@@ -1,4 +1,5 @@
 # Everyday
+<img width="543" height="480" alt="image" src="https://github.com/user-attachments/assets/d3983318-7e97-4f06-8819-c9ea965f6f07" />
 
 A lightweight, fully customizable HUD / dashboard for RayNeo X3 Pro.
 
