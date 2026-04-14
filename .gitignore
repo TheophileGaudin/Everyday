@@ -1,0 +1,49 @@
+# ============================================================
+# Build outputs
+# ============================================================
+**/build/
+**/.gradle/
+**/*.apk
+**/*.aab
+**/*.aar
+**/*.ap_
+**/*.dex
+
+# ============================================================
+# Sensitive / local-only files  — NEVER commit these
+# ============================================================
+# Keystore files and signing credentials
+auth/
+**/*.jks
+**/*.keystore
+**/keystore.properties
+
+# GitHub token
+github_repo_personal_access_token.txt
+
+# Local SDK path and other machine-specific overrides
+**/local.properties
+
+# Debug logs
+**/app_debug.log
+get_phone_filelog.txt
+
+# ============================================================
+# IDE / tooling
+# ============================================================
+**/.idea/
+**/*.iml
+**/.DS_Store
+**/captures/
+**/.externalNativeBuild/
+**/.cxx/
+
+# ============================================================
+# Claude Code
+# ============================================================
+**/.claude/
+
+# ============================================================
+# Misc
+# ============================================================
+nul

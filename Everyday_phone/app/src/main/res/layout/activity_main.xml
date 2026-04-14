@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="#1a1a2e">
+
+    <!-- Everyday Bar: Glasses icon + battery + close button -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="8dp">
+
+        <!-- Glasses icon -->
+        <ImageView
+            android:id="@+id/glassesIcon"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/glasses_disconnected"
+            android:contentDescription="Glasses connection status"/>
+
+        <!-- Battery status -->
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:text="---"
+            android:textSize="18sp"
+            android:textColor="#FFFFFF"
+            android:gravity="start"/>
+
+        <!-- Close button -->
+        <View
+            android:id="@+id/closeButton"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/close_button_background"
+            android:contentDescription="Close app"/>
+
+    </LinearLayout>
+
+    <!-- Coordinates display (DEBUG - commented out) -->
+    <!--
+    <TextView
+        android:id="@+id/coordsText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Touch the trackpad"
+        android:textSize="24sp"
+        android:textColor="#00FF00"
+        android:fontFamily="monospace"
+        android:gravity="center"
+        android:padding="16dp"/>
+    -->
+
+    <!-- Trackpad area (contains keyboard when text editing) -->
+    <FrameLayout
+        android:id="@+id/trackpadContainer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_margin="16dp">
+
+        <!-- Main trackpad (full area when no keyboard, top half when keyboard shown) -->
+        <FrameLayout
+            android:id="@+id/trackpad"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/trackpad_background"
+            android:alpha="0.5">
+
+            <!-- Trackpad label hidden for minimalist design -->
+            <TextView
+                android:id="@+id/trackpadLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:text=""
+                android:textSize="20sp"
+                android:textColor="#666666"
+                android:gravity="center"
+                android:visibility="gone"/>
+
+        </FrameLayout>
+
+        <!-- Keyboard (bottom half, initially hidden) -->
+        <com.everyday.everyday_phone.KeyboardView
+            android:id="@+id/keyboardView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_gravity="bottom"
+            android:visibility="gone"/>
+
+    </FrameLayout>
+
+    <!-- Button row: Image picker + Mirror button -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginBottom="8dp">
+
+        <!-- Image picker button (replaces orientation button) -->
+        <Button
+            android:id="@+id/imagePickerButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="🖼️ Send Image"
+            android:textSize="14sp"
+            android:enabled="false"
+            android:alpha="0.5"
+            android:layout_marginEnd="8dp"/>
+
+        <!-- Mirror button -->
+        <Button
+            android:id="@+id/mirrorButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📺 Start Mirror"
+            android:textSize="14sp"
+            android:enabled="false"
+            android:alpha="0.5"/>
+
+    </LinearLayout>
+
+</LinearLayout>

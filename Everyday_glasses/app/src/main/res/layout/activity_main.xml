@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.everyday.everyday_glasses.binocular.BinocularView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/binocularView"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <com.everyday.everyday_glasses.WidgetContainer
+        android:id="@+id/widgetContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"/>
+
+    <!-- Cursor overlay (on top of everything) -->
+    <com.everyday.everyday_glasses.CursorView
+        android:id="@+id/cursorView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"/>
+
+</com.everyday.everyday_glasses.binocular.BinocularView>

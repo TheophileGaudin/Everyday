@@ -1,0 +1,60 @@
+SPDX-License-Identifier: GPL-3.0-only
+
+Everyday for RayNeo X3 Pro — Glasses App
+Copyright (C) 2026 Théophile Gaudin <gaudin.theophile@gmail.com>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DUAL LICENSING NOTICE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This software is available under two licensing models:
+
+  1. GNU General Public License v3 (GPLv3) — Open-Source License
+  2. Commercial License — for proprietary / closed-source use
+
+You must choose one of these licenses to govern your use of this
+software. If you do not purchase a Commercial License, the terms
+of the GPLv3 apply automatically.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LICENSE 1 — GNU GENERAL PUBLIC LICENSE VERSION 3 (GPLv3)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You may use, copy, modify, and distribute this software under the
+terms of the GNU General Public License, version 3, as published
+by the Free Software Foundation.
+
+Key obligations under GPLv3:
+  - Any derivative work you distribute must also be licensed under
+    GPLv3 and its complete source code must be made available.
+  - You must preserve all copyright and license notices.
+  - There is NO WARRANTY for this software to the extent permitted
+    by applicable law.
+
+The full text of the GPLv3 is available at:
+  https://www.gnu.org/licenses/gpl-3.0.txt
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LICENSE 2 — COMMERCIAL LICENSE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If you wish to use this software in a proprietary or closed-source
+product — or if the copyleft terms of the GPLv3 are incompatible
+with your intended use — you must obtain a Commercial License from
+the copyright holder.
+
+The full terms of the Commercial License are in LICENSE-COMMERCIAL.
+
+To inquire about a Commercial License, contact:
+  Théophile Gaudin <gaudin.theophile@gmail.com>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Use case                                      License needed
+  ──────────────────────────────────────────────────────────
+  Personal, academic, or research use           GPLv3 (free)
+  Open-source project (source code released)   GPLv3 (free)
+  Proprietary / closed-source product           Commercial
+  Commercial product keeping source private     Commercial

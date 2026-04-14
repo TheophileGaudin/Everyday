@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Everyday</string>
+    <!-- For the device-code glasses flow, this must be a Google limited-input/device client ID. -->
+    <string name="google_device_client_id">919130726928-o3dhv0un4pijs2hehaiq7qmm0ik36dbe.apps.googleusercontent.com</string>
+</resources>
