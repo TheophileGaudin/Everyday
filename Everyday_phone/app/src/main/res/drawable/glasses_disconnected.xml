@@ -1,0 +1,44 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    
+    <!-- Glasses with reduced opacity -->
+    <!-- Bridge (line connecting the lenses) -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeAlpha="0.5"
+        android:pathData="M10,12 L14,12"/>
+    
+    <!-- Left lens (circle) -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="@android:color/transparent"
+        android:strokeAlpha="0.5"
+        android:pathData="M 6,8 A 4,4 0 1,1 6,16 A 4,4 0 1,1 6,8 Z"/>
+    
+    <!-- Right lens (circle) -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="@android:color/transparent"
+        android:strokeAlpha="0.5"
+        android:pathData="M 18,8 A 4,4 0 1,1 18,16 A 4,4 0 1,1 18,8 Z"/>
+    
+    <!-- Diagonal strikethrough line -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4,20 L20,4"/>
+</vector>

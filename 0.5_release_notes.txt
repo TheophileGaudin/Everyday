@@ -1,0 +1,9 @@
+=> Added Google OAuth pipeline via phone
+=> Added Google calendar widget
+=> Optimized battery on phone app
+=> Optimized Browser / Mirror experience: removed a cause of glasses restart
+=> Included adaptive brightness
+=> Improved scrolling behavior (no cursor jumping)
+=> Improved widget persistence
+
+=> Fixed fullscreen widget not getting on top of windowed widgets on restart
