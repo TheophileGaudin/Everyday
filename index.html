@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Everyday</title>
+  <meta name="description" content="Everyday is a lightweight HUD and widget dashboard for RayNeo X3 Pro AR glasses.">
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --ink: #172033;
+      --muted: #536070;
+      --panel: #ffffff;
+      --line: #dbe2ea;
+      --accent: #0d6b7c;
+      --accent-dark: #084b58;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.6;
+      color: var(--ink);
+      background: var(--bg);
+    }
+
+    header {
+      background: #ffffff;
+      border-bottom: 1px solid var(--line);
+    }
+
+    nav,
+    main,
+    footer {
+      width: min(960px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 0;
+    }
+
+    nav a {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 700;
+    }
+
+    main {
+      padding: 56px 0;
+    }
+
+    .hero {
+      display: grid;
+      gap: 22px;
+      padding-bottom: 40px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2.25rem, 8vw, 4.5rem);
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 1.35rem;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 16px;
+    }
+
+    .lead {
+      max-width: 720px;
+      font-size: 1.2rem;
+      color: var(--muted);
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      padding: 10px 16px;
+      border-radius: 6px;
+      border: 1px solid var(--accent);
+      color: #ffffff;
+      background: var(--accent);
+      text-decoration: none;
+      font-weight: 700;
+    }
+
+    .button.secondary {
+      color: var(--accent-dark);
+      background: transparent;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-top: 32px;
+    }
+
+    section {
+      margin-top: 40px;
+    }
+
+    .card {
+      min-height: 100%;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    li {
+      margin: 8px 0;
+    }
+
+    footer {
+      padding: 28px 0 36px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+    }
+
+    footer a {
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <nav aria-label="Primary navigation">
+      <a href="./index.html" aria-label="Everyday home">Everyday</a>
+      <a href="./privacy.html">Privacy Policy</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="title">
+      <h1 id="title">Everyday</h1>
+      <p class="lead">Everyday is a lightweight, customizable HUD and widget dashboard for RayNeo X3 Pro AR glasses, with a phone companion app for input, screen mirroring, location data, and Google Calendar authorization.</p>
+      <div class="actions" aria-label="Important links">
+        <a class="button" href="https://github.com/TheophileGaudin/Everyday">View Source</a>
+        <a class="button secondary" href="./privacy.html">Read Privacy Policy</a>
+      </div>
+    </section>
+
+    <section aria-labelledby="about">
+      <h2 id="about">About Everyday</h2>
+      <p>Everyday is built for glanceable AR use. It lets users place, resize, minimize, and arrange widgets in their field of view so the glasses can stay useful without obstructing daily life.</p>
+      <div class="grid">
+        <div class="card">
+          <h2>Glasses App</h2>
+          <p>Runs the HUD experience on RayNeo X3 Pro, including widgets for time, weather, browser, text, images, news, finance, speed, screen mirror, and Google Calendar.</p>
+        </div>
+        <div class="card">
+          <h2>Phone Companion</h2>
+          <p>Provides trackpad and keyboard input, clipboard sync, location data, screen mirroring support, and the Google authentication flow used by the Calendar widget.</p>
+        </div>
+        <div class="card">
+          <h2>Google Calendar</h2>
+          <p>Google sign-in is optional and is used only when a user enables the Calendar widget. Everyday requests calendar read-only access to show upcoming events in the HUD.</p>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="oauth">
+      <h2 id="oauth">Google OAuth Use</h2>
+      <p>Everyday uses Google OAuth so users can choose to connect Google Calendar. The app requests basic account identity and read-only calendar access. It does not sell user data, serve ads, or operate a server that stores Google user data.</p>
+      <ul>
+        <li>Account identity is used to show which Google account is connected.</li>
+        <li>Google Calendar read-only access is used to fetch upcoming calendar events for the Calendar widget.</li>
+        <li>Users can disconnect Google from inside the app, which clears locally stored authorization state.</li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="contact">
+      <h2 id="contact">Contact</h2>
+      <p>For privacy, OAuth, support, or licensing questions, contact <a href="mailto:gaudin.theophile@gmail.com">gaudin.theophile@gmail.com</a>.</p>
+    </section>
+  </main>
+
+  <footer>
+    <p>&copy; 2026 Everyday. Source code is available on <a href="https://github.com/TheophileGaudin/Everyday">GitHub</a>.</p>
+  </footer>
+</body>
+</html>
