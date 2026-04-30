@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy - Everyday</title>
+  <meta name="description" content="Privacy Policy for Everyday, a HUD and widget dashboard for RayNeo X3 Pro AR glasses.">
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --ink: #172033;
+      --muted: #536070;
+      --panel: #ffffff;
+      --line: #dbe2ea;
+      --accent: #0d6b7c;
+      --accent-dark: #084b58;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.6;
+      color: var(--ink);
+      background: var(--bg);
+    }
+
+    header {
+      background: #ffffff;
+      border-bottom: 1px solid var(--line);
+    }
+
+    nav,
+    main,
+    footer {
+      width: min(880px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 0;
+    }
+
+    nav a,
+    main a,
+    footer a {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 700;
+    }
+
+    main {
+      padding: 48px 0;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(2rem, 7vw, 3.5rem);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 34px 0 10px;
+      font-size: 1.25rem;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 16px;
+    }
+
+    .updated {
+      color: var(--muted);
+      margin-bottom: 28px;
+    }
+
+    .notice {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    ul {
+      margin: 0 0 16px;
+      padding-left: 20px;
+    }
+
+    li {
+      margin: 8px 0;
+    }
+
+    footer {
+      padding: 28px 0 36px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <nav aria-label="Primary navigation">
+      <a href="./index.html" aria-label="Everyday home">Everyday</a>
+      <a href="./privacy.html">Privacy Policy</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last updated: April 30, 2026</p>
+
+    <p class="notice">This Privacy Policy explains how Everyday handles information when you use the Everyday glasses app and the Everyday phone companion app.</p>
+
+    <h2>Overview</h2>
+    <p>Everyday is a lightweight HUD and widget dashboard for RayNeo X3 Pro AR glasses. The phone companion app can provide input, screen mirroring, location data, and Google authorization support. Everyday is designed to run on your own devices and does not operate a backend service that stores Google user data.</p>
+
+    <h2>Information Everyday May Access</h2>
+    <ul>
+      <li>Google account identity, including email address and display name, when you choose to connect Google.</li>
+      <li>Google Calendar event data when you enable the Calendar widget and grant read-only calendar access.</li>
+      <li>Device and app settings needed to preserve your widget layout, preferences, and sign-in state.</li>
+      <li>Phone-provided data such as location for weather, clipboard text for paste, keyboard or trackpad input, and screen mirroring data when you use those features.</li>
+    </ul>
+
+    <h2>Google API Data</h2>
+    <p>Everyday requests the following Google OAuth scopes only when you choose to connect Google Calendar:</p>
+    <ul>
+      <li><strong>openid</strong>, <strong>email</strong>, and <strong>profile</strong>: used to identify the connected Google account inside the app.</li>
+      <li><strong>https://www.googleapis.com/auth/calendar.readonly</strong>: used to read upcoming calendar events for display in the Calendar widget.</li>
+    </ul>
+    <p>Everyday uses Google Calendar data only to provide user-facing calendar functionality. Everyday does not sell Google user data, does not use Google user data for advertising, and does not transfer Google user data to third parties except as necessary to provide the app features you request on your own devices.</p>
+
+    <h2>Storage and Security</h2>
+    <p>Google authorization state and refresh tokens are stored locally on the device. Where supported by the device, refresh tokens are stored using Android encrypted preferences. Calendar access tokens are held temporarily in memory while needed to fetch calendar data.</p>
+    <p>When the phone companion app is used for authorization or data sync, relevant status and calendar data may be transmitted between your phone and glasses over the local connection used by the app.</p>
+
+    <h2>Data Sharing</h2>
+    <p>Everyday does not sell personal information. Everyday does not operate a third-party analytics, advertising, or profiling service for Google user data. Information may be processed by Google when you use Google sign-in and Google Calendar APIs, subject to Google's own policies.</p>
+
+    <h2>Your Choices</h2>
+    <ul>
+      <li>Google Calendar connection is optional.</li>
+      <li>You can use Everyday without connecting a Google account, although the Calendar widget requires Google access.</li>
+      <li>You can disconnect Google inside the app to clear locally stored authorization state.</li>
+      <li>You can revoke Everyday's Google access from your Google Account permissions page.</li>
+      <li>You can uninstall the app to remove locally stored app data from your device.</li>
+    </ul>
+
+    <h2>Data Retention and Deletion</h2>
+    <p>Everyday keeps local settings and authorization state until you disconnect, clear app data, or uninstall the app. Disconnecting Google clears the app's local Google authorization state. Revoking access in your Google Account prevents future Google Calendar access.</p>
+
+    <h2>Children</h2>
+    <p>Everyday is not directed to children under 13. The app does not knowingly collect personal information from children.</p>
+
+    <h2>Changes to This Policy</h2>
+    <p>This policy may be updated when Everyday's features or data practices change. Updates will be posted on this page with a new effective date.</p>
+
+    <h2>Contact</h2>
+    <p>For privacy, OAuth, support, or licensing questions, contact <a href="mailto:gaudin.theophile@gmail.com">gaudin.theophile@gmail.com</a>.</p>
+  </main>
+
+  <footer>
+    <p>&copy; 2026 Everyday. Return to the <a href="./index.html">Everyday homepage</a>.</p>
+  </footer>
+</body>
+</html>
