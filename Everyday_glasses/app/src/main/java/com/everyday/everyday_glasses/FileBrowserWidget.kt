@@ -787,12 +787,12 @@ class FileBrowserWidget(
             }
         }
 
-        val newState = when (baseResult) {
-            BaseState.HOVER_RESIZE -> State.HOVER_BORDER
-            BaseState.HOVER_BORDER -> State.HOVER_BORDER
-            BaseState.HOVER_CONTENT -> State.HOVER_CONTENT
-            else -> State.IDLE
-        }
+        val newState = WidgetInteractionState(baseResult).toChromeLocal(
+            idle = State.IDLE,
+            content = State.HOVER_CONTENT,
+            border = State.HOVER_BORDER,
+            moving = State.IDLE
+        )
 
         if (newState != state || hoveredItemIndex != oldHoveredIndex) {
             state = newState
@@ -862,29 +862,6 @@ class FileBrowserWidget(
         scrollOffset = (scrollOffset + dy).coerceIn(0f, maxScrollOffset)
         updateScrollbarThumb()
         onStateChanged?.invoke(state)
-    }
-
-    fun startMove() {
-        state = State.MOVING
-        baseState = BaseState.MOVING
-    }
-
-    fun startResize() {
-        state = State.RESIZING
-        baseState = BaseState.RESIZING
-    }
-
-    fun endDrag() {
-        state = State.IDLE
-        baseState = BaseState.IDLE
-    }
-
-    override fun onDrag(dx: Float, dy: Float, screenWidth: Float, screenHeight: Float) {
-        super.onDrag(dx, dy, screenWidth, screenHeight)
-
-        if (baseState == BaseState.RESIZING) {
-            updateBaseBounds()
-        }
     }
 
     private fun navigateUp() {

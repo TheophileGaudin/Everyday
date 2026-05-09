@@ -22,16 +22,27 @@ class ScreenCaptureService : Service() {
         private const val TAG = "ScreenCaptureService"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "screen_capture_channel"
+        private const val EXTRA_INCLUDE_AUDIO_CAPTURE = "extra_include_audio_capture"
         
+        const val ACTION_START = "com.everyday.everyday_phone.START_CAPTURE"
         // Action to stop the service
         const val ACTION_STOP = "com.everyday.everyday_phone.STOP_CAPTURE"
         
-        fun start(context: Context) {
-            val intent = Intent(context, ScreenCaptureService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+        fun start(context: Context, includeAudioCapture: Boolean = false): Boolean {
+            val intent = Intent(context, ScreenCaptureService::class.java).apply {
+                action = ACTION_START
+                putExtra(EXTRA_INCLUDE_AUDIO_CAPTURE, includeAudioCapture)
+            }
+            return try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+                true
+            } catch (e: Exception) {
+                fileLog("Unable to request screen capture foreground service: ${e.message}")
+                false
             }
         }
         
@@ -48,28 +59,46 @@ class ScreenCaptureService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        fileLog("Service started")
+        fileLog("Service started action=${intent?.action}")
         
         if (intent?.action == ACTION_STOP) {
             fileLog("Stop action received")
             stopSelf()
             return START_NOT_STICKY
         }
+
+        if (intent?.action != ACTION_START) {
+            fileLog("Ignoring non-explicit capture service start")
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         
         // Start as foreground service with notification
         val notification = createNotification()
+        val includeAudioCapture = intent.getBooleanExtra(EXTRA_INCLUDE_AUDIO_CAPTURE, false)
         
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID, 
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                var foregroundServiceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                if (includeAudioCapture && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    foregroundServiceType = foregroundServiceType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                }
+                fileLog("Starting foreground with type=$foregroundServiceType includeAudioCapture=$includeAudioCapture")
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    foregroundServiceType
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            fileLog("Unable to start media projection foreground service: ${e.message}")
+            stopSelf(startId)
+            return START_NOT_STICKY
         }
         
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -83,10 +112,10 @@ class ScreenCaptureService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Screen Mirroring",
+                "Media Capture",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows when screen is being mirrored to glasses"
+                description = "Shows when phone media is being captured for glasses"
                 setShowBadge(false)
             }
             
@@ -115,8 +144,8 @@ class ScreenCaptureService : Service() {
         )
         
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Screen Mirroring")
-            .setContentText("Mirroring to AR glasses")
+            .setContentTitle("Glasses Media Capture")
+            .setContentText("Sharing phone media with AR glasses")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setOngoing(true)
             .setContentIntent(openPendingIntent)

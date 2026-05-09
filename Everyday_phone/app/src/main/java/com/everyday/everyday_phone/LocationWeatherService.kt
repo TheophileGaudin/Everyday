@@ -16,11 +16,11 @@ import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
+import com.everyday.shared.sync.LocationName
+import com.everyday.shared.sync.WeatherData
+import com.everyday.shared.sync.WeatherDataProvider
+import com.everyday.shared.sync.WeatherSnapshot
 import com.google.android.gms.location.*
-import org.json.JSONObject
-import java.net.URL
-import java.net.URLEncoder
-import java.util.Locale
 
 
 /**
@@ -50,6 +50,8 @@ class LocationWeatherService : Service() {
         var instance: LocationWeatherService? = null
             private set
 
+        var onSnapshotChanged: ((WeatherSnapshot) -> Unit)? = null
+
         fun start(context: Context, forceRefresh: Boolean = false) {
             val intent = Intent(context, LocationWeatherService::class.java).apply {
                 putExtra(EXTRA_FORCE_REFRESH, forceRefresh)
@@ -71,7 +73,6 @@ class LocationWeatherService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     // Cached data - Single source of truth for location/weather
     private var cachedTown: String? = null
-    private var cachedCountry: String? = null
     private var cachedCountryCode: String? = null
     private var cachedWeatherData: WeatherData? = null  // Full weather data including description
     private var cachedLat: Double? = null
@@ -225,9 +226,9 @@ class LocationWeatherService : Service() {
                 // Explicit force-refreshes can push immediately when fresh data arrives.
                 fetchWeather(lat, lon, sendImmediately = forceWeatherFetch)
             } else {
-                // Normal background refreshes only update cache; transport is driven elsewhere.
+                // Normal background refreshes only update cache; transport is driven by the coordinator.
                 if (forceWeatherFetch) {
-                    sendToGlassesIfConnected()
+                    notifySnapshotChanged()
                 }
             }
         }.start()
@@ -260,39 +261,21 @@ class LocationWeatherService : Service() {
     }
 
     private fun geocodeLocation(lat: Double, lon: Double) {
-        try {
-            // geocode.maps.co now requires an API key
-            val apiKey = URLEncoder.encode(GEOCODE_MAPS_CO_API_KEY, "UTF-8")
-            val url = "https://geocode.maps.co/reverse?lat=$lat&lon=$lon&api_key=$apiKey"
-            val response = URL(url).readText()
-            val json = JSONObject(response)
-            val address = json.getJSONObject("address")
-
-            cachedTown = address.optString("city", null)
-                ?: address.optString("town", null)
-                ?: address.optString("village", null)
-                ?: address.optString("municipality", null)
-                ?: "Unknown"
-
-            // Prefer raw country code so glasses can localize however they want.
-            // geocode.maps.co typically returns lowercase like "gb" -> normalize to "GB".
-            cachedCountryCode = address.optString("country_code", null)
-                ?.takeIf { it.isNotBlank() }
-                ?.uppercase(Locale.ROOT)
-                ?: "Unknown"
-
-            // Update payload timestamp when location data changes
-            payloadTimestamp = System.currentTimeMillis()
-            fileLog("Geocoded: $cachedTown, countryCode=$cachedCountryCode, timestamp=$payloadTimestamp")
-
-        } catch (e: Exception) {
-            fileLog("Geocoding failed: ${e.message}")
-        }
+        WeatherDataProvider.resolveLocationName(lat, lon, GEOCODE_MAPS_CO_API_KEY)
+            .onSuccess { locationName: LocationName ->
+                cachedTown = locationName.town
+                cachedCountryCode = locationName.countryCode
+                payloadTimestamp = System.currentTimeMillis()
+                fileLog("Geocoded: $cachedTown, countryCode=$cachedCountryCode, timestamp=$payloadTimestamp")
+                notifySnapshotChanged()
+            }
+            .onFailure { e ->
+                fileLog("Geocoding failed: ${e.message}")
+            }
     }
 
     private fun fetchWeather(lat: Double, lon: Double, sendImmediately: Boolean = false) {
-        // Use WeatherHelper for consistent weather fetching with description
-        WeatherHelper.fetchWeather(lat, lon) { weatherData ->
+        WeatherDataProvider.fetchWeatherAsync(lat, lon) { weatherData ->
             if (weatherData != null) {
                 cachedWeatherData = weatherData
                 // Update payload timestamp when weather data changes
@@ -300,7 +283,7 @@ class LocationWeatherService : Service() {
                 fileLog("Weather fetched: temp=${weatherData.tempCurrent}°C, desc=${weatherData.weatherDescCurrent}, timestamp=$payloadTimestamp")
                 // Send to glasses after weather is updated, ensuring data is synchronized
                 if (sendImmediately) {
-                    sendToGlassesIfConnected()
+                    notifySnapshotChanged()
                 }
             } else {
                 fileLog("Weather fetch failed - callback returned null")
@@ -308,10 +291,7 @@ class LocationWeatherService : Service() {
         }
     }
 
-    private fun sendToGlassesIfConnected() {
-        val server = RfcommServer.instance ?: return
-        if (!server.isConnected()) return
-
+    private fun notifySnapshotChanged() {
         val town = cachedTown
         val countryCode = cachedCountryCode
 
@@ -319,9 +299,16 @@ class LocationWeatherService : Service() {
         // payloadTimestamp == 0 means data hasn't been refreshed this session (stale from previous run)
         if (town != null && countryCode != null && payloadTimestamp > 0) {
             // Send full weather data with description and timestamp for proper icon display
-            server.sendLocationUpdate(town, countryCode, cachedWeatherData, payloadTimestamp, cachedSpeedMps)
-            fileLog("Location speed payload: speedMps=${cachedSpeedMps ?: "na"}")
-            fileLog("Sent to glasses: $town, countryCode=$countryCode, weather=${cachedWeatherData?.tempCurrent}°C/${cachedWeatherData?.weatherDescCurrent}, timestamp=$payloadTimestamp")
+            onSnapshotChanged?.invoke(
+                WeatherSnapshot(
+                    town = town,
+                    countryCode = countryCode,
+                    weather = cachedWeatherData,
+                    timestampMs = payloadTimestamp,
+                    speedMps = cachedSpeedMps
+                )
+            )
+            fileLog("Location/weather snapshot changed: $town, countryCode=$countryCode, timestamp=$payloadTimestamp")
         } else if (payloadTimestamp == 0L) {
             fileLog("Skipping send - timestamp is 0 (data not yet refreshed this session)")
         }
@@ -331,10 +318,10 @@ class LocationWeatherService : Service() {
      * Push the current cached payload to the glasses without forcing a provider refresh.
      * Returns true when there was a valid payload to send.
      */
-    fun pushCachedPayloadToGlasses(): Boolean {
+    fun pushCachedPayloadToCoordinator(): Boolean {
         val hasPayload = cachedTown != null && cachedCountryCode != null && payloadTimestamp > 0L
         if (hasPayload) {
-            sendToGlassesIfConnected()
+            notifySnapshotChanged()
         } else if (payloadTimestamp == 0L) {
             fileLog("Skipping cached payload push - timestamp is 0 (data not yet refreshed this session)")
         }
@@ -345,10 +332,16 @@ class LocationWeatherService : Service() {
      * Get current cached location data. Used by RfcommServer for immediate sends.
      * Returns town, countryCode, full WeatherData, and timestamp for proper display.
      */
-    fun getCurrentLocationData(): LocationWeatherData? {
+    fun getCurrentLocationData(): WeatherSnapshot? {
         val town = cachedTown ?: return null
         val countryCode = cachedCountryCode ?: return null
-        return LocationWeatherData(town, countryCode, cachedWeatherData, payloadTimestamp, cachedSpeedMps)
+        return WeatherSnapshot(
+            town = town,
+            countryCode = countryCode,
+            weather = cachedWeatherData,
+            timestampMs = payloadTimestamp,
+            speedMps = cachedSpeedMps
+        )
     }
 
     /**
@@ -393,14 +386,6 @@ class LocationWeatherService : Service() {
         // Force a fresh location/weather fetch
         forceUpdate()
     }
-
-    data class LocationWeatherData(
-        val town: String,
-        val countryCode: String,
-        val weather: WeatherData?,
-        val timestamp: Long,  // When this data was last updated
-        val speedMps: Float?
-    )
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.getBooleanExtra(EXTRA_FORCE_REFRESH, false) == true) {

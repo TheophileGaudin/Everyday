@@ -53,6 +53,7 @@ import kotlin.math.ln
 class MainActivity : AppCompatActivity() {
 
     private var rfcommClient: RfcommClient? = null
+    private lateinit var transportManager: TransportManager
     
     // Wake lock to prevent display from sleeping
     private var wakeLock: PowerManager.WakeLock? = null
@@ -60,12 +61,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binocularView: BinocularView
     private lateinit var cursorView: CursorView
     private lateinit var widgetContainer: WidgetContainer
+    private lateinit var persistenceManager: PersistenceManager
     
     // Wake/Sleep state manager
     private lateinit var wakeSleepManager: WakeSleepManager
 
     // Head-up wake manager for hands-free screen wake
     private lateinit var headUpWakeManager: HeadUpWakeManager
+    private lateinit var inputCoordinator: InputCoordinator
 
     // Track if this session was started by head-up wake (for auto-finish)
     private var isHeadUpWakeSession = false
@@ -117,25 +120,8 @@ class MainActivity : AppCompatActivity() {
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
     }
     
-    // Unified pointer count for both phone and temple paths (they never overlap)
-    private var lastPointerCount = 1
     private var latestPhoneBatteryPercent: Int = -1
-    
-    // Temple trackpad tracking
-    private var lastTempleX: Float = 0f
-    private var lastTempleY: Float = 0f
-    private var lastTempleMovementTime: Long = 0L
-    
-    // Temple tap/double-tap detection
-    private var templeDownX: Float = 0f
-    private var templeDownY: Float = 0f
-    private var templeDownTime: Long = 0L
-    private var templeTotalDistance: Float = 0f
-    
-    // Double-tap detection for temple
-    private var lastTempleTapTime: Long = 0L
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
-    private var pendingTempleTap: Runnable? = null
     
     // Glasses battery update
     private var glassesBatteryUpdateRunnable: Runnable? = null
@@ -148,15 +134,8 @@ class MainActivity : AppCompatActivity() {
     private var autoSaveRunnable: Runnable? = null
     private val AUTO_SAVE_INTERVAL_MS = 30000L
 
-    // Cached payload sync from phone while the glasses display is awake
-    private var phonePayloadSyncRunnable: Runnable? = null
-
     // Pending widget restoration (waits for views to be ready)
     private var pendingWidgetRestore = false
-
-    // Timestamp of the most recent weather data displayed (from phone payload)
-    // This is used to prevent displaying stale data
-    private var displayedWeatherTimestamp: Long = 0
 
     // Local speed pipeline state
     private var speedLocationManager: LocationManager? = null
@@ -181,34 +160,18 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var googleAuthCoordinator: GoogleAuthCoordinator
     private lateinit var googleCalendarClient: GoogleCalendarClient
-    private lateinit var googleCalendarSnapshotStore: GoogleCalendarSnapshotStore
+    private lateinit var dataSyncCoordinator: GlassesDataSyncCoordinator
 
     companion object {
         private const val TAG = "Everyday_glasses"
         private const val REQUEST_PERMISSIONS = 1
         private const val REQUEST_STORAGE_PERMISSION = 2
         
-        // Cursor movement sensitivity
-        private const val PHONE_SENSITIVITY = 1.0f
-        private const val TEMPLE_SENSITIVITY_X = 1.0f  // Less sensitive along temple length
-        private const val TEMPLE_SENSITIVITY_Y = 2.5f  // More sensitive across temple height
-        
-        // Movement filtering
-        private const val MIN_MOVEMENT_THRESHOLD = 0.5f  // Minimum movement to register
-        
-        // Tap detection thresholds
-        private const val TAP_MAX_DISTANCE = 50f
-        private const val TAP_MAX_DURATION = 300L
-        private const val DOUBLE_TAP_TIMEOUT_MS = 300L
-        
         // Battery update interval
         private const val BATTERY_UPDATE_INTERVAL_MS = 30000L  // 30 seconds
 
         // Time update interval
         private const val TIME_UPDATE_INTERVAL_MS = 1000L  // 1 second
-
-        // Pull cached phone payloads while the display is awake.
-        private const val PHONE_PAYLOAD_SYNC_INTERVAL_MS = 10_000L
 
         // SharedPreferences keys for settings
         private const val PREFS_NAME = "everyday_settings"
@@ -220,8 +183,10 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_HEADSUP_ENABLED = "headsup_enabled"
         private const val KEY_SPEED_UNIT = "speed_unit"
         private const val KEY_SPEED_VISIBILITY_THRESHOLD = "speed_visibility_threshold_kmh"
+        private const val KEY_SMART_ALIGNMENT = "smart_alignment_enabled"
         private const val DEFAULT_BRIGHTNESS = 1.0f  // Maximum brightness (no dimming) by default
         private const val DEFAULT_ADAPTIVE_BRIGHTNESS = true
+        private const val DEFAULT_SMART_ALIGNMENT = true
         private const val MEDIA_WIDGET_BRIGHTNESS_CAP = 0.0f
         private const val MIN_WINDOW_BRIGHTNESS = 0.01f
         private const val MIN_ADAPTIVE_BRIGHTNESS = 0.08f
@@ -300,48 +265,6 @@ class MainActivity : AppCompatActivity() {
         return smoothedSpeedKmh
     }
 
-    private fun requestPhonePayloadSync(forceCalendarRefresh: Boolean = false) {
-        rfcommClient?.requestPayloadSync()
-
-        if (forceCalendarRefresh) {
-            rfcommClient?.requestGoogleCalendarSnapshot()
-        }
-    }
-
-    private fun shouldRefreshCalendarOnWake(): Boolean {
-        val snapshot = googleCalendarSnapshotStore.load() ?: return true
-        if (snapshot.fetchedAtMs <= 0L) return true
-        if (snapshot.staleAfterMs <= 0L) return false
-        return System.currentTimeMillis() > snapshot.fetchedAtMs + snapshot.staleAfterMs
-    }
-
-    private fun restartPhonePayloadSyncLoop(requestImmediately: Boolean = false) {
-        stopPhonePayloadSyncLoop()
-
-        if (!::wakeSleepManager.isInitialized || wakeSleepManager.state == WakeSleepManager.DisplayState.OFF) {
-            return
-        }
-
-        val runnable = object : Runnable {
-            override fun run() {
-                requestPhonePayloadSync(forceCalendarRefresh = false)
-                handler.postDelayed(this, PHONE_PAYLOAD_SYNC_INTERVAL_MS)
-            }
-        }
-        phonePayloadSyncRunnable = runnable
-
-        if (requestImmediately) {
-            requestPhonePayloadSync(forceCalendarRefresh = false)
-        }
-
-        handler.postDelayed(runnable, PHONE_PAYLOAD_SYNC_INTERVAL_MS)
-    }
-
-    private fun stopPhonePayloadSyncLoop() {
-        phonePayloadSyncRunnable?.let(handler::removeCallbacks)
-        phonePayloadSyncRunnable = null
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -411,11 +334,31 @@ class MainActivity : AppCompatActivity() {
 
         // Setup widget container
         setupWidgetContainer()
+        persistenceManager = PersistenceManager(
+            context = this,
+            handler = handler,
+            captureState = { widgetContainer.capturePersistedState() }
+        )
+        transportManager = TransportManager { rfcommClient }
+        inputCoordinator = InputCoordinator(
+            cursorView = cursorView,
+            widgetContainer = widgetContainer,
+            tapGestureDetectorProvider = {
+                if (::tapGestureDetector.isInitialized) tapGestureDetector else null
+            },
+            isPhoneMode = { isPhoneMode },
+            isAwake = { !::wakeSleepManager.isInitialized || wakeSleepManager.isAwake() },
+            wakeDisplay = { wakeSleepManager.transitionTo(WakeSleepManager.DisplayState.WAKE) },
+            notifyUserActivity = ::notifyUserActivity,
+            notifyTransientChange = ::notifyTransientBinocularChange,
+            onTripleTap = ::handleTripleTap
+        )
         updateCursorRedrawMode()
         registerBatteryStateReceiver()
 
         // Initialize Google auth after the mirrored UI is ready.
         setupGoogleAuth()
+        setupDataSyncCoordinator()
 
         // Initialize wake/sleep manager
         setupWakeSleepManager()
@@ -452,6 +395,9 @@ class MainActivity : AppCompatActivity() {
             
             onConnectionChanged = { connected ->
                 runOnUiThread {
+                    if (::dataSyncCoordinator.isInitialized) {
+                        dataSyncCoordinator.onPhoneConnectionChanged(connected)
+                    }
                     if (!connected && isPhoneMode) {
                         latestPhoneBatteryPercent = -1
                         // Update status bar to show disconnected
@@ -459,29 +405,17 @@ class MainActivity : AppCompatActivity() {
                             isPhoneConnected = false,
                             phoneBattery = -1,
                         )
-                        stopPhonePayloadSyncLoop()
                         // Unfocus any widgets on disconnect
                         widgetContainer.unfocusAll()
                         // Disable mirroring on disconnect
                         widgetContainer.setMirroringEnabled(false)
+                        widgetContainer.onSubtitlePhoneDisconnected()
                     } else if (connected) {
                         updateStatusBar(
                             isPhoneConnected = true,
                             phoneBattery = latestPhoneBatteryPercent,
                         )
-                        if (::wakeSleepManager.isInitialized &&
-                            wakeSleepManager.state != WakeSleepManager.DisplayState.OFF
-                        ) {
-                            // Request cached payloads immediately, then let the awake loop keep them refreshed.
-                            Log.d(TAG, "Bluetooth connected - requesting payload sync from phone")
-                            requestPhonePayloadSync(forceCalendarRefresh = shouldRefreshCalendarOnWake())
-                            restartPhonePayloadSyncLoop()
-                        } else {
-                            stopPhonePayloadSyncLoop()
-                        }
                         widgetContainer.onPhoneReconnected()
-                    } else {
-                        stopPhonePayloadSyncLoop()
                     }
                     binocularView.notifyContentChanged()
                 }
@@ -529,60 +463,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            onWeatherReceived = { weatherInfo ->
-                runOnUiThread {
-                    maybeApplyPhoneSpeedFallback(weatherInfo.speedMps)
-
-                    // Only accept data that is newer than what's currently displayed
-                    // This prevents stale cached data from overwriting fresher data
-                    if (weatherInfo.timestamp > 0 && weatherInfo.timestamp <= displayedWeatherTimestamp) {
-                        Log.d(TAG, "Skipping weather update - stale data (incoming=${weatherInfo.timestamp}, displayed=$displayedWeatherTimestamp)")
-                        return@runOnUiThread
-                    }
-
-                    val addressText = "${weatherInfo.town}, ${weatherInfo.country}"
-
-                    // Don't update if we don't have valid temperature data
-                    if (weatherInfo.temp == "?" || weatherInfo.temp.isEmpty()) {
-                        Log.d(TAG, "Skipping weather update - no valid temperature data")
-                        return@runOnUiThread
-                    }
-
-                    // Build weather text, handling both simple and full formats
-                    // Format: "sunny.png 15°C" (desc + temp with degree sign)
-                    // or just "15°C" if no description
-                    val tempWithDegree = if (weatherInfo.temp.contains("°")) {
-                        weatherInfo.temp
-                    } else {
-                        "${weatherInfo.temp}°C"
-                    }
-
-                    val weatherText = if (weatherInfo.desc.isNotEmpty()) {
-                        // Full format: desc + temp
-                        "${weatherInfo.desc} $tempWithDegree"
-                    } else {
-                        // Simple format: just temp
-                        tempWithDegree
-                    }
-
-                    // Update the displayed timestamp
-                    if (weatherInfo.timestamp > 0) {
-                        displayedWeatherTimestamp = weatherInfo.timestamp
-                    }
-
-                    Log.d(TAG, "Weather updated: $addressText, $weatherText (timestamp=${weatherInfo.timestamp})")
-                    widgetContainer.updateLocationData(
-                        addressText,
-                        weatherText,
-                        weatherInfo.sunriseEpochMs,
-                        weatherInfo.sunsetEpochMs
-                    )
-                    widgetContainer.updateFinanceCountryCode(weatherInfo.country)
-                    widgetContainer.updateNewsCountryCode(weatherInfo.country)
-                    binocularView.notifyContentChanged()
-                }
-            }
-
             onImageReceived = { imageData, fileName ->
                 runOnUiThread {
                     Log.d(TAG, "Image received from phone: $fileName (${imageData.size} bytes)")
@@ -593,23 +473,43 @@ class MainActivity : AppCompatActivity() {
             onGoogleAuthStateReceived = { status, account, detail ->
                 runOnUiThread {
                     if (status == GooglePhoneAuthStatus.SIGNED_OUT) {
-                        googleCalendarSnapshotStore.clear()
-                        widgetContainer.setGoogleCalendarSnapshot(null)
+                        dataSyncCoordinator.clearCalendarSnapshot()
                     }
                     googleAuthCoordinator.onPhoneAuthStateChanged(status, account, detail)
                     binocularView.notifyContentChanged()
                 }
             }
 
-            onGoogleCalendarSnapshotReceived = { snapshot ->
+            onSyncSnapshotReceived = { snapshot ->
                 runOnUiThread {
-                    googleCalendarSnapshotStore.save(snapshot)
-                    widgetContainer.setGoogleCalendarSnapshot(snapshot)
-                    googleAuthCoordinator.onPhoneCalendarSnapshotReceived(snapshot)
+                    snapshot.weather?.let { maybeApplyPhoneSpeedFallback(it.speedMps) }
+                    dataSyncCoordinator.onSyncSnapshotReceived(snapshot)
+                    binocularView.notifyContentChanged()
+                }
+            }
+
+            onSyncErrorReceived = { error ->
+                runOnUiThread {
+                    dataSyncCoordinator.onSyncErrorReceived(error)
+                }
+            }
+
+            onSubtitleStatusReceived = { status ->
+                runOnUiThread {
+                    widgetContainer.applySubtitleStatus(status)
+                    binocularView.notifyContentChanged()
+                }
+            }
+
+            onSubtitleTranscriptReceived = { transcript ->
+                runOnUiThread {
+                    widgetContainer.applySubtitleTranscript(transcript)
                     binocularView.notifyContentChanged()
                 }
             }
         }
+
+        googleAuthCoordinator.refreshStateSilently(this)
 
         // Default: phone mode ON
         isPhoneMode = true
@@ -642,7 +542,7 @@ class MainActivity : AppCompatActivity() {
         // Check if this is a returning user BEFORE layout happens.
         // This prevents onSizeChanged() from creating default singleton widgets
         // that the user has previously closed.
-        val persistedState = WidgetPersistence.loadAll(this)
+        val persistedState = persistenceManager.loadState()
         if (!persistedState.isFirstRun) {
             Log.d(TAG, "Returning user detected - preventing default singleton widget creation")
             widgetContainer.setIsReturningUser()
@@ -758,7 +658,7 @@ class MainActivity : AppCompatActivity() {
             Log.d(TAG, "Widget focus changed: $focused")
             
             // Notify phone to show/hide keyboard
-            rfcommClient?.sendTextFieldFocus(focused)
+            transportManager.sendTextFieldFocus(focused)
             
             notifyTransientBinocularChange()
         }
@@ -799,18 +699,25 @@ class MainActivity : AppCompatActivity() {
         
         widgetContainer.onMirrorRequest = { start ->
             Log.d(TAG, "Mirror request from widget: start=$start")
-            rfcommClient?.sendMirrorRequest(start)
+            transportManager.sendMirrorRequest(start)
+        }
+
+        widgetContainer.onSubtitleControlRequested = { control ->
+            Log.d(TAG, "Subtitle control from widget: action=${control.action.wireName}")
+            if (!transportManager.sendSubtitleControl(control)) {
+                widgetContainer.onSubtitlePhoneDisconnected()
+            }
         }
         
         widgetContainer.onBrowserKeyboardRequest = { show ->
             Log.d(TAG, "Browser keyboard request: show=$show")
             // Send keyboard focus request to phone for browser input fields
-            rfcommClient?.sendTextFieldFocus(show)
+            transportManager.sendTextFieldFocus(show)
         }
         
         widgetContainer.onClipboardRequest = {
             Log.d(TAG, "Clipboard request from widget - asking phone for current clipboard")
-            rfcommClient?.requestClipboard()
+            transportManager.requestClipboard()
         }
 
         widgetContainer.onFilePickerRequest = {
@@ -903,9 +810,14 @@ class MainActivity : AppCompatActivity() {
             saveHeadUpSettings()
         }
 
+        widgetContainer.onSmartAlignmentChanged = { enabled ->
+            saveSmartAlignmentSetting(enabled)
+        }
+
         // Restore saved settings
         restoreBrightness()
         restoreHeadUpSettings()
+        restoreSmartAlignmentSetting()
         val savedSpeedUnit = loadSpeedUnit()
         speedVisibilityThresholdKmh = loadSpeedVisibilityThreshold()
         widgetContainer.setSpeedUnit(savedSpeedUnit)
@@ -915,22 +827,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupGoogleAuth() {
-        googleCalendarSnapshotStore = GoogleCalendarSnapshotStore(this)
         googleAuthCoordinator = GoogleAuthCoordinator(
             clientId = getString(R.string.google_device_client_id),
             store = GoogleAuthPreferencesStore(this),
             networkStatusProvider = DefaultNetworkStatusProvider(this),
             phoneFallbackBridge = object : GooglePhoneFallbackBridge {
                 override fun requestPhoneAuthorization() {
-                    rfcommClient?.requestGooglePhoneAuthorization()
+                    transportManager.requestGooglePhoneAuthorization()
                 }
 
                 override fun requestCalendarSnapshot() {
-                    rfcommClient?.requestGoogleCalendarSnapshot()
+                    if (::dataSyncCoordinator.isInitialized) {
+                        dataSyncCoordinator.requestPhoneCalendarSnapshot()
+                    }
                 }
 
                 override fun disconnectPhoneAuthorization() {
-                    rfcommClient?.disconnectGooglePhoneAuth()
+                    transportManager.disconnectGooglePhoneAuth()
                 }
             }
         ).apply {
@@ -950,8 +863,11 @@ class MainActivity : AppCompatActivity() {
             googleAuthCoordinator.requestCalendarGrant(this)
         }
         widgetContainer.onDisconnectGoogle = {
-            googleCalendarSnapshotStore.clear()
-            widgetContainer.setGoogleCalendarSnapshot(null)
+            if (::dataSyncCoordinator.isInitialized) {
+                dataSyncCoordinator.clearCalendarSnapshot()
+            } else {
+                widgetContainer.setGoogleCalendarSnapshot(null)
+            }
             googleAuthCoordinator.disconnect()
         }
         widgetContainer.onRetryGoogleAuth = {
@@ -959,14 +875,33 @@ class MainActivity : AppCompatActivity() {
         }
         widgetContainer.onGoogleAuthBrowserClosed = null
 
-        googleCalendarSnapshotStore.load()?.let { snapshot ->
-            widgetContainer.setGoogleCalendarSnapshot(snapshot)
-            if (googleAuthCoordinator.getCurrentState().isPhoneFallbackMode) {
-                googleAuthCoordinator.onPhoneCalendarSnapshotReceived(snapshot)
-            }
-        }
         updateGoogleAuthUi(googleAuthCoordinator.getCurrentState())
-        googleAuthCoordinator.refreshStateSilently(this)
+    }
+
+    private fun setupDataSyncCoordinator() {
+        dataSyncCoordinator = GlassesDataSyncCoordinator(
+            context = this,
+            widgetContainer = widgetContainer,
+            syncMessengerProvider = { transportManager },
+            networkStatusProvider = DefaultNetworkStatusProvider(this),
+            googleAuthCoordinatorProvider = {
+                if (::googleAuthCoordinator.isInitialized) googleAuthCoordinator else null
+            },
+            googleCalendarClientProvider = {
+                if (::googleCalendarClient.isInitialized) googleCalendarClient else null
+            },
+            localLocationProvider = { previousSpeedLocation },
+            notifyContentChanged = {
+                binocularView.notifyContentChanged()
+            }
+        )
+        widgetContainer.onFinanceDataRequested = { symbol, range, force, reason ->
+            dataSyncCoordinator.onFinanceDataRequested(symbol, range, force, reason)
+        }
+        widgetContainer.onNewsDataRequested = { countryCode, force, reason ->
+            dataSyncCoordinator.onNewsDataRequested(countryCode, force, reason)
+        }
+        dataSyncCoordinator.restoreCachedSnapshots()
     }
 
     private fun updateGoogleAuthUi(state: GoogleAuthState) {
@@ -1049,6 +984,19 @@ class MainActivity : AppCompatActivity() {
             "Window brightness set to: $appliedWindowBrightness " +
                 "(requested=$requestedBrightness, adaptive=$adaptiveBrightnessEnabled, mediaCapActive=$isMediaBrightnessCapActive, charging=$isGlassesCharging, lux=${smoothedAmbientLux ?: -1f})"
         )
+    }
+
+    private fun saveSmartAlignmentSetting(enabled: Boolean) {
+        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_SMART_ALIGNMENT, enabled)
+            .apply()
+    }
+
+    private fun restoreSmartAlignmentSetting() {
+        val enabled = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SMART_ALIGNMENT, DEFAULT_SMART_ALIGNMENT)
+        widgetContainer.setSmartAlignmentEnabled(enabled)
     }
 
     /**
@@ -1248,7 +1196,6 @@ class MainActivity : AppCompatActivity() {
                     // Hide everything
                     cursorView.setForceHidden(true, useGentleRedraw = true)
                     widgetContainer.setDisplayState(state)
-                    stopPhonePayloadSyncLoop()
 
                     // NEW: Actually turn off the display
                     window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -1266,11 +1213,9 @@ class MainActivity : AppCompatActivity() {
                     // Show everything
                     cursorView.setForceHidden(false, useGentleRedraw = true)
                     widgetContainer.setDisplayState(state)
-                    // Request an immediate payload sync when waking, then keep syncing while awake.
-                    Log.d(TAG, "Waking up - requesting payload sync from phone")
-                    requestPhonePayloadSync(forceCalendarRefresh = shouldRefreshCalendarOnWake())
-                    rfcommClient?.requestWeather()
-                    restartPhonePayloadSyncLoop()
+                    if (::dataSyncCoordinator.isInitialized) {
+                        dataSyncCoordinator.onDisplayWake("display_wake")
+                    }
                 }
                 WakeSleepManager.DisplayState.SLEEP -> {
                     // Hide cursor, show only pinned widgets - use gentle redraw
@@ -1419,11 +1364,11 @@ class MainActivity : AppCompatActivity() {
         tapGestureDetector = TapGestureDetector()
 
         tapGestureDetector.onSingleTap = { x, y ->
-            handleTapAtCoordinates(x, y)
+            inputCoordinator.handleTapAtCoordinates(x, y)
         }
 
         tapGestureDetector.onDoubleTap = { x, y ->
-            handleDoubleTapAtCoordinates(x, y)
+            inputCoordinator.handleDoubleTapAtCoordinates(x, y)
         }
 
         tapGestureDetector.onTripleTap = { x, y ->
@@ -1438,7 +1383,7 @@ class MainActivity : AppCompatActivity() {
      */
     private fun handleTripleTap() {
         Log.d(TAG, "Triple tap detected - toggling 3DOF mode")
-        flashCursor()
+        inputCoordinator.flashCursor()
         threeDofManager.toggle3Dof()
     }
 
@@ -1456,50 +1401,15 @@ class MainActivity : AppCompatActivity() {
         cancelHeadUpWakeSession()
     }
     
-    // Debounce saving to avoid excessive writes
-    private var saveRunnable: Runnable? = null
-    private val saveDebounceMs = 500L
-    
     private fun saveWidgetStateDebounced() {
-        saveRunnable?.let { handler.removeCallbacks(it) }
-        saveRunnable = Runnable {
-            saveWidgetState()
-        }
-        handler.postDelayed(saveRunnable!!, saveDebounceMs)
+        persistenceManager.saveDebounced()
     }
     
     /**
      * Save current widget state to persistent storage.
      */
     private fun saveWidgetState() {
-        val textWidgetStates = widgetContainer.getTextWidgetStates()
-        val browserWidgetStates = widgetContainer.getBrowserWidgetStates()
-        val imageWidgetStates = widgetContainer.getImageWidgetStates()
-        val statusBarState = widgetContainer.getStatusBarState()
-        val locationWidgetState = widgetContainer.getLocationWidgetState()
-        val calendarWidgetState = widgetContainer.getCalendarWidgetState()
-        val mirrorWidgetState = widgetContainer.getMirrorWidgetState()
-        val financeWidgetState = widgetContainer.getFinanceWidgetState()
-        val newsWidgetState = widgetContainer.getNewsWidgetState()
-        val speedometerWidgetState = widgetContainer.getSpeedometerWidgetState()
-
-        val saveSucceeded = WidgetPersistence.saveWidgets(
-            this,
-            textWidgetStates,
-            browserWidgetStates,
-            imageWidgetStates,
-            statusBarState,
-            locationWidgetState,
-            calendarWidgetState,
-            mirrorWidgetState,
-            financeWidgetState,
-            newsWidgetState,
-            speedometerWidgetState,
-            widgetContainer.getClosedWidgetTemplates()
-        )
-        if (saveSucceeded) {
-            ImageWidgetStorage.pruneUnreferenced(this, imageWidgetStates.map { it.imagePath })
-        }
+        persistenceManager.saveNow()
         //Log.d(TAG, "Saved ${textWidgetStates.size} widgets")
     }
     
@@ -1515,24 +1425,15 @@ class MainActivity : AppCompatActivity() {
     private fun restoreWidgetState(state: WidgetPersistence.PersistedState) {
         Log.d(TAG, "Restoring widget state: isFirstRun=${state.isFirstRun}, " +
                 "text=${state.text.size}, browser=${state.browser.size}, image=${state.image.size}, " +
-                "status=${state.status != null}, location=${state.location != null}, calendar=${state.calendar != null}, mirror=${state.mirror != null}, finance=${state.finance != null}, news=${state.news != null}, speedometer=${state.speedometer != null}")
+                "status=${state.status != null}, location=${state.location != null}, calendar=${state.calendar != null}, mirror=${state.mirror != null}, finance=${state.finance != null}, news=${state.news != null}, speedometer=${state.speedometer != null}, subtitle=${state.subtitle != null}")
 
-        widgetContainer.setClosedWidgetTemplates(state.closedTemplates)
+        if (state.isFirstRun) {
+            refreshBinocularRenderingStrategy()
+            notifyStructuralBinocularChange()
+            return
+        }
 
-        // Restore text, browser, and image widgets
-        if (state.text.isNotEmpty()) widgetContainer.restoreTextWidgets(state.text)
-        if (state.browser.isNotEmpty()) widgetContainer.restoreBrowserWidgets(state.browser)
-        if (state.image.isNotEmpty()) widgetContainer.restoreImageWidgets(state.image)
-
-        // Restore singleton widgets only if they were saved (i.e., they existed when app closed)
-        // If state is null, the widget was closed by user and should NOT be recreated
-        state.status?.let { widgetContainer.restoreStatusBarWidget(it) }
-        state.location?.let { widgetContainer.restoreLocationWidget(it) }
-        state.calendar?.let { widgetContainer.restoreCalendarWidget(it) }
-        state.mirror?.let { widgetContainer.restoreMirrorWidget(it) }
-        state.finance?.let { widgetContainer.restoreFinanceWidget(it) }
-        state.news?.let { widgetContainer.restoreNewsWidget(it) }
-        state.speedometer?.let { widgetContainer.restoreSpeedometerWidget(it) }
+        widgetContainer.applyPersistedStateReplacingCurrent(state)
 
         refreshBinocularRenderingStrategy()
         notifyStructuralBinocularChange()
@@ -1725,11 +1626,17 @@ class MainActivity : AppCompatActivity() {
             }
 
             widgetContainer.onHeadUpWake()
+            if (::dataSyncCoordinator.isInitialized) {
+                dataSyncCoordinator.onDisplayWake("head_up_wake_resume")
+            }
         }
 
         // Hardware action-button wake can resume the activity without an internal
-        // WakeSleepManager transition. Keep finance fresh; news remains periodic.
+        // WakeSleepManager transition. Let the coordinator refresh visible data.
         widgetContainer.onAppResumed()
+        if (::dataSyncCoordinator.isInitialized) {
+            dataSyncCoordinator.onAppResumed()
+        }
 
         // Re-evaluate local speed pipeline on resume in case providers were toggled externally.
         val fine = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -1741,11 +1648,6 @@ class MainActivity : AppCompatActivity() {
         if (::googleAuthCoordinator.isInitialized) {
             googleAuthCoordinator.refreshStateSilently(this)
         }
-
-        restartPhonePayloadSyncLoop(
-            requestImmediately = ::wakeSleepManager.isInitialized &&
-                wakeSleepManager.state != WakeSleepManager.DisplayState.OFF
-        )
     }
 
     /**
@@ -1823,7 +1725,6 @@ class MainActivity : AppCompatActivity() {
         // Service will enable its head-up detection
         GlassesService.notifyActivityPaused(this)
 
-        stopPhonePayloadSyncLoop()
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -1843,7 +1744,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        stopPhonePayloadSyncLoop()
         rfcommClient?.stop()
         wifiDirectClient?.release()
         GlassesService.stop(this)
@@ -1876,8 +1776,10 @@ class MainActivity : AppCompatActivity() {
         }
         wakeLock = null
         
-        // Cancel any pending tap
-        pendingTempleTap?.let { handler.removeCallbacks(it) }
+        // Clean up input coordinator callbacks
+        if (::inputCoordinator.isInitialized) {
+            inputCoordinator.release()
+        }
         
         // Clean up widget container resources
         widgetContainer.release()
@@ -1918,8 +1820,6 @@ class MainActivity : AppCompatActivity() {
     // ==================== Phone Data Handling ====================
 
     private fun handlePhoneData(data: RfcommClient.PhoneData) {
-        var needsTransientRefresh = false
-
         if (data.battery >= 0) {
             latestPhoneBatteryPercent = data.battery
             updateStatusBar(
@@ -1927,214 +1827,7 @@ class MainActivity : AppCompatActivity() {
                 phoneBattery = latestPhoneBatteryPercent
             )
         }
-        
-        // If not awake, only process wake-triggering events (touch wakes from sleep)
-        if (::wakeSleepManager.isInitialized && !wakeSleepManager.isAwake()) {
-            // Any touch interaction wakes from SLEEP mode
-            if (data.event == "down" || data.event == "tap" || data.event == "doubletap") {
-                Log.d(TAG, "Wake from sleep via phone ${data.event}")
-                wakeSleepManager.transitionTo(WakeSleepManager.DisplayState.WAKE)
-            }
-            return
-        }
-        
-        // Handle cursor events
-        when (data.event) {
-            "down" -> {
-                notifyUserActivity()  // Reset sleep timer on interaction
-                Log.d(TAG, "Phone DOWN at ${cursorView.getCursorX()}, ${cursorView.getCursorY()} pointerCount=${data.pointerCount}")
-                handlePointerDown(
-                    WidgetContainer.InputSource.PHONE_TRACKPAD,
-                    data.pointerCount.coerceAtLeast(1)
-                )
-                needsTransientRefresh = true
-            }
-            "up" -> {
-                Log.d(TAG, "Phone UP at ${cursorView.getCursorX()}, ${cursorView.getCursorY()}")
-                handlePointerUp(WidgetContainer.InputSource.PHONE_TRACKPAD)
-            }
-            "move" -> {
-                notifyUserActivity()  // Reset sleep timer on cursor movement
-                val dx = data.dx * PHONE_SENSITIVITY
-                val dy = data.dy * PHONE_SENSITIVITY
-                handlePointerMove(
-                    WidgetContainer.InputSource.PHONE_TRACKPAD,
-                    data.pointerCount.coerceAtLeast(1),
-                    dx,
-                    dy
-                )
-            }
-            "tap" -> {
-                notifyUserActivity()  // Reset sleep timer on tap
-                cursorView.onActivity()  // Notify cursor of activity
-                Log.d(TAG, "Phone tap at ${cursorView.getCursorX()}, ${cursorView.getCursorY()}")
-                // Phone already detects tap vs doubletap, so handle directly
-                // (Triple-tap from phone will need phone app update)
-                val x = cursorView.getCursorX()
-                val y = cursorView.getCursorY()
-                handleTapAtCoordinates(x, y)
-                needsTransientRefresh = true
-            }
-            "doubletap" -> {
-                notifyUserActivity()  // Reset sleep timer on double-tap
-                cursorView.onActivity()  // Notify cursor of activity
-                Log.d(TAG, "Phone double-tap at ${cursorView.getCursorX()}, ${cursorView.getCursorY()}")
-                // Phone already detected this as double-tap, handle directly
-                val x = cursorView.getCursorX()
-                val y = cursorView.getCursorY()
-                handleDoubleTapAtCoordinates(x, y)
-                needsTransientRefresh = true
-            }
-            "tripletap" -> {
-                // Direct triple-tap event from phone (requires phone app update)
-                notifyUserActivity()
-                cursorView.onActivity()
-                Log.d(TAG, "Phone triple-tap - toggling 3DOF mode")
-                handleTripleTap()
-                needsTransientRefresh = true
-            }
-            "pointercount" -> {
-                val pointerCount = data.pointerCount.coerceAtLeast(1)
-                notifyUserActivity()
-                cursorView.onActivity()
-                Log.d(TAG, "Phone pointer count changed: $pointerCount")
-                widgetContainer.onPointerCountChanged(pointerCount)
-                lastPointerCount = pointerCount
-                needsTransientRefresh = true
-            }
-        }
-
-        if (needsTransientRefresh) {
-            notifyTransientBinocularChange()
-        }
-    }
-
-    /**
-     * Handle single tap action.
-     * Routes tap through TapGestureDetector for proper multi-tap detection.
-     */
-    private fun handleTap() {
-        val x = cursorView.getCursorX()
-        val y = cursorView.getCursorY()
-
-        // Route through tap gesture detector for single/double/triple tap detection
-        if (::tapGestureDetector.isInitialized) {
-            tapGestureDetector.onTap(x, y)
-        } else {
-            // Fallback if detector not initialized
-            handleTapAtCoordinates(x, y)
-        }
-    }
-
-    /**
-     * Handle double-tap action.
-     * Routes tap through TapGestureDetector for proper multi-tap detection.
-     */
-    private fun handleDoubleTap() {
-        val x = cursorView.getCursorX()
-        val y = cursorView.getCursorY()
-
-        // Route through tap gesture detector for single/double/triple tap detection
-        if (::tapGestureDetector.isInitialized) {
-            tapGestureDetector.onTap(x, y)
-        } else {
-            // Fallback if detector not initialized
-            handleDoubleTapAtCoordinates(x, y)
-        }
-    }
-
-    /**
-     * Handle tap at specific screen coordinates.
-     * Called by TapGestureDetector when single tap is confirmed.
-     * In 3DOF mode, transforms screen coordinates to content coordinates.
-     */
-    private fun handleTapAtCoordinates(screenX: Float, screenY: Float) {
-        // Flash cursor
-        flashCursor()
-
-        // Pass screen coordinates directly - WidgetContainer handles 3DOF transformation internally
-        widgetContainer.onTap(screenX, screenY)
-    }
-
-    /**
-     * Handle double-tap at specific screen coordinates.
-     * Called by TapGestureDetector when double tap is confirmed.
-     * In 3DOF mode, transforms screen coordinates to content coordinates.
-     */
-    private fun handleDoubleTapAtCoordinates(screenX: Float, screenY: Float) {
-        // Flash cursor
-        flashCursor()
-
-        // Pass screen coordinates directly - WidgetContainer handles 3DOF transformation internally
-        widgetContainer.onDoubleTap(screenX, screenY)
-    }
-
-    private fun flashCursor() {
-        cursorView.setCursorColor(Color.YELLOW)
-        cursorView.postDelayed({
-            cursorView.setCursorColor(if (isPhoneMode) Color.WHITE else Color.CYAN)
-            notifyTransientBinocularChange()
-        }, 150)
-    }
-
-    // ==================== Pointer Input Router ====================
-
-    /**
-     * Shared DOWN handler for both phone and temple inputs.
-     * Callers log and apply source-specific setup (tracking vars, notifyUserActivity) before invoking.
-     */
-    private fun handlePointerDown(source: WidgetContainer.InputSource, pointerCount: Int) {
-        cursorView.onActivity()
-        lastPointerCount = pointerCount
-        val cursorX = cursorView.getCursorX()
-        val cursorY = cursorView.getCursorY()
-        widgetContainer.onCursorDown(cursorX, cursorY, pointerCount)
-    }
-
-    /**
-     * Shared MOVE handler for both phone and temple inputs.
-     * Handles pointer-count change detection, two-finger scroll, scrollbar drag, and normal cursor move.
-     * Callers are responsible for applying sensitivity scaling and jitter filtering before invoking.
-     */
-    private fun handlePointerMove(source: WidgetContainer.InputSource, pointerCount: Int, dx: Float, dy: Float) {
-        if (pointerCount != lastPointerCount) {
-            widgetContainer.onPointerCountChanged(pointerCount)
-            lastPointerCount = pointerCount
-        }
-        if (pointerCount >= 2) {
-            val cursorX = cursorView.getCursorX()
-            val cursorY = cursorView.getCursorY()
-            widgetContainer.scrollWidgetAtCursor(cursorX, cursorY, dy)
-            cursorView.onActivity()
-        } else {
-            val isScrollbarDrag = widgetContainer.isScrollbarDragActive()
-            if (isScrollbarDrag && !widgetContainer.isDragging()) {
-                cursorView.moveCursor(dx, 0f)
-                cursorView.onActivity()
-                val newCursorX = cursorView.getCursorX()
-                val newCursorY = cursorView.getCursorY()
-                widgetContainer.updateCursor(newCursorX, newCursorY, cursorView.isCursorVisible())
-                widgetContainer.getScrollbarDragWidget()?.onScroll(dy)
-            } else {
-                val (newX, newY) = widgetContainer.onMove(dx, dy, source)
-                cursorView.setCursorPosition(newX, newY)
-                cursorView.onActivity()
-            }
-        }
-        notifyTransientBinocularChange()
-    }
-
-    /**
-     * Shared UP handler for both phone and temple inputs.
-     * Resets pointer count and ends any active drag. Callers handle tap detection after invoking.
-     */
-    private fun handlePointerUp(source: WidgetContainer.InputSource) {
-        cursorView.onActivity()
-        val cursorX = cursorView.getCursorX()
-        val cursorY = cursorView.getCursorY()
-        widgetContainer.onCursorUp(cursorX, cursorY)
-        lastPointerCount = 1
-        notifyTransientBinocularChange()
+        inputCoordinator.handlePhoneData(data)
     }
 
     // ==================== Temple Trackpad Handling ====================
@@ -2172,195 +1865,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
-        // Consume all touch events to prevent OS from processing them
-        // Log.d(TAG, "onGenericMotionEvent: action=${event.action} actionMasked=${event.actionMasked} x=${event.x} y=${event.y}")
-        
-        // If not awake, wake on touch
-        if (::wakeSleepManager.isInitialized && !wakeSleepManager.isAwake()) {
-            // Wake immediately on touch
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_HOVER_ENTER -> {
-                    Log.d(TAG, "Temple touch detected while sleeping - waking up")
-                    wakeSleepManager.transitionTo(WakeSleepManager.DisplayState.WAKE)
-                    // Initialize tracking for normal processing after wake
-                    templeDownX = event.x
-                    templeDownY = event.y
-                    templeDownTime = System.currentTimeMillis()
-                    templeTotalDistance = 0f
-                    lastTempleX = event.x
-                    lastTempleY = event.y
-                }
-            }
-            return true  // Consume - we've woken up, next event will be processed normally
-        }
-        
-        // Notify wake/sleep manager of activity
-        notifyUserActivity()
-        
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN,
-            MotionEvent.ACTION_HOVER_ENTER -> {
-                lastTempleX = event.x
-                lastTempleY = event.y
-                templeDownX = event.x
-                templeDownY = event.y
-                templeDownTime = System.currentTimeMillis()
-                templeTotalDistance = 0f
-                Log.d(TAG, "Temple DOWN/ENTER at ($templeDownX, $templeDownY)")
-                handlePointerDown(WidgetContainer.InputSource.GLASSES_TEMPLE, 1)
-                return true
-            }
-            MotionEvent.ACTION_MOVE,
-            MotionEvent.ACTION_HOVER_MOVE -> {
-                val rawDx = event.x - lastTempleX
-                val rawDy = event.y - lastTempleY
-                val dx = rawDx * TEMPLE_SENSITIVITY_X
-                val dy = rawDy * TEMPLE_SENSITIVITY_Y
-                templeTotalDistance += kotlin.math.sqrt(rawDx * rawDx + rawDy * rawDy)
-                lastTempleX = event.x
-                lastTempleY = event.y
-                lastTempleMovementTime = System.currentTimeMillis()
-                val movementMagnitude = kotlin.math.sqrt(dx * dx + dy * dy)
-                if (movementMagnitude >= MIN_MOVEMENT_THRESHOLD) {
-                    handlePointerMove(WidgetContainer.InputSource.GLASSES_TEMPLE, 1, dx, dy)
-                }
-                return true
-            }
-            MotionEvent.ACTION_UP,
-            MotionEvent.ACTION_HOVER_EXIT -> {
-                val currentTime = System.currentTimeMillis()
-                val duration = currentTime - templeDownTime
-                val timeSinceLastMove = currentTime - lastTempleMovementTime
-                Log.d(TAG, "Temple UP/EXIT - distance: $templeTotalDistance, duration: ${duration}ms, timeSinceLastMove: ${timeSinceLastMove}ms")
-                handlePointerUp(WidgetContainer.InputSource.GLASSES_TEMPLE)
-                if (templeTotalDistance < TAP_MAX_DISTANCE && duration < TAP_MAX_DURATION) {
-                    Log.d(TAG, "Temple TAP detected!")
-                    handleTempleTapDetected()
-                }
-                return true
-            }
-        }
-        return super.onGenericMotionEvent(event)
-    }
-    
-    /**
-     * Handle temple tap with single/double/triple tap detection.
-     * Routes through TapGestureDetector for unified multi-tap handling.
-     */
-    private fun handleTempleTapDetected() {
-        val x = cursorView.getCursorX()
-        val y = cursorView.getCursorY()
-
-        // Route through tap gesture detector for unified single/double/triple tap detection
-        if (::tapGestureDetector.isInitialized) {
-            tapGestureDetector.onTap(x, y)
+        return if (::inputCoordinator.isInitialized && inputCoordinator.onGenericMotionEvent(event)) {
+            true
         } else {
-            // Fallback to old double-tap detection if detector not initialized
-            val currentTime = System.currentTimeMillis()
-            val timeSinceLastTap = currentTime - lastTempleTapTime
-
-            // Cancel any pending single tap
-            pendingTempleTap?.let { handler.removeCallbacks(it) }
-            pendingTempleTap = null
-
-            if (timeSinceLastTap < DOUBLE_TAP_TIMEOUT_MS) {
-                // Double tap detected
-                Log.d(TAG, "Temple double-tap confirmed (fallback)")
-                lastTempleTapTime = 0L
-                handleDoubleTapAtCoordinates(x, y)
-            } else {
-                // Potential single tap - wait to see if another tap comes
-                lastTempleTapTime = currentTime
-                pendingTempleTap = Runnable {
-                    Log.d(TAG, "Temple single tap confirmed (fallback)")
-                    handleTapAtCoordinates(x, y)
-                    pendingTempleTap = null
-                }
-                handler.postDelayed(pendingTempleTap!!, DOUBLE_TAP_TIMEOUT_MS)
-            }
+            super.onGenericMotionEvent(event)
         }
-
-        notifyTransientBinocularChange()
     }
-
-    // Tracking for two-finger scroll on temple (pointer count shared with phone via lastPointerCount)
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        //Log.d(TAG, "onTouchEvent: action=${event.action} source=${event.source} device=${event.device?.name} x=${event.x} y=${event.y} pointerCount=${event.pointerCount}")
-        
-        // If not awake, wake on touch
-        if (::wakeSleepManager.isInitialized && !wakeSleepManager.isAwake()) {
-            // Wake immediately on touch
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                Log.d(TAG, "Touch detected while sleeping - waking up")
-                wakeSleepManager.transitionTo(WakeSleepManager.DisplayState.WAKE)
-                // Initialize tracking for normal processing after wake
-                templeDownX = event.x
-                templeDownY = event.y
-                templeDownTime = System.currentTimeMillis()
-                templeTotalDistance = 0f
-                lastTempleX = event.x
-                lastTempleY = event.y
-            }
-            return true  // Consume - we've woken up, next event will be processed normally
+        return if (::inputCoordinator.isInitialized && inputCoordinator.onTouchEvent(event)) {
+            true
+        } else {
+            super.onTouchEvent(event)
         }
-        
-        // Notify wake/sleep manager of activity
-        notifyUserActivity()
-        
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                lastTempleX = event.x
-                lastTempleY = event.y
-                templeDownX = event.x
-                templeDownY = event.y
-                templeDownTime = System.currentTimeMillis()
-                templeTotalDistance = 0f
-                Log.d(TAG, "Trackpad DOWN at ($templeDownX, $templeDownY) pointerCount=${event.pointerCount}")
-                handlePointerDown(WidgetContainer.InputSource.GLASSES_TEMPLE, event.pointerCount)
-                return true
-            }
-            MotionEvent.ACTION_POINTER_DOWN -> {
-                // Second finger touched - switch to scroll mode
-                Log.d(TAG, "Second finger down - entering scroll mode, pointerCount=${event.pointerCount}")
-                lastPointerCount = event.pointerCount
-                widgetContainer.onPointerCountChanged(event.pointerCount)
-                return true
-            }
-            MotionEvent.ACTION_MOVE -> {
-                val rawDx = event.x - lastTempleX
-                val rawDy = event.y - lastTempleY
-                val dx = rawDx * TEMPLE_SENSITIVITY_X
-                val dy = rawDy * TEMPLE_SENSITIVITY_Y
-                templeTotalDistance += kotlin.math.sqrt(rawDx * rawDx + rawDy * rawDy)
-                lastTempleX = event.x
-                lastTempleY = event.y
-                lastTempleMovementTime = System.currentTimeMillis()
-                val movementMagnitude = kotlin.math.sqrt(dx * dx + dy * dy)
-                if (movementMagnitude >= MIN_MOVEMENT_THRESHOLD) {
-                    handlePointerMove(WidgetContainer.InputSource.GLASSES_TEMPLE, event.pointerCount, dx, dy)
-                }
-                return true
-            }
-            MotionEvent.ACTION_POINTER_UP -> {
-                // One finger lifted - back to single-finger mode
-                val newPointerCount = event.pointerCount - 1
-                Log.d(TAG, "Finger up - exiting scroll mode, newPointerCount=$newPointerCount")
-                lastPointerCount = newPointerCount
-                widgetContainer.onPointerCountChanged(newPointerCount)
-                return true
-            }
-            MotionEvent.ACTION_UP -> {
-                val currentTime = System.currentTimeMillis()
-                val duration = currentTime - templeDownTime
-                handlePointerUp(WidgetContainer.InputSource.GLASSES_TEMPLE)
-                if (templeTotalDistance < TAP_MAX_DISTANCE && duration < TAP_MAX_DURATION) {
-                    handleTempleTapDetected()
-                }
-                return true
-            }
-        }
-        return super.onTouchEvent(event)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
@@ -2381,7 +1898,7 @@ class MainActivity : AppCompatActivity() {
             KeyEvent.KEYCODE_DPAD_CENTER,
             KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                 notifyUserActivity()
-                handleTap()
+                inputCoordinator.handleTap()
                 return true
             }
         }
@@ -2664,18 +2181,14 @@ class MainActivity : AppCompatActivity() {
     /**
      * Called when local location updates are received.
      *
-     * NOTE: Weather data is ONLY provided by the phone app via Bluetooth.
-     * The glasses do not make weather API calls. Local updates are used for:
+     * NOTE: Weather data prefers the phone app when connected. Local updates are used for:
      * - validating location permission/provider availability
      * - driving the local speedometer widget from sensor speed
-     * Location/weather display text remains driven by phone weather payloads.
+     * - triggering standalone weather refreshes when no phone is connected
      */
     private fun updateLocationWidget(location: Location) {
         lastSpeedLocationUpdateElapsedMs = android.os.SystemClock.elapsedRealtime()
 
-        // Local location updates are only used to verify location permission is working.
-        // Weather/location display is exclusively controlled by phone data to ensure
-        // a single source of truth and prevent stale data issues.
         val now = System.currentTimeMillis()
         val ageMs = now - location.time
         val hasSensorSpeed = location.hasSpeed()
@@ -2704,6 +2217,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
         previousSpeedLocation = Location(location)
+        if (::dataSyncCoordinator.isInitialized) {
+            dataSyncCoordinator.onLocalLocationChanged()
+        }
 
         val qualityOk = hasReliableSensorSpeed || hasReliableEstimatedSpeed
 

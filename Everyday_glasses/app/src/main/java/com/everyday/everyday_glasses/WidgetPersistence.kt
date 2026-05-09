@@ -6,6 +6,7 @@ import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.IOException
 
 /**
  * Handles persistence of widget state.
@@ -19,6 +20,8 @@ import java.io.File
 object WidgetPersistence {
     private const val TAG = "WidgetPersistence"
     private const val FILENAME = "everyday_widgets.json"
+    private const val LAYOUTS_FILENAME = "everyday_widget_layouts.json"
+    const val DEFAULT_LAYOUT_NAME = "Default"
 
     // JSON keys
     private const val KEY_TEXT_WIDGETS = "text_widgets"
@@ -31,6 +34,7 @@ object WidgetPersistence {
     private const val KEY_FINANCE_WIDGET = "finance_widget"
     private const val KEY_NEWS_WIDGET = "news_widget"
     private const val KEY_SPEEDOMETER_WIDGET = "speedometer_widget"
+    private const val KEY_SUBTITLE_WIDGET = "subtitle_widget"
     private const val KEY_CLOSED_TEMPLATES = "closed_templates"
     private const val KEY_CLOSED_TEXT_WIDGET = "text_widget"
     private const val KEY_CLOSED_BROWSER_WIDGET = "browser_widget"
@@ -41,6 +45,13 @@ object WidgetPersistence {
     private const val KEY_CLOSED_FINANCE_WIDGET = "finance_widget"
     private const val KEY_CLOSED_NEWS_WIDGET = "news_widget"
     private const val KEY_CLOSED_SPEEDOMETER_WIDGET = "speedometer_widget"
+    private const val KEY_CLOSED_SUBTITLE_WIDGET = "subtitle_widget"
+    private const val KEY_LAYOUTS = "layouts"
+    private const val KEY_LAYOUT_NAME = "name"
+    private const val KEY_LAYOUT_CREATED_AT = "createdAt"
+    private const val KEY_LAYOUT_UPDATED_AT = "updatedAt"
+    private const val KEY_LAYOUT_STATE = "state"
+    private const val KEY_ACTIVE_LAYOUT_NAME = "activeLayoutName"
 
     // Avoid spamming logcat if something goes wrong during load.
     @Volatile private var hasLoggedLoadError = false
@@ -128,9 +139,18 @@ object WidgetPersistence {
         val finance: FinanceWidgetState?,
         val news: NewsWidgetState?,
         val speedometer: SpeedometerWidgetState?,
+        val subtitle: SubtitleWidgetState?,
         val mirror: MirrorWidgetState?,
         val closedTemplates: ClosedWidgetTemplates = ClosedWidgetTemplates(),
-        val isFirstRun: Boolean = true  // True if no saved state exists (create default widgets)
+        val isFirstRun: Boolean = true,  // True if no saved state exists (create default widgets)
+        val activeLayoutName: String? = null
+    )
+
+    data class WidgetLayoutRecord(
+        val name: String,
+        val createdAt: Long,
+        val updatedAt: Long,
+        val state: PersistedState
     )
 
     data class ClosedWidgetTemplates(
@@ -142,6 +162,7 @@ object WidgetPersistence {
         val finance: FinanceWidgetState? = null,
         val news: NewsWidgetState? = null,
         val speedometer: SpeedometerWidgetState? = null,
+        val subtitle: SubtitleWidgetState? = null,
         val mirror: MirrorWidgetState? = null
     )
 
@@ -306,12 +327,134 @@ object WidgetPersistence {
         override val isPinned: Boolean = false
     ) : SizedWidgetFields
 
+    data class SubtitleWidgetState(
+        override val x: Float,
+        override val y: Float,
+        override val width: Float,
+        override val height: Float,
+        val phonePlaybackEnabled: Boolean = true,
+        val microphoneEnabled: Boolean = false,
+        val translationEnabled: Boolean = false,
+        override val isMinimized: Boolean = false,
+        override val isFullscreen: Boolean = false,
+        override val savedMinX: Float = 0f,
+        override val savedMinY: Float = 0f,
+        override val savedMinWidth: Float = 0f,
+        override val savedMinHeight: Float = 0f,
+        override val isPinned: Boolean = false
+    ) : SizedWidgetFields
+
     private fun getStorageFile(context: Context): File {
         val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: context.filesDir
         val file = File(dir, FILENAME)
         file.parentFile?.mkdirs()
         return file
     }
+
+    private fun getLayoutsStorageFile(context: Context): File {
+        val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: context.filesDir
+        val file = File(dir, LAYOUTS_FILENAME)
+        file.parentFile?.mkdirs()
+        return file
+    }
+
+    fun createPersistedState(
+        textWidgets: List<TextWidgetState>,
+        browserWidgets: List<BrowserWidgetState>,
+        imageWidgets: List<ImageWidgetState>,
+        statusBarState: StatusBarState?,
+        locationWidgetState: LocationWidgetState? = null,
+        calendarWidgetState: CalendarWidgetState? = null,
+        mirrorWidgetState: MirrorWidgetState? = null,
+        financeWidgetState: FinanceWidgetState? = null,
+        newsWidgetState: NewsWidgetState? = null,
+        speedometerWidgetState: SpeedometerWidgetState? = null,
+        subtitleWidgetState: SubtitleWidgetState? = null,
+        closedTemplates: ClosedWidgetTemplates = ClosedWidgetTemplates(),
+        isFirstRun: Boolean = false,
+        activeLayoutName: String? = null
+    ): PersistedState = PersistedState(
+        text = textWidgets,
+        browser = browserWidgets,
+        image = imageWidgets,
+        status = statusBarState,
+        location = locationWidgetState,
+        calendar = calendarWidgetState,
+        finance = financeWidgetState,
+        news = newsWidgetState,
+        speedometer = speedometerWidgetState,
+        subtitle = subtitleWidgetState,
+        mirror = mirrorWidgetState,
+        closedTemplates = closedTemplates,
+        isFirstRun = isFirstRun,
+        activeLayoutName = sanitizeLayoutName(activeLayoutName)
+    )
+
+    fun stateToJson(state: PersistedState): JSONObject {
+        val rootJson = JSONObject()
+
+        rootJson.put(KEY_TEXT_WIDGETS, JSONArray().apply {
+            state.text.forEach { put(textWidgetToJson(it)) }
+        })
+        rootJson.put(KEY_BROWSER_WIDGETS, JSONArray().apply {
+            state.browser.forEach { put(browserWidgetToJson(it)) }
+        })
+        rootJson.put(KEY_IMAGE_WIDGETS, JSONArray().apply {
+            state.image.forEach {
+                put(JSONObject().apply {
+                    putCommonFields(it)
+                    put("imagePath", it.imagePath)
+                })
+            }
+        })
+
+        state.status?.let { rootJson.put(KEY_STATUS_BAR, statusBarToJson(it)) }
+        state.location?.let { rootJson.put(KEY_LOCATION_WIDGET, locationWidgetToJson(it)) }
+        state.calendar?.let { rootJson.put(KEY_CALENDAR_WIDGET, calendarWidgetToJson(it)) }
+        state.mirror?.let { rootJson.put(KEY_MIRROR_WIDGET, mirrorWidgetToJson(it)) }
+        state.finance?.let { rootJson.put(KEY_FINANCE_WIDGET, financeWidgetToJson(it)) }
+        state.news?.let { rootJson.put(KEY_NEWS_WIDGET, newsWidgetToJson(it)) }
+        state.speedometer?.let { rootJson.put(KEY_SPEEDOMETER_WIDGET, speedometerWidgetToJson(it)) }
+        state.subtitle?.let { rootJson.put(KEY_SUBTITLE_WIDGET, subtitleWidgetToJson(it)) }
+
+        val closedTemplatesJson = JSONObject()
+        state.closedTemplates.text?.let { closedTemplatesJson.put(KEY_CLOSED_TEXT_WIDGET, textWidgetToJson(it)) }
+        state.closedTemplates.browser?.let { closedTemplatesJson.put(KEY_CLOSED_BROWSER_WIDGET, browserWidgetToJson(it)) }
+        state.closedTemplates.status?.let { closedTemplatesJson.put(KEY_CLOSED_STATUS_BAR, statusBarToJson(it)) }
+        state.closedTemplates.location?.let { closedTemplatesJson.put(KEY_CLOSED_LOCATION_WIDGET, locationWidgetToJson(it)) }
+        state.closedTemplates.calendar?.let { closedTemplatesJson.put(KEY_CLOSED_CALENDAR_WIDGET, calendarWidgetToJson(it)) }
+        state.closedTemplates.mirror?.let { closedTemplatesJson.put(KEY_CLOSED_MIRROR_WIDGET, mirrorWidgetToJson(it)) }
+        state.closedTemplates.finance?.let { closedTemplatesJson.put(KEY_CLOSED_FINANCE_WIDGET, financeWidgetToJson(it)) }
+        state.closedTemplates.news?.let { closedTemplatesJson.put(KEY_CLOSED_NEWS_WIDGET, newsWidgetToJson(it)) }
+        state.closedTemplates.speedometer?.let { closedTemplatesJson.put(KEY_CLOSED_SPEEDOMETER_WIDGET, speedometerWidgetToJson(it)) }
+        state.closedTemplates.subtitle?.let { closedTemplatesJson.put(KEY_CLOSED_SUBTITLE_WIDGET, subtitleWidgetToJson(it)) }
+        if (closedTemplatesJson.length() > 0) {
+            rootJson.put(KEY_CLOSED_TEMPLATES, closedTemplatesJson)
+        }
+        sanitizeLayoutName(state.activeLayoutName)?.let {
+            rootJson.put(KEY_ACTIVE_LAYOUT_NAME, it)
+        }
+
+        return rootJson
+    }
+
+    fun stateFromJson(rootJson: JSONObject, isFirstRun: Boolean = false): PersistedState =
+        PersistedState(
+            text = parseTextWidgets(rootJson),
+            browser = parseBrowserWidgets(rootJson),
+            image = parseImageWidgets(rootJson),
+            status = parseStatusBar(rootJson),
+            location = parseLocation(rootJson),
+            calendar = parseCalendar(rootJson),
+            finance = parseFinance(rootJson),
+            news = parseNews(rootJson),
+            speedometer = parseSpeedometer(rootJson),
+            subtitle = parseSubtitle(rootJson),
+            mirror = parseMirror(rootJson),
+            closedTemplates = parseClosedTemplates(rootJson),
+            isFirstRun = isFirstRun,
+            activeLayoutName = sanitizeLayoutName(rootJson.optString(KEY_ACTIVE_LAYOUT_NAME, ""))
+        )
 
     /**
      * Save all widget states to file.
@@ -328,126 +471,32 @@ object WidgetPersistence {
         financeWidgetState: FinanceWidgetState? = null,
         newsWidgetState: NewsWidgetState? = null,
         speedometerWidgetState: SpeedometerWidgetState? = null,
-        closedTemplates: ClosedWidgetTemplates = ClosedWidgetTemplates()
-    ): Boolean {
+        subtitleWidgetState: SubtitleWidgetState? = null,
+        closedTemplates: ClosedWidgetTemplates = ClosedWidgetTemplates(),
+        activeLayoutName: String? = null
+    ): Boolean = saveState(
+        context,
+        createPersistedState(
+            textWidgets = textWidgets,
+            browserWidgets = browserWidgets,
+            imageWidgets = imageWidgets,
+            statusBarState = statusBarState,
+            locationWidgetState = locationWidgetState,
+            calendarWidgetState = calendarWidgetState,
+            mirrorWidgetState = mirrorWidgetState,
+            financeWidgetState = financeWidgetState,
+            newsWidgetState = newsWidgetState,
+            speedometerWidgetState = speedometerWidgetState,
+            subtitleWidgetState = subtitleWidgetState,
+            closedTemplates = closedTemplates,
+            isFirstRun = false,
+            activeLayoutName = activeLayoutName
+        )
+    )
+
+    fun saveState(context: Context, state: PersistedState): Boolean {
         try {
-            val rootJson = JSONObject()
-
-            // Text widgets
-            val widgetsArray = JSONArray()
-            for (widget in textWidgets) {
-                val obj = JSONObject().apply {
-                    putCommonFields(widget)
-                    put("text", widget.text)
-                    widget.html?.let { put("html", it) }
-                    put("fontSize", widget.fontSize.toDouble())
-                    put("isTextWrap", widget.isTextWrap)
-                    put("columnCount", widget.columnCount)
-                }
-                widgetsArray.put(obj)
-            }
-            rootJson.put(KEY_TEXT_WIDGETS, widgetsArray)
-
-            // Browser widgets
-            val browserArray = JSONArray()
-            for (widget in browserWidgets) {
-                val obj = JSONObject().apply {
-                    putCommonFields(widget)
-                    put("url", widget.url)
-                }
-                browserArray.put(obj)
-            }
-            rootJson.put(KEY_BROWSER_WIDGETS, browserArray)
-
-            // Image widgets
-            val imageArray = JSONArray()
-            for (widget in imageWidgets) {
-                val obj = JSONObject().apply {
-                    putCommonFields(widget)
-                    put("imagePath", widget.imagePath)
-                }
-                imageArray.put(obj)
-            }
-            rootJson.put(KEY_IMAGE_WIDGETS, imageArray)
-
-            // Status bar (no width/height)
-            statusBarState?.let { s ->
-                rootJson.put(KEY_STATUS_BAR, JSONObject().apply {
-                    putCommonFields(s, includeSize = false)
-                    put("showTime", s.showTime)
-                    put("showDate", s.showDate)
-                    put("showPhoneBattery", s.showPhoneBattery)
-                    put("showGlassesBattery", s.showGlassesBattery)
-                })
-            }
-
-            // Location widget
-            locationWidgetState?.let { l ->
-                rootJson.put(KEY_LOCATION_WIDGET, JSONObject().apply {
-                    putCommonFields(l)
-                    put("showWeather", l.showWeather)
-                    put("showTemperature", l.showTemperature)
-                    put("showLocation", l.showLocation)
-                    put("showCountry", l.showCountry)
-                })
-            }
-
-            // Calendar widget
-            calendarWidgetState?.let { c ->
-                rootJson.put(KEY_CALENDAR_WIDGET, JSONObject().apply {
-                    putCommonFields(c)
-                    put("fontScale", c.fontScale)
-                })
-            }
-
-            // Mirror widget
-            mirrorWidgetState?.let { m ->
-                rootJson.put(KEY_MIRROR_WIDGET, JSONObject().apply { putCommonFields(m) })
-            }
-
-            // Finance widget
-            financeWidgetState?.let { f ->
-                rootJson.put(KEY_FINANCE_WIDGET, JSONObject().apply {
-                    putCommonFields(f)
-                    put("selectedSymbol", f.selectedSymbol)
-                    put("selectedRange", f.selectedRange)
-                })
-            }
-
-            // News widget
-            newsWidgetState?.let { n ->
-                rootJson.put(KEY_NEWS_WIDGET, JSONObject().apply {
-                    putCommonFields(n)
-                    put("countryCode", n.countryCode)
-                    put("selectedIndex", n.selectedIndex)
-                    put("fontScale", n.fontScale)
-                })
-            }
-
-            // Speedometer widget
-            speedometerWidgetState?.let { s ->
-                rootJson.put(KEY_SPEEDOMETER_WIDGET, JSONObject().apply { putCommonFields(s) })
-            }
-
-            val closedTemplatesJson = JSONObject()
-            closedTemplates.text?.let { closedTemplatesJson.put(KEY_CLOSED_TEXT_WIDGET, textWidgetToJson(it)) }
-            closedTemplates.browser?.let { closedTemplatesJson.put(KEY_CLOSED_BROWSER_WIDGET, browserWidgetToJson(it)) }
-            closedTemplates.status?.let { closedTemplatesJson.put(KEY_CLOSED_STATUS_BAR, statusBarToJson(it)) }
-            closedTemplates.location?.let { closedTemplatesJson.put(KEY_CLOSED_LOCATION_WIDGET, locationWidgetToJson(it)) }
-            closedTemplates.calendar?.let { closedTemplatesJson.put(KEY_CLOSED_CALENDAR_WIDGET, calendarWidgetToJson(it)) }
-            closedTemplates.mirror?.let { closedTemplatesJson.put(KEY_CLOSED_MIRROR_WIDGET, mirrorWidgetToJson(it)) }
-            closedTemplates.finance?.let { closedTemplatesJson.put(KEY_CLOSED_FINANCE_WIDGET, financeWidgetToJson(it)) }
-            closedTemplates.news?.let { closedTemplatesJson.put(KEY_CLOSED_NEWS_WIDGET, newsWidgetToJson(it)) }
-            closedTemplates.speedometer?.let { closedTemplatesJson.put(KEY_CLOSED_SPEEDOMETER_WIDGET, speedometerWidgetToJson(it)) }
-            if (closedTemplatesJson.length() > 0) {
-                rootJson.put(KEY_CLOSED_TEMPLATES, closedTemplatesJson)
-            }
-
-            val jsonText = rootJson.toString(2)
-            val file = getStorageFile(context)
-            file.writeText(jsonText)
-
-            // Optional: reset spam guards on success
+            writeTextAtomic(getStorageFile(context), stateToJson(state.copy(isFirstRun = false)).toString(2))
             hasLoggedSaveError = false
             return true
         } catch (e: Exception) {
@@ -477,25 +526,87 @@ object WidgetPersistence {
                 null,
                 null,
                 null,
+                null,
                 closedTemplates = ClosedWidgetTemplates(),
-                isFirstRun = true
+                isFirstRun = true,
+                activeLayoutName = DEFAULT_LAYOUT_NAME
             )
 
-        return PersistedState(
-            text = parseTextWidgets(rootJson),
-            browser = parseBrowserWidgets(rootJson),
-            image = parseImageWidgets(rootJson),
-            status = parseStatusBar(rootJson),
-            location = parseLocation(rootJson),
-            calendar = parseCalendar(rootJson),
-            finance = parseFinance(rootJson),
-            news = parseNews(rootJson),
-            speedometer = parseSpeedometer(rootJson),
-            mirror = parseMirror(rootJson),
-            closedTemplates = parseClosedTemplates(rootJson),
-            isFirstRun = false  // File exists, this is a returning user
-        )
+        return stateFromJson(rootJson, isFirstRun = false)
     }
+
+    fun listLayouts(context: Context): List<WidgetLayoutRecord> {
+        val file = getLayoutsStorageFile(context)
+        if (!file.exists()) return emptyList()
+
+        return try {
+            val jsonText = file.readText()
+            if (jsonText.isBlank()) return emptyList()
+            val rootJson = JSONObject(jsonText)
+            parseLayoutRecords(rootJson)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error reading widget layouts", e)
+            emptyList()
+        }
+    }
+
+    fun saveLayout(context: Context, name: String, state: PersistedState): Boolean {
+        val trimmedName = name.trim()
+        if (trimmedName.isBlank() || isDefaultLayoutName(trimmedName)) return false
+
+        return try {
+            val now = System.currentTimeMillis()
+            val existing = listLayouts(context).toMutableList()
+            val existingIndex = existing.indexOfFirst { it.name.equals(trimmedName, ignoreCase = true) }
+            val createdAt = existing.getOrNull(existingIndex)?.createdAt ?: now
+            val record = WidgetLayoutRecord(
+                name = trimmedName,
+                createdAt = createdAt,
+                updatedAt = now,
+                state = state.copy(isFirstRun = false, activeLayoutName = trimmedName)
+            )
+
+            if (existingIndex >= 0) {
+                existing[existingIndex] = record
+            } else {
+                existing.add(record)
+            }
+
+            writeLayoutRecords(context, existing.sortedBy { it.createdAt })
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving widget layout '$trimmedName'", e)
+            false
+        }
+    }
+
+    fun loadLayout(context: Context, name: String): PersistedState? {
+        val trimmedName = name.trim()
+        if (trimmedName.isBlank()) return null
+        return listLayouts(context)
+            .firstOrNull { it.name.equals(trimmedName, ignoreCase = true) }
+            ?.state
+            ?.copy(isFirstRun = false, activeLayoutName = trimmedName)
+    }
+
+    fun deleteLayout(context: Context, name: String): Boolean {
+        val trimmedName = name.trim()
+        if (trimmedName.isBlank() || isDefaultLayoutName(trimmedName)) return false
+
+        return try {
+            val remaining = listLayouts(context)
+                .filterNot { it.name.equals(trimmedName, ignoreCase = true) }
+            writeLayoutRecords(context, remaining)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error deleting widget layout '$trimmedName'", e)
+            false
+        }
+    }
+
+    fun isDefaultLayoutName(name: String?): Boolean =
+        name?.trim()?.equals(DEFAULT_LAYOUT_NAME, ignoreCase = true) == true
+
+    private fun sanitizeLayoutName(name: String?): String? =
+        name?.trim()?.takeIf { it.isNotBlank() }
 
     /**
      * Clear all saved widget data.
@@ -509,6 +620,53 @@ object WidgetPersistence {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error clearing widget data", e)
+        }
+    }
+
+    private fun parseLayoutRecords(rootJson: JSONObject): List<WidgetLayoutRecord> {
+        val layoutsJson = rootJson.optJSONArray(KEY_LAYOUTS) ?: return emptyList()
+        val records = mutableListOf<WidgetLayoutRecord>()
+
+        for (i in 0 until layoutsJson.length()) {
+            val obj = layoutsJson.optJSONObject(i) ?: continue
+            val name = obj.optString(KEY_LAYOUT_NAME, "").trim()
+            val stateJson = obj.optJSONObject(KEY_LAYOUT_STATE)
+            if (name.isBlank() || stateJson == null) continue
+
+            val createdAt = obj.optLong(KEY_LAYOUT_CREATED_AT, 0L)
+            val updatedAt = obj.optLong(KEY_LAYOUT_UPDATED_AT, createdAt)
+            records.add(
+                WidgetLayoutRecord(
+                    name = name,
+                    createdAt = createdAt,
+                    updatedAt = updatedAt,
+                    state = stateFromJson(stateJson, isFirstRun = false)
+                )
+            )
+        }
+
+        return records.sortedBy { it.createdAt }
+    }
+
+    private fun writeLayoutRecords(context: Context, records: List<WidgetLayoutRecord>): Boolean {
+        return try {
+            val rootJson = JSONObject().apply {
+                put(KEY_LAYOUTS, JSONArray().apply {
+                    records.forEach { record ->
+                        put(JSONObject().apply {
+                            put(KEY_LAYOUT_NAME, record.name)
+                            put(KEY_LAYOUT_CREATED_AT, record.createdAt)
+                            put(KEY_LAYOUT_UPDATED_AT, record.updatedAt)
+                            put(KEY_LAYOUT_STATE, stateToJson(record.state))
+                        })
+                    }
+                })
+            }
+            writeTextAtomic(getLayoutsStorageFile(context), rootJson.toString(2))
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error writing widget layouts", e)
+            false
         }
     }
 
@@ -539,6 +697,22 @@ object WidgetPersistence {
                 Log.e(TAG, "Error parsing widget JSON", e)
             }
             null
+        }
+    }
+
+    private fun writeTextAtomic(file: File, text: String) {
+        file.parentFile?.mkdirs()
+        val tempFile = File(file.parentFile, "${file.name}.tmp")
+        tempFile.writeText(text)
+        if (!tempFile.renameTo(file)) {
+            if (file.exists() && !file.delete()) {
+                tempFile.delete()
+                throw IOException("Failed to replace ${file.absolutePath}")
+            }
+            if (!tempFile.renameTo(file)) {
+                tempFile.delete()
+                throw IOException("Failed to commit ${file.absolutePath}")
+            }
         }
     }
 
@@ -602,6 +776,14 @@ object WidgetPersistence {
 
     private fun speedometerWidgetToJson(state: SpeedometerWidgetState): JSONObject =
         JSONObject().apply { putCommonFields(state) }
+
+    private fun subtitleWidgetToJson(state: SubtitleWidgetState): JSONObject =
+        JSONObject().apply {
+            putCommonFields(state)
+            put("phonePlaybackEnabled", state.phonePlaybackEnabled)
+            put("microphoneEnabled", state.microphoneEnabled)
+            put("translationEnabled", state.translationEnabled)
+        }
 
     private fun parseTextWidget(obj: JSONObject): TextWidgetState? {
         val html: String? =
@@ -756,6 +938,21 @@ object WidgetPersistence {
                 parseSizedWidgetObject(it) { _, c, w, h ->
                     SpeedometerWidgetState(
                         x = c.x, y = c.y, width = w, height = h,
+                        isMinimized = c.isMinimized,
+                        isFullscreen = c.isFullscreen,
+                        savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                        savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                        isPinned = c.isPinned
+                    )
+                }
+            },
+            subtitle = obj.optJSONObject(KEY_CLOSED_SUBTITLE_WIDGET)?.let {
+                parseSizedWidgetObject(it) { item, c, w, h ->
+                    SubtitleWidgetState(
+                        x = c.x, y = c.y, width = w, height = h,
+                        phonePlaybackEnabled = item.optBoolean("phonePlaybackEnabled", true),
+                        microphoneEnabled = item.optBoolean("microphoneEnabled", false),
+                        translationEnabled = item.optBoolean("translationEnabled", false),
                         isMinimized = c.isMinimized,
                         isFullscreen = c.isFullscreen,
                         savedMinX = c.savedMinX, savedMinY = c.savedMinY,
@@ -924,6 +1121,21 @@ object WidgetPersistence {
         parseSizedWidget(rootJson, KEY_SPEEDOMETER_WIDGET) { _, c, w, h ->
             SpeedometerWidgetState(
                 x = c.x, y = c.y, width = w, height = h,
+                isMinimized = c.isMinimized,
+                isFullscreen = c.isFullscreen,
+                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                isPinned = c.isPinned
+            )
+        }
+
+    private fun parseSubtitle(rootJson: JSONObject): SubtitleWidgetState? =
+        parseSizedWidget(rootJson, KEY_SUBTITLE_WIDGET) { obj, c, w, h ->
+            SubtitleWidgetState(
+                x = c.x, y = c.y, width = w, height = h,
+                phonePlaybackEnabled = obj.optBoolean("phonePlaybackEnabled", true),
+                microphoneEnabled = obj.optBoolean("microphoneEnabled", false),
+                translationEnabled = obj.optBoolean("translationEnabled", false),
                 isMinimized = c.isMinimized,
                 isFullscreen = c.isFullscreen,
                 savedMinX = c.savedMinX, savedMinY = c.savedMinY,

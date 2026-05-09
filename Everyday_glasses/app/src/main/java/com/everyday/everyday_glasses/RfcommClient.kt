@@ -17,8 +17,16 @@ import android.os.Looper
 import android.util.Base64
 import android.util.Log
 import androidx.core.app.ActivityCompat
-import org.json.JSONArray
 import org.json.JSONObject
+import com.everyday.shared.sync.SyncChannel
+import com.everyday.shared.sync.SyncError
+import com.everyday.shared.sync.SyncProtocol
+import com.everyday.shared.sync.SyncRequest
+import com.everyday.shared.sync.SyncSnapshot
+import com.everyday.shared.sync.SubtitleControl
+import com.everyday.shared.sync.SubtitleProtocol
+import com.everyday.shared.sync.SubtitleStatus
+import com.everyday.shared.sync.SubtitleTranscript
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
@@ -49,10 +57,12 @@ class RfcommClient(private val context: Context) {
     var onMirrorStateChanged: ((enabled: Boolean, ip: String?, isWifiDirect: Boolean) -> Unit)? = null
     var onLongPressWithClipboard: ((String?) -> Unit)? = null  // Called when phone sends long-press with clipboard
     var onClipboardReceived: ((String) -> Unit)? = null  // Called when phone clipboard changes
-    var onWeatherReceived: ((WeatherInfo) -> Unit)? = null // Called when weather data is received
     var onImageReceived: ((ByteArray, String) -> Unit)? = null // Called when image data is received (data, fileName)
     var onGoogleAuthStateReceived: ((GooglePhoneAuthStatus, GoogleAccountSummary?, String?) -> Unit)? = null
-    var onGoogleCalendarSnapshotReceived: ((GoogleCalendarSnapshot) -> Unit)? = null
+    var onSyncSnapshotReceived: ((SyncSnapshot) -> Unit)? = null
+    var onSyncErrorReceived: ((SyncError) -> Unit)? = null
+    var onSubtitleStatusReceived: ((SubtitleStatus) -> Unit)? = null
+    var onSubtitleTranscriptReceived: ((SubtitleTranscript) -> Unit)? = null
 
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var socket: BluetoothSocket? = null
@@ -82,19 +92,6 @@ class RfcommClient(private val context: Context) {
         val pointerCount: Int = 1  // Number of fingers touching (1 = normal, 2+ = scroll mode)
     )
 
-    data class WeatherInfo(
-        val town: String,
-        val country: String,
-        val temp: String,
-        val desc: String,
-        val min: String,
-        val max: String,
-        val timestamp: Long,  // When this data was last updated on the phone
-        val speedMps: Float? = null,  // Optional phone-reported speed (m/s)
-        val sunriseEpochMs: Long? = null,
-        val sunsetEpochMs: Long? = null
-    )
-
     fun start(): Boolean {
         if (isRunning.get()) return true
 
@@ -120,6 +117,8 @@ class RfcommClient(private val context: Context) {
         connectToPhone()
         return true
     }
+
+    fun isConnected(): Boolean = isConnected.get()
 
     fun stop() {
         isRunning.set(false)
@@ -203,24 +202,50 @@ class RfcommClient(private val context: Context) {
         }
     }
 
-    /**
-     * Send request to phone to send current weather/location data.
-     * Called when glasses wake from sleep or want fresh data.
-     */
-    fun requestWeather() {
+    fun requestSync(
+        channels: Set<SyncChannel>,
+        force: Boolean,
+        reason: String,
+        countryCode: String? = null,
+        financeSymbol: String? = null,
+        financeRange: String? = null
+    ) {
         if (!isConnected.get()) return
         val output = outputStream ?: return
 
         try {
-            val message = """{"action":"requestWeather"}""" + "\n"
-            Log.d(TAG, "Requesting weather from phone")
+            val message = SyncProtocol.encodeRequest(
+                SyncRequest(
+                    channels = channels,
+                    force = force,
+                    reason = reason,
+                    countryCode = countryCode,
+                    financeSymbol = financeSymbol,
+                    financeRange = financeRange
+                )
+            ) + "\n"
 
             synchronized(output) {
                 output.write(message.toByteArray())
                 output.flush()
             }
         } catch (e: IOException) {
-            Log.e(TAG, "Failed to request weather", e)
+            Log.e(TAG, "Failed to request sync", e)
+        }
+    }
+
+    fun sendSubtitleControl(control: SubtitleControl) {
+        if (!isConnected.get()) return
+        val output = outputStream ?: return
+
+        try {
+            val message = SubtitleProtocol.encodeControl(control) + "\n"
+            synchronized(output) {
+                output.write(message.toByteArray())
+                output.flush()
+            }
+        } catch (e: IOException) {
+            Log.e(TAG, "Failed to send subtitle control", e)
         }
     }
 
@@ -238,39 +263,6 @@ class RfcommClient(private val context: Context) {
             }
         } catch (e: IOException) {
             Log.e(TAG, "Failed to request Google auth", e)
-        }
-    }
-
-    fun requestGoogleCalendarSnapshot() {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-
-        try {
-            val message = """{"action":"requestGoogleCalendarSnapshot"}""" + "\n"
-            //Log.d(TAG, "Requesting Google calendar snapshot from phone")
-
-            synchronized(output) {
-                output.write(message.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to request Google calendar snapshot", e)
-        }
-    }
-
-    fun requestPayloadSync() {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-
-        try {
-            val message = """{"action":"requestPayloadSync"}""" + "\n"
-
-            synchronized(output) {
-                output.write(message.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to request cached payload sync", e)
         }
     }
 
@@ -482,16 +474,16 @@ class RfcommClient(private val context: Context) {
                         continue
                     }
 
-                    // Weather/location update? Parse BEFORE generic parseData to ensure it's handled
-                    if (parseWeatherMessage(line)) {
-                        continue
-                    }
-
                     if (parseGoogleAuthStateMessage(line)) {
                         continue
                     }
 
-                    if (parseGoogleCalendarSnapshotMessage(line)) {
+                    if (parseSyncMessage(line)) {
+                        continue
+                    }
+
+                    if (parseSubtitleMessage(line)) {
+                        logRxThrottled(kind = "subtitle", raw = line, summary = "subtitle message parsed")
                         continue
                     }
 
@@ -664,92 +656,6 @@ class RfcommClient(private val context: Context) {
             false
         }
     }
-
-    /**
-     * Parse weather/location messages from phone.
-     * Supports two formats:
-     * 1. Full format with weather object: {"event":"weather","location":{...},"weather":{"temp":15,"desc":"sunny.png",...}}
-     * 2. Simple format: {"event":"weather","location":{...},"weatherSimple":"15°C"}
-     * Returns true if message was a weather message.
-     */
-    private fun parseWeatherMessage(json: String): Boolean {
-        return try {
-            // Only handle weather events
-            if (!json.contains(""""event":"weather"""") && !json.contains(""""event" : "weather"""")) {
-                return false
-            }
-
-            //Log.d(TAG, "Parsing weather message: ${json.take(200)}...")
-
-            // Extract location fields
-            val town = Regex(""""town"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1) ?: "?"
-            val country = Regex(""""country"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1) ?: "?"
-
-            // Try to extract full weather object first
-            var temp = Regex(""""temp"\s*:\s*([-0-9.]+)""").find(json)?.groupValues?.get(1) ?: ""
-            var desc = Regex(""""desc"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1) ?: ""
-            val min = Regex(""""min"\s*:\s*([-0-9.]+)""").find(json)?.groupValues?.get(1) ?: "?"
-            val max = Regex(""""max"\s*:\s*([-0-9.]+)""").find(json)?.groupValues?.get(1) ?: "?"
-
-            // If no full weather object, try simple format (weatherSimple: "15°C")
-            if (temp.isEmpty()) {
-                val weatherSimple = Regex(""""weatherSimple"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
-                if (weatherSimple != null) {
-                    // Parse temp from simple format like "15°C"
-                    val tempMatch = Regex("""(-?\d+)""").find(weatherSimple)
-                    temp = tempMatch?.groupValues?.get(1) ?: "?"
-                    // No description in simple format
-                    desc = ""
-                    Log.d(TAG, "Parsed weatherSimple: temp=$temp from '$weatherSimple'")
-                }
-            }
-
-            // Detect placeholder / junk location coming from phone
-            val townIsPlaceholder =
-                town.isBlank() || town == "?" || town.equals("Loading...", ignoreCase = true)
-            val countryIsPlaceholder =
-                country.isBlank() || country == "?"
-
-            // If the phone is sending "Loading..." / empty location, IGNORE this update
-            // but return true so we consume the weather event and it won't fall through.
-            if (townIsPlaceholder && countryIsPlaceholder) {
-                Log.d(TAG, "Ignoring weather update (placeholder location): town='$town' country='$country'")
-                return true
-            }
-
-            // Extract payload timestamp (when data was last updated on phone)
-            val timestamp = Regex(""""timestamp"\s*:\s*(\d+)""").find(json)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
-            val speedMps = Regex(""""speedMps"\s*:\s*([-0-9.]+)""")
-                .find(json)
-                ?.groupValues
-                ?.getOrNull(1)
-                ?.toFloatOrNull()
-                ?.coerceAtLeast(0f)
-            val sunriseEpochMs = Regex(""""sunrise"\s*:\s*(\d+)""").find(json)?.groupValues?.get(1)?.toLongOrNull()
-            val sunsetEpochMs = Regex(""""sunset"\s*:\s*(\d+)""").find(json)?.groupValues?.get(1)?.toLongOrNull()
-
-            val weatherInfo = WeatherInfo(
-                town = town,
-                country = country,
-                temp = temp,
-                desc = desc,
-                min = min,
-                max = max,
-                timestamp = timestamp,
-                speedMps = speedMps,
-                sunriseEpochMs = sunriseEpochMs,
-                sunsetEpochMs = sunsetEpochMs
-            )
-
-            //Log.d(TAG, "Weather parsed: ${weatherInfo.town}, ${weatherInfo.country}, temp=${weatherInfo.temp}, timestamp=$timestamp")
-            handler.post { onWeatherReceived?.invoke(weatherInfo) }
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Error parsing weather message: $json", e)
-            false
-        }
-    }
-
     private fun parseGoogleAuthStateMessage(json: String): Boolean {
         return try {
             if (!json.contains(""""event":"google_auth_state"""")) {
@@ -780,44 +686,28 @@ class RfcommClient(private val context: Context) {
         }
     }
 
-    private fun parseGoogleCalendarSnapshotMessage(json: String): Boolean {
-        return try {
-            if (!json.contains(""""event":"google_calendar_snapshot"""")) {
-                return false
-            }
-
-            val root = JSONObject(json)
-            val account = root.optJSONObject("account")?.let { accountJson ->
-                val email = accountJson.optString("email")
-                if (email.isBlank()) null else GoogleAccountSummary(
-                    email = email,
-                    displayName = accountJson.optString("displayName").takeIf { it.isNotBlank() }
-                )
-            }
-            val events = mutableListOf<GoogleCalendarEvent>()
-            val items = root.optJSONArray("events") ?: JSONArray()
-            for (index in 0 until items.length()) {
-                val item = items.optJSONObject(index) ?: continue
-                events += GoogleCalendarEvent(
-                    id = item.optString("id"),
-                    summary = item.optString("summary"),
-                    startIso = item.optString("startIso"),
-                    htmlLink = item.optString("htmlLink").takeIf { it.isNotBlank() }
-                )
-            }
-            val snapshot = GoogleCalendarSnapshot(
-                account = account,
-                events = events,
-                fetchedAtMs = root.optLong("fetchedAtMs", 0L),
-                staleAfterMs = root.optLong("staleAfterMs", 0L),
-                sourceMode = GoogleAuthState.AuthMode.PHONE_FALLBACK
-            )
-            handler.post { onGoogleCalendarSnapshotReceived?.invoke(snapshot) }
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Error parsing google calendar snapshot message: $json", e)
-            false
+    private fun parseSyncMessage(json: String): Boolean {
+        SyncProtocol.decodeSnapshot(json)?.let { snapshot ->
+            handler.post { onSyncSnapshotReceived?.invoke(snapshot) }
+            return true
         }
+        SyncProtocol.decodeError(json)?.let { error ->
+            handler.post { onSyncErrorReceived?.invoke(error) }
+            return true
+        }
+        return false
+    }
+
+    private fun parseSubtitleMessage(json: String): Boolean {
+        SubtitleProtocol.decodeStatus(json)?.let { status ->
+            handler.post { onSubtitleStatusReceived?.invoke(status) }
+            return true
+        }
+        SubtitleProtocol.decodeTranscript(json)?.let { transcript ->
+            handler.post { onSubtitleTranscriptReceived?.invoke(transcript) }
+            return true
+        }
+        return false
     }
 
     /**
@@ -893,27 +783,6 @@ class RfcommClient(private val context: Context) {
             }
         }
     }
-
-    // ---- Weather RX tracking (independent from generic RX throttling) ----
-    private val weatherLogLock = Any()
-    @Volatile private var weatherSeenCount: Int = 0
-    @Volatile private var lastWeatherSeenAtMs: Long = 0L
-    @Volatile private var lastWeatherLogAtMs: Long = 0L
-    private val WEATHER_LOG_MIN_INTERVAL_MS = 5000L
-
-    private fun logWeatherRxThrottled(line: String) {
-        val now = android.os.SystemClock.elapsedRealtime()
-        // Extract a few fields for readability (best-effort)
-        synchronized(weatherLogLock) {
-            weatherSeenCount += 1
-            lastWeatherSeenAtMs = now
-
-            if (now - lastWeatherLogAtMs >= WEATHER_LOG_MIN_INTERVAL_MS) {
-                lastWeatherLogAtMs = now
-            }
-        }
-    }
-
 
     /** Call this when disconnecting so you don’t lose the last aggregated RX info. */
     private fun flushRxLogOnDisconnect(reason: String) {

@@ -13,6 +13,14 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.core.app.ActivityCompat
+import com.everyday.shared.sync.SyncError
+import com.everyday.shared.sync.SyncProtocol
+import com.everyday.shared.sync.SyncRequest
+import com.everyday.shared.sync.SyncSnapshot
+import com.everyday.shared.sync.SubtitleControl
+import com.everyday.shared.sync.SubtitleProtocol
+import com.everyday.shared.sync.SubtitleStatus
+import com.everyday.shared.sync.SubtitleTranscript
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
@@ -59,9 +67,9 @@ class RfcommServer(private val context: Context) {
     var onMirrorActionRequested: ((Boolean) -> Unit)? = null
     var onClipboardRequested: (() -> Unit)? = null
     var onGoogleAuthRequested: (() -> Unit)? = null
-    var onGoogleCalendarSnapshotRequested: (() -> Unit)? = null
     var onGoogleDisconnectRequested: (() -> Unit)? = null
-    var onPayloadSyncRequested: (() -> Unit)? = null
+    var onSyncRequested: ((SyncRequest) -> Unit)? = null
+    var onSubtitleControlRequested: ((SubtitleControl) -> Unit)? = null
     
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var serverSocket: BluetoothServerSocket? = null
@@ -83,9 +91,8 @@ class RfcommServer(private val context: Context) {
     private var pendingMoveDy: Float = 0f
 
     // Avoid resending identical cached payloads over the same RFCOMM stream.
-    private var lastSentLocationPayload: String? = null
     private var lastSentGoogleAuthState: String? = null
-    private var lastSentGoogleCalendarSnapshot: String? = null
+    private var lastSentSyncSnapshot: String? = null
     
     // Double-tap detection
     private var lastTapTime: Long = 0L
@@ -102,14 +109,6 @@ class RfcommServer(private val context: Context) {
     private var isTextFieldFocused = AtomicBoolean(false)
     
     fun isTextFieldFocused(): Boolean = isTextFieldFocused.get()
-
-    // Note: Location data is managed by LocationWeatherService
-    // These methods are kept for backward compatibility with MainActivity
-    fun updateLatLon(lat: Double, lon: Double) { /* no-op, LocationWeatherService handles this */ }
-    fun updateTownCountry(town: String, country: String) { /* no-op, LocationWeatherService handles this */ }
-    fun updateWeather(weather: WeatherData?) { /* no-op, LocationWeatherService handles this */ }
-
-
 
     init {
         instance = this
@@ -163,9 +162,8 @@ class RfcommServer(private val context: Context) {
     }
 
     private fun resetSentPayloadCache() {
-        lastSentLocationPayload = null
         lastSentGoogleAuthState = null
-        lastSentGoogleCalendarSnapshot = null
+        lastSentSyncSnapshot = null
     }
     
     fun onTouchStart(x: Float, y: Float, pointerCount: Int = 1) {
@@ -466,53 +464,72 @@ class RfcommServer(private val context: Context) {
         }
     }
 
-    /**
-     * Send location and weather update to glasses.
-     * @param timestamp Epoch millis when this data was last updated on the phone
-     */
-    fun sendLocationUpdate(
-        town: String,
-        country: String,
-        weather: WeatherData?,
-        timestamp: Long = System.currentTimeMillis(),
-        speedMps: Float? = null
-    ) {
+    fun sendSyncSnapshot(snapshot: SyncSnapshot) {
+        if (snapshot.isEmpty) return
         if (!isConnected.get()) return
         val output = outputStream ?: return
 
         try {
-            // Construct JSON
-            // If weather is null, send only location
-            val weatherPart = if (weather != null) {
-                val sunrisePart = weather.sunriseEpochMs?.let { ""","sunrise":$it""" } ?: ""
-                val sunsetPart = weather.sunsetEpochMs?.let { ""","sunset":$it""" } ?: ""
-                ""","weather":{"temp":${weather.tempCurrent},"desc":"${weather.weatherDescCurrent}","min":${weather.tempMinToday},"max":${weather.tempMaxToday},"forecast":"${weather.weatherDescToday}"$sunrisePart$sunsetPart}"""
-            } else ""
-
-            val safeTown = town.replace("\"", "\\\"")
-            val safeCountry = country.replace("\"", "\\\"")
-            val speedPart = speedMps
-                ?.takeIf { it.isFinite() }
-                ?.coerceAtLeast(0f)
-                ?.let { ""","speedMps":${String.format(Locale.ENGLISH, "%.3f", it)}""" }
-                ?: ""
-
-            // Include payload timestamp so glasses can determine data freshness
-            val data = """{"event":"weather","timestamp":$timestamp$speedPart,"location":{"town":"$safeTown","country":"$safeCountry"}$weatherPart}""" + "\n"
-
-            if (data == lastSentLocationPayload) {
+            val data = SyncProtocol.encodeSnapshot(snapshot) + "\n"
+            if (data == lastSentSyncSnapshot) {
                 return
             }
-
-            fileLog("Sending location update (timestamp=$timestamp, speedMps=${speedMps ?: "na"})")
 
             synchronized(output) {
                 output.write(data.toByteArray())
                 output.flush()
             }
-            lastSentLocationPayload = data
+            lastSentSyncSnapshot = data
         } catch (e: IOException) {
-            fileLog("Failed to send location update: ${e.message}")
+            fileLog("Failed to send sync snapshot: ${e.message}")
+            isConnected.set(false)
+        }
+    }
+
+    fun sendSyncError(error: SyncError) {
+        if (!isConnected.get()) return
+        val output = outputStream ?: return
+
+        try {
+            val data = SyncProtocol.encodeError(error) + "\n"
+            synchronized(output) {
+                output.write(data.toByteArray())
+                output.flush()
+            }
+        } catch (e: IOException) {
+            fileLog("Failed to send sync error: ${e.message}")
+            isConnected.set(false)
+        }
+    }
+
+    fun sendSubtitleStatus(status: SubtitleStatus) {
+        if (!isConnected.get()) return
+        val output = outputStream ?: return
+
+        try {
+            val data = SubtitleProtocol.encodeStatus(status) + "\n"
+            synchronized(output) {
+                output.write(data.toByteArray())
+                output.flush()
+            }
+        } catch (e: IOException) {
+            fileLog("Failed to send subtitle status: ${e.message}")
+            isConnected.set(false)
+        }
+    }
+
+    fun sendSubtitleTranscript(transcript: SubtitleTranscript) {
+        if (!isConnected.get()) return
+        val output = outputStream ?: return
+
+        try {
+            val data = SubtitleProtocol.encodeTranscript(transcript) + "\n"
+            synchronized(output) {
+                output.write(data.toByteArray())
+                output.flush()
+            }
+        } catch (e: IOException) {
+            fileLog("Failed to send subtitle transcript: ${e.message}")
             isConnected.set(false)
         }
     }
@@ -551,31 +568,6 @@ class RfcommServer(private val context: Context) {
             lastSentGoogleAuthState = data
         } catch (e: IOException) {
             fileLog("Failed to send Google auth state: ${e.message}")
-            isConnected.set(false)
-        }
-    }
-
-    fun sendGoogleCalendarSnapshot(snapshot: PhoneGoogleCalendarSnapshot) {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-
-        try {
-            val eventsJson = snapshot.events.joinToString(",") { event ->
-                """{"id":"${escapeJson(event.id)}","summary":"${escapeJson(event.summary)}","startIso":"${escapeJson(event.startIso)}","htmlLink":"${escapeJson(event.htmlLink ?: "")}"}"""
-            }
-            val data = """{"event":"google_calendar_snapshot","fetchedAtMs":${snapshot.fetchedAtMs},"staleAfterMs":${snapshot.staleAfterMs},"account":{"email":"${escapeJson(snapshot.account.email)}","displayName":"${escapeJson(snapshot.account.displayName ?: "")}"},"events":[$eventsJson]}""" + "\n"
-
-            if (data == lastSentGoogleCalendarSnapshot) {
-                return
-            }
-
-            synchronized(output) {
-                output.write(data.toByteArray())
-                output.flush()
-            }
-            lastSentGoogleCalendarSnapshot = data
-        } catch (e: IOException) {
-            fileLog("Failed to send Google calendar snapshot: ${e.message}")
             isConnected.set(false)
         }
     }
@@ -696,9 +688,6 @@ class RfcommServer(private val context: Context) {
                     onConnectionChanged?.invoke(true)
                 }
 
-                // Trigger immediate location/weather update
-                triggerImmediateLocationUpdate()
-
                 startPeriodicUpdates()
                 receiveMessages(socket)
                 
@@ -708,25 +697,6 @@ class RfcommServer(private val context: Context) {
                 }
                 break
             }
-        }
-    }
-
-    /**
-     * Send location data to glasses immediately on connection.
-     * Uses LocationWeatherService's cached data if available.
-     */
-    private fun triggerImmediateLocationUpdate() {
-        val service = LocationWeatherService.instance
-        if (service != null) {
-            val data = service.getCurrentLocationData()
-            if (data != null) {
-                sendLocationUpdate(data.town, data.countryCode, data.weather, data.timestamp, data.speedMps)
-                fileLog("Sent immediate location: ${data.town}, ${data.countryCode}, timestamp=${data.timestamp}")
-            } else {
-                fileLog("No cached location yet, LocationWeatherService will send when ready")
-            }
-        } else {
-            fileLog("LocationWeatherService not running")
         }
     }
 
@@ -823,20 +793,16 @@ class RfcommServer(private val context: Context) {
                 handler.post { onClipboardRequested?.invoke() }
             }
 
-            // Check for weather request (glasses woke up or want fresh data)
-            // Format: {"action":"requestWeather"}
-            if (json.contains(""""action":"requestWeather"""") || json.contains(""""action" : "requestWeather"""")) {
-                fileLog("Weather request received from glasses")
-                // Force LocationWeatherService to attempt a fresh API call, then send data
-                handler.post {
-                    val service = LocationWeatherService.instance
-                    if (service != null) {
-                        // Always trigger a force update to attempt fresh API data
-                        // forceUpdate() will send to glasses once data is ready
-                        service.forceUpdate()
-                        fileLog("Triggered force update in response to weather request")
-                    }
-                }
+            SyncProtocol.decodeRequest(json)?.let { request ->
+                fileLog("Sync request received from glasses: channels=${request.channels} reason=${request.reason}")
+                handler.post { onSyncRequested?.invoke(request) }
+                return
+            }
+
+            SubtitleProtocol.decodeControl(json)?.let { control ->
+                fileLog("Subtitle control received from glasses: action=${control.action.wireName}")
+                handler.post { onSubtitleControlRequested?.invoke(control) }
+                return
             }
 
             if (json.contains(""""action":"requestGoogleAuth"""") || json.contains(""""action" : "requestGoogleAuth"""")) {
@@ -844,19 +810,9 @@ class RfcommServer(private val context: Context) {
                 handler.post { onGoogleAuthRequested?.invoke() }
             }
 
-            if (json.contains(""""action":"requestGoogleCalendarSnapshot"""") || json.contains(""""action" : "requestGoogleCalendarSnapshot"""")) {
-                fileLog("Google calendar snapshot request received from glasses")
-                handler.post { onGoogleCalendarSnapshotRequested?.invoke() }
-            }
-
             if (json.contains(""""action":"disconnectGoogleAuth"""") || json.contains(""""action" : "disconnectGoogleAuth"""")) {
                 fileLog("Google disconnect request received from glasses")
                 handler.post { onGoogleDisconnectRequested?.invoke() }
-            }
-
-            if (json.contains(""""action":"requestPayloadSync"""") || json.contains(""""action" : "requestPayloadSync"""")) {
-                fileLog("Cached payload sync request received from glasses")
-                handler.post { onPayloadSyncRequested?.invoke() }
             }
         } catch (e: Exception) {
             fileLog("Failed to parse glasses message: $json - ${e.message}")

@@ -28,19 +28,19 @@ abstract class BaseWidget(
     y: Float,
     widgetWidth: Float,
     widgetHeight: Float
-) {
+) : WidgetLifecycle {
     companion object {
         private const val TAG = "BaseWidget"
         
         // Common sizes for all widgets
-        const val BORDER_WIDTH = 3f
-        const val FULLSCREEN_BUTTON_SIZE = 28f
-        const val MINIMIZE_BUTTON_SIZE = 28f
-        const val PIN_BUTTON_SIZE = 28f
-        const val CLOSE_BUTTON_SIZE = 28f
-        const val RESIZE_HANDLE_SIZE = 40f
-        const val BORDER_HIT_AREA = 12f
-        const val BUTTON_SPACING = 6f
+        const val BORDER_WIDTH = WidgetTheme.Size.BORDER_WIDTH
+        const val FULLSCREEN_BUTTON_SIZE = WidgetTheme.Size.FULLSCREEN_BUTTON
+        const val MINIMIZE_BUTTON_SIZE = WidgetTheme.Size.MINIMIZE_BUTTON
+        const val PIN_BUTTON_SIZE = WidgetTheme.Size.PIN_BUTTON
+        const val CLOSE_BUTTON_SIZE = WidgetTheme.Size.CLOSE_BUTTON
+        const val RESIZE_HANDLE_SIZE = WidgetTheme.Size.RESIZE_HANDLE
+        const val BORDER_HIT_AREA = WidgetTheme.Size.BORDER_HIT_AREA
+        const val BUTTON_SPACING = WidgetTheme.Size.BUTTON_SPACING
     }
     
     // Properties with reactive setters to ensure bounds are always in sync
@@ -86,6 +86,9 @@ abstract class BaseWidget(
         MOVING,         // Being dragged to new position
         RESIZING        // Being resized
     }
+
+    protected fun BaseState.asWidgetChromeState(): BaseState =
+        WidgetInteractionState(this).chromeState
     
     enum class BaseHitArea {
         NONE,
@@ -116,6 +119,22 @@ abstract class BaseWidget(
 
     // Z-order for unified drawing order (higher = drawn on top)
     var zOrder: Int = 0
+
+    // Optional smart-alignment hook. Set by the container; may be null if the
+    // feature is disabled or never wired (e.g. in tests). When non-null, drag
+    // and resize routes the natural target through the provider so it can apply
+    // snapping / produce alignment guides.
+    var snapProvider: SnapProvider? = null
+
+    // Drag accumulator for smart alignment. Tracks the "true" cursor-driven
+    // position independently of where the widget is currently rendered, so the
+    // widget can stay snapped while the cursor drifts within tolerance and then
+    // jump free when the cursor moves past it.
+    private var snapAnchorX: Float = 0f
+    private var snapAnchorY: Float = 0f
+    private var snapAnchorW: Float = 0f
+    private var snapAnchorH: Float = 0f
+    private var hasSnapAnchor: Boolean = false
     
     // Pin state - pinned widgets remain visible during SLEEP mode
     var isPinned = true  // Default to pinned on creation
@@ -166,12 +185,12 @@ abstract class BaseWidget(
     protected val hoverBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = BORDER_WIDTH
-        color = Color.parseColor("#6666AA")
+        color = WidgetTheme.ColorValue.hoverBorder
     }
     
     // Fullscreen button paints
     protected val fullscreenButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#4488AA")
+        color = WidgetTheme.ColorValue.primaryButton
     }
     
     protected val fullscreenIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -181,9 +200,14 @@ abstract class BaseWidget(
         strokeCap = Paint.Cap.ROUND
     }
 
+    protected val fullscreenIconFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = WidgetTheme.ColorValue.primaryButton
+        style = Paint.Style.FILL
+    }
+
     // Minimize button paints
     protected val minimizeButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#4488AA")
+        color = WidgetTheme.ColorValue.primaryButton
     }
 
     protected val minimizeIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -201,11 +225,11 @@ abstract class BaseWidget(
     
     // Pin button paints
     protected val pinButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#666688")  // Neutral gray when unpinned
+        color = WidgetTheme.ColorValue.pinIdleButton
     }
     
     protected val pinButtonPinnedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#44AA66")  // Green when pinned
+        color = WidgetTheme.ColorValue.pinnedButton
     }
     
     protected val pinIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -221,13 +245,13 @@ abstract class BaseWidget(
     }
 
     protected val resizeHandlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#888899")
+        color = WidgetTheme.ColorValue.resizeHandle
         strokeWidth = 2f
     }
 
     // Close button paints
     protected val closeButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#AA4444")  // Red color for close button
+        color = WidgetTheme.ColorValue.dangerButton
     }
 
     protected val closeXPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -347,6 +371,12 @@ abstract class BaseWidget(
      * or content reveals the border, while buttons stay border-specific.
      */
     fun shouldShowBorder(): Boolean {
+        if (isFullscreen) {
+            return _isBorderHovered ||
+                   baseState == BaseState.MOVING ||
+                   baseState == BaseState.RESIZING
+        }
+
         return when (baseState) {
             BaseState.HOVER_CONTENT,
             BaseState.HOVER_BORDER,
@@ -556,6 +586,9 @@ abstract class BaseWidget(
         return newState
     }
 
+    protected fun currentInteractionState(): WidgetInteractionState =
+        WidgetInteractionState(baseState)
+
     /**
      * Update hover state from cursor position.
      * Subclasses can override this to handle specific hover logic (like TextBoxWidget's edit mode).
@@ -563,6 +596,32 @@ abstract class BaseWidget(
      */
     open fun updateHover(px: Float, py: Float) {
         updateHoverState(px, py)
+    }
+
+    /**
+     * Handles common window chrome taps shared by widgets.
+     * Returns true when the tap was consumed.
+     */
+    protected fun handleChromeTap(px: Float, py: Float): Boolean {
+        return when {
+            closeButtonBounds.contains(px, py) -> {
+                onCloseRequested?.invoke()
+                true
+            }
+            fullscreenButtonBounds.contains(px, py) -> {
+                toggleFullscreen()
+                true
+            }
+            minimizeButtonBounds.contains(px, py) -> {
+                toggleMinimize()
+                true
+            }
+            pinButtonBounds.contains(px, py) -> {
+                isPinned = !isPinned
+                true
+            }
+            else -> false
+        }
     }
 
     /**
@@ -718,6 +777,15 @@ abstract class BaseWidget(
      */
     open fun startDrag(isResize: Boolean) {
         baseState = if (isResize) BaseState.RESIZING else BaseState.MOVING
+        captureSnapAnchor()
+    }
+
+    private fun captureSnapAnchor() {
+        snapAnchorX = x
+        snapAnchorY = y
+        snapAnchorW = widgetWidth
+        snapAnchorH = widgetHeight
+        hasSnapAnchor = true
     }
 
     /**
@@ -731,33 +799,48 @@ abstract class BaseWidget(
         // baseState will typically still be HOVER_BORDER. Promote it to MOVING.
         if (baseState == BaseState.HOVER_BORDER) {
             baseState = BaseState.MOVING
+            if (!hasSnapAnchor) captureSnapAnchor()
         }
         // If container begins dragging after long press on resize handle
         if (baseState == BaseState.HOVER_RESIZE) {
             baseState = BaseState.RESIZING
+            if (!hasSnapAnchor) captureSnapAnchor()
         }
 
+        val provider = snapProvider
         when (baseState) {
             BaseState.MOVING -> {
-                // Handle case where widget is larger than screen (avoid invalid coerceIn range)
                 val maxX = (screenWidth - widgetWidth).coerceAtLeast(0f)
                 val maxY = (screenHeight - widgetHeight).coerceAtLeast(0f)
-                val newX = (x + dx).coerceIn(0f, maxX)
-                val newY = (y + dy).coerceIn(0f, maxY)
-                x = newX
-                y = newY
+                if (provider != null && hasSnapAnchor) {
+                    snapAnchorX = (snapAnchorX + dx).coerceIn(0f, maxX)
+                    snapAnchorY = (snapAnchorY + dy).coerceIn(0f, maxY)
+                    val (snappedX, snappedY) = provider.snapMove(this, snapAnchorX, snapAnchorY)
+                    x = snappedX.coerceIn(0f, maxX)
+                    y = snappedY.coerceIn(0f, maxY)
+                } else {
+                    x = (x + dx).coerceIn(0f, maxX)
+                    y = (y + dy).coerceIn(0f, maxY)
+                }
             }
             BaseState.RESIZING -> {
-                // Updating properties triggers updateBaseBounds()
                 val maxWidth = (screenWidth - x).coerceAtLeast(minWidth)
                 val maxHeight = (screenHeight - y).coerceAtLeast(minHeight)
-                widgetWidth = (widgetWidth + dx).coerceIn(minWidth, maxWidth)
-                widgetHeight = (widgetHeight + dy).coerceIn(minHeight, maxHeight)
+                if (provider != null && hasSnapAnchor) {
+                    snapAnchorW = (snapAnchorW + dx).coerceIn(minWidth, maxWidth)
+                    snapAnchorH = (snapAnchorH + dy).coerceIn(minHeight, maxHeight)
+                    val (snappedW, snappedH) = provider.snapResize(this, snapAnchorW, snapAnchorH)
+                    widgetWidth = snappedW.coerceIn(minWidth, maxWidth)
+                    widgetHeight = snappedH.coerceIn(minHeight, maxHeight)
+                } else {
+                    widgetWidth = (widgetWidth + dx).coerceIn(minWidth, maxWidth)
+                    widgetHeight = (widgetHeight + dy).coerceIn(minHeight, maxHeight)
+                }
             }
             else -> {}
         }
     }
-    
+
     /**
      * End drag operation.
      * Clears border hover state since cursor position is unknown after drag.
@@ -766,6 +849,10 @@ abstract class BaseWidget(
         if (baseState == BaseState.MOVING || baseState == BaseState.RESIZING) {
             baseState = BaseState.IDLE
             _isBorderHovered = false
+        }
+        if (hasSnapAnchor) {
+            hasSnapAnchor = false
+            snapProvider?.onWidgetDragEnd(this)
         }
     }
     
@@ -816,16 +903,12 @@ abstract class BaseWidget(
             )
             
             // Front square (bottom-left) - filled background first
-            val frontFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#4488AA")
-                style = Paint.Style.FILL
-            }
             canvas.drawRect(
                 cx - iconSize,
                 cy - iconSize + smallOffset,
                 cx + iconSize - smallOffset,
                 cy + iconSize,
-                frontFillPaint
+                fullscreenIconFillPaint
             )
             canvas.drawRect(
                 cx - iconSize,

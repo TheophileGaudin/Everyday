@@ -298,6 +298,26 @@ class WidgetPersistenceHelper(private val context: Context) {
     }
 
     /**
+     * Get subtitle widget state for persistence. Capture-enabled is deliberately omitted.
+     */
+    fun getSubtitleWidgetState(subtitleWidget: SubtitleWidget?): WidgetPersistence.SubtitleWidgetState? {
+        return subtitleWidget?.let {
+            val c = extractCommonFields(it)
+            WidgetPersistence.SubtitleWidgetState(
+                x = c.x, y = c.y, width = c.width, height = c.height,
+                phonePlaybackEnabled = it.options.phonePlaybackEnabled,
+                microphoneEnabled = it.options.microphoneEnabled,
+                translationEnabled = it.options.translationEnabled,
+                isMinimized = c.isMinimized,
+                isFullscreen = c.isFullscreen,
+                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                isPinned = c.isPinned
+            )
+        }
+    }
+
+    /**
      * Get finance widget state for persistence.
      */
     fun getFinanceWidgetState(financeWidget: FinanceWidget?): WidgetPersistence.FinanceWidgetState? {
@@ -707,6 +727,36 @@ class WidgetPersistenceHelper(private val context: Context) {
             restoreCommonState(sw, state, adjustedX, adjustedY)
 
             Log.d(TAG, "Restored speedometer widget: ($adjustedX, $adjustedY) ${adjustedWidth}x${adjustedHeight}")
+        }
+    }
+
+    /**
+     * Restore subtitle widget position and persisted options from saved state.
+     */
+    fun restoreSubtitleWidgetPosition(
+        subtitleWidget: SubtitleWidget?,
+        state: WidgetPersistence.SubtitleWidgetState,
+        screenWidth: Int,
+        screenHeight: Int
+    ) {
+        subtitleWidget?.let { sw ->
+            val adjustedX = state.x.coerceIn(0f, (screenWidth - state.width).coerceAtLeast(0f))
+            val adjustedY = state.y.coerceIn(0f, (screenHeight - state.height).coerceAtLeast(0f))
+            val adjustedWidth = state.width.coerceIn(220f, screenWidth.toFloat())
+            val adjustedHeight = state.height.coerceIn(84f, screenHeight.toFloat())
+
+            sw.setPosition(adjustedX, adjustedY)
+            sw.widgetWidth = adjustedWidth
+            sw.widgetHeight = adjustedHeight
+            sw.restoreOptions(
+                phonePlaybackEnabled = state.phonePlaybackEnabled,
+                microphoneEnabled = state.microphoneEnabled,
+                translationEnabled = state.translationEnabled
+            )
+
+            restoreCommonState(sw, state, adjustedX, adjustedY)
+
+            Log.d(TAG, "Restored subtitle widget: ($adjustedX, $adjustedY) ${adjustedWidth}x${adjustedHeight}")
         }
     }
 }

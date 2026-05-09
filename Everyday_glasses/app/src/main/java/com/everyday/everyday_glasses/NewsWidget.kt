@@ -8,16 +8,11 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
-import android.text.Html
 import android.text.TextUtils
 import android.util.Log
-import org.xmlpull.v1.XmlPullParser
-import org.xmlpull.v1.XmlPullParserFactory
-import java.io.StringReader
-import java.net.HttpURLConnection
-import java.net.URL
-import java.util.Locale
-import java.util.concurrent.atomic.AtomicBoolean
+import com.everyday.shared.sync.NewsArticle
+import com.everyday.shared.sync.NewsDataProvider
+import com.everyday.shared.sync.NewsSnapshot
 
 /**
  * Google News RSS widget.
@@ -46,8 +41,6 @@ class NewsWidget(
         const val DEFAULT_HEIGHT = 250f
 
         private const val AUTO_INTERVAL_MS = 60_000L
-        private const val FETCH_TIMEOUT_MS = 8_000
-
         private const val WINDOW_PADDING = 16f
         private const val FULLSCREEN_PADDING = 26f
         private const val CONTENT_GAP = 10f
@@ -63,14 +56,6 @@ class NewsWidget(
         private const val FONT_MENU_HEIGHT = 58f
         private const val FONT_MENU_BUTTON_SIZE = 40f
     }
-
-    data class NewsItem(
-        val title: String,
-        val content: String,
-        val link: String,
-        val source: String,
-        val publishedAt: String
-    )
 
     private data class FullscreenLayout(
         val titleLines: List<String>,
@@ -89,24 +74,24 @@ class NewsWidget(
     override val minWidth: Float = 260f
     override val minHeight: Float = 140f
 
-    private val newsItems = mutableListOf<NewsItem>()
+    private val newsItems = mutableListOf<NewsArticle>()
     private var currentIndex = 0
 
-    private var currentCountryCode = defaultCountryCode()
-    private var isLoading = false
-    private var lastError: String? = null
+    private var currentCountryCode = NewsDataProvider.defaultCountryCode()
+    private val dataState = WidgetDataState(
+        loadingText = "Loading news...",
+        emptyText = "No news"
+    )
     private var fontScale = 1f
 
     // Content scroll (fullscreen)
     private var contentScrollOffset = 0f
 
-    // Timer + refresh state
+    // Timer
     private val handler = Handler(Looper.getMainLooper())
-    private var refreshActive = true
-    private val fetchInFlight = AtomicBoolean(false)
-    private var lastFetchTimestamp = 0L
 
     var onStateChanged: (() -> Unit)? = null
+    var onDataRequested: ((countryCode: String, force: Boolean, reason: String) -> Unit)? = null
 
     // Overlay arrows
     private val leftArrowBounds = RectF()
@@ -216,23 +201,12 @@ class NewsWidget(
 
     // ==================== Periodic Tasks ====================
 
-    private val refreshRunnable = object : Runnable {
-        override fun run() {
-            fetchNews(force = true, reason = "periodic_refresh")
-            if (refreshActive) {
-                handler.postDelayed(this, AUTO_INTERVAL_MS)
-            }
-        }
-    }
-
     private val switchRunnable = object : Runnable {
         override fun run() {
             if (!isFullscreen) {
                 showNextItem()
             }
-            if (refreshActive) {
-                handler.postDelayed(this, AUTO_INTERVAL_MS)
-            }
+            handler.postDelayed(this, AUTO_INTERVAL_MS)
         }
     }
 
@@ -240,21 +214,20 @@ class NewsWidget(
         applyFontScale()
         updateInternalBounds()
         startTimers()
-        fetchNews(force = true, reason = "initial")
     }
 
     // ==================== Public API ====================
 
     fun setCountryCode(code: String) {
-        val normalized = normalizeCountryCode(code) ?: return
+        val normalized = NewsDataProvider.normalizeCountryCode(code) ?: return
         if (normalized == currentCountryCode) return
 
         currentCountryCode = normalized
         currentIndex = 0
         contentScrollOffset = 0f
-        lastError = null
+        dataState.clearError()
         onStateChanged?.invoke()
-        fetchNews(force = true, reason = "country_changed")
+        requestData(force = true, reason = "country_changed")
         restartSwitchTimer()
         Log.d(TAG, "News country updated: $currentCountryCode")
     }
@@ -286,21 +259,6 @@ class NewsWidget(
 
     fun getFontScale(): Float = fontScale
 
-    fun setRefreshActive(active: Boolean) {
-        if (refreshActive == active) return
-        refreshActive = active
-        if (active) {
-            startTimers()
-        } else {
-            stopTimers()
-        }
-    }
-
-    fun refreshOnWake() {
-        fetchNews(force = true, reason = "wake")
-        restartSwitchTimer()
-    }
-
     /**
      * On head-up wake, rotate to the next cached story immediately so the
      * user sees fresh content even before network refresh completes.
@@ -310,9 +268,19 @@ class NewsWidget(
         restartSwitchTimer()
     }
 
-    fun release() {
+    override fun onPause() {
         stopTimers()
     }
+
+    override fun onResume() {
+        startTimers()
+    }
+
+    override fun onDestroy() {
+        stopTimers()
+    }
+
+    fun release() = onDestroy()
 
     fun handleFontMenuTapOrDismiss(px: Float, py: Float): Boolean {
         if (!showFontMenu) return false
@@ -463,7 +431,7 @@ class NewsWidget(
             append("News ")
             append(currentCountryCode)
             append(" ")
-            append(if (isLoading) "- Refreshing" else "- Live")
+            append(if (dataState.isLoading) "- Refreshing" else "- Live")
         }
         val x = contentBounds.left + WINDOW_PADDING
         val y = contentBounds.top + WINDOW_PADDING + headerPaint.textSize
@@ -471,11 +439,7 @@ class NewsWidget(
     }
 
     private fun drawCenteredState(canvas: Canvas) {
-        val text = when {
-            isLoading -> "Loading news..."
-            !lastError.isNullOrEmpty() -> lastError ?: "No news"
-            else -> "No news"
-        }
+        val text = dataState.displayText()
         val y = widgetBounds.centerY() - (centerInfoPaint.descent() + centerInfoPaint.ascent()) / 2f
         canvas.drawText(text, widgetBounds.centerX(), y, centerInfoPaint)
     }
@@ -545,7 +509,7 @@ class NewsWidget(
         drawBodyScrollbar(canvas, layout)
     }
 
-    private fun drawFullscreenFooter(canvas: Canvas, item: NewsItem) {
+    private fun drawFullscreenFooter(canvas: Canvas, item: NewsArticle) {
         val right = contentBounds.right - FULLSCREEN_PADDING
         val bottom = contentBounds.bottom - FULLSCREEN_PADDING
 
@@ -628,156 +592,31 @@ class NewsWidget(
         canvas.drawPath(path, arrowStrokePaint)
     }
 
-    // ==================== Fetch Logic ====================
+    // ==================== Data Application ====================
 
-    private fun fetchNews(force: Boolean, reason: String) {
-        val now = System.currentTimeMillis()
-        if (!force && now - lastFetchTimestamp < AUTO_INTERVAL_MS && newsItems.isNotEmpty()) {
-            return
-        }
-
-        if (!fetchInFlight.compareAndSet(false, true)) {
-            return
-        }
-
-        val previousLink = newsItems.getOrNull(currentIndex)?.link
-        isLoading = true
+    fun requestData(force: Boolean, reason: String) {
+        dataState.startLoading(clearError = newsItems.isEmpty())
         onStateChanged?.invoke()
-        Log.d(TAG, "News fetch started: country=$currentCountryCode reason=$reason force=$force")
-
-        Thread {
-            try {
-                val feedConfig = buildFeedConfig(currentCountryCode)
-                val national = fetchFeed(feedConfig.nationalUrl)
-                val world = fetchFeed(feedConfig.worldUrl)
-                val merged = mergeNews(national, world)
-
-                if (merged.isEmpty()) {
-                    throw IllegalStateException("Empty feed")
-                }
-
-                val fetchedAt = System.currentTimeMillis()
-                handler.post {
-                    newsItems.clear()
-                    newsItems.addAll(merged)
-                    currentIndex = resolveCurrentIndex(previousLink)
-                    contentScrollOffset = 0f
-                    isLoading = false
-                    lastError = null
-                    lastFetchTimestamp = fetchedAt
-                    Log.d(TAG, "News fetch success: items=${newsItems.size} country=$currentCountryCode")
-                    onStateChanged?.invoke()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "News fetch failed for country=$currentCountryCode", e)
-                handler.post {
-                    isLoading = false
-                    if (newsItems.isEmpty()) {
-                        lastError = "No news available"
-                    }
-                    onStateChanged?.invoke()
-                }
-            } finally {
-                fetchInFlight.set(false)
-            }
-        }.start()
+        onDataRequested?.invoke(currentCountryCode, force, reason)
     }
 
-    private fun fetchFeed(urlString: String): List<NewsItem> {
-        val connection = URL(urlString).openConnection() as HttpURLConnection
-        connection.connectTimeout = FETCH_TIMEOUT_MS
-        connection.readTimeout = FETCH_TIMEOUT_MS
-        connection.setRequestProperty("User-Agent", "Mozilla/5.0")
-
-        return try {
-            if (connection.responseCode != HttpURLConnection.HTTP_OK) {
-                throw IllegalStateException("HTTP ${connection.responseCode}")
-            }
-            val xml = connection.inputStream.bufferedReader().use { it.readText() }
-            parseRss(xml)
-        } finally {
-            connection.disconnect()
+    fun applySnapshot(snapshot: NewsSnapshot) {
+        if (snapshot.countryCode != currentCountryCode) {
+            return
         }
+        val previousLink = newsItems.getOrNull(currentIndex)?.link
+        newsItems.clear()
+        newsItems.addAll(snapshot.items)
+        currentIndex = resolveCurrentIndex(previousLink)
+        contentScrollOffset = 0f
+        dataState.markLoaded()
+        Log.d(TAG, "News snapshot applied: items=${newsItems.size} country=$currentCountryCode")
+        onStateChanged?.invoke()
     }
 
-    private fun parseRss(xml: String): List<NewsItem> {
-        val parser = XmlPullParserFactory.newInstance().newPullParser().apply {
-            setInput(StringReader(xml))
-        }
-
-        val items = mutableListOf<NewsItem>()
-        var eventType = parser.eventType
-        var inItem = false
-
-        var title = ""
-        var description = ""
-        var encoded = ""
-        var link = ""
-        var source = ""
-        var pubDate = ""
-
-        while (eventType != XmlPullParser.END_DOCUMENT) {
-            when (eventType) {
-                XmlPullParser.START_TAG -> {
-                    val tag = parser.name.lowercase(Locale.US)
-                    when {
-                        tag == "item" -> {
-                            inItem = true
-                            title = ""
-                            description = ""
-                            encoded = ""
-                            link = ""
-                            source = ""
-                            pubDate = ""
-                        }
-                        inItem && tag == "title" -> title = parser.safeNextText()
-                        inItem && tag == "description" -> description = parser.safeNextText()
-                        inItem && tag == "link" -> link = parser.safeNextText()
-                        inItem && tag == "source" -> source = parser.safeNextText()
-                        inItem && tag == "pubdate" -> pubDate = parser.safeNextText()
-                        inItem && (tag == "content:encoded" || tag == "encoded") -> encoded = parser.safeNextText()
-                    }
-                }
-                XmlPullParser.END_TAG -> {
-                    if (parser.name.equals("item", ignoreCase = true) && inItem) {
-                        val cleanTitle = htmlToPlain(title).ifBlank { "Untitled" }
-                        val rawBody = if (encoded.isNotBlank()) encoded else description
-                        val cleanBody = htmlToPlain(rawBody).ifBlank { "No preview available for this article." }
-
-                        items.add(
-                            NewsItem(
-                                title = cleanTitle,
-                                content = cleanBody,
-                                link = link.trim(),
-                                source = source.trim(),
-                                publishedAt = normalizePubDate(pubDate)
-                            )
-                        )
-                        inItem = false
-                    }
-                }
-            }
-            eventType = parser.next()
-        }
-        return items
-    }
-
-    private fun mergeNews(national: List<NewsItem>, world: List<NewsItem>): List<NewsItem> {
-        val result = mutableListOf<NewsItem>()
-        val seen = HashSet<String>()
-
-        fun addUnique(items: List<NewsItem>) {
-            for (item in items) {
-                val key = if (item.link.isNotBlank()) item.link else "${item.title}|${item.source}"
-                if (seen.add(key)) {
-                    result.add(item)
-                }
-            }
-        }
-
-        addUnique(national)
-        addUnique(world)
-        return result.take(60)
+    fun applyError(message: String = "No news available") {
+        dataState.markError(message, showError = newsItems.isEmpty())
+        onStateChanged?.invoke()
     }
 
     // ==================== Layout Helpers ====================
@@ -936,20 +775,15 @@ class NewsWidget(
     // ==================== Timer Helpers ====================
 
     private fun startTimers() {
-        handler.removeCallbacks(refreshRunnable)
         handler.removeCallbacks(switchRunnable)
-        if (!refreshActive) return
-        handler.postDelayed(refreshRunnable, AUTO_INTERVAL_MS)
         handler.postDelayed(switchRunnable, AUTO_INTERVAL_MS)
     }
 
     private fun stopTimers() {
-        handler.removeCallbacks(refreshRunnable)
         handler.removeCallbacks(switchRunnable)
     }
 
     private fun restartSwitchTimer() {
-        if (!refreshActive) return
         handler.removeCallbacks(switchRunnable)
         handler.postDelayed(switchRunnable, AUTO_INTERVAL_MS)
     }
@@ -977,83 +811,4 @@ class NewsWidget(
         return currentIndex.coerceIn(0, newsItems.lastIndex)
     }
 
-    // ==================== Feed URL Helpers ====================
-
-    private data class FeedConfig(
-        val nationalUrl: String,
-        val worldUrl: String
-    )
-
-    private fun buildFeedConfig(countryCode: String): FeedConfig {
-        val language = languageForCountry(countryCode)
-        val hl = "$language-$countryCode"
-        val ceid = "$countryCode:$language"
-
-        val nationalUrl = "https://news.google.com/rss?hl=$hl&gl=$countryCode&ceid=$ceid"
-        val worldUrl = "https://news.google.com/rss/headlines/section/topic/WORLD?hl=$hl&gl=$countryCode&ceid=$ceid"
-
-        return FeedConfig(nationalUrl = nationalUrl, worldUrl = worldUrl)
-    }
-
-    private fun languageForCountry(countryCode: String): String {
-        return when (countryCode.uppercase(Locale.US)) {
-            "FR" -> "fr"
-            "DE", "AT", "CH" -> "de"
-            "ES", "MX", "AR", "CO", "PE", "CL" -> "es"
-            "IT" -> "it"
-            "PT", "BR" -> "pt"
-            "NL", "BE" -> "nl"
-            "SE" -> "sv"
-            "NO" -> "no"
-            "DK" -> "da"
-            "FI" -> "fi"
-            "PL" -> "pl"
-            "TR" -> "tr"
-            "JP" -> "ja"
-            "KR" -> "ko"
-            "CN", "TW", "HK" -> "zh"
-            "IN" -> "en"
-            else -> "en"
-        }
-    }
-
-    private fun defaultCountryCode(): String {
-        val localeCountry = Locale.getDefault().country
-        return normalizeCountryCode(localeCountry) ?: "US"
-    }
-
-    private fun normalizeCountryCode(raw: String?): String? {
-        val value = raw?.trim()?.uppercase(Locale.US) ?: return null
-        if (value.length != 2) return null
-        if (!value[0].isLetter() || !value[1].isLetter()) return null
-        return value
-    }
-
-    // ==================== Parsing Helpers ====================
-
-    private fun htmlToPlain(raw: String): String {
-        if (raw.isBlank()) return ""
-        val spanned = Html.fromHtml(raw, Html.FROM_HTML_MODE_LEGACY)
-        return spanned.toString()
-            .replace("\u00A0", " ")
-            .replace(Regex("[ \\t]+"), " ")
-            .replace(Regex("\\n{3,}"), "\n\n")
-            .trim()
-    }
-
-    private fun normalizePubDate(pubDate: String): String {
-        val trimmed = pubDate.trim()
-        if (trimmed.isEmpty()) return ""
-        // Keep this lightweight and robust: RSS date often ends with timezone,
-        // this trimming keeps it short and readable without parse failures.
-        return if (trimmed.length > 22) trimmed.take(22) else trimmed
-    }
-
-    private fun XmlPullParser.safeNextText(): String {
-        return try {
-            nextText().trim()
-        } catch (_: Exception) {
-            ""
-        }
-    }
 }

@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "Everyday_phone"
 include ':app'
+include ':shared'
+project(':shared').projectDir = file('../Everyday_shared')

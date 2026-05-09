@@ -49,11 +49,11 @@ Then:
 1. Plug glasses to computer
 2. Open a terminal
 3. Navigate to where the APK is
-4. Run `adb install everyday_0.5.apk`
+4. Run `adb install everyday0.6_glasses.apk`
 
 **On phone**
 
-Install `everyday_0.5_phone.apk` via sideloading on your Android phone.
+Install `everyday0.6_phone.apk` via sideloading on your Android phone.
 
 See the [InformalTech tutorial](https://www.youtube.com/watch?v=l3wu7x14LKY) for a full walkthrough.
 

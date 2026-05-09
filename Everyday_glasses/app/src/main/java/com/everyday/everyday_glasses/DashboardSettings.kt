@@ -22,7 +22,7 @@ class DashboardSettings(
     companion object {
         private const val TAG = "DashboardSettings"
         private const val MENU_WIDTH = 320f
-        private const val MAIN_MENU_HEIGHT = 285f  // Main menu: brightness + adaptive brightness + heads-up + Google button
+        private const val MAIN_MENU_HEIGHT = 330f  // Main menu: brightness + adaptive brightness + heads-up + Google button + smart alignment
         private const val HEADSUP_MENU_HEIGHT = 350f  // Heads-up submenu: 3 sliders + toggle + back button
         private const val GOOGLE_MENU_HEIGHT = 360f
         private const val CORNER_RADIUS = 12f
@@ -98,6 +98,12 @@ class DashboardSettings(
             onHeadsUpEnabledChanged?.invoke(field)
         }
 
+    var smartAlignmentEnabled: Boolean = true
+        set(value) {
+            field = value
+            onSmartAlignmentChanged?.invoke(field)
+        }
+
     var googleAuthState: GoogleAuthState = GoogleAuthState.signedOut()
         set(value) {
             field = value
@@ -110,6 +116,7 @@ class DashboardSettings(
     var onWakeDurationChanged: ((Float) -> Unit)? = null
     var onAngleThresholdChanged: ((Float) -> Unit)? = null  // Callback with degrees
     var onHeadsUpEnabledChanged: ((Boolean) -> Unit)? = null
+    var onSmartAlignmentChanged: ((Boolean) -> Unit)? = null
     var onConnectGoogle: (() -> Unit)? = null
     var onGrantCalendarAccess: (() -> Unit)? = null
     var onDisconnectGoogle: (() -> Unit)? = null
@@ -209,6 +216,8 @@ class DashboardSettings(
     private val adaptiveBrightnessBoxRect = RectF()
     private val headsUpButtonRect = RectF()
     private val googleButtonRect = RectF()
+    private val smartAlignmentRowRect = RectF()
+    private val smartAlignmentBoxRect = RectF()
 
     // Heads-up submenu elements
     private val backButtonRect = RectF()
@@ -416,6 +425,16 @@ class DashboardSettings(
             headsUpButtonRect.set(trackLeft, buttonY, trackRight, buttonY + BUTTON_HEIGHT)
             val googleButtonY = buttonY + BUTTON_HEIGHT + 12f
             googleButtonRect.set(trackLeft, googleButtonY, trackRight, googleButtonY + BUTTON_HEIGHT)
+
+            // Smart alignment toggle below the Google button
+            val smartAlignTop = googleButtonRect.bottom + 16f
+            smartAlignmentRowRect.set(trackLeft, smartAlignTop, trackRight, smartAlignTop + 28f)
+            smartAlignmentBoxRect.set(
+                trackLeft,
+                smartAlignTop + 3f,
+                trackLeft + CHECKBOX_SIZE,
+                smartAlignTop + 3f + CHECKBOX_SIZE
+            )
         } else if (currentView == ViewMode.HEADSUP) {
             // Heads-up submenu layout
             val firstSliderY = menuRect.top + 90f
@@ -548,6 +567,37 @@ class DashboardSettings(
         canvas.drawRoundRect(googleButtonRect, BUTTON_CORNER_RADIUS, BUTTON_CORNER_RADIUS, buttonPaint)
         val googleButtonTextY = googleButtonRect.centerY() + 6f
         canvas.drawText("Google", googleButtonRect.centerX(), googleButtonTextY, buttonTextPaint)
+
+        drawSmartAlignmentToggle(canvas, trackRight)
+    }
+
+    private fun drawSmartAlignmentToggle(canvas: Canvas, valueRight: Float) {
+        canvas.drawRect(smartAlignmentBoxRect, checkboxPaint)
+
+        if (smartAlignmentEnabled) {
+            val left = smartAlignmentBoxRect.left
+            val top = smartAlignmentBoxRect.top
+            val width = smartAlignmentBoxRect.width()
+            val height = smartAlignmentBoxRect.height()
+            canvas.drawLine(
+                left + width * 0.22f,
+                top + height * 0.55f,
+                left + width * 0.44f,
+                top + height * 0.78f,
+                checkmarkPaint
+            )
+            canvas.drawLine(
+                left + width * 0.44f,
+                top + height * 0.78f,
+                left + width * 0.82f,
+                top + height * 0.26f,
+                checkmarkPaint
+            )
+        }
+
+        val labelY = smartAlignmentRowRect.centerY() + 6f
+        canvas.drawText("Smart alignment", smartAlignmentBoxRect.right + 12f, labelY, labelPaint)
+        canvas.drawText(if (smartAlignmentEnabled) "On" else "Off", valueRight, labelY, valuePaint)
     }
 
     private fun drawAdaptiveBrightnessToggle(canvas: Canvas, valueRight: Float) {
@@ -809,6 +859,10 @@ class DashboardSettings(
                 return true
             }
 
+            if (smartAlignmentRowRect.contains(x, y)) {
+                return true
+            }
+
             // Check brightness slider
             activeSlider = getSliderAt(x, y)
             if (activeSlider != ActiveSlider.NONE) {
@@ -908,6 +962,10 @@ class DashboardSettings(
             }
             if (adaptiveBrightnessRowRect.contains(x, y)) {
                 adaptiveBrightnessEnabled = !adaptiveBrightnessEnabled
+                return true
+            }
+            if (smartAlignmentRowRect.contains(x, y)) {
+                smartAlignmentEnabled = !smartAlignmentEnabled
                 return true
             }
 
