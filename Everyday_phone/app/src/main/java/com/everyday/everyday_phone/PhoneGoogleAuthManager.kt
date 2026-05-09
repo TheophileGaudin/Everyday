@@ -13,6 +13,7 @@ import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.AuthorizationResult
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.auth.api.identity.RevokeAccessRequest
+import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.Scope
 import org.json.JSONArray
 import org.json.JSONObject
@@ -176,7 +177,7 @@ class PhoneGoogleAuthManager(context: Context) {
             requestBuilder.setAccount(Account(email, "com.google"))
         }
 
-        authorizationClient.authorize(requestBuilder.build())
+        Identity.getAuthorizationClient(activity).authorize(requestBuilder.build())
             .addOnSuccessListener { result ->
                 fileLog("Google auth: authorize() success, hasResolution=${result.hasResolution()}, hasAccessToken=${!result.accessToken.isNullOrBlank()}")
                 handleAuthorizationResult(result, launcher)
@@ -219,21 +220,26 @@ class PhoneGoogleAuthManager(context: Context) {
         launcher: ActivityResultLauncher<IntentSenderRequest>
     ) {
         val onStateChanged = pendingOnStateChanged ?: return
-        if (resultCode != Activity.RESULT_OK || data == null) {
-            fileLog("Google auth: authorization intent canceled, resultCode=$resultCode, hasData=${data != null}")
+        fileLog("Google auth: authorization intent result, resultCode=$resultCode, hasData=${data != null}")
+        if (data == null) {
+            Log.w(TAG, "Authorization intent returned without data, resultCode=$resultCode")
             onStateChanged(PhoneGoogleAuthState(status = PhoneGoogleAuthState.Status.ERROR, detail = "Authorization canceled"))
             return
         }
 
         runCatching { authorizationClient.getAuthorizationResultFromIntent(data) }
             .onSuccess { result ->
-                fileLog("Google auth: parsed authorization result, hasResolution=${result.hasResolution()}, hasAccessToken=${!result.accessToken.isNullOrBlank()}")
+                fileLog(
+                    "Google auth: parsed authorization result, resultCode=$resultCode, " +
+                        "hasResolution=${result.hasResolution()}, hasAccessToken=${!result.accessToken.isNullOrBlank()}"
+                )
                 handleAuthorizationResult(result, launcher)
             }
             .onFailure { error ->
                 Log.e(TAG, "Failed to parse authorization result", error)
-                fileLog("Google auth: failed to parse authorization result: ${error::class.java.simpleName}: ${error.message}")
-                onStateChanged(PhoneGoogleAuthState(status = PhoneGoogleAuthState.Status.ERROR, detail = error.message ?: "Authorization failed"))
+                val detail = formatAuthorizationFailure(error, resultCode)
+                fileLog("Google auth: failed to parse authorization result: ${error::class.java.simpleName}: $detail")
+                onStateChanged(PhoneGoogleAuthState(status = PhoneGoogleAuthState.Status.ERROR, detail = detail))
             }
     }
 
@@ -366,6 +372,21 @@ class PhoneGoogleAuthManager(context: Context) {
         networkExecutor.execute {
             finalizeAuthorization(accessToken)
         }
+    }
+
+    private fun formatAuthorizationFailure(error: Throwable, resultCode: Int): String {
+        if (error is ApiException) {
+            val message = error.message
+            val codeDetail = "Google authorization failed (${error.statusCode})"
+            return message?.takeIf { it.isNotBlank() }?.let { "$codeDetail: $it" } ?: codeDetail
+        }
+
+        return error.message?.takeIf { it.isNotBlank() }
+            ?: if (resultCode == Activity.RESULT_CANCELED) {
+                "Authorization canceled"
+            } else {
+                "Authorization failed"
+            }
     }
 
     private fun finalizeAuthorization(accessToken: String) {
