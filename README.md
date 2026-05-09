@@ -19,6 +19,7 @@ Everyday is structured around draggable, resizable, minimizable widgets. You cho
 8. **Finance**: follow a stock market in real time. Defaults to your country's market.
 9. **Speedometer**: shows your current speed. Has an adjustable threshold below which it disappears.
 10. **Google Calendar**: see what's next on your agenda. Tap to browse upcoming events, double-tap to go back. Requires Google sign-in (see below).
+11. **Subtitles**: Subtitle the audio content from your phone. Useful for hearing disabiilities or when ambient noise is high.
 
 ## Other features
 
@@ -27,6 +28,7 @@ Everyday is structured around draggable, resizable, minimizable widgets. You cho
 - *Adaptive brightness*: optionally adapts display brightness to ambient light rather than keeping it fixed.
 - *3dof mode*: pin the dashboard relative to head rotation.
 - *Google OAuth*: authenticate with your Google account via your phone. Opt-in via settings. Required for the Calendar widget.
+- *Alignment guides*: helps to align widgets relative to each other and to the screen.
 
 ## Phone companion app
 
