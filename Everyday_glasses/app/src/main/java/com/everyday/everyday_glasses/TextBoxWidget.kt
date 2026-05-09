@@ -124,6 +124,9 @@ class TextBoxWidget(
     private var horizontalScrollOffset: Float = 0f
     private var scrollOffset: Float = 0f
     private var maxScrollOffset: Float = 0f
+    private var cachedTextLayout: StaticLayout? = null
+    private var cachedTextLayoutWidth: Int = -1
+    private var cachedTextLayoutDirty: Boolean = true
     
     private var isFocused = false
     private var cursorVisible = true
@@ -142,7 +145,7 @@ class TextBoxWidget(
     private val focusedBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = BORDER_WIDTH
-        color = Color.parseColor("#4444AA")
+        color = WidgetTheme.ColorValue.focusedBorder
     }
     
     private val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -165,8 +168,16 @@ class TextBoxWidget(
     // Close button paints are inherited from BaseWidget
 
     private val selectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#806699FF")
+        color = WidgetTheme.ColorValue.selectionHighlight
         style = Paint.Style.FILL
+    }
+
+    private val scrollbarTrackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = WidgetTheme.ColorValue.scrollbarTrack
+    }
+
+    private val scrollbarThumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = WidgetTheme.ColorValue.scrollbarThumb
     }
     
     // ==================== Additional Bounds ====================
@@ -174,6 +185,7 @@ class TextBoxWidget(
 
     // Use lazy initialization to avoid NullPointerException when called from BaseWidget constructor
     private val scrollbarBounds by lazy { RectF() }
+    private val textClipBounds = RectF()
 
     // ==================== Keyboard ====================
 
@@ -386,14 +398,12 @@ class TextBoxWidget(
         // Use unified hover state from BaseWidget
         val baseResult = updateHoverState(px, py)
 
-        // Map base state to local state
-        val newState = when (baseResult) {
-            BaseState.HOVER_RESIZE, BaseState.RESIZING -> State.HOVER_BORDER
-            BaseState.HOVER_BORDER -> State.HOVER_BORDER
-            BaseState.HOVER_CONTENT -> State.HOVER_CONTENT
-            BaseState.MOVING -> State.MOVING
-            else -> State.IDLE
-        }
+        val newState = WidgetInteractionState(baseResult).toChromeLocal(
+            idle = State.IDLE,
+            content = State.HOVER_CONTENT,
+            border = State.HOVER_BORDER,
+            moving = State.MOVING
+        )
 
         if (newState != state) {
             state = newState
@@ -404,11 +414,7 @@ class TextBoxWidget(
     // ==================== Tap Handling ====================
 
     fun onTap(px: Float, py: Float): Boolean {
-        // Check close button first (handled by base class)
-        if (closeButtonBounds.contains(px, py)) {
-            onCloseRequested?.invoke()
-            return true
-        }
+        if (handleChromeTap(px, py)) return true
 
         val hitArea = hitTest(px, py)
 
@@ -701,11 +707,7 @@ class TextBoxWidget(
         val colIndex = (relativeX / columnStride).toInt().coerceIn(0, columnCount - 1)
 
         // 2. Rebuild layout to calculate offsets
-        val layout = StaticLayout.Builder.obtain(richText, 0, richText.length, textPaint, singleColumnWidth.toInt())
-            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-            .setLineSpacing(0f, 1f)
-            .setIncludePad(false)
-            .build()
+        val layout = getRichTextLayout(singleColumnWidth.toInt().coerceAtLeast(1))
 
         // 3. NEW: Get the snapped Y start for this specific column
         val visibleHeight = contentBounds.height()
@@ -1051,7 +1053,11 @@ class TextBoxWidget(
     // ==================== Layout ====================
 
     private fun updateTextLayout() {
+        cachedTextLayoutDirty = true
+
         if (richText.isEmpty()) {
+            cachedTextLayout = null
+            cachedTextLayoutWidth = -1
             maxScrollOffset = 0f
             scrollOffset = 0f
             horizontalScrollOffset = 0f
@@ -1067,11 +1073,7 @@ class TextBoxWidget(
         // We assume wrapping is ON for columns (multi-column usually implies wrapping)
         val targetWidth = if (isTextWrap) singleColumnWidth else Int.MAX_VALUE / 2
 
-        val layout = StaticLayout.Builder.obtain(richText, 0, richText.length, textPaint, targetWidth)
-            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-            .setLineSpacing(0f, 1f)
-            .setIncludePad(false)
-            .build()
+        val layout = getRichTextLayout(targetWidth)
 
         val textHeight = layout.height.toFloat()
         // Use effective content height (accounting for keyboard)
@@ -1086,6 +1088,26 @@ class TextBoxWidget(
 
         scrollOffset = scrollOffset.coerceIn(0f, maxScrollOffset)
         horizontalScrollOffset = 0f
+    }
+
+    private fun buildTextLayout(text: CharSequence, paint: TextPaint, width: Int): StaticLayout {
+        return StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+            .setLineSpacing(0f, 1f)
+            .setIncludePad(false)
+            .build()
+    }
+
+    private fun getRichTextLayout(width: Int): StaticLayout {
+        val cached = cachedTextLayout
+        if (!cachedTextLayoutDirty && cached != null && cachedTextLayoutWidth == width) {
+            return cached
+        }
+        val layout = buildTextLayout(richText, textPaint, width)
+        cachedTextLayout = layout
+        cachedTextLayoutWidth = width
+        cachedTextLayoutDirty = false
+        return layout
     }
     
     // ==================== Drawing ====================
@@ -1126,17 +1148,18 @@ class TextBoxWidget(
 
         // Content - clip to area above keyboard if visible
         canvas.save()
-        val textClipBounds = if (isKeyboardVisible) {
-            RectF(
+        val clipBounds = if (isKeyboardVisible) {
+            textClipBounds.set(
                 contentBounds.left,
                 contentBounds.top,
                 contentBounds.right,
                 contentBounds.bottom - keyboardOverlay.getHeight()
             )
+            textClipBounds
         } else {
             contentBounds
         }
-        canvas.clipRect(textClipBounds)
+        canvas.clipRect(clipBounds)
 
         val showHint = isBorderHovered && !isFocused && richText.isEmpty()
         val displayText: CharSequence = when {
@@ -1153,11 +1176,11 @@ class TextBoxWidget(
             val gapTotal = (columnCount - 1) * COLUMN_GAP
             val singleColumnWidth = ((totalAvailableWidth - gapTotal) / columnCount).toInt().coerceAtLeast(1)
 
-            val layout = StaticLayout.Builder.obtain(displayText, 0, displayText.length, paint, singleColumnWidth)
-                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                .setLineSpacing(0f, 1f)
-                .setIncludePad(false)
-                .build()
+            val layout = if (displayText === richText) {
+                getRichTextLayout(singleColumnWidth)
+            } else {
+                buildTextLayout(displayText, paint, singleColumnWidth)
+            }
 
             val visibleHeight = getEffectiveContentHeight()
 
@@ -1241,28 +1264,22 @@ class TextBoxWidget(
                 0f
             }
 
-            val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#22666688")
-            }
             canvas.drawRoundRect(
                 contentBounds.right - scrollbarWidth,
                 contentBounds.top + trackPadding,
                 contentBounds.right - 2f,
                 contentBounds.bottom - trackPadding,
                 4f, 4f,
-                trackPaint
+                scrollbarTrackPaint
             )
 
-            val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#66888899")
-            }
             canvas.drawRoundRect(
                 contentBounds.right - scrollbarWidth + 2f,
                 contentBounds.top + trackPadding + thumbY,
                 contentBounds.right - 4f,
                 contentBounds.top + trackPadding + thumbY + thumbHeight,
                 3f, 3f,
-                thumbPaint
+                scrollbarThumbPaint
             )
         }
     }

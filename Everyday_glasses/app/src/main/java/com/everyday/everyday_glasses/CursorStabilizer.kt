@@ -70,6 +70,15 @@ class CursorStabilizer {
      * @return Stabilized PointF containing (processedDx, processedDy)
      */
     fun process(rawDx: Float, rawDy: Float): PointF {
+        val out = PointF()
+        return processInto(rawDx, rawDy, out)
+    }
+
+    /**
+     * Process raw delta input into a caller-owned point to avoid per-frame
+     * allocations on the cursor movement path.
+     */
+    fun processInto(rawDx: Float, rawDy: Float, out: PointF): PointF {
         var dx = rawDx
         var dy = rawDy
 
@@ -117,7 +126,8 @@ class CursorStabilizer {
         val finalDx = dx * SMOOTH_ALPHA_X
         val finalDy = effectiveRawDy * SMOOTH_ALPHA_Y
 
-        return PointF(finalDx, finalDy)
+        out.set(finalDx, finalDy)
+        return out
     }
 
     /**

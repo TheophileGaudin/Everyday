@@ -29,6 +29,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import org.json.JSONObject
+import java.net.URLEncoder
 
 /**
  * A widget that displays a web browser.
@@ -61,6 +62,8 @@ class BrowserWidget(
         private const val TAB_CLOSE_SIZE = 16f
         private const val NEW_TAB_BUTTON_WIDTH = 32f
         private const val MAX_TABS = 10
+        private const val URL_EDITOR_MAX_ROWS = 5
+        private const val URL_EDITOR_PADDING = 8f
     }
 
     /**
@@ -196,6 +199,49 @@ class BrowserWidget(
 
     fun getUrl(): String? = webView?.url ?: currentTab()?.url
 
+    fun isEditingAddress(): Boolean = isEditingUrl
+
+    fun isAddressHit(px: Float, py: Float): Boolean {
+        return urlBarBounds.contains(px, py) || (isEditingUrl && urlEditorBounds.contains(px, py))
+    }
+
+    fun beginAddressEditing(selectAll: Boolean = true) {
+        setFocused(true)
+        isEditingUrl = true
+        editingUrlText.clear()
+        editingUrlText.append(getUrl() ?: "")
+        isUrlTextSelected = selectAll && editingUrlText.isNotEmpty()
+        urlEditorScrollLine = 0
+        updateUrlEditorBounds()
+        onRequestKeyboard?.invoke(true)
+    }
+
+    fun addressHasSelection(): Boolean = isEditingUrl && isUrlTextSelected && editingUrlText.isNotEmpty()
+
+    fun getSelectedAddressText(): String = if (addressHasSelection()) editingUrlText.toString() else ""
+
+    fun cutSelectedAddressText(): String {
+        val selected = getSelectedAddressText()
+        if (selected.isNotEmpty()) {
+            editingUrlText.clear()
+            isUrlTextSelected = false
+            urlEditorScrollLine = 0
+        }
+        return selected
+    }
+
+    fun copySelectedAddressText(): String = getSelectedAddressText()
+
+    fun pasteIntoAddress(content: String) {
+        if (!isEditingUrl) beginAddressEditing()
+        replaceSelectionOrAppend(content)
+    }
+
+    fun selectAllAddressText() {
+        if (!isEditingUrl) beginAddressEditing()
+        isUrlTextSelected = editingUrlText.isNotEmpty()
+    }
+
     // Bounds (navigation bar - close button inherited from BaseWidget)
     private val navBarBounds = RectF()
     private val backButtonBounds = RectF()
@@ -204,6 +250,7 @@ class BrowserWidget(
     private val homeButtonBounds = RectF()
     private val modeButtonBounds = RectF()
     private val urlBarBounds = RectF()
+    private val urlEditorBounds = RectF()
 
     // Tab bar bounds
     private val tabBarBounds = RectF()
@@ -253,6 +300,24 @@ class BrowserWidget(
 
     private val urlBarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#33000000")
+    }
+
+    private val urlEditorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#F0202028")
+    }
+
+    private val urlEditorBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#CCFFFFFF")
+        style = Paint.Style.STROKE
+        strokeWidth = 1.5f
+    }
+
+    private val urlSelectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#664488FF")
+    }
+
+    private val urlScrollbarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#88FFFFFF")
     }
 
     private val urlTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -314,10 +379,14 @@ class BrowserWidget(
     private var hoveringTabIndex = -1
     private var hoveringTabClose = -1
     private var isHoveringNewTab = false
+    private var cursorSafeX = Float.NEGATIVE_INFINITY
+    private var cursorSafeY = Float.NEGATIVE_INFINITY
     
     // URL editing state
     private var isEditingUrl = false
     private var editingUrlText = StringBuilder()
+    private var isUrlTextSelected = false
+    private var urlEditorScrollLine = 0
 
     // User agent toggle state
     private var isDesktopMode = false
@@ -860,6 +929,7 @@ class BrowserWidget(
 
         updateTabBounds()
         updateKeyboardLayout()
+        updateUrlEditorBounds()
         updateWebViewLayout()
     }
 
@@ -960,14 +1030,14 @@ class BrowserWidget(
         }
     }
 
-    fun onHostPause() {
+    override fun onPause() {
         if (isHostPaused) return
         isHostPaused = true
         syncLiveWebViewState()
         syncTabLifecycle()
     }
 
-    fun onHostResume() {
+    override fun onResume() {
         if (!isHostPaused) return
         isHostPaused = false
         syncLiveWebViewState()
@@ -975,7 +1045,7 @@ class BrowserWidget(
         updateWebViewLayout()
     }
 
-    fun onDisplayVisibilityChanged(visible: Boolean) {
+    override fun onDisplayVisibilityChanged(visible: Boolean) {
         if (isDisplayVisible == visible) return
         isDisplayVisible = visible
         customView?.visibility = if (visible) View.VISIBLE else View.GONE
@@ -1021,7 +1091,7 @@ class BrowserWidget(
         CookieManager.getInstance().flush()
     }
 
-    fun destroy() {
+    override fun onDestroy() {
         // Exit video fullscreen if active
         exitVideoFullscreen()
 
@@ -1031,6 +1101,12 @@ class BrowserWidget(
         }
         tabs.clear()
     }
+
+    fun onHostPause() = onPause()
+
+    fun onHostResume() = onResume()
+
+    fun destroy() = onDestroy()
     
     /**
      * Helper to notify state changed callback.
@@ -1135,7 +1211,10 @@ class BrowserWidget(
             // Exit URL editing mode when losing focus
             if (isEditingUrl) {
                 isEditingUrl = false
+                isUrlTextSelected = false
                 editingUrlText.clear()
+                urlEditorScrollLine = 0
+                urlEditorBounds.setEmpty()
             }
         }
     }
@@ -1199,6 +1278,91 @@ class BrowserWidget(
         }
     }
 
+    private fun replaceSelectionOrAppend(text: String) {
+        if (isUrlTextSelected) {
+            editingUrlText.clear()
+            isUrlTextSelected = false
+        }
+        editingUrlText.append(text)
+        scrollAddressEditorToCursor()
+    }
+
+    private fun normalizeAddressInput(input: String): String {
+        val trimmed = input.trim()
+        if (trimmed.isEmpty()) return HOME_URL
+
+        val hasHttpScheme = trimmed.startsWith("http://", ignoreCase = true) ||
+            trimmed.startsWith("https://", ignoreCase = true)
+        if (hasHttpScheme && trimmed.substringAfter("://", "").isNotBlank() && !trimmed.contains(Regex("\\s"))) {
+            return trimmed
+        }
+
+        val looksLikeAddress =
+            !trimmed.contains(Regex("\\s")) &&
+            (trimmed.contains(".") ||
+                trimmed.startsWith("localhost", ignoreCase = true) ||
+                trimmed.matches(Regex("""\d{1,3}(\.\d{1,3}){3}(:\d+)?(/.*)?""")))
+
+        return if (looksLikeAddress) {
+            "https://$trimmed"
+        } else {
+            "https://www.google.com/search?q=${URLEncoder.encode(trimmed, "UTF-8")}"
+        }
+    }
+
+    private fun navigateFromAddressBar() {
+        val url = normalizeAddressInput(editingUrlText.toString())
+        currentTab()?.apply {
+            savedState = null
+            this.url = url
+        }
+        ensureActiveWebView()
+        webView?.loadUrl(url)
+        isEditingUrl = false
+        isUrlTextSelected = false
+        editingUrlText.clear()
+        urlEditorScrollLine = 0
+        onRequestKeyboard?.invoke(false)
+    }
+
+    private fun wrapAddressText(text: String, maxWidth: Float): List<String> {
+        if (text.isEmpty()) return listOf("")
+        val lines = mutableListOf<String>()
+        var remaining = text
+        while (remaining.isNotEmpty()) {
+            val count = urlTextPaint.breakText(remaining, true, maxWidth, null).coerceAtLeast(1)
+            lines.add(remaining.take(count))
+            remaining = remaining.drop(count)
+        }
+        return lines
+    }
+
+    private fun updateUrlEditorBounds() {
+        if (!isEditingUrl) {
+            urlEditorBounds.setEmpty()
+            return
+        }
+        val maxTextWidth = (urlBarBounds.width() - URL_EDITOR_PADDING * 2).coerceAtLeast(1f)
+        val lines = wrapAddressText(editingUrlText.toString(), maxTextWidth)
+        val rows = lines.size.coerceIn(1, URL_EDITOR_MAX_ROWS)
+        val lineHeight = urlTextPaint.fontSpacing
+        val height = URL_EDITOR_PADDING * 2 + lineHeight * rows
+        val top = urlBarBounds.top
+        urlEditorBounds.set(
+            urlBarBounds.left,
+            top,
+            urlBarBounds.right,
+            (top + height).coerceAtMost(contentBounds.bottom)
+        )
+    }
+
+    private fun scrollAddressEditorToCursor() {
+        val maxTextWidth = (urlBarBounds.width() - URL_EDITOR_PADDING * 2).coerceAtLeast(1f)
+        val lineCount = wrapAddressText(editingUrlText.toString(), maxTextWidth).size
+        urlEditorScrollLine = (lineCount - URL_EDITOR_MAX_ROWS).coerceAtLeast(0)
+        updateUrlEditorBounds()
+    }
+
     fun onKeyPress(key: String) {
         if (!isFocused) return
         
@@ -1206,32 +1370,20 @@ class BrowserWidget(
         if (isEditingUrl) {
             when (key) {
                 "BACKSPACE" -> {
-                    if (editingUrlText.isNotEmpty()) {
+                    if (isUrlTextSelected) {
+                        editingUrlText.clear()
+                        isUrlTextSelected = false
+                    } else if (editingUrlText.isNotEmpty()) {
                         editingUrlText.deleteAt(editingUrlText.length - 1)
                     }
+                    scrollAddressEditorToCursor()
                 }
                 "ENTER", "\n" -> {
-                    // Navigate to the URL
-                    var url = editingUrlText.toString().trim()
-                    if (url.isNotEmpty()) {
-                        // Add https:// if no scheme provided
-                        if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                            url = "https://$url"
-                        }
-                        currentTab()?.apply {
-                            savedState = null
-                            this.url = url
-                        }
-                        ensureActiveWebView()
-                        webView?.loadUrl(url)
-                    }
-                    isEditingUrl = false
-                    editingUrlText.clear()
-                    onRequestKeyboard?.invoke(false)
+                    navigateFromAddressBar()
                 }
-                "SPACE", " " -> editingUrlText.append(" ")
+                "SPACE", " " -> replaceSelectionOrAppend(" ")
                 else -> {
-                    if (key.isNotEmpty()) editingUrlText.append(key)
+                    if (key.isNotEmpty()) replaceSelectionOrAppend(key)
                 }
             }
             return
@@ -1391,7 +1543,14 @@ class BrowserWidget(
     
     // Scrolling support (for future external scroll control)
     override fun onScroll(dy: Float) {
-         (webView ?: ensureActiveWebView())?.scrollBy(0, dy.toInt())
+        if (isEditingUrl && urlEditorBounds.contains(cursorSafeX, cursorSafeY)) {
+            val maxTextWidth = (urlEditorBounds.width() - URL_EDITOR_PADDING * 2).coerceAtLeast(1f)
+            val lines = wrapAddressText(editingUrlText.toString(), maxTextWidth)
+            val maxScroll = (lines.size - URL_EDITOR_MAX_ROWS).coerceAtLeast(0)
+            urlEditorScrollLine = (urlEditorScrollLine + if (dy > 0) 1 else -1).coerceIn(0, maxScroll)
+            return
+        }
+        (webView ?: ensureActiveWebView())?.scrollBy(0, dy.toInt())
     }
 
     // Store the hit tab index for tap handling
@@ -1432,6 +1591,8 @@ class BrowserWidget(
             return HitArea.NONE
         }
 
+        if (isEditingUrl && urlEditorBounds.contains(px, py)) return HitArea.NAV_URL
+
         // Tab bar hit testing
         if (tabBarBounds.contains(px, py)) {
             // Check new tab button first
@@ -1469,6 +1630,7 @@ class BrowserWidget(
     }
     
     override fun containsPoint(px: Float, py: Float): Boolean {
+        if (isEditingUrl && urlEditorBounds.contains(px, py)) return true
         // Check keyboard button (extends below widget)
         if (keyboardButtonBounds.contains(px, py)) return true
         // All other button bounds are now handled by BaseWidget
@@ -1477,6 +1639,8 @@ class BrowserWidget(
 
     override fun updateHover(px: Float, py: Float) {
         if (state == State.MOVING) return
+        cursorSafeX = px
+        cursorSafeY = py
 
         // Reset nav hover states
         isHoveringBack = false
@@ -1506,6 +1670,9 @@ class BrowserWidget(
             else if (modeButtonBounds.contains(px, py)) isHoveringMode = true
             else if (urlBarBounds.contains(px, py)) isHoveringUrlBar = true
         }
+        if (isEditingUrl && urlEditorBounds.contains(px, py)) {
+            isHoveringUrlBar = true
+        }
 
         // Update tab specific hovers (for visual feedback)
         if (tabBarBounds.contains(px, py)) {
@@ -1529,12 +1696,12 @@ class BrowserWidget(
             }
         }
 
-        // Map base state to local state
+        val chromeState = WidgetInteractionState(baseResult).chromeState
         val newState = when {
             navBarBounds.contains(px, py) -> State.HOVER_NAV
+            isEditingUrl && urlEditorBounds.contains(px, py) -> State.HOVER_NAV
             tabBarBounds.contains(px, py) -> State.HOVER_TAB
-            baseResult == BaseState.HOVER_RESIZE || baseResult == BaseState.RESIZING -> State.HOVER_BORDER
-            baseResult == BaseState.HOVER_BORDER -> State.HOVER_BORDER
+            chromeState == BaseState.HOVER_BORDER -> State.HOVER_BORDER
             baseResult == BaseState.HOVER_CONTENT -> State.HOVER_CONTENT
             baseResult == BaseState.MOVING -> State.MOVING
             else -> State.IDLE
@@ -1546,11 +1713,7 @@ class BrowserWidget(
     }
     
     fun onTap(px: Float, py: Float): Boolean {
-        // Check close button first (handled by base class)
-        if (closeButtonBounds.contains(px, py)) {
-            onCloseRequested?.invoke()
-            return true
-        }
+        if (handleChromeTap(px, py)) return true
 
         val hitArea = hitTest(px, py)
 
@@ -1604,14 +1767,7 @@ class BrowserWidget(
                 true
             }
             HitArea.NAV_URL -> {
-                // Set browser as focused so it receives keyboard input
-                setFocused(true)
-                // Enter URL editing mode
-                isEditingUrl = true
-                editingUrlText.clear()
-                editingUrlText.append(getUrl() ?: "")
-                // Request keyboard to show
-                onRequestKeyboard?.invoke(true)
+                beginAddressEditing(selectAll = true)
                 true
             }
             HitArea.NEW_TAB -> {
@@ -1636,7 +1792,10 @@ class BrowserWidget(
                 // Exit URL editing mode when tapping content (but don't hide keyboard - WebView may need it)
                 if (isEditingUrl) {
                     isEditingUrl = false
+                    isUrlTextSelected = false
                     editingUrlText.clear()
+                    urlEditorScrollLine = 0
+                    urlEditorBounds.setEmpty()
                 }
 
                 performContentTap(px, py)
@@ -1697,6 +1856,10 @@ class BrowserWidget(
         // Draw Tab Bar
         if (!isVideoFullscreen) {
             drawTabBar(canvas)
+        }
+
+        if (!isVideoFullscreen) {
+            drawFocusedUrlEditor(canvas)
         }
 
         // Draw keyboard if visible
@@ -1791,6 +1954,83 @@ class BrowserWidget(
             val textWidth = urlTextPaint.measureText(displayUrl)
             val cursorX = (urlBarBounds.left + 8f + textWidth).coerceAtMost(urlBarBounds.right - 8f)
             canvas.drawLine(cursorX, urlBarBounds.top + 6f, cursorX, urlBarBounds.bottom - 6f, navIconPaint)
+        }
+    }
+
+    private fun drawFocusedUrlEditor(canvas: Canvas) {
+        if (!isEditingUrl || !isFocused) return
+
+        updateUrlEditorBounds()
+        val maxTextWidth = (urlEditorBounds.width() - URL_EDITOR_PADDING * 2).coerceAtLeast(1f)
+        val lines = wrapAddressText(editingUrlText.toString(), maxTextWidth)
+        val visibleRows = lines.size.coerceIn(1, URL_EDITOR_MAX_ROWS)
+        val maxScroll = (lines.size - visibleRows).coerceAtLeast(0)
+        urlEditorScrollLine = urlEditorScrollLine.coerceIn(0, maxScroll)
+
+        canvas.drawRoundRect(urlEditorBounds, 4f, 4f, urlEditorPaint)
+        canvas.drawRoundRect(urlEditorBounds, 4f, 4f, urlEditorBorderPaint)
+
+        val lineHeight = urlTextPaint.fontSpacing
+        val firstBaseline = urlEditorBounds.top + URL_EDITOR_PADDING - urlTextPaint.fontMetrics.ascent
+        val endLine = (urlEditorScrollLine + visibleRows).coerceAtMost(lines.size)
+
+        canvas.save()
+        canvas.clipRect(
+            urlEditorBounds.left + URL_EDITOR_PADDING,
+            urlEditorBounds.top + URL_EDITOR_PADDING,
+            urlEditorBounds.right - URL_EDITOR_PADDING,
+            urlEditorBounds.bottom - URL_EDITOR_PADDING
+        )
+
+        for (i in urlEditorScrollLine until endLine) {
+            val line = lines[i]
+            val y = firstBaseline + (i - urlEditorScrollLine) * lineHeight
+            if (isUrlTextSelected && line.isNotEmpty()) {
+                val selectedRight = urlEditorBounds.left + URL_EDITOR_PADDING + urlTextPaint.measureText(line)
+                canvas.drawRect(
+                    urlEditorBounds.left + URL_EDITOR_PADDING,
+                    y + urlTextPaint.fontMetrics.ascent,
+                    selectedRight,
+                    y + urlTextPaint.fontMetrics.descent,
+                    urlSelectionPaint
+                )
+            }
+            canvas.drawText(line, urlEditorBounds.left + URL_EDITOR_PADDING, y, urlTextPaint)
+        }
+
+        if (!isUrlTextSelected) {
+            val lastVisibleIndex = endLine - 1
+            val cursorLine = lines.lastIndex.coerceAtLeast(0)
+            if (cursorLine in urlEditorScrollLine..lastVisibleIndex) {
+                val line = lines.getOrElse(cursorLine) { "" }
+                val cursorX = (urlEditorBounds.left + URL_EDITOR_PADDING + urlTextPaint.measureText(line))
+                    .coerceAtMost(urlEditorBounds.right - URL_EDITOR_PADDING)
+                val y = firstBaseline + (cursorLine - urlEditorScrollLine) * lineHeight
+                canvas.drawLine(
+                    cursorX,
+                    y + urlTextPaint.fontMetrics.ascent,
+                    cursorX,
+                    y + urlTextPaint.fontMetrics.descent,
+                    navIconPaint
+                )
+            }
+        }
+        canvas.restore()
+
+        if (lines.size > URL_EDITOR_MAX_ROWS) {
+            val trackTop = urlEditorBounds.top + URL_EDITOR_PADDING
+            val trackBottom = urlEditorBounds.bottom - URL_EDITOR_PADDING
+            val thumbHeight = ((trackBottom - trackTop) * visibleRows / lines.size).coerceAtLeast(10f)
+            val thumbTop = trackTop + (trackBottom - trackTop - thumbHeight) * urlEditorScrollLine / maxScroll.coerceAtLeast(1)
+            canvas.drawRoundRect(
+                urlEditorBounds.right - 5f,
+                thumbTop,
+                urlEditorBounds.right - 2f,
+                thumbTop + thumbHeight,
+                2f,
+                2f,
+                urlScrollbarPaint
+            )
         }
     }
 

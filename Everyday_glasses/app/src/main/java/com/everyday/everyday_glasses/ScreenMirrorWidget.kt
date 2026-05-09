@@ -106,26 +106,31 @@ class ScreenMirrorWidget(
     private val streamingBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = BORDER_WIDTH
-        color = Color.parseColor("#44AA44")
+        color = WidgetTheme.ColorValue.streamOkBorder
     }
     private val errorBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = BORDER_WIDTH
-        color = Color.parseColor("#AA4444")
+        color = WidgetTheme.ColorValue.streamErrorBorder
     }
     private val errorTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#FF6666")
+        color = WidgetTheme.ColorValue.streamErrorText
         textSize = 18f
+        textAlign = Paint.Align.CENTER
+    }
+    private val connectingTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = WidgetTheme.ColorValue.warningText
+        textSize = 20f
         textAlign = Paint.Align.CENTER
     }
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true }
 
     // Run/Pause button paints
     private val runButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#44AA66") // Green
+        color = WidgetTheme.ColorValue.pinnedButton
     }
     private val stopButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#D32F2F") // Red
+        color = WidgetTheme.ColorValue.stopButton
     }
     private val runIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
@@ -400,8 +405,9 @@ class ScreenMirrorWidget(
     override fun isHovering(): Boolean =
         isBorderHovered ||
             state == State.MOVING ||
-            baseState == BaseState.HOVER_RESIZE ||
-            baseState == BaseState.RESIZING
+            baseState == BaseState.MOVING ||
+            baseState == BaseState.RESIZING ||
+            baseState == BaseState.HOVER_RESIZE
 
     // Use unified border hover from BaseWidget - include run/pause button as a border button
     override fun isPointOverBorderButton(px: Float, py: Float): Boolean {
@@ -439,19 +445,18 @@ class ScreenMirrorWidget(
     }
 
     override fun updateHover(px: Float, py: Float) {
-        if (state == State.MOVING) return
+        if (baseState == BaseState.MOVING || baseState == BaseState.RESIZING) return
 
         // Use unified hover state from BaseWidget
         val baseResult = updateHoverState(px, py)
 
-        // Map base state to local state
-        // Note: ScreenMirror doesn't use HOVER_CONTENT, so content becomes IDLE
-        val newState = when (baseResult) {
-            BaseState.HOVER_RESIZE, BaseState.RESIZING -> State.HOVER_BORDER
-            BaseState.HOVER_BORDER -> State.HOVER_BORDER
-            BaseState.MOVING -> State.MOVING
-            else -> State.IDLE
-        }
+        // ScreenMirror doesn't use HOVER_CONTENT, so content becomes IDLE.
+        val newState = WidgetInteractionState(baseResult).toChromeLocal(
+            idle = State.IDLE,
+            content = State.IDLE,
+            border = State.HOVER_BORDER,
+            moving = State.MOVING
+        )
 
         if (newState != state) {
             Log.d(TAG, "State changed: $state -> $newState")
@@ -461,11 +466,7 @@ class ScreenMirrorWidget(
     }
     
     fun onTap(px: Float, py: Float): Boolean {
-        // Check close button first (handled by base class)
-        if (closeButtonBounds.contains(px, py)) {
-            onCloseRequested?.invoke()
-            return true
-        }
+        if (handleChromeTap(px, py)) return true
 
         val hitArea = hitTest(px, py)
         Log.d(TAG, "onTap at ($px, $py) -> hitArea=$hitArea, currentState=$state")
@@ -508,34 +509,6 @@ class ScreenMirrorWidget(
             HitArea.NONE -> false
         }
     }
-    
-    override fun startDrag(isResize: Boolean) {
-        super.startDrag(isResize)
-        state = if (isResize) {
-            // ScreenMirrorWidget doesn't have RESIZING state in its enum, so keep it IDLE or map it if we add RESIZING
-            // But baseState will be RESIZING, so onDrag will handle it.
-            // Let's assume we don't need to change local state for resizing if it's not in the enum
-            // Or better: update enum. But I cannot change enum easily without breaking other things.
-            // Wait, BaseWidget handles resizing.
-            // ScreenMirrorWidget.State has IDLE, HOVER_BORDER, MOVING.
-            // So if resizing, maybe we should just keep it as is, or maybe IDLE?
-            // If I set MOVING, it might look like dragging.
-            State.IDLE
-        } else {
-            State.MOVING
-        }
-        onStateChanged?.invoke(state)
-    }
-
-    override fun onDragEnd() {
-        super.onDragEnd()
-        if (state == State.MOVING) {
-            state = State.IDLE
-            baseState = BaseState.IDLE
-            onStateChanged?.invoke(state)
-        }
-    }
-    
     override fun containsPoint(px: Float, py: Float): Boolean {
         if (fullscreenButtonBounds.contains(px, py)) return true
         if (minimizeButtonBounds.contains(px, py)) return true
@@ -1044,12 +1017,7 @@ class ScreenMirrorWidget(
         }
         
         if (streamState == StreamState.CONNECTING) {
-            val connectingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#FFAA00")
-                textSize = 20f
-                textAlign = Paint.Align.CENTER
-            }
-            canvas.drawText("Reconnecting...", widgetBounds.centerX(), widgetBounds.centerY(), connectingPaint)
+            canvas.drawText("Reconnecting...", widgetBounds.centerX(), widgetBounds.centerY(), connectingTextPaint)
         }
         
         if (shouldShowBorder()) {
@@ -1100,7 +1068,7 @@ class ScreenMirrorWidget(
         }
     }
 
-    fun release() {
+    override fun onDestroy() {
         stopStreaming()
         lastReportedMediaActive = false
         handler.post { onMediaStateChanged?.invoke(false) }
@@ -1113,6 +1081,8 @@ class ScreenMirrorWidget(
         yuvToRgbScript = null
         renderScript = null
     }
+
+    fun release() = onDestroy()
 
     override fun minimize() {
         super.minimize()
@@ -1127,36 +1097,35 @@ class ScreenMirrorWidget(
     override fun onDrag(dx: Float, dy: Float, screenWidth: Float, screenHeight: Float) {
         val previousWidth = widgetWidth
         val previousHeight = widgetHeight
-        if (isFullscreen) return
-        
-        if (state == State.MOVING) {
-            super.onDrag(dx, dy, screenWidth, screenHeight)
-        } else if (baseState == BaseState.HOVER_RESIZE || baseState == BaseState.RESIZING) {
-            super.onDrag(dx, dy, screenWidth, screenHeight)
-        }
+
+        super.onDrag(dx, dy, screenWidth, screenHeight)
 
         if (previousWidth != widgetWidth || previousHeight != widgetHeight) {
             resetDetectedContentBounds()
         }
     }
 
-    fun onHostPause() {
+    override fun onPause() {
         if (!isHostPaused) {
             isHostPaused = true
             dispatchMediaStateIfChanged()
         }
     }
 
-    fun onHostResume() {
+    override fun onResume() {
         if (isHostPaused) {
             isHostPaused = false
             dispatchMediaStateIfChanged()
         }
     }
 
-    fun onDisplayVisibilityChanged(visible: Boolean) {
+    override fun onDisplayVisibilityChanged(visible: Boolean) {
         if (isDisplayVisible == visible) return
         isDisplayVisible = visible
         dispatchMediaStateIfChanged()
     }
+
+    fun onHostPause() = onPause()
+
+    fun onHostResume() = onResume()
 }

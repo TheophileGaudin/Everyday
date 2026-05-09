@@ -36,6 +36,7 @@ class WidgetRegistry {
     var financeWidget: FinanceWidget? = null
     var newsWidget: NewsWidget? = null
     var speedometerWidget: SpeedometerWidget? = null
+    var subtitleWidget: SubtitleWidget? = null
     
     // Global z-order counter for unified widget layering
     private var nextZOrder = 0
@@ -136,6 +137,7 @@ class WidgetRegistry {
         financeWidget?.let { result.add(it) }
         newsWidget?.let { result.add(it) }
         speedometerWidget?.let { result.add(it) }
+        subtitleWidget?.let { result.add(it) }
         screenMirrorWidget?.let { result.add(it) }
         result.addAll(browserWidgets)
         result.addAll(textWidgets)

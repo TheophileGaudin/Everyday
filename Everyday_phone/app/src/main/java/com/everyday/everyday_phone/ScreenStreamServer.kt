@@ -255,6 +255,17 @@ class ScreenStreamServer(private val context: Context) {
             return false
         }
     }
+
+    fun getMediaProjection(): MediaProjection? = mediaProjection
+
+    fun releaseProjection() {
+        try {
+            mediaProjection?.stop()
+        } catch (e: Exception) {
+            fileLog("Error stopping MediaProjection: ${e.message}")
+        }
+        mediaProjection = null
+    }
     
     /**
      * Get current display rotation.
@@ -832,11 +843,6 @@ class ScreenStreamServer(private val context: Context) {
      */
     fun release() {
         stop()
-        try {
-            mediaProjection?.stop()
-        } catch (e: Exception) {
-            fileLog("Error stopping MediaProjection: ${e.message}")
-        }
-        mediaProjection = null
+        releaseProjection()
     }
 }

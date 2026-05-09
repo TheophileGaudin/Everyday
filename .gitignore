@@ -6,6 +6,8 @@
 **/*.apk
 **/*.aab
 **/*.aar
+!Everyday_phone/app/libs/
+!Everyday_phone/app/libs/sherpa-onnx-1.12.39.aar
 **/*.ap_
 **/*.dex
 

@@ -5,13 +5,14 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.util.Log
+import kotlin.math.max
+import kotlin.math.min
 
 /**
- * A popup context menu for creating widgets.
+ * Head-locked context menu optimized for the 640x480 glasses display.
  *
- * Shows at cursor position when double-tapping on empty space.
- * Menu items can be selected by moving cursor and tapping.
- * Supports submenus that appear to the right when hovering parent items.
+ * The menu uses drill-in pages instead of hover-open flyouts so shaky cursor
+ * movement cannot accidentally close a submenu.
  */
 class ContextMenu(
     private val screenWidth: Float,
@@ -22,54 +23,63 @@ class ContextMenu(
 
         private const val MENU_WIDTH = 250f
         private const val ITEM_HEIGHT = 48f
+        private const val HEADER_HEIGHT = 44f
         private const val PADDING = 12f
         private const val CORNER_RADIUS = 8f
-        private const val SUBMENU_OFFSET = 4f  // Horizontal gap between menu and submenu
+        private const val MAX_VISIBLE_ROWS = 5
+        private const val SCROLLBAR_WIDTH = 5f
     }
 
     data class MenuItem(
         val id: String,
         val label: String,
         val icon: String? = null,
-        val submenu: List<SubMenuItem>? = null  // If non-null, this item has a submenu
+        val submenu: List<SubMenuItem>? = null
     )
 
     data class SubMenuItem(
         val id: String,
         val label: String,
-        val isEnabled: Boolean = true  // Grey if false, light blue if true (widget present)
+        val isEnabled: Boolean = true,
+        val submenu: List<SubMenuItem>? = null
     )
 
+    private data class Page(
+        val title: String,
+        val parentMenuItem: MenuItem?,
+        val entries: List<Entry>,
+        var scrollOffset: Float = 0f
+    )
+
+    private sealed class Entry {
+        data class Menu(val item: MenuItem) : Entry()
+        data class SubMenu(val item: SubMenuItem, val parent: MenuItem) : Entry()
+        data class Back(val label: String = "Back") : Entry()
+    }
+
     private val items = mutableListOf<MenuItem>()
-    private val itemRects = mutableListOf<RectF>()
+    private val pageStack = mutableListOf<Page>()
+    private val rowRects = mutableListOf<Pair<RectF, Entry>>()
+    private val backRect = RectF()
 
-    // Submenu state
-    private var activeSubmenuIndex = -1  // Index of parent item whose submenu is showing
-    private val submenuRects = mutableListOf<RectF>()
-    private var submenuX = 0f
-    private var submenuY = 0f
-    private var submenuWidth = 0f
-    private var submenuHeight = 0f
-    private var hoveredSubmenuIndex = -1
+    private var hoveredRowIndex = -1
+    private var isBackHovered = false
+    private var menuX = 0f
+    private var menuY = 0f
+    private var menuHeight = 0f
+    private var contentTop = 0f
+    private var visibleRows = MAX_VISIBLE_ROWS
 
-    // Callback for updating submenu item states (e.g., widget presence)
     var onSubmenuWillShow: ((MenuItem) -> List<SubMenuItem>)? = null
 
     var isVisible = false
         private set
 
-    private var menuX = 0f
-    private var menuY = 0f
-    private var menuHeight = 0f
-
-    private var hoveredItemIndex = -1
-
-    // Callbacks
     var onItemSelected: ((MenuItem) -> Unit)? = null
     var onSubmenuItemSelected: ((MenuItem, SubMenuItem) -> Unit)? = null
+    var onSubmenuItemDoubleTapped: ((MenuItem, SubMenuItem) -> Boolean)? = null
     var onDismissed: (() -> Unit)? = null
 
-    // Paints
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#2a2a3e")
     }
@@ -88,8 +98,33 @@ class ContextMenu(
         color = Color.parseColor("#5050AA")
     }
 
+    private val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#202033")
+    }
+
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
+        textSize = 24f
+    }
+
+    private val headerTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 22f
+        isFakeBoldText = true
+    }
+
+    private val activeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#6699FF")
+        textSize = 24f
+    }
+
+    private val inactiveTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 24f
+    }
+
+    private val disabledTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#777777")
         textSize = 24f
     }
 
@@ -98,42 +133,68 @@ class ContextMenu(
         textSize = 28f
     }
 
-    // Submenu-specific paints
-    private val enabledTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#6699FF")  // Light blue for enabled/present widgets
-        textSize = 24f
-    }
-
-    private val disabledTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#666666")  // Grey for disabled/absent widgets
-        textSize = 24f
-    }
-
     private val arrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textSize = 20f
     }
 
+    private val scrollbarTrackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#353550")
+    }
+
+    private val scrollbarThumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#8888CC")
+    }
+
     init {
-        // Default menu items (can be customized)
-        addItem(MenuItem("create_textbox", "Create Text Box", "📝"))
-        addItem(MenuItem("create_browser", "Open Browser", "🌐"))
-        addItem(MenuItem("open_file", "Open...", "📂"))
-        addItem(MenuItem(
-            "toggle_widgets",
-            "Toggle",
-            "\uD83C\uDF9A\uFE0F",
-            submenu = listOf(
-                SubMenuItem("toggle_status", "System", false),
-                SubMenuItem("toggle_location", "Location/Weather", false),
-                SubMenuItem("toggle_calendar", "Calendar", false),
-                SubMenuItem("toggle_speedometer", "Speedometer", false),
-                SubMenuItem("toggle_finance", "Finance", false),
-                SubMenuItem("toggle_news", "News", false),
-                SubMenuItem("toggle_mirror", "Screen Mirror", false)
+        addItem(
+            MenuItem(
+                "create",
+                "Create",
+                "+",
+                submenu = listOf(
+                    SubMenuItem("create_textbox", "Text Box"),
+                    SubMenuItem("create_browser", "Browser")
+                )
             )
-        ))
-        addItem(MenuItem("settings", "Settings", "⚙️"))
+        )
+        addItem(
+            MenuItem(
+                "toggle_widgets",
+                "Widgets",
+                null,
+                submenu = listOf(
+                    SubMenuItem("toggle_status", "System", false),
+                    SubMenuItem("toggle_location", "Location/Weather", false),
+                    SubMenuItem("toggle_calendar", "Calendar", false),
+                    SubMenuItem("toggle_speedometer", "Speedometer", false),
+                    SubMenuItem("toggle_finance", "Finance", false),
+                    SubMenuItem("toggle_news", "News", false),
+                    SubMenuItem("toggle_subtitle", "Subtitles", false),
+                    SubMenuItem("toggle_mirror", "Screen Mirror", false)
+                )
+            )
+        )
+        addItem(
+            MenuItem(
+                "layouts",
+                "Layouts",
+                null,
+                submenu = listOf(
+                    SubMenuItem("layout_save", "Save"),
+                    SubMenuItem("layout_save_as", "Save As...")
+                )
+            )
+        )
+        addItem(
+            MenuItem(
+                "files",
+                "Files",
+                null,
+                submenu = listOf(SubMenuItem("open_file", "Open..."))
+            )
+        )
+        addItem(MenuItem("settings", "Settings", null))
     }
 
     fun addItem(item: MenuItem) {
@@ -144,363 +205,443 @@ class ContextMenu(
         items.clear()
     }
 
-    /**
-     * Show the menu at the specified position.
-     */
     fun show(x: Float, y: Float) {
-        menuHeight = items.size * ITEM_HEIGHT + PADDING * 2
-
-        // Position menu, keeping it on screen
-        menuX = x.coerceIn(0f, screenWidth - MENU_WIDTH)
-        menuY = y.coerceIn(0f, screenHeight - menuHeight)
-
-        // Calculate item rects
-        itemRects.clear()
-        var itemY = menuY + PADDING
-        for (item in items) {
-            val rect = RectF(
-                menuX + PADDING,
-                itemY,
-                menuX + MENU_WIDTH - PADDING,
-                itemY + ITEM_HEIGHT - 4f
-            )
-            itemRects.add(rect)
-            itemY += ITEM_HEIGHT
-        }
-
-        hoveredItemIndex = -1
-        activeSubmenuIndex = -1
-        hoveredSubmenuIndex = -1
+        pageStack.clear()
+        pageStack.add(Page("Menu", null, items.map { Entry.Menu(it) }))
+        hoveredRowIndex = -1
+        isBackHovered = false
         isVisible = true
-
-        Log.d(TAG, "Menu shown at ($menuX, $menuY) with ${items.size} items")
+        recalculateLayout(x, y)
+        Log.d(TAG, "Menu shown at ($menuX, $menuY) with ${items.size} root items")
     }
 
-    /**
-     * Hide the menu.
-     */
     fun dismiss() {
-        if (isVisible) {
-            isVisible = false
-            hoveredItemIndex = -1
-            activeSubmenuIndex = -1
-            hoveredSubmenuIndex = -1
-            onDismissed?.invoke()
-            Log.d(TAG, "Menu dismissed")
-        }
+        if (!isVisible) return
+
+        isVisible = false
+        hoveredRowIndex = -1
+        isBackHovered = false
+        pageStack.clear()
+        rowRects.clear()
+        backRect.setEmpty()
+        onDismissed?.invoke()
+        Log.d(TAG, "Menu dismissed")
     }
 
-    /**
-     * Show submenu for the item at the given index.
-     */
-    private fun showSubmenu(itemIndex: Int) {
-        val item = items[itemIndex]
-        if (item.submenu == null) {
-            activeSubmenuIndex = -1
-            return
-        }
-
-        // Get updated submenu items (allows dynamic state like widget presence)
-        val submenuItems = onSubmenuWillShow?.invoke(item) ?: item.submenu
-
-        // Update the item's submenu with fresh state
-        items[itemIndex] = item.copy(submenu = submenuItems)
-
-        activeSubmenuIndex = itemIndex
-        hoveredSubmenuIndex = -1
-
-        // Calculate submenu dimensions
-        submenuWidth = MENU_WIDTH
-        submenuHeight = submenuItems.size * ITEM_HEIGHT + PADDING * 2
-
-        // Position submenu to the right of the parent item
-        val parentRect = itemRects[itemIndex]
-        submenuX = menuX + MENU_WIDTH + SUBMENU_OFFSET
-
-        // If submenu would go off screen to the right, show it on the left
-        if (submenuX + submenuWidth > screenWidth) {
-            submenuX = menuX - submenuWidth - SUBMENU_OFFSET
-        }
-
-        // Vertical position: align with parent item, but keep on screen
-        submenuY = (parentRect.top - PADDING).coerceIn(0f, screenHeight - submenuHeight)
-
-        // Calculate submenu item rects
-        submenuRects.clear()
-        var itemY = submenuY + PADDING
-        for (subItem in submenuItems) {
-            val rect = RectF(
-                submenuX + PADDING,
-                itemY,
-                submenuX + submenuWidth - PADDING,
-                itemY + ITEM_HEIGHT - 4f
-            )
-            submenuRects.add(rect)
-            itemY += ITEM_HEIGHT
-        }
-
-        Log.d(TAG, "Submenu shown for '${item.label}' with ${submenuItems.size} items")
-    }
-
-    /**
-     * Hide the submenu.
-     */
-    private fun hideSubmenu() {
-        activeSubmenuIndex = -1
-        hoveredSubmenuIndex = -1
-        submenuRects.clear()
-    }
-
-    /**
-     * Update hover state based on cursor position.
-     */
     fun updateHover(px: Float, py: Float) {
         if (!isVisible) return
 
-        val prevHoveredIndex = hoveredItemIndex
-        hoveredItemIndex = -1
-        hoveredSubmenuIndex = -1
-
-        // Check submenu first (if visible)
-        if (activeSubmenuIndex >= 0) {
-            val submenuBounds = RectF(submenuX, submenuY, submenuX + submenuWidth, submenuY + submenuHeight)
-            if (submenuBounds.contains(px, py)) {
-                // Cursor is in submenu
-                for (i in submenuRects.indices) {
-                    if (submenuRects[i].contains(px, py)) {
-                        hoveredSubmenuIndex = i
-                        break
-                    }
-                }
-                // Keep parent item highlighted
-                hoveredItemIndex = activeSubmenuIndex
+        hoveredRowIndex = -1
+        isBackHovered = !backRect.isEmpty && backRect.contains(px, py)
+        rowRects.forEachIndexed { index, (rect, _) ->
+            if (rect.contains(px, py)) {
+                hoveredRowIndex = index
                 return
-            }
-        }
-
-        // Check main menu items
-        for (i in itemRects.indices) {
-            if (itemRects[i].contains(px, py)) {
-                hoveredItemIndex = i
-
-                // If hovering a different item with submenu, show its submenu
-                if (items[i].submenu != null) {
-                    if (activeSubmenuIndex != i) {
-                        showSubmenu(i)
-                    }
-                } else {
-                    // Hovering item without submenu, hide any open submenu
-                    if (activeSubmenuIndex >= 0) {
-                        hideSubmenu()
-                    }
-                }
-                return
-            }
-        }
-
-        // Not hovering any main menu item
-        // If cursor moved away from both menu and submenu, hide submenu
-        val menuBounds = RectF(menuX, menuY, menuX + MENU_WIDTH, menuY + menuHeight)
-        if (!menuBounds.contains(px, py) && activeSubmenuIndex >= 0) {
-            val submenuBounds = RectF(submenuX, submenuY, submenuX + submenuWidth, submenuY + submenuHeight)
-            if (!submenuBounds.contains(px, py)) {
-                hideSubmenu()
             }
         }
     }
 
-    /**
-     * Handle tap at the given position.
-     * Returns true if the tap was handled.
-     */
     fun onTap(px: Float, py: Float): Boolean {
         if (!isVisible) return false
 
-        val menuBounds = RectF(menuX, menuY, menuX + MENU_WIDTH, menuY + menuHeight)
-
-        // Check submenu tap first
-        if (activeSubmenuIndex >= 0) {
-            val submenuBounds = RectF(submenuX, submenuY, submenuX + submenuWidth, submenuY + submenuHeight)
-            if (submenuBounds.contains(px, py)) {
-                for (i in submenuRects.indices) {
-                    if (submenuRects[i].contains(px, py)) {
-                        val parentItem = items[activeSubmenuIndex]
-                        val subItem = parentItem.submenu?.getOrNull(i)
-                        if (subItem != null) {
-                            Log.d(TAG, "Submenu item selected: ${subItem.label}")
-                            onSubmenuItemSelected?.invoke(parentItem, subItem)
-                            dismiss()
-                            return true
-                        }
-                    }
-                }
-                return true  // Consume tap on submenu area
-            }
-        }
-
-        // Check if tap is inside main menu
-        if (!menuBounds.contains(px, py)) {
-            // Tap outside both menus - dismiss
+        if (!currentMenuBounds().contains(px, py)) {
             dismiss()
-            return true  // Consume the tap
+            return true
         }
 
-        // Check main menu item taps
-        for (i in itemRects.indices) {
-            if (itemRects[i].contains(px, py)) {
-                val item = items[i]
+        if (!backRect.isEmpty && backRect.contains(px, py)) {
+            navigateBack()
+            return true
+        }
 
-                // If item has submenu, toggle it instead of selecting
-                if (item.submenu != null) {
-                    if (activeSubmenuIndex == i) {
-                        hideSubmenu()
-                    } else {
-                        showSubmenu(i)
-                    }
-                    return true
-                }
+        for ((rect, entry) in rowRects) {
+            if (!rect.contains(px, py)) continue
 
-                Log.d(TAG, "Item selected: ${item.label}")
-                onItemSelected?.invoke(item)
-                dismiss()
-                return true
+            when (entry) {
+                is Entry.Back -> navigateBack()
+                is Entry.Menu -> handleMenuTap(entry.item)
+                is Entry.SubMenu -> handleSubMenuTap(entry.parent, entry.item)
             }
+            return true
         }
 
-        return true  // Consume tap on menu area
+        return true
     }
 
-    /**
-     * Check if a point is within the menu area (including submenu if visible).
-     */
-    fun containsPoint(px: Float, py: Float): Boolean {
+    fun onDoubleTap(px: Float, py: Float): Boolean {
         if (!isVisible) return false
 
-        val menuBounds = RectF(menuX, menuY, menuX + MENU_WIDTH, menuY + menuHeight)
-        if (menuBounds.contains(px, py)) return true
+        for ((rect, entry) in rowRects) {
+            if (!rect.contains(px, py)) continue
 
-        if (activeSubmenuIndex >= 0) {
-            val submenuBounds = RectF(submenuX, submenuY, submenuX + submenuWidth, submenuY + submenuHeight)
-            if (submenuBounds.contains(px, py)) return true
+            if (entry is Entry.SubMenu && isSelectable(entry.item)) {
+                val handled = onSubmenuItemDoubleTapped?.invoke(entry.parent, entry.item) == true
+                if (handled) {
+                    dismiss()
+                } else if (pageStack.size > 1) {
+                    navigateBack()
+                }
+                return true
+            }
+
+            if (pageStack.size > 1) {
+                navigateBack()
+            }
+            return true
+        }
+
+        if (pageStack.size > 1 && currentMenuBounds().contains(px, py)) {
+            navigateBack()
+            return true
+        }
+
+        return currentMenuBounds().contains(px, py)
+    }
+
+    fun onNavigationTap(px: Float, py: Float): Boolean {
+        if (!isVisible) return false
+
+        if (!currentMenuBounds().contains(px, py)) {
+            dismiss()
+            return true
+        }
+
+        if (!backRect.isEmpty && backRect.contains(px, py)) {
+            navigateBack()
+            return true
+        }
+
+        for ((rect, entry) in rowRects) {
+            if (!rect.contains(px, py)) continue
+
+            when (entry) {
+                is Entry.Back -> {
+                    navigateBack()
+                    return true
+                }
+                is Entry.Menu -> {
+                    if (entry.item.submenu == null) return false
+                    handleMenuTap(entry.item)
+                    return true
+                }
+                is Entry.SubMenu -> {
+                    if (entry.item.submenu == null) return false
+                    handleSubMenuTap(entry.parent, entry.item)
+                    return true
+                }
+            }
         }
 
         return false
     }
 
-    /**
-     * Draw the menu.
-     */
+    fun onScroll(dy: Float): Boolean {
+        if (!isVisible) return false
+
+        val page = currentPage() ?: return false
+        val maxOffset = maxScrollOffset(page)
+        if (maxOffset <= 0f) return true
+
+        page.scrollOffset = (page.scrollOffset + dy).coerceIn(0f, maxOffset)
+        rebuildRows()
+        return true
+    }
+
+    fun containsPoint(px: Float, py: Float): Boolean {
+        return isVisible && currentMenuBounds().contains(px, py)
+    }
+
     fun draw(canvas: Canvas) {
         if (!isVisible) return
 
-        // Draw main menu
-        drawMainMenu(canvas)
-
-        // Draw submenu if active
-        if (activeSubmenuIndex >= 0) {
-            drawSubmenu(canvas)
-        }
-    }
-
-    private fun drawMainMenu(canvas: Canvas) {
-        val menuBounds = RectF(menuX, menuY, menuX + MENU_WIDTH, menuY + menuHeight)
-
-        // Shadow effect
+        val bounds = currentMenuBounds()
         val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#40000000")
         }
+
         canvas.drawRoundRect(
-            menuBounds.left + 4f,
-            menuBounds.top + 4f,
-            menuBounds.right + 4f,
-            menuBounds.bottom + 4f,
-            CORNER_RADIUS, CORNER_RADIUS,
+            bounds.left + 4f,
+            bounds.top + 4f,
+            bounds.right + 4f,
+            bounds.bottom + 4f,
+            CORNER_RADIUS,
+            CORNER_RADIUS,
             shadowPaint
         )
+        canvas.drawRoundRect(bounds, CORNER_RADIUS, CORNER_RADIUS, backgroundPaint)
+        canvas.drawRoundRect(bounds, CORNER_RADIUS, CORNER_RADIUS, borderPaint)
 
-        // Background
-        canvas.drawRoundRect(menuBounds, CORNER_RADIUS, CORNER_RADIUS, backgroundPaint)
-        canvas.drawRoundRect(menuBounds, CORNER_RADIUS, CORNER_RADIUS, borderPaint)
+        drawHeader(canvas, bounds)
+        drawPinnedBackRow(canvas)
+        drawRows(canvas)
+        drawScrollbar(canvas, bounds)
+    }
 
-        // Items
-        for (i in items.indices) {
-            val rect = itemRects[i]
-            val item = items[i]
+    private fun handleMenuTap(item: MenuItem) {
+        if (item.submenu != null) {
+            openMenuPage(item)
+            return
+        }
 
-            // Item background
-            val itemBgPaint = if (i == hoveredItemIndex) hoverPaint else itemPaint
+        onItemSelected?.invoke(item)
+        dismiss()
+    }
+
+    private fun handleSubMenuTap(parent: MenuItem, item: SubMenuItem) {
+        if (item.submenu != null) {
+            openSubMenuPage(parent, item)
+            return
+        }
+
+        if (!isSelectable(item)) return
+
+        when (item.id) {
+            "create_textbox", "create_browser", "open_file" -> {
+                onItemSelected?.invoke(MenuItem(item.id, item.label))
+            }
+            else -> {
+                onSubmenuItemSelected?.invoke(parent, item)
+            }
+        }
+        dismiss()
+    }
+
+    private fun openMenuPage(item: MenuItem) {
+        val freshItems = onSubmenuWillShow?.invoke(item) ?: item.submenu ?: emptyList()
+        val refreshedItem = item.copy(submenu = freshItems)
+        replaceRootItem(refreshedItem)
+        pageStack.add(
+            Page(
+                title = item.label,
+                parentMenuItem = refreshedItem,
+                entries = freshItems.map { Entry.SubMenu(it, refreshedItem) }
+            )
+        )
+        hoveredRowIndex = -1
+        recalculateLayout(menuX, menuY)
+    }
+
+    private fun openSubMenuPage(parent: MenuItem, item: SubMenuItem) {
+        val nestedItems = item.submenu ?: emptyList()
+        pageStack.add(
+            Page(
+                title = item.label,
+                parentMenuItem = parent,
+                entries = nestedItems.map { Entry.SubMenu(it, parent) }
+            )
+        )
+        hoveredRowIndex = -1
+        recalculateLayout(menuX, menuY)
+    }
+
+    private fun navigateBack() {
+        if (pageStack.size > 1) {
+            pageStack.removeAt(pageStack.lastIndex)
+            hoveredRowIndex = -1
+            isBackHovered = false
+            recalculateLayout(menuX, menuY)
+        } else {
+            dismiss()
+        }
+    }
+
+    private fun replaceRootItem(updated: MenuItem) {
+        val index = items.indexOfFirst { it.id == updated.id }
+        if (index >= 0) {
+            items[index] = updated
+        }
+        pageStack.firstOrNull()?.let { root ->
+            val newEntries = items.map { Entry.Menu(it) }
+            pageStack[0] = root.copy(entries = newEntries)
+        }
+    }
+
+    private fun recalculateLayout(anchorX: Float, anchorY: Float) {
+        val page = currentPage() ?: return
+        visibleRows = min(MAX_VISIBLE_ROWS, max(1, page.entries.size))
+        menuHeight = HEADER_HEIGHT + PADDING * 2 + backRowHeight() + visibleRows * ITEM_HEIGHT
+        menuX = anchorX.coerceIn(0f, (screenWidth - MENU_WIDTH).coerceAtLeast(0f))
+        menuY = anchorY.coerceIn(0f, (screenHeight - menuHeight).coerceAtLeast(0f))
+        layoutBackRow()
+        contentTop = menuY + HEADER_HEIGHT + PADDING + backRowHeight()
+        page.scrollOffset = page.scrollOffset.coerceIn(0f, maxScrollOffset(page))
+        rebuildRows()
+    }
+
+    private fun rebuildRows() {
+        val page = currentPage() ?: return
+        rowRects.clear()
+
+        val firstIndex = (page.scrollOffset / ITEM_HEIGHT).toInt().coerceAtLeast(0)
+        val offsetInRow = page.scrollOffset - firstIndex * ITEM_HEIGHT
+        var y = contentTop - offsetInRow
+        var index = firstIndex
+        val bottom = contentTop + visibleRows * ITEM_HEIGHT
+
+        while (index < page.entries.size && y < bottom) {
+            val rowTop = max(y, contentTop)
+            val rowBottom = min(y + ITEM_HEIGHT - 4f, bottom - 4f)
+            if (rowBottom > rowTop) {
+                rowRects.add(
+                    RectF(
+                        menuX + PADDING,
+                        rowTop,
+                        menuX + MENU_WIDTH - PADDING,
+                        rowBottom
+                    ) to page.entries[index]
+                )
+            }
+            y += ITEM_HEIGHT
+            index++
+        }
+    }
+
+    private fun drawHeader(canvas: Canvas, bounds: RectF) {
+        val headerBounds = RectF(bounds.left, bounds.top, bounds.right, bounds.top + HEADER_HEIGHT)
+        canvas.drawRoundRect(headerBounds, CORNER_RADIUS, CORNER_RADIUS, headerPaint)
+
+        val page = currentPage() ?: return
+        val labelX = bounds.left + PADDING + 4f
+        val labelY = headerBounds.centerY() - (headerTextPaint.descent() + headerTextPaint.ascent()) / 2f
+        canvas.drawText(page.title, labelX, labelY, headerTextPaint)
+    }
+
+    private fun drawRows(canvas: Canvas) {
+        rowRects.forEachIndexed { index, (rect, entry) ->
+            val itemBgPaint = if (index == hoveredRowIndex) hoverPaint else itemPaint
             canvas.drawRoundRect(rect, 6f, 6f, itemBgPaint)
 
-            // Icon
-            val iconX = rect.left + 12f
-            val iconY = rect.centerY() + iconPaint.textSize / 3f
-            if (item.icon != null) {
-                canvas.drawText(item.icon, iconX, iconY, iconPaint)
-            }
-
-            // Label
-            val labelX = rect.left + (if (item.icon != null) 48f else 12f)
-            val labelY = rect.centerY() - (textPaint.descent() + textPaint.ascent()) / 2f
-            canvas.drawText(item.label, labelX, labelY, textPaint)
-
-            // Arrow indicator for items with submenu
-            if (item.submenu != null) {
-                val arrowX = rect.right - 20f
-                val arrowY = rect.centerY() - (arrowPaint.descent() + arrowPaint.ascent()) / 2f
-                canvas.drawText("▶", arrowX, arrowY, arrowPaint)
+            when (entry) {
+                is Entry.Back -> drawBackRow(canvas, rect, entry)
+                is Entry.Menu -> drawMenuRow(canvas, rect, entry.item)
+                is Entry.SubMenu -> drawSubMenuRow(canvas, rect, entry.item)
             }
         }
     }
 
-    private fun drawSubmenu(canvas: Canvas) {
-        if (activeSubmenuIndex < 0) return
+    private fun drawPinnedBackRow(canvas: Canvas) {
+        if (backRect.isEmpty) return
 
-        val parentItem = items[activeSubmenuIndex]
-        val submenuItems = parentItem.submenu ?: return
+        val itemBgPaint = if (isBackHovered) hoverPaint else itemPaint
+        canvas.drawRoundRect(backRect, 6f, 6f, itemBgPaint)
+        drawBackRow(canvas, backRect, Entry.Back())
+    }
 
-        val submenuBounds = RectF(submenuX, submenuY, submenuX + submenuWidth, submenuY + submenuHeight)
+    private fun drawBackRow(canvas: Canvas, rect: RectF, entry: Entry.Back) {
+        val labelY = rect.centerY() - (textPaint.descent() + textPaint.ascent()) / 2f
+        canvas.drawText("<", rect.left + 12f, labelY, arrowPaint)
+        canvas.drawText(entry.label, rect.left + 42f, labelY, textPaint)
+    }
 
-        // Shadow effect
-        val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#40000000")
+    private fun drawMenuRow(canvas: Canvas, rect: RectF, item: MenuItem) {
+        val labelPaint = textPaint
+        val labelY = rect.centerY() - (labelPaint.descent() + labelPaint.ascent()) / 2f
+        val labelX = if (item.icon != null) {
+            canvas.drawText(item.icon, rect.left + 12f, rect.centerY() + iconPaint.textSize / 3f, iconPaint)
+            rect.left + 48f
+        } else {
+            rect.left + 12f
         }
-        canvas.drawRoundRect(
-            submenuBounds.left + 4f,
-            submenuBounds.top + 4f,
-            submenuBounds.right + 4f,
-            submenuBounds.bottom + 4f,
-            CORNER_RADIUS, CORNER_RADIUS,
-            shadowPaint
-        )
 
-        // Background
-        canvas.drawRoundRect(submenuBounds, CORNER_RADIUS, CORNER_RADIUS, backgroundPaint)
-        canvas.drawRoundRect(submenuBounds, CORNER_RADIUS, CORNER_RADIUS, borderPaint)
+        drawTextClipped(canvas, item.label, labelX, labelY, rect.right - 34f, labelPaint)
 
-        // Items
-        for (i in submenuItems.indices) {
-            if (i >= submenuRects.size) break
+        if (item.submenu != null) {
+            val arrowY = rect.centerY() - (arrowPaint.descent() + arrowPaint.ascent()) / 2f
+            canvas.drawText(">", rect.right - 20f, arrowY, arrowPaint)
+        }
+    }
 
-            val rect = submenuRects[i]
-            val subItem = submenuItems[i]
+    private fun drawSubMenuRow(canvas: Canvas, rect: RectF, item: SubMenuItem) {
+        val selectable = isSelectable(item)
+        val labelPaint = when {
+            !selectable -> disabledTextPaint
+            item.id.startsWith("toggle_") && item.isEnabled -> activeTextPaint
+            else -> inactiveTextPaint
+        }
+        val labelX = rect.left + 12f
+        val labelY = rect.centerY() - (labelPaint.descent() + labelPaint.ascent()) / 2f
+        drawTextClipped(canvas, item.label, labelX, labelY, rect.right - 34f, labelPaint)
 
-            // Item background
-            val itemBgPaint = if (i == hoveredSubmenuIndex) hoverPaint else itemPaint
-            canvas.drawRoundRect(rect, 6f, 6f, itemBgPaint)
-
-            // Label with color based on enabled state (widget presence)
-            val labelPaint = if (subItem.isEnabled) enabledTextPaint else disabledTextPaint
-            val labelX = rect.left + 12f
-            val labelY = rect.centerY() - (labelPaint.descent() + labelPaint.ascent()) / 2f
-            canvas.drawText(subItem.label, labelX, labelY, labelPaint)
-
-            // Optional: draw a small indicator for enabled items
-            if (subItem.isEnabled) {
-                val indicatorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = Color.parseColor("#6699FF")
-                }
-                canvas.drawCircle(rect.right - 16f, rect.centerY(), 4f, indicatorPaint)
+        if (item.submenu != null) {
+            val arrowY = rect.centerY() - (arrowPaint.descent() + arrowPaint.ascent()) / 2f
+            canvas.drawText(">", rect.right - 20f, arrowY, arrowPaint)
+        } else if (selectable && item.isEnabled && item.id.startsWith("toggle_")) {
+            val indicatorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#6699FF")
             }
+            canvas.drawCircle(rect.right - 16f, rect.centerY(), 4f, indicatorPaint)
         }
+    }
+
+    private fun drawScrollbar(canvas: Canvas, bounds: RectF) {
+        val page = currentPage() ?: return
+        val maxOffset = maxScrollOffset(page)
+        if (maxOffset <= 0f) return
+
+        val trackTop = contentTop
+        val trackBottom = contentTop + visibleRows * ITEM_HEIGHT - 4f
+        val trackLeft = bounds.right - PADDING + 3f
+        val trackRight = trackLeft + SCROLLBAR_WIDTH
+        val track = RectF(trackLeft, trackTop, trackRight, trackBottom)
+        canvas.drawRoundRect(track, 3f, 3f, scrollbarTrackPaint)
+
+        val contentHeight = page.entries.size * ITEM_HEIGHT
+        val viewportHeight = visibleRows * ITEM_HEIGHT
+        val thumbHeight = (viewportHeight / contentHeight * track.height()).coerceAtLeast(28f)
+        val thumbTop = track.top + (page.scrollOffset / maxOffset) * (track.height() - thumbHeight)
+        val thumb = RectF(track.left, thumbTop, track.right, thumbTop + thumbHeight)
+        canvas.drawRoundRect(thumb, 3f, 3f, scrollbarThumbPaint)
+    }
+
+    private fun drawTextClipped(canvas: Canvas, label: String, x: Float, y: Float, maxRight: Float, paint: Paint) {
+        val available = (maxRight - x).coerceAtLeast(0f)
+        val measured = paint.measureText(label)
+        if (measured <= available) {
+            canvas.drawText(label, x, y, paint)
+            return
+        }
+
+        val ellipsis = "..."
+        val ellipsisWidth = paint.measureText(ellipsis)
+        var end = label.length
+        while (end > 0 && paint.measureText(label, 0, end) + ellipsisWidth > available) {
+            end--
+        }
+        canvas.drawText(label.substring(0, end) + ellipsis, x, y, paint)
+    }
+
+    private fun currentPage(): Page? = pageStack.lastOrNull()
+
+    private fun currentMenuBounds(): RectF {
+        return RectF(menuX, menuY, menuX + MENU_WIDTH, menuY + menuHeight)
+    }
+
+    private fun backRowHeight(): Float {
+        return if (pageStack.size > 1) ITEM_HEIGHT else 0f
+    }
+
+    private fun layoutBackRow() {
+        if (pageStack.size <= 1) {
+            backRect.setEmpty()
+            return
+        }
+
+        val top = menuY + HEADER_HEIGHT + PADDING
+        backRect.set(
+            menuX + PADDING,
+            top,
+            menuX + MENU_WIDTH - PADDING,
+            top + ITEM_HEIGHT - 4f
+        )
+    }
+
+    private fun maxScrollOffset(page: Page): Float {
+        val contentHeight = page.entries.size * ITEM_HEIGHT
+        val viewportHeight = visibleRows * ITEM_HEIGHT
+        return (contentHeight - viewportHeight).coerceAtLeast(0f)
+    }
+
+    private fun isSelectable(item: SubMenuItem): Boolean {
+        return item.isEnabled || item.id.startsWith("toggle_")
     }
 }

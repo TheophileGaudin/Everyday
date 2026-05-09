@@ -16,6 +16,7 @@ object FileLogger {
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
     private var isInitialized = false
     private var isLoggingEnabled = false
+    private const val MAX_LOG_BYTES = 512 * 1024
 
     /**
      * Initialize the file logger. Must be called before using fileLog().
@@ -33,8 +34,9 @@ object FileLogger {
             val logDir = context.getExternalFilesDir(null)
             logFile = File(logDir, "app_debug.log")
 
-            // Clear the file on initialization
-            logFile?.writeText("")
+            if ((logFile?.length() ?: 0L) > MAX_LOG_BYTES) {
+                logFile?.writeText("")
+            }
 
             isInitialized = true
             fileLog("=== Log file initialized ===")

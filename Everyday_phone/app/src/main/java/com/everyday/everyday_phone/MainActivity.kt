@@ -6,17 +6,13 @@ import android.app.Activity
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.location.Geocoder
-import android.location.Location
-import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.provider.Settings
 import android.view.MotionEvent
 import android.view.View
@@ -30,11 +26,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import java.util.Locale
-import org.json.JSONObject
+import com.everyday.shared.sync.SubtitleControl
+import com.everyday.shared.sync.SubtitleControlAction
+import com.everyday.shared.sync.SubtitleOptions
 import java.io.ByteArrayOutputStream
-import java.net.URL
-import java.net.URLEncoder
 
 /**
  * Phone app with trackpad for cursor control on glasses.
@@ -44,20 +39,25 @@ import java.net.URLEncoder
 class MainActivity : AppCompatActivity() {
     
     companion object {
-        //note: this API key can run out if overused.
-        private const val GEOCODE_MAPS_CO_API_KEY = "6974a768992ec642181119eby0e50e7"
-
         private const val TAG = "Everyday_phone"
         private const val REQUEST_PERMISSIONS = 1
         private const val REQUEST_BACKGROUND_LOCATION = 2
         private const val ACTION_START_MIRROR = "com.everyday.everyday_phone.START_MIRROR"
+        private const val ACTION_DEBUG_START_SUBTITLE = "com.everyday.everyday_phone.DEBUG_START_SUBTITLE"
+        private const val ACTION_DEBUG_STOP_SUBTITLE = "com.everyday.everyday_phone.DEBUG_STOP_SUBTITLE"
         private const val REQUEST_CHANNEL_ID = "mirror_request_channel"
         private const val REQUEST_NOTIFICATION_ID = 2002
 
         private const val REQUEST_WIFI_DIRECT_PERMISSIONS = 2001
         private const val REQUEST_IMAGE_PICKER = 2002
         private const val REQUEST_IMAGE_PERMISSION = 2003
-        private const val GOOGLE_CALENDAR_REFRESH_INTERVAL_MS = 3 * 60 * 1000L
+        private const val REQUEST_SUBTITLE_AUDIO_PERMISSION = 2004
+    }
+
+    private enum class ProjectionPurpose {
+        NONE,
+        MIRROR,
+        SUBTITLE
     }
     
     private lateinit var statusText: TextView
@@ -74,18 +74,16 @@ class MainActivity : AppCompatActivity() {
     private var mirrorButton: Button? = null
     private var imagePickerButton: Button? = null
     private lateinit var phoneGoogleAuthManager: PhoneGoogleAuthManager
+    private lateinit var dataSyncCoordinator: PhoneDataSyncCoordinator
     
     private var rfcommServer: RfcommServer? = null
+    private lateinit var transportManager: TransportManager
     private var screenStreamServer: ScreenStreamServer? = null
+    private var phoneSubtitleCoordinator: PhoneSubtitleCoordinator? = null
     private var isKeyboardShown = false
     private var isMirroringEnabled = false
     private var isGlassesConnected = false
     private var glassesBatteryPercent: Int? = null
-
-    // Location & Weather
-    private var locationManager: LocationManager? = null
-    private var lastLocation: Location? = null
-
 
     // Clipboard monitoring
     private var clipboardManager: ClipboardManager? = null
@@ -95,11 +93,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var wifiDirectManager: WifiDirectManager? = null
-    private var useWifiDirectFallback = false
+    private var pendingProjectionPurpose = ProjectionPurpose.NONE
 
     private lateinit var googleAuthorizationLauncher: androidx.activity.result.ActivityResultLauncher<IntentSenderRequest>
-    private val mainHandler = Handler(Looper.getMainLooper())
-    private var googleCalendarRefreshRunnable: Runnable? = null
 
 
     
@@ -124,6 +120,7 @@ class MainActivity : AppCompatActivity() {
         }
         
         // Global crash handler to see what's happening
+        val previousCrashHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             fileLog("UNCAUGHT EXCEPTION in $thread: ${throwable.message}\n${throwable.stackTraceToString()}")
             // Try to show in UI (may not work if UI thread crashed)
@@ -136,12 +133,15 @@ class MainActivity : AppCompatActivity() {
                     ).show()
                 }
             } catch (e: Exception) {}
+            previousCrashHandler?.uncaughtException(thread, throwable)
+                ?: run {
+                    android.os.Process.killProcess(android.os.Process.myPid())
+                    kotlin.system.exitProcess(10)
+                }
         }
         
         setContentView(R.layout.activity_main)
         
-        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-
         statusText = findViewById(R.id.statusText)
         glassesIcon = findViewById(R.id.glassesIcon)
         // coordsText commented out in layout for minimalist design
@@ -158,6 +158,21 @@ class MainActivity : AppCompatActivity() {
         closeButton.setOnClickListener {
             finish()
         }
+
+        transportManager = TransportManager(
+            rfcommServerProvider = { rfcommServer },
+            screenStreamServerProvider = { screenStreamServer },
+            wifiDirectManagerProvider = { wifiDirectManager },
+            log = ::fileLog
+        )
+
+        dataSyncCoordinator = PhoneDataSyncCoordinator(
+            context = this,
+            syncMessengerProvider = { transportManager },
+            googleAuthStateSender = { state -> transportManager.sendGoogleAuthState(state) },
+            googleAuthManager = phoneGoogleAuthManager,
+            hasLocationPermission = { hasLocationPermission() }
+        )
         
         rfcommServer = RfcommServer(this).apply {
             onStatusChanged = { status ->
@@ -172,16 +187,11 @@ class MainActivity : AppCompatActivity() {
                     if (!connected) {
                         glassesBatteryPercent = null
                         lastSentClipboard = null  // Reset on disconnect
-                        stopLocationWeatherService()
                     } else {
-                        startLocationWeatherService(forceRefresh = true)
-                        // When connected, try to send location update
-                        updateLocationAndWeather()
                         // Also send current clipboard so glasses have it
                         sendCurrentClipboardToGlasses()
-                        sendCachedPayloadsToGlasses(pushGoogleState = true)
                     }
-                    updateGoogleCalendarRefreshSchedule()
+                    dataSyncCoordinator.onConnectionChanged(connected)
                     updateStatusDisplay()
                     trackpad.alpha = if (connected) 1.0f else 0.5f
                     updateMirrorButton()
@@ -193,6 +203,7 @@ class MainActivity : AppCompatActivity() {
                         if (isMirroringEnabled) {
                             stopMirroring()
                         }
+                        phoneSubtitleCoordinator?.stop()
                     }
                 }
             }
@@ -235,21 +246,21 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            onGoogleCalendarSnapshotRequested = {
-                runOnUiThread {
-                    syncGoogleSnapshotToGlasses(pushCachedFirst = true)
-                }
-            }
-
             onGoogleDisconnectRequested = {
                 runOnUiThread {
                     disconnectPhoneGoogleAuthorization()
                 }
             }
 
-            onPayloadSyncRequested = {
+            onSyncRequested = { request ->
                 runOnUiThread {
-                    sendCachedPayloadsToGlasses(pushGoogleState = true)
+                    dataSyncCoordinator.onSyncRequest(request)
+                }
+            }
+
+            onSubtitleControlRequested = { control ->
+                runOnUiThread {
+                    phoneSubtitleCoordinator?.onControl(control)
                 }
             }
         }
@@ -285,6 +296,20 @@ class MainActivity : AppCompatActivity() {
                 // Orientation button removed - no action needed
             }
         }
+
+        phoneSubtitleCoordinator = PhoneSubtitleCoordinator(
+            context = this,
+            serverProvider = { rfcommServer },
+            projectionProvider = { screenStreamServer?.getMediaProjection() },
+            requestProjectionPermission = { requestSubtitleProjectionPermission() },
+            requestAudioPermission = { requestSubtitleAudioPermission() },
+            onCaptureStopped = {
+                if (!isMirroringEnabled) {
+                    screenStreamServer?.releaseProjection()
+                    ScreenCaptureService.stop(this)
+                }
+            }
+        )
         
         setupTrackpad()
         setupKeyboard()
@@ -295,7 +320,6 @@ class MainActivity : AppCompatActivity() {
         if (hasPermissions()) {
             fileLog("Has permissions, starting services")
             rfcommServer?.start()
-            checkLocationPermission()
             // Request background location for Android 10+ (must be after foreground location is granted)
             requestBackgroundLocationIfNeeded()
         } else {
@@ -334,15 +358,14 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this@MainActivity, "WiFi Direct ready: $ownerIp", Toast.LENGTH_SHORT).show()
                 }
 
-                // If we were waiting for WiFi Direct to start mirroring, now request permission
-                if (useWifiDirectFallback && !isMirroringEnabled) {
-                    runOnUiThread {
-                        screenStreamServer?.requestPermission(this@MainActivity)
+                when (transportManager.onWifiDirectGroupFormed(ownerIp, isMirroringEnabled)) {
+                    TransportManager.MirrorStartAction.REQUEST_PROJECTION -> {
+                        runOnUiThread {
+                            pendingProjectionPurpose = ProjectionPurpose.MIRROR
+                            screenStreamServer?.requestPermission(this@MainActivity)
+                        }
                     }
-                }
-                // If already mirroring (e.g., reconnect), send the new IP
-                else if (useWifiDirectFallback && screenStreamServer?.isRunning() == true) {
-                    rfcommServer?.sendMirrorControl(true, ownerIp, isWifiDirect = true)
+                    else -> Unit
                 }
             }
 
@@ -354,7 +377,7 @@ class MainActivity : AppCompatActivity() {
                 fileLog("WiFi Direct error: $error")
                 runOnUiThread {
                     Toast.makeText(this@MainActivity, "WiFi Direct: $error", Toast.LENGTH_SHORT).show()
-                    useWifiDirectFallback = false
+                    transportManager.onWifiDirectError()
                 }
             }
 
@@ -371,7 +394,36 @@ class MainActivity : AppCompatActivity() {
         handleIntent(intent)
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (::dataSyncCoordinator.isInitialized) {
+            dataSyncCoordinator.onForeground()
+        }
+    }
+
     private fun handleIntent(intent: Intent?) {
+        val isDebuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        if (isDebuggable && intent?.action == ACTION_DEBUG_START_SUBTITLE) {
+            fileLog("Received debug start subtitle intent")
+            phoneSubtitleCoordinator?.onControl(
+                SubtitleControl(
+                    action = SubtitleControlAction.START,
+                    options = SubtitleOptions()
+                )
+            )
+            return
+        }
+        if (isDebuggable && intent?.action == ACTION_DEBUG_STOP_SUBTITLE) {
+            fileLog("Received debug stop subtitle intent")
+            phoneSubtitleCoordinator?.onControl(
+                SubtitleControl(
+                    action = SubtitleControlAction.STOP,
+                    options = SubtitleOptions()
+                )
+            )
+            return
+        }
+
         if (intent?.action == ACTION_START_MIRROR) {
             fileLog("Received start mirror intent")
             // Cancel notification
@@ -388,8 +440,7 @@ class MainActivity : AppCompatActivity() {
             activity = this,
             launcher = googleAuthorizationLauncher,
             onStateChanged = { state ->
-                pushGoogleStateToGlasses(state)
-                updateGoogleCalendarRefreshSchedule()
+                dataSyncCoordinator.onGoogleAuthStateChanged(state)
                 val message = when (state.status) {
                     PhoneGoogleAuthState.Status.AUTHORIZING -> "Authorizing Google..."
                     PhoneGoogleAuthState.Status.AUTHORIZED -> "Google Calendar connected"
@@ -399,125 +450,38 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
             },
             onSnapshotChanged = { snapshot ->
-                if (snapshot != null) {
-                    rfcommServer?.sendGoogleCalendarSnapshot(snapshot)
-                }
+                dataSyncCoordinator.onCalendarSnapshotChanged(snapshot)
             }
         )
-    }
-
-    private fun sendCachedPayloadsToGlasses(pushGoogleState: Boolean) {
-        if (!isGlassesConnected) return
-
-        val googleState = phoneGoogleAuthManager.loadState()
-        if (pushGoogleState) {
-            pushGoogleStateToGlasses(googleState)
-        }
-
-        LocationWeatherService.instance?.pushCachedPayloadToGlasses()
-
-        val cachedSnapshot = phoneGoogleAuthManager.loadCachedSnapshot()
-        cachedSnapshot?.let { snapshot ->
-            rfcommServer?.sendGoogleCalendarSnapshot(snapshot)
-        }
-
-        if (googleState.status == PhoneGoogleAuthState.Status.AUTHORIZED && shouldRefreshGoogleSnapshot(cachedSnapshot)) {
-            syncGoogleSnapshotToGlasses(
-                pushCachedFirst = false,
-                pushFreshToGlasses = true
-            )
-        }
-    }
-
-    private fun syncGoogleSnapshotToGlasses(
-        pushCachedFirst: Boolean,
-        pushFreshToGlasses: Boolean = true
-    ) {
-        val state = phoneGoogleAuthManager.loadState()
-        if (pushCachedFirst) {
-            pushGoogleStateToGlasses(state)
-        }
-
-        if (pushCachedFirst) {
-            phoneGoogleAuthManager.loadCachedSnapshot()?.let { snapshot ->
-                rfcommServer?.sendGoogleCalendarSnapshot(snapshot)
-            }
-        }
-
-        if (!isGlassesConnected || state.status != PhoneGoogleAuthState.Status.AUTHORIZED) {
-            return
-        }
-
-        phoneGoogleAuthManager.refreshSnapshotSilently { result ->
-            result.onSuccess { snapshot ->
-                if (pushFreshToGlasses && isGlassesConnected) {
-                    rfcommServer?.sendGoogleCalendarSnapshot(snapshot)
-                }
-            }.onFailure { error ->
-                if (error.message != "Google Calendar refresh already in progress") {
-                    fileLog("Google auth: background snapshot refresh failed: ${error::class.java.simpleName}: ${error.message}")
-                }
-            }
-        }
-    }
-
-    private fun updateGoogleCalendarRefreshSchedule() {
-        googleCalendarRefreshRunnable?.let { mainHandler.removeCallbacks(it) }
-
-        val shouldRefresh = isGlassesConnected &&
-            phoneGoogleAuthManager.loadState().status == PhoneGoogleAuthState.Status.AUTHORIZED
-
-        if (!shouldRefresh) return
-
-        val runnable = object : Runnable {
-            override fun run() {
-                syncGoogleSnapshotToGlasses(
-                    pushCachedFirst = false,
-                    pushFreshToGlasses = true
-                )
-                mainHandler.postDelayed(this, GOOGLE_CALENDAR_REFRESH_INTERVAL_MS)
-            }
-        }
-        googleCalendarRefreshRunnable = runnable
-        mainHandler.postDelayed(runnable, GOOGLE_CALENDAR_REFRESH_INTERVAL_MS)
-    }
-
-    private fun shouldRefreshGoogleSnapshot(snapshot: PhoneGoogleCalendarSnapshot?): Boolean {
-        if (snapshot == null) return true
-        val staleAfterMs = snapshot.staleAfterMs.takeIf { it > 0L } ?: return false
-        return System.currentTimeMillis() > snapshot.fetchedAtMs + staleAfterMs
     }
 
     private fun disconnectPhoneGoogleAuthorization() {
         phoneGoogleAuthManager.revokeAccess(
             activity = this,
             onStateChanged = { state ->
-                pushGoogleStateToGlasses(state)
-                updateGoogleCalendarRefreshSchedule()
+                dataSyncCoordinator.onGoogleAuthStateChanged(state)
                 Toast.makeText(this, "Google disconnected", Toast.LENGTH_SHORT).show()
             },
-            onComplete = {}
-        )
-    }
-
-    private fun pushGoogleStateToGlasses(state: PhoneGoogleAuthState) {
-        rfcommServer?.sendGoogleAuthState(
-            status = state.status,
-            account = state.account,
-            detail = state.detail
+            onComplete = {
+                dataSyncCoordinator.onGoogleDisconnected()
+            }
         )
     }
     
     override fun onDestroy() {
         super.onDestroy()
-        googleCalendarRefreshRunnable?.let { mainHandler.removeCallbacks(it) }
+        fileLog("MainActivity onDestroy isFinishing=$isFinishing isChangingConfigurations=$isChangingConfigurations")
 
         // Remove clipboard listener
         clipboardManager?.removePrimaryClipChangedListener(clipboardListener)
 
         rfcommServer?.stop()
+        phoneSubtitleCoordinator?.release()
         screenStreamServer?.release()
         wifiDirectManager?.release()
+        if (::dataSyncCoordinator.isInitialized) {
+            dataSyncCoordinator.release()
+        }
 
         // Stop foreground services if running
         ScreenCaptureService.stop(this)
@@ -531,31 +495,55 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == ScreenStreamServer.REQUEST_MEDIA_PROJECTION) {
             try {
                 fileLog("MediaProjection result: resultCode=$resultCode, data=$data")
+                val purpose = pendingProjectionPurpose
+                pendingProjectionPurpose = ProjectionPurpose.NONE
 
                 if (resultCode == Activity.RESULT_OK && data != null) {
-                    // Start foreground service FIRST (required on Android 14+)
                     fileLog("Starting foreground service...")
-                    ScreenCaptureService.start(this)
+                    val needsAudioCapture = purpose == ProjectionPurpose.SUBTITLE
+                    if (!ScreenCaptureService.start(this, includeAudioCapture = needsAudioCapture)) {
+                        fileLog("Failed to start foreground service for MediaProjection")
+                        isMirroringEnabled = false
+                        updateMirrorButton()
+                        if (purpose == ProjectionPurpose.SUBTITLE) {
+                            phoneSubtitleCoordinator?.onProjectionPermissionResult(false)
+                        }
+                        screenStreamServer?.releaseProjection()
+                        return
+                    }
 
-                    // Small delay to ensure service is running before getting MediaProjection
+                    // Android requires the typed foreground service to exist before
+                    // getMediaProjection(), and stale/null service restarts are ignored
+                    // inside ScreenCaptureService.
                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                         try {
                             fileLog("Getting MediaProjection...")
                             if (screenStreamServer?.onPermissionResult(resultCode, data) == true) {
-                                // Permission granted, start streaming
-                                fileLog("MediaProjection obtained, starting mirroring...")
-                                startMirroringAfterPermission()
+                                fileLog("MediaProjection obtained")
+                                if (purpose == ProjectionPurpose.SUBTITLE) {
+                                    fileLog("Starting subtitles...")
+                                    phoneSubtitleCoordinator?.onProjectionPermissionResult(true)
+                                    phoneSubtitleCoordinator?.onMediaProjectionReady()
+                                } else {
+                                    fileLog("Starting mirroring...")
+                                    startMirroringAfterPermission()
+                                }
                             } else {
-                                // Failed to create MediaProjection
                                 fileLog("Failed to get MediaProjection")
                                 isMirroringEnabled = false
                                 updateMirrorButton()
+                                if (purpose == ProjectionPurpose.SUBTITLE) {
+                                    phoneSubtitleCoordinator?.onProjectionPermissionResult(false)
+                                }
                                 ScreenCaptureService.stop(this)
-                                // DEBUG: coordsText.text = "Error: Failed to get projection"
                             }
                         } catch (e: Exception) {
-                            fileLog("Error in delayed handler: ${e.message}\n${e.stackTraceToString()}")
-                            // DEBUG: coordsText.text = "Error: ${e.message}"
+                            fileLog("Error preparing MediaProjection: ${e.message}\n${e.stackTraceToString()}")
+                            isMirroringEnabled = false
+                            updateMirrorButton()
+                            if (purpose == ProjectionPurpose.SUBTITLE) {
+                                phoneSubtitleCoordinator?.onProjectionPermissionResult(false)
+                            }
                             ScreenCaptureService.stop(this)
                         }
                     }, 200)
@@ -564,6 +552,12 @@ class MainActivity : AppCompatActivity() {
                     fileLog("Permission denied by user")
                     isMirroringEnabled = false
                     updateMirrorButton()
+                    if (purpose == ProjectionPurpose.SUBTITLE) {
+                        phoneSubtitleCoordinator?.onProjectionPermissionResult(false)
+                        if (!isMirroringEnabled) {
+                            ScreenCaptureService.stop(this)
+                        }
+                    }
                     // DEBUG: coordsText.text = "Permission denied"
                 }
             } catch (e: Exception) {
@@ -844,29 +838,17 @@ class MainActivity : AppCompatActivity() {
     private fun startMirroring() {
         fileLog("Starting mirroring...")
 
-        // Check for best available connection (regular WiFi or WiFi Direct)
-        val bestIp = screenStreamServer?.getBestStreamingIp()
-
-        when {
-            bestIp != null -> {
-                // We have an IP (either regular WiFi or WiFi Direct already active)
-                fileLog("Starting mirror with ${bestIp.second}: ${bestIp.first}")
-                useWifiDirectFallback = (bestIp.second == ScreenStreamServer.ConnectionMode.WIFI_DIRECT)
-                // Request screen capture permission (will call startMirroringAfterPermission on success)
+        when (transportManager.prepareMirrorStart()) {
+            TransportManager.MirrorStartAction.REQUEST_PROJECTION -> {
+                pendingProjectionPurpose = ProjectionPurpose.MIRROR
                 screenStreamServer?.requestPermission(this)
             }
 
-            wifiDirectManager?.isWifiDirectEnabled == true -> {
-                // No IP yet, but WiFi Direct is available - create a group first
-                fileLog("No network IP, creating WiFi Direct group...")
-                useWifiDirectFallback = true
+            TransportManager.MirrorStartAction.WAIT_FOR_WIFI_DIRECT -> {
                 Toast.makeText(this, "Creating WiFi Direct connection...", Toast.LENGTH_SHORT).show()
-                wifiDirectManager?.createGroup()
-                // The onGroupFormed callback will trigger permission request
             }
 
-            else -> {
-                fileLog("No WiFi or WiFi Direct available")
+            TransportManager.MirrorStartAction.NO_NETWORK -> {
                 Toast.makeText(this, "Please enable WiFi for screen mirroring", Toast.LENGTH_LONG).show()
             }
         }
@@ -925,23 +907,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startMirroringAfterPermission() {
-        val bestIp = screenStreamServer?.getBestStreamingIp()
-        if (bestIp == null) {
+        val metrics = resources.displayMetrics
+        if (!transportManager.startMirrorAfterPermission(metrics)) {
             ScreenCaptureService.stop(this)
             return
         }
 
         isMirroringEnabled = true
         updateMirrorButton()
-
-        val metrics = resources.displayMetrics
-        screenStreamServer?.start(metrics)
-
-        // Explicitly pass whether this is WiFi Direct
-        val isWifiDirect = (bestIp.second == ScreenStreamServer.ConnectionMode.WIFI_DIRECT)
-        rfcommServer?.sendMirrorControl(true, bestIp.first, isWifiDirect)
-
-        fileLog("Mirror started, IP: ${bestIp.first}, WiFi Direct: $isWifiDirect")
     }
     
     private fun stopMirroring() {
@@ -950,14 +923,13 @@ class MainActivity : AppCompatActivity() {
         isMirroringEnabled = false
         updateMirrorButton()
 
-        // Tell glasses to stop receiving
-        rfcommServer?.sendMirrorControl(false)
-        
-        // Stop stream server
-        screenStreamServer?.stop()
+        transportManager.stopMirror()
         
         // Stop foreground service
-        ScreenCaptureService.stop(this)
+        if (phoneSubtitleCoordinator?.isActive() != true) {
+            screenStreamServer?.releaseProjection()
+            ScreenCaptureService.stop(this)
+        }
         
         // DEBUG: coordsText.text = "Mirror stopped"
     }
@@ -1097,6 +1069,19 @@ class MainActivity : AppCompatActivity() {
         }
         ActivityCompat.requestPermissions(this, permissions, REQUEST_PERMISSIONS)
     }
+
+    private fun requestSubtitleAudioPermission() {
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.RECORD_AUDIO),
+            REQUEST_SUBTITLE_AUDIO_PERMISSION
+        )
+    }
+
+    private fun requestSubtitleProjectionPermission() {
+        pendingProjectionPurpose = ProjectionPurpose.SUBTITLE
+        screenStreamServer?.requestPermission(this)
+    }
     
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
@@ -1104,7 +1089,10 @@ class MainActivity : AppCompatActivity() {
             REQUEST_PERMISSIONS -> {
                 if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
                     rfcommServer?.start()
-                    checkLocationPermission()
+                    requestBackgroundLocationIfNeeded()
+                    if (::dataSyncCoordinator.isInitialized) {
+                        dataSyncCoordinator.onForeground()
+                    }
                 }
             }
 
@@ -1114,11 +1102,13 @@ class MainActivity : AppCompatActivity() {
             }
 
             REQUEST_BACKGROUND_LOCATION -> {
-                checkLocationPermission()
                 if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                     fileLog("Background location permission granted")
                 } else {
                     fileLog("Background location permission denied - location updates may not work in background")
+                }
+                if (::dataSyncCoordinator.isInitialized) {
+                    dataSyncCoordinator.onForeground()
                 }
             }
 
@@ -1130,6 +1120,12 @@ class MainActivity : AppCompatActivity() {
                     fileLog("Image permission denied")
                     Toast.makeText(this, "Permission required to select images", Toast.LENGTH_SHORT).show()
                 }
+            }
+
+            REQUEST_SUBTITLE_AUDIO_PERMISSION -> {
+                val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+                fileLog("Subtitle audio permission granted=$granted")
+                phoneSubtitleCoordinator?.onAudioPermissionResult(granted)
             }
         }
     }
@@ -1164,130 +1160,6 @@ class MainActivity : AppCompatActivity() {
     private fun hasLocationPermission(): Boolean {
         return ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
             ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-    }
-
-    private fun startLocationWeatherService(forceRefresh: Boolean = false) {
-        if (!hasLocationPermission()) return
-        LocationWeatherService.start(this, forceRefresh = forceRefresh)
-    }
-
-    private fun stopLocationWeatherService() {
-        LocationWeatherService.stop(this)
-    }
-
-    private fun resolveTownAndCountryCode(location: Location): Pair<String, String> {
-        val lat = location.latitude
-        val lon = location.longitude
-
-        // 1) Prefer geocode.maps.co (often returns more precise "town"/"village" like Ely)
-        try {
-            val apiKey = URLEncoder.encode(GEOCODE_MAPS_CO_API_KEY, "UTF-8")
-            val url = "https://geocode.maps.co/reverse?lat=$lat&lon=$lon&api_key=$apiKey"
-            val response = URL(url).readText()
-            val json = JSONObject(response)
-            val address = json.optJSONObject("address")
-
-            if (address != null) {
-                val town = listOf("city", "town", "village", "municipality")
-                    .asSequence()
-                    .mapNotNull { key -> address.optString(key, null)?.takeIf { it.isNotBlank() } }
-                    .firstOrNull()
-                    ?: "Unknown"
-
-                val countryCode = address.optString("country_code", null)
-                    ?.takeIf { it.isNotBlank() }
-                    ?.uppercase(Locale.ROOT)
-                    ?: "Unknown"
-
-                if (town != "Unknown" && countryCode != "Unknown") {
-                    return Pair(town, countryCode)
-                }
-            }
-        } catch (e: Exception) {
-            fileLog("maps.co geocoding failed: ${e.message}")
-        }
-
-        // 2) Fallback: Android Geocoder (still send ISO country code, not localized name)
-        return try {
-            val geocoder = Geocoder(this, Locale.getDefault())
-            val addresses = geocoder.getFromLocation(lat, lon, 1)
-
-            if (!addresses.isNullOrEmpty()) {
-                val a = addresses[0]
-
-                val town = a.locality
-                    ?: a.subLocality
-                    ?: a.subAdminArea
-                    ?: a.adminArea
-                    ?: "Unknown"
-
-                val countryCode = (a.countryCode ?: "Unknown").uppercase(Locale.ROOT)
-
-                Pair(town, countryCode)
-            } else {
-                Pair("Unknown", "Unknown")
-            }
-        } catch (e: Exception) {
-            fileLog("Android Geocoder failed: ${e.message}")
-            Pair("Unknown", "Unknown")
-        }
-    }
-
-
-    private fun checkLocationPermission() {
-        if (!hasLocationPermission()) {
-            return
-        }
-
-        lastLocation = locationManager?.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
-            ?: locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-            ?: locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-    }
-
-
-
-    private fun updateLocationAndWeather() {
-        // Prefer LocationWeatherService when it's running - it has the authoritative data
-        val service = LocationWeatherService.instance
-        if (service != null) {
-            val data = service.getCurrentLocationData()
-            if (data != null) {
-                rfcommServer?.sendLocationUpdate(data.town, data.countryCode, data.weather, data.timestamp, data.speedMps)
-                fileLog("Sent location from LocationWeatherService: ${data.town}, timestamp=${data.timestamp}")
-                return
-            }
-            // Service running but no data yet - trigger a fetch
-            service.forceUpdate()
-            return
-        }
-
-        // Fallback: use MainActivity's own location data (when service not running)
-        checkLocationPermission()
-        if (lastLocation != null) {
-            fetchWeatherAndSend(lastLocation!!)
-        }
-    }
-
-    private fun fetchWeatherAndSend(location: Location) {
-        if (!isGlassesConnected) return
-
-        Thread {
-            // Prefer maps.co for a more precise town (e.g., Ely), fallback to Android Geocoder
-            val (town, countryCode) = resolveTownAndCountryCode(location)
-
-            rfcommServer?.updateTownCountry(town, countryCode)
-
-            // Fetch rich weather and send rich payload with current timestamp
-            WeatherHelper.fetchWeather(location.latitude, location.longitude) { weather ->
-                rfcommServer?.updateWeather(weather)
-
-                // IMPORTANT: Send ISO country code instead of localized country name
-                // (JSON field name remains "country", value is now "GB", "FR", etc.)
-                // Include current timestamp to ensure glasses can validate data freshness
-                val speedMps = if (location.hasSpeed()) location.speed.coerceAtLeast(0f) else null
-                rfcommServer?.sendLocationUpdate(town, countryCode, weather, System.currentTimeMillis(), speedMps)
-            }
-        }.start()
     }
 
     /**

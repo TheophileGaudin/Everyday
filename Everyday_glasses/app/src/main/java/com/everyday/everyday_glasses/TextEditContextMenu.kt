@@ -108,7 +108,13 @@ class TextEditContextMenu(
      * @param clipboard Current clipboard content (null if empty)
      * @param hasSelectedText Whether there is currently selected text
      */
-    fun show(x: Float, y: Float, clipboard: String?, hasSelectedText: Boolean = false) {
+    fun show(
+        x: Float,
+        y: Float,
+        clipboard: String?,
+        hasSelectedText: Boolean = false,
+        includeFormatting: Boolean = true
+    ) {
         clipboardContent = clipboard
         hasSelection = hasSelectedText
         
@@ -147,13 +153,15 @@ class TextEditContextMenu(
             enabled = true  // Will be disabled if no text, handled in widget
         ))
         
-        // Formatting - always enabled
-        items.add(MenuItem(
-            id = "formatting",
-            label = "Formatting",
-            icon = "🔤",
-            enabled = true
-        ))
+        if (includeFormatting) {
+            // Formatting - always enabled
+            items.add(MenuItem(
+                id = "formatting",
+                label = "Formatting",
+                icon = "🔤",
+                enabled = true
+            ))
+        }
         
         menuHeight = items.size * ITEM_HEIGHT + PADDING * 2
         

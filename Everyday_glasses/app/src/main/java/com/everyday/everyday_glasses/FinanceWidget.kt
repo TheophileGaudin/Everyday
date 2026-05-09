@@ -5,15 +5,11 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
-import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
-import java.util.Calendar
-import java.util.TimeZone
+import com.everyday.shared.sync.FinanceDataProvider
+import com.everyday.shared.sync.FinanceSnapshot
+import com.everyday.shared.sync.FinanceStockIndex
+import com.everyday.shared.sync.FinanceTimeRange
 
 /**
  * Finance widget that displays stock index charts.
@@ -39,77 +35,12 @@ class FinanceWidget(
 
         private const val HEADER_HEIGHT = 32f
         private const val TIME_RANGE_HEIGHT = 28f
-        private const val FETCH_COOLDOWN_MS = 60_000L
         private const val DROPDOWN_ITEM_HEIGHT = 34f
-        private const val ONE_DAY_LOOKBACK_RANGE = "5d"
     }
 
     // ==================== Data Model ====================
 
-    data class StockIndex(
-        val symbol: String,
-        val displayName: String,
-        val country: String
-    )
-
-    enum class TimeRange(val label: String, val range: String, val interval: String) {
-        ONE_DAY("1D", "1d", "5m"),
-        ONE_WEEK("1W", "5d", "15m"),
-        ONE_MONTH("1M", "1mo", "1h"),
-        THREE_MONTHS("3M", "3mo", "1d"),
-        SIX_MONTHS("6M", "6mo", "1d"),
-        ONE_YEAR("1Y", "1y", "1wk"),
-        FIVE_YEARS("5Y", "5y", "1mo")
-    }
-
-    data class ChartSnapshot(
-        val points: List<Float>,
-        val percentChange: Float
-    )
-
-    private data class TimedPrice(
-        val timestampSeconds: Long,
-        val price: Float
-    )
-
-    private data class TradingSessionSnapshot(
-        val prices: List<Float>,
-        val baselinePrice: Float?
-    )
-
-    // All available indices - popular ones first
-    private val allIndices = listOf(
-        StockIndex("^GSPC", "S&P 500", "US"),
-        StockIndex("^DJI", "Dow Jones", "US"),
-        StockIndex("^IXIC", "Nasdaq", "US"),
-        StockIndex("^FTSE", "FTSE 100", "GB"),
-        StockIndex("^GDAXI", "DAX", "DE"),
-        StockIndex("^FCHI", "CAC 40", "FR"),
-        StockIndex("^N225", "Nikkei 225", "JP"),
-        StockIndex("^HSI", "Hang Seng", "HK"),
-        StockIndex("^STOXX50E", "Euro Stoxx 50", "EU"),
-        StockIndex("^GSPTSE", "S&P/TSX", "CA"),
-        StockIndex("^AXJO", "ASX 200", "AU"),
-        StockIndex("^BSESN", "BSE Sensex", "IN"),
-        StockIndex("^KS11", "KOSPI", "KR"),
-        StockIndex("^IBEX", "IBEX 35", "ES"),
-        StockIndex("^FTSEMIB.MI", "FTSE MIB", "IT"),
-        StockIndex("^SSMI", "SMI", "CH"),
-        StockIndex("^BVSP", "Bovespa", "BR"),
-        StockIndex("^MXX", "IPC Mexico", "MX")
-    )
-
-    private val countryToDefaultSymbol = mapOf(
-        "US" to "^GSPC", "GB" to "^FTSE", "DE" to "^GDAXI",
-        "FR" to "^FCHI", "JP" to "^N225", "HK" to "^HSI",
-        "CA" to "^GSPTSE", "AU" to "^AXJO", "IN" to "^BSESN",
-        "KR" to "^KS11", "ES" to "^IBEX", "IT" to "^FTSEMIB.MI",
-        "CH" to "^SSMI", "BR" to "^BVSP", "MX" to "^MXX",
-        // Map some EU countries without their own major index to Euro Stoxx
-        "NL" to "^STOXX50E", "BE" to "^STOXX50E", "AT" to "^STOXX50E",
-        "FI" to "^STOXX50E", "IE" to "^STOXX50E", "PT" to "^STOXX50E",
-        "GR" to "^STOXX50E", "LU" to "^STOXX50E"
-    )
+    private val allIndices = FinanceDataProvider.allIndices
 
     // ==================== State ====================
 
@@ -117,34 +48,23 @@ class FinanceWidget(
 
     var currentSymbol: String = "^GSPC"
         private set
-    var currentRange: TimeRange = TimeRange.ONE_DAY
+    var currentRange: FinanceTimeRange = FinanceTimeRange.ONE_DAY
         private set
 
-    private var currentIndex: StockIndex = allIndices[0]
+    private var currentIndex: FinanceStockIndex = allIndices[0]
     private var dataPoints: List<Float> = emptyList()
     private var percentChange: Float = 0f
-    private var isLoading = false
-    private var lastError: String? = null
+    private val dataState = WidgetDataState(
+        loadingText = "Loading...",
+        emptyText = "No data"
+    )
     private var countryCodeSet = false  // Track if country was already auto-set
 
-    // Fetch tracking keyed by "symbol:range"
-    private val lastFetchTimes = mutableMapOf<String, Long>()
-    private val chartCache = mutableMapOf<String, ChartSnapshot>()
-    private val activeFetchKeys = mutableSetOf<String>()
+    private val chartCache = mutableMapOf<String, FinanceSnapshot>()
     private val lastErrorByKey = mutableMapOf<String, String>()
 
-    private val handler = Handler(Looper.getMainLooper())
-    private var autoRefreshStarted = false
     var onStateChanged: (() -> Unit)? = null
-
-    private val autoRefreshRunnable = object : Runnable {
-        override fun run() {
-            fetchData(force = true, reason = "periodic_60s")
-            if (autoRefreshStarted) {
-                handler.postDelayed(this, FETCH_COOLDOWN_MS)
-            }
-        }
-    }
+    var onDataRequested: ((symbol: String, range: String, force: Boolean, reason: String) -> Unit)? = null
 
     // ==================== Interaction State ====================
 
@@ -163,7 +83,7 @@ class FinanceWidget(
 
     private val indexNameBounds = RectF()
     private val timeRangeBarBounds = RectF()
-    private val timeRangeButtonBounds = Array(TimeRange.values().size) { RectF() }
+    private val timeRangeButtonBounds = Array(FinanceTimeRange.values().size) { RectF() }
     private val dropdownPanelBounds = RectF()
     private val chartAreaBounds = RectF()
 
@@ -287,10 +207,10 @@ class FinanceWidget(
         )
 
         // Individual time range buttons
-        val buttonCount = TimeRange.values().size
+        val buttonCount = FinanceTimeRange.values().size
         val totalBarWidth = timeRangeBarBounds.width()
         val buttonWidth = totalBarWidth / buttonCount
-        for (i in TimeRange.values().indices) {
+        for (i in FinanceTimeRange.values().indices) {
             timeRangeButtonBounds[i].set(
                 timeRangeBarBounds.left + i * buttonWidth,
                 timeRangeBarBounds.top,
@@ -320,114 +240,12 @@ class FinanceWidget(
 
     init {
         updateInternalBounds()
-        startAutoRefresh()
     }
 
     private fun buildSeriesKey(
         symbol: String = currentSymbol,
-        range: TimeRange = currentRange
+        range: FinanceTimeRange = currentRange
     ): String = "$symbol:${range.range}"
-
-    private fun buildChartUrl(symbol: String, range: TimeRange): String {
-        val encodedSymbol = URLEncoder.encode(symbol, "UTF-8")
-        val query = if (range == TimeRange.ONE_DAY) {
-            "?range=$ONE_DAY_LOOKBACK_RANGE&interval=${range.interval}&includePrePost=false"
-        } else {
-            "?range=${range.range}&interval=${range.interval}"
-        }
-        return "https://query1.finance.yahoo.com/v8/finance/chart/$encodedSymbol$query"
-    }
-
-    private fun buildChartSnapshot(
-        requestRange: TimeRange,
-        rawPrices: List<Float>,
-        timedPrices: List<TimedPrice>,
-        exchangeTimeZoneId: String?,
-        fallbackPreviousClose: Float?
-    ): ChartSnapshot {
-        val oneDaySnapshot = if (requestRange == TimeRange.ONE_DAY) {
-            // 1D should represent the latest market session, not a rolling 24h window.
-            extractLatestTradingSession(timedPrices, exchangeTimeZoneId, fallbackPreviousClose)
-        } else {
-            null
-        }
-
-        val sessionPrices = oneDaySnapshot?.prices ?: rawPrices
-        if (sessionPrices.isEmpty()) {
-            throw Exception("Insufficient chart data")
-        }
-
-        val renderablePrices = if (sessionPrices.size >= 2) {
-            sessionPrices
-        } else if (requestRange == TimeRange.ONE_DAY) {
-            listOf(sessionPrices.first(), sessionPrices.first())
-        } else {
-            throw Exception("Insufficient chart data")
-        }
-
-        val baseline = when (requestRange) {
-            TimeRange.ONE_DAY -> oneDaySnapshot?.baselinePrice ?: renderablePrices.first()
-            else -> renderablePrices.first()
-        }
-        if (baseline == 0f) {
-            throw Exception("Invalid chart baseline")
-        }
-
-        val pct = ((renderablePrices.last() - baseline) / baseline) * 100f
-        return ChartSnapshot(
-            points = renderablePrices,
-            percentChange = pct
-        )
-    }
-
-    private fun extractLatestTradingSession(
-        points: List<TimedPrice>,
-        exchangeTimeZoneId: String?,
-        fallbackPreviousClose: Float?
-    ): TradingSessionSnapshot {
-        if (points.isEmpty()) {
-            return TradingSessionSnapshot(emptyList(), fallbackPreviousClose)
-        }
-
-        val timeZone = resolveExchangeTimeZone(exchangeTimeZoneId)
-        val targetDayKey = tradingDayKey(points.last().timestampSeconds, timeZone)
-        val sessionPoints = points.filter { tradingDayKey(it.timestampSeconds, timeZone) == targetDayKey }
-        val previousSessionClose = points
-            .asReversed()
-            .firstOrNull { tradingDayKey(it.timestampSeconds, timeZone) < targetDayKey }
-            ?.price
-            ?: fallbackPreviousClose
-
-        return TradingSessionSnapshot(
-            prices = sessionPoints.map { it.price },
-            baselinePrice = previousSessionClose
-        )
-    }
-
-    private fun resolveExchangeTimeZone(exchangeTimeZoneId: String?): TimeZone {
-        if (exchangeTimeZoneId.isNullOrBlank()) {
-            return TimeZone.getTimeZone("UTC")
-        }
-
-        val timeZone = TimeZone.getTimeZone(exchangeTimeZoneId)
-        return if (
-            timeZone.id == "GMT" &&
-            !exchangeTimeZoneId.equals("GMT", ignoreCase = true) &&
-            !exchangeTimeZoneId.equals("UTC", ignoreCase = true) &&
-            !exchangeTimeZoneId.startsWith("GMT", ignoreCase = true) &&
-            !exchangeTimeZoneId.startsWith("UTC", ignoreCase = true)
-        ) {
-            TimeZone.getTimeZone("UTC")
-        } else {
-            timeZone
-        }
-    }
-
-    private fun tradingDayKey(timestampSeconds: Long, timeZone: TimeZone): Int {
-        val calendar = Calendar.getInstance(timeZone)
-        calendar.timeInMillis = timestampSeconds * 1000L
-        return calendar.get(Calendar.YEAR) * 1000 + calendar.get(Calendar.DAY_OF_YEAR)
-    }
 
     private fun hasRenderableCache(key: String): Boolean {
         return (chartCache[key]?.points?.size ?: 0) >= 2
@@ -439,271 +257,74 @@ class FinanceWidget(
         if (cached != null && cached.points.size >= 2) {
             dataPoints = cached.points
             percentChange = cached.percentChange
-            lastError = null
+            dataState.markLoaded()
         } else {
             dataPoints = emptyList()
             percentChange = 0f
-            lastError = lastErrorByKey[key]
+            dataState.setIdleError(lastErrorByKey[key])
         }
-        isLoading = activeFetchKeys.contains(key)
         updateInternalBounds()
         onStateChanged?.invoke()
     }
 
-    private fun startAutoRefresh() {
-        if (autoRefreshStarted) return
-        autoRefreshStarted = true
-        handler.postDelayed(autoRefreshRunnable, FETCH_COOLDOWN_MS)
-        Log.d(TAG, "Auto-refresh timer started (${FETCH_COOLDOWN_MS}ms)")
+    override fun onDestroy() {
+        Log.d(TAG, "Finance widget released")
     }
 
-    private fun stopAutoRefresh() {
-        if (!autoRefreshStarted) return
-        autoRefreshStarted = false
-        handler.removeCallbacks(autoRefreshRunnable)
-        Log.d(TAG, "Auto-refresh timer stopped")
-    }
-
-    fun setRefreshActive(active: Boolean) {
-        if (active) {
-            startAutoRefresh()
-        } else {
-            stopAutoRefresh()
-        }
-    }
-
-    private fun restartAutoRefreshTimer() {
-        if (!autoRefreshStarted) return
-        handler.removeCallbacks(autoRefreshRunnable)
-        handler.postDelayed(autoRefreshRunnable, FETCH_COOLDOWN_MS)
-    }
-
-    fun release() {
-        stopAutoRefresh()
-        Log.d(TAG, "Finance widget released (auto-refresh stopped)")
-    }
+    fun release() = onDestroy()
 
     // ==================== Public API ====================
 
-    /**
-     * Set the country code to auto-select the default stock index.
-     * Only changes the index if the user hasn't manually selected one.
-     */
     fun setCountryCode(code: String) {
         if (countryCodeSet) {
             Log.d(TAG, "Auto-country update ignored (manual/restored selection already set): country=$code")
-            return  // Don't override user's manual selection
+            return
         }
-        val defaultSymbol = countryToDefaultSymbol[code.uppercase()] ?: return
-        val index = allIndices.find { it.symbol == defaultSymbol } ?: return
+        val index = FinanceDataProvider.defaultIndexForCountry(code)
         if (currentIndex.symbol != index.symbol) {
             currentIndex = index
             currentSymbol = index.symbol
             countryCodeSet = true
             Log.d(TAG, "Auto-selected finance index from country: country=${code.uppercase()} symbol=$currentSymbol range=${currentRange.label}")
             applyCurrentSeriesFromCache()
-            fetchData(force = true, reason = "country_auto")
+            requestData(force = true, reason = "country_auto")
         }
     }
 
-    /**
-     * Restore a specific symbol and range from persisted state.
-     */
     fun setSymbolAndRange(symbol: String, range: String) {
         val index = allIndices.find { it.symbol == symbol }
         if (index != null) {
             currentIndex = index
             currentSymbol = symbol
-            countryCodeSet = true  // Treat restored state like a manual selection
+            countryCodeSet = true
         }
-        val timeRange = TimeRange.values().find { it.range == range }
-        if (timeRange != null) {
-            currentRange = timeRange
-        }
+        currentRange = FinanceTimeRange.fromRange(range)
         Log.d(TAG, "Restored finance widget selection: symbol=$currentSymbol range=${currentRange.label}")
         applyCurrentSeriesFromCache()
     }
 
-    /**
-     * Fetch chart data from Yahoo Finance.
-     */
-    fun fetchData(force: Boolean = false, reason: String = "manual") {
-        val requestSymbol = currentSymbol
-        val requestRange = currentRange
-        val key = buildSeriesKey(requestSymbol, requestRange)
-
-        restartAutoRefreshTimer()
-
-        val now = System.currentTimeMillis()
-        val lastFetch = lastFetchTimes[key] ?: 0L
+    fun requestData(force: Boolean = false, reason: String = "manual") {
+        val key = buildSeriesKey()
         val hasCachedData = hasRenderableCache(key)
-
-        if (!force && now - lastFetch < FETCH_COOLDOWN_MS && hasCachedData) {
-            val elapsed = now - lastFetch
-            Log.d(
-                TAG,
-                "Fetch skipped (cooldown): symbol=$requestSymbol range=${requestRange.label} reason=$reason elapsedMs=$elapsed cooldownMs=$FETCH_COOLDOWN_MS"
-            )
-            if (key == buildSeriesKey()) {
-                applyCurrentSeriesFromCache()
-            }
-            return
-        }
-
-        if (activeFetchKeys.contains(key)) {
-            Log.d(
-                TAG,
-                "Fetch skipped (request already in flight): symbol=$requestSymbol range=${requestRange.label} reason=$reason"
-            )
-            if (key == buildSeriesKey()) {
-                isLoading = true
-                if (!hasCachedData) {
-                    lastError = null
-                }
-                onStateChanged?.invoke()
-            }
-            return
-        }
-
-        activeFetchKeys.add(key)
-        if (key == buildSeriesKey()) {
-            isLoading = true
-            if (!hasCachedData) {
-                lastError = null
-            }
-            onStateChanged?.invoke()
-        }
-
-        Log.d(
-            TAG,
-            "Fetch started: symbol=$requestSymbol range=${requestRange.label} interval=${requestRange.interval} reason=$reason force=$force hasCachedData=$hasCachedData"
-        )
-
-        Thread {
-            try {
-                val urlStr = buildChartUrl(requestSymbol, requestRange)
-
-                val connection = URL(urlStr).openConnection() as HttpURLConnection
-                connection.connectTimeout = 8000
-                connection.readTimeout = 8000
-                connection.setRequestProperty("User-Agent", "Mozilla/5.0")
-
-                val responseCode = connection.responseCode
-                if (responseCode != 200) {
-                    throw Exception("HTTP $responseCode")
-                }
-
-                val json = connection.inputStream.bufferedReader().readText()
-                connection.disconnect()
-
-                val root = JSONObject(json)
-                val result = root.getJSONObject("chart")
-                    .getJSONArray("result").getJSONObject(0)
-                val meta = result.optJSONObject("meta")
-                val timestamps = result.optJSONArray("timestamp")
-
-                val closePrices = result.getJSONObject("indicators")
-                    .getJSONArray("quote").getJSONObject(0)
-                    .getJSONArray("close")
-
-                val rawPrices = mutableListOf<Float>()
-                val timedPrices = mutableListOf<TimedPrice>()
-                for (i in 0 until closePrices.length()) {
-                    if (!closePrices.isNull(i)) {
-                        val price = closePrices.getDouble(i).toFloat()
-                        rawPrices.add(price)
-                        if (timestamps != null && i < timestamps.length() && !timestamps.isNull(i)) {
-                            timedPrices.add(
-                                TimedPrice(
-                                    timestampSeconds = timestamps.getLong(i),
-                                    price = price
-                                )
-                            )
-                        }
-                    }
-                }
-
-                val snapshot = buildChartSnapshot(
-                    requestRange = requestRange,
-                    rawPrices = rawPrices,
-                    timedPrices = timedPrices,
-                    exchangeTimeZoneId = meta?.optString("exchangeTimezoneName")
-                        ?.takeIf { it.isNotBlank() }
-                        ?: meta?.optString("timezone")?.takeIf { it.isNotBlank() },
-                    fallbackPreviousClose = meta?.let {
-                        listOf("previousClose", "regularMarketPreviousClose", "chartPreviousClose")
-                            .asSequence()
-                            .mapNotNull { keyName ->
-                                if (it.has(keyName) && !it.isNull(keyName)) {
-                                    it.optDouble(keyName, Double.NaN)
-                                        .takeIf { value -> value.isFinite() && value > 0.0 }
-                                        ?.toFloat()
-                                } else {
-                                    null
-                                }
-                            }
-                            .firstOrNull()
-                    }
-                )
-                val fetchedAt = System.currentTimeMillis()
-
-                handler.post {
-                    activeFetchKeys.remove(key)
-                    chartCache[key] = snapshot
-                    lastFetchTimes[key] = fetchedAt
-                    lastErrorByKey.remove(key)
-
-                    if (key == buildSeriesKey()) {
-                        dataPoints = snapshot.points
-                        percentChange = snapshot.percentChange
-                        lastError = null
-                        isLoading = activeFetchKeys.contains(key)
-                        updateInternalBounds()
-                        onStateChanged?.invoke()
-                    }
-
-                    Log.d(
-                        TAG,
-                        "Fetch success: symbol=$requestSymbol range=${requestRange.label} reason=$reason points=${snapshot.points.size} pct=${String.format("%.2f", snapshot.percentChange)}%"
-                    )
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to fetch chart data for $requestSymbol", e)
-                handler.post {
-                    activeFetchKeys.remove(key)
-                    lastErrorByKey[key] = "No data"
-
-                    if (key == buildSeriesKey()) {
-                        val cached = chartCache[key]
-                        if (cached != null && cached.points.size >= 2) {
-                            dataPoints = cached.points
-                            percentChange = cached.percentChange
-                            lastError = null
-                        } else {
-                            dataPoints = emptyList()
-                            percentChange = 0f
-                            lastError = "No data"
-                        }
-                        isLoading = activeFetchKeys.contains(key)
-                        updateInternalBounds()
-                        onStateChanged?.invoke()
-                    }
-
-                    Log.d(
-                        TAG,
-                        "Fetch failed: symbol=$requestSymbol range=${requestRange.label} reason=$reason keepCachedData=${hasRenderableCache(key)}"
-                    )
-                }
-            }
-        }.start()
+        dataState.setLoadingIfEmpty(hasCachedData)
+        onStateChanged?.invoke()
+        onDataRequested?.invoke(currentSymbol, currentRange.range, force, reason)
     }
 
-    /**
-     * Trigger a wake refresh.
-     */
-    fun refreshOnWake() {
-        Log.d(TAG, "Wake refresh requested: symbol=$currentSymbol range=${currentRange.label}")
-        fetchData(force = true, reason = "wake")
+    fun applySnapshot(snapshot: FinanceSnapshot) {
+        if (snapshot.symbol != currentSymbol || snapshot.range != currentRange.range) {
+            return
+        }
+        val key = buildSeriesKey(snapshot.symbol, currentRange)
+        chartCache[key] = snapshot
+        lastErrorByKey.remove(key)
+        applyCurrentSeriesFromCache()
+    }
+
+    fun applyError(message: String = "No data") {
+        val key = buildSeriesKey()
+        lastErrorByKey[key] = message
+        applyCurrentSeriesFromCache()
     }
 
     // ==================== Tap Handling ====================
@@ -736,12 +357,12 @@ class FinanceWidget(
 
         // Tap on time range button
         if (showTimeRangeBar) {
-            for (i in TimeRange.values().indices) {
+            for (i in FinanceTimeRange.values().indices) {
                 if (timeRangeButtonBounds[i].contains(px, py)) {
-                    currentRange = TimeRange.values()[i]
+                    currentRange = FinanceTimeRange.values()[i]
                     Log.d(TAG, "Time range selected: symbol=$currentSymbol range=${currentRange.label}")
                     applyCurrentSeriesFromCache()
-                    fetchData(force = true, reason = "range_changed")
+                    requestData(force = true, reason = "range_changed")
                     return true
                 }
             }
@@ -750,13 +371,13 @@ class FinanceWidget(
         return false
     }
 
-    private fun selectIndex(index: StockIndex) {
+    private fun selectIndex(index: FinanceStockIndex) {
         currentIndex = index
         currentSymbol = index.symbol
         countryCodeSet = true  // Manual selection overrides auto-detection
         Log.d(TAG, "Index selected: symbol=$currentSymbol name=${currentIndex.displayName} range=${currentRange.label}")
         applyCurrentSeriesFromCache()
-        fetchData(force = true, reason = "index_changed")
+        requestData(force = true, reason = "index_changed")
     }
 
     private fun findDropdownItemAt(px: Float, py: Float): Int {
@@ -793,7 +414,7 @@ class FinanceWidget(
         // Check time range button hover
         hoveredTimeRangeIndex = -1
         if (showTimeRangeBar) {
-            for (i in TimeRange.values().indices) {
+            for (i in FinanceTimeRange.values().indices) {
                 if (timeRangeButtonBounds[i].contains(px, py)) {
                     hoveredTimeRangeIndex = i
                     break
@@ -837,12 +458,8 @@ class FinanceWidget(
         // Keep the last successful chart visible during refresh/failure.
         if (dataPoints.size >= 2) {
             drawChart(canvas)
-        } else if (isLoading) {
-            drawCenteredText(canvas, "Loading...")
-        } else if (lastError != null) {
-            drawCenteredText(canvas, lastError!!)
         } else {
-            drawCenteredText(canvas, "No data")
+            drawCenteredText(canvas, dataState.displayText())
         }
 
         // Time range bar (on hover)
@@ -930,7 +547,7 @@ class FinanceWidget(
     }
 
     private fun drawTimeRangeBar(canvas: Canvas) {
-        val values = TimeRange.values()
+        val values = FinanceTimeRange.values()
         for (i in values.indices) {
             val bounds = timeRangeButtonBounds[i]
             val isSelected = values[i] == currentRange

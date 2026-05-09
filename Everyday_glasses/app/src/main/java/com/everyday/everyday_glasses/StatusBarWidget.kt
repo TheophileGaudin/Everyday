@@ -319,8 +319,9 @@ class StatusBarWidget(
         return state == State.HOVER_CONTENT ||
                state == State.HOVER_BORDER ||
                state == State.MOVING ||
-               baseState == BaseState.HOVER_RESIZE ||
-               baseState == BaseState.RESIZING
+               baseState == BaseState.MOVING ||
+               baseState == BaseState.RESIZING ||
+               baseState == BaseState.HOVER_RESIZE
     }
     
     // Use unified border hover from BaseWidget - no override needed
@@ -351,31 +352,21 @@ class StatusBarWidget(
     }
     
     override fun updateHover(px: Float, py: Float) {
-        if (state == State.MOVING) return
+        if (baseState == BaseState.MOVING || baseState == BaseState.RESIZING) return
 
         // Use unified hover state from BaseWidget
         val baseResult = updateHoverState(px, py)
 
-        // Map base state to local state
-        val newState = when (baseResult) {
-            BaseState.HOVER_RESIZE, BaseState.RESIZING -> State.HOVER_BORDER
-            BaseState.HOVER_BORDER -> State.HOVER_BORDER
-            BaseState.HOVER_CONTENT -> State.HOVER_CONTENT
-            BaseState.MOVING -> State.MOVING
-            else -> State.IDLE
-        }
+        val newState = WidgetInteractionState(baseResult).toChromeLocal(
+            idle = State.IDLE,
+            content = State.HOVER_CONTENT,
+            border = State.HOVER_BORDER,
+            moving = State.MOVING
+        )
 
         if (newState != state) {
             Log.d(TAG, "State changed: $state -> $newState")
             state = newState
-
-            // Sync with baseState
-            baseState = when (state) {
-                State.MOVING -> BaseState.MOVING
-                State.HOVER_BORDER -> BaseState.HOVER_BORDER
-                State.HOVER_CONTENT -> BaseState.HOVER_CONTENT
-                else -> BaseState.IDLE
-            }
         }
 
         hoveredToggleElement = if (showToggleMenu) {
@@ -390,11 +381,7 @@ class StatusBarWidget(
             return true
         }
 
-        // Check close button first (handled by base class)
-        if (closeButtonBounds.contains(px, py)) {
-            onCloseRequested?.invoke()
-            return true
-        }
+        if (handleChromeTap(px, py)) return true
 
         val hitArea = hitTest(px, py)
         Log.d(TAG, "onTap at ($px, $py) -> hitArea=$hitArea, currentState=$state")
@@ -431,27 +418,6 @@ class StatusBarWidget(
             HitArea.NONE -> false
         }
     }
-    
-    override fun startDrag(isResize: Boolean) {
-        super.startDrag(isResize)
-        state = if (isResize) {
-            // StatusBarWidget also lacks RESIZING state
-            State.IDLE
-        } else {
-            State.MOVING
-        }
-        onStateChanged?.invoke(state)
-    }
-
-    override fun onDragEnd() {
-        super.onDragEnd() // BaseWidget.onDragEnd resets baseState if MOVING or RESIZING
-        if (state == State.MOVING) {
-            Log.d(TAG, "Drag ended")
-            state = State.IDLE
-            onStateChanged?.invoke(state)
-        }
-    }
-    
     override fun containsPoint(px: Float, py: Float): Boolean {
         if (fullscreenButtonBounds.contains(px, py)) return true
         if (minimizeButtonBounds.contains(px, py)) return true
