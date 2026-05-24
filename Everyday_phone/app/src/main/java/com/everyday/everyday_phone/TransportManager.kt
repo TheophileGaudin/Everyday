@@ -4,6 +4,7 @@ import android.util.DisplayMetrics
 import com.everyday.shared.sync.SyncError
 import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot
+import com.everyday.shared.sync.SpeedSnapshot
 import com.everyday.shared.transport.SyncMessenger
 
 class TransportManager(
@@ -40,6 +41,12 @@ class TransportManager(
     override fun sendSyncError(error: SyncError): Boolean {
         if (!isConnected()) return false
         rfcommServerProvider()?.sendSyncError(error) ?: return false
+        return true
+    }
+
+    override fun sendSpeedSnapshot(snapshot: SpeedSnapshot): Boolean {
+        if (!isConnected()) return false
+        rfcommServerProvider()?.sendSpeedSnapshot(snapshot) ?: return false
         return true
     }
 

@@ -7,6 +7,7 @@ object SyncProtocol {
     private const val EVENT_SYNC_REQUEST = "sync_request"
     private const val EVENT_SYNC_SNAPSHOT = "sync_snapshot"
     private const val EVENT_SYNC_ERROR = "sync_error"
+    private const val EVENT_SPEED_SNAPSHOT = "speed_snapshot"
 
     fun encodeRequest(request: SyncRequest): String {
         return JSONObject()
@@ -20,6 +21,10 @@ object SyncProtocol {
             .putNullable("countryCode", request.countryCode)
             .putNullable("financeSymbol", request.financeSymbol)
             .putNullable("financeRange", request.financeRange)
+            .putNullable("financeAssetType", request.financeAssetType?.name)
+            .putNullable("financeChartType", request.financeChartType?.name)
+            .putNullable("financeTileId", request.financeTileId)
+            .putNullable("financeLiveEnabled", request.financeLiveEnabled)
             .toString()
     }
 
@@ -41,7 +46,15 @@ object SyncProtocol {
             requestedAtMs = root.optLong("requestedAtMs", System.currentTimeMillis()),
             countryCode = root.optStringOrNull("countryCode"),
             financeSymbol = root.optStringOrNull("financeSymbol"),
-            financeRange = root.optStringOrNull("financeRange")
+            financeRange = root.optStringOrNull("financeRange"),
+            financeAssetType = root.optStringOrNull("financeAssetType")?.let(FinanceAssetType::fromWireName),
+            financeChartType = root.optStringOrNull("financeChartType")?.let(FinanceChartType::fromWireName),
+            financeTileId = root.optStringOrNull("financeTileId"),
+            financeLiveEnabled = if (root.has("financeLiveEnabled") && !root.isNull("financeLiveEnabled")) {
+                root.optBoolean("financeLiveEnabled")
+            } else {
+                null
+            }
         )
     }
 
@@ -82,6 +95,30 @@ object SyncProtocol {
         return SyncError(
             channel = channel,
             message = root.optString("message", "Sync error"),
+            timestampMs = root.optLong("timestampMs", System.currentTimeMillis())
+        )
+    }
+
+    fun encodeSpeedSnapshot(snapshot: SpeedSnapshot): String {
+        return JSONObject()
+            .put("event", EVENT_SPEED_SNAPSHOT)
+            .putNullable("speedMps", snapshot.speedMps)
+            .put("qualityOk", snapshot.qualityOk)
+            .put("timestampMs", snapshot.timestampMs)
+            .toString()
+    }
+
+    fun decodeSpeedSnapshot(raw: String): SpeedSnapshot? {
+        val root = runCatching { JSONObject(raw) }.getOrNull() ?: return null
+        if (root.optString("event") != EVENT_SPEED_SNAPSHOT) return null
+        val speedMps = if (root.has("speedMps") && !root.isNull("speedMps")) {
+            root.optDouble("speedMps").toFloat()
+        } else {
+            null
+        }
+        return SpeedSnapshot(
+            speedMps = speedMps,
+            qualityOk = root.optBoolean("qualityOk", false),
             timestampMs = root.optLong("timestampMs", System.currentTimeMillis())
         )
     }
@@ -255,7 +292,12 @@ object SyncProtocol {
             .put("range", range)
             .put("rangeLabel", rangeLabel)
             .put("points", JSONArray().apply { points.forEach { put(it.toDouble()) } })
+            .put("candles", JSONArray().apply { candles.forEach { put(it.toJson()) } })
             .put("percentChange", percentChange.toDouble())
+            .put("assetType", assetType.name)
+            .put("chartType", chartType.name)
+            .put("navigationIndex", navigationIndex)
+            .put("tiles", JSONArray().apply { tiles.forEach { put(it.toJson()) } })
             .put("fetchedAtMs", fetchedAtMs)
             .put("staleAfterMs", staleAfterMs)
     }
@@ -267,6 +309,12 @@ object SyncProtocol {
                 add(pointsJson.optDouble(index).toFloat())
             }
         }
+        val tilesJson = optJSONArray("tiles") ?: JSONArray()
+        val tiles = buildList {
+            for (index in 0 until tilesJson.length()) {
+                tilesJson.optJSONObject(index)?.toFinanceTileSnapshot()?.let(::add)
+            }
+        }
         return FinanceSnapshot(
             symbol = optString("symbol"),
             displayName = optString("displayName"),
@@ -274,11 +322,94 @@ object SyncProtocol {
             range = optString("range"),
             rangeLabel = optString("rangeLabel"),
             points = points,
+            candles = buildList {
+                val candlesJson = optJSONArray("candles") ?: JSONArray()
+                for (index in 0 until candlesJson.length()) {
+                    candlesJson.optJSONObject(index)?.toFinanceCandle()?.let(::add)
+                }
+            },
             percentChange = optDouble("percentChange").toFloat(),
+            assetType = FinanceAssetType.fromWireName(optStringOrNull("assetType")),
+            chartType = FinanceChartType.fromWireName(optStringOrNull("chartType")),
+            tiles = tiles,
+            navigationIndex = optInt("navigationIndex", 0),
             fetchedAtMs = optLong("fetchedAtMs", 0L),
             staleAfterMs = optLong("staleAfterMs", SyncCachePolicy.FINANCE_STALE_AFTER_MS)
         )
     }
+
+    private fun FinanceTileSnapshot.toJson(): JSONObject =
+        JSONObject()
+            .put("id", id)
+            .put("assetType", assetType.name)
+            .put("symbol", symbol)
+            .put("displayName", displayName)
+            .put("country", country)
+            .put("range", range)
+            .put("rangeLabel", rangeLabel)
+            .put("chartType", chartType.name)
+            .put("points", JSONArray().apply { points.forEach { put(it.toDouble()) } })
+            .put("candles", JSONArray().apply { candles.forEach { put(it.toJson()) } })
+            .putNullable("latestValue", latestValue?.toDouble())
+            .put("percentChange", percentChange.toDouble())
+            .put("source", source)
+            .putNullable("streamStatus", streamStatus)
+            .put("fetchedAtMs", fetchedAtMs)
+            .put("staleAfterMs", staleAfterMs)
+
+    private fun JSONObject.toFinanceTileSnapshot(): FinanceTileSnapshot {
+        val pointsJson = optJSONArray("points") ?: JSONArray()
+        val points = buildList {
+            for (index in 0 until pointsJson.length()) {
+                add(pointsJson.optDouble(index).toFloat())
+            }
+        }
+        val candlesJson = optJSONArray("candles") ?: JSONArray()
+        val candles = buildList {
+            for (index in 0 until candlesJson.length()) {
+                candlesJson.optJSONObject(index)?.toFinanceCandle()?.let(::add)
+            }
+        }
+        return FinanceTileSnapshot(
+            id = optString("id"),
+            assetType = FinanceAssetType.fromWireName(optStringOrNull("assetType")),
+            symbol = optString("symbol"),
+            displayName = optString("displayName"),
+            country = optString("country"),
+            range = optString("range"),
+            rangeLabel = optString("rangeLabel"),
+            chartType = FinanceChartType.fromWireName(optStringOrNull("chartType")),
+            points = points,
+            candles = candles,
+            latestValue = if (has("latestValue") && !isNull("latestValue")) optDouble("latestValue").toFloat() else null,
+            percentChange = optDouble("percentChange").toFloat(),
+            source = optString("source", "UNKNOWN"),
+            streamStatus = optStringOrNull("streamStatus"),
+            fetchedAtMs = optLong("fetchedAtMs", 0L),
+            staleAfterMs = optLong("staleAfterMs", SyncCachePolicy.FINANCE_STALE_AFTER_MS)
+        )
+    }
+
+    private fun FinanceCandle.toJson(): JSONObject =
+        JSONObject()
+            .put("openTimeMs", openTimeMs)
+            .put("open", open.toDouble())
+            .put("high", high.toDouble())
+            .put("low", low.toDouble())
+            .put("close", close.toDouble())
+            .put("volume", volume.toDouble())
+            .put("isClosed", isClosed)
+
+    private fun JSONObject.toFinanceCandle(): FinanceCandle =
+        FinanceCandle(
+            openTimeMs = optLong("openTimeMs"),
+            open = optDouble("open").toFloat(),
+            high = optDouble("high").toFloat(),
+            low = optDouble("low").toFloat(),
+            close = optDouble("close").toFloat(),
+            volume = optDouble("volume", 0.0).toFloat(),
+            isClosed = optBoolean("isClosed", true)
+        )
 
     private fun JSONObject.putNullable(name: String, value: Any?): JSONObject {
         if (value == null) {

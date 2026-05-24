@@ -23,6 +23,9 @@ import com.everyday.shared.sync.SyncError
 import com.everyday.shared.sync.SyncProtocol
 import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot
+import com.everyday.shared.sync.FinanceAssetType
+import com.everyday.shared.sync.FinanceChartType
+import com.everyday.shared.sync.SpeedSnapshot
 import com.everyday.shared.sync.SubtitleControl
 import com.everyday.shared.sync.SubtitleProtocol
 import com.everyday.shared.sync.SubtitleStatus
@@ -58,9 +61,11 @@ class RfcommClient(private val context: Context) {
     var onLongPressWithClipboard: ((String?) -> Unit)? = null  // Called when phone sends long-press with clipboard
     var onClipboardReceived: ((String) -> Unit)? = null  // Called when phone clipboard changes
     var onImageReceived: ((ByteArray, String) -> Unit)? = null // Called when image data is received (data, fileName)
+    var onOpenBrowserRequested: ((String) -> Unit)? = null
     var onGoogleAuthStateReceived: ((GooglePhoneAuthStatus, GoogleAccountSummary?, String?) -> Unit)? = null
     var onSyncSnapshotReceived: ((SyncSnapshot) -> Unit)? = null
     var onSyncErrorReceived: ((SyncError) -> Unit)? = null
+    var onSpeedSnapshotReceived: ((SpeedSnapshot) -> Unit)? = null
     var onSubtitleStatusReceived: ((SubtitleStatus) -> Unit)? = null
     var onSubtitleTranscriptReceived: ((SubtitleTranscript) -> Unit)? = null
 
@@ -208,7 +213,11 @@ class RfcommClient(private val context: Context) {
         reason: String,
         countryCode: String? = null,
         financeSymbol: String? = null,
-        financeRange: String? = null
+        financeRange: String? = null,
+        financeAssetType: FinanceAssetType? = null,
+        financeChartType: FinanceChartType? = null,
+        financeTileId: String? = null,
+        financeLiveEnabled: Boolean? = null
     ) {
         if (!isConnected.get()) return
         val output = outputStream ?: return
@@ -221,7 +230,11 @@ class RfcommClient(private val context: Context) {
                     reason = reason,
                     countryCode = countryCode,
                     financeSymbol = financeSymbol,
-                    financeRange = financeRange
+                    financeRange = financeRange,
+                    financeAssetType = financeAssetType,
+                    financeChartType = financeChartType,
+                    financeTileId = financeTileId,
+                    financeLiveEnabled = financeLiveEnabled
                 )
             ) + "\n"
 
@@ -474,6 +487,11 @@ class RfcommClient(private val context: Context) {
                         continue
                     }
 
+                    if (parseOpenBrowserMessage(line)) {
+                        logRxThrottled(kind = "open_browser", raw = line, summary = "open browser message parsed")
+                        continue
+                    }
+
                     if (parseGoogleAuthStateMessage(line)) {
                         continue
                     }
@@ -656,6 +674,28 @@ class RfcommClient(private val context: Context) {
             false
         }
     }
+
+    private fun parseOpenBrowserMessage(json: String): Boolean {
+        return try {
+            if (!json.contains(""""event":"open_browser"""")) {
+                return false
+            }
+
+            val root = JSONObject(json)
+            val address = root.optString("address").trim()
+            if (address.isBlank()) {
+                Log.w(TAG, "Open browser message missing address")
+                return true
+            }
+
+            handler.post { onOpenBrowserRequested?.invoke(address) }
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing open browser message: $json", e)
+            false
+        }
+    }
+
     private fun parseGoogleAuthStateMessage(json: String): Boolean {
         return try {
             if (!json.contains(""""event":"google_auth_state"""")) {
@@ -687,6 +727,10 @@ class RfcommClient(private val context: Context) {
     }
 
     private fun parseSyncMessage(json: String): Boolean {
+        SyncProtocol.decodeSpeedSnapshot(json)?.let { snapshot ->
+            handler.post { onSpeedSnapshotReceived?.invoke(snapshot) }
+            return true
+        }
         SyncProtocol.decodeSnapshot(json)?.let { snapshot ->
             handler.post { onSyncSnapshotReceived?.invoke(snapshot) }
             return true

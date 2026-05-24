@@ -26,7 +26,7 @@ class ContextMenu(
         private const val HEADER_HEIGHT = 44f
         private const val PADDING = 12f
         private const val CORNER_RADIUS = 8f
-        private const val MAX_VISIBLE_ROWS = 5
+        private const val MAX_VISIBLE_ROWS = 6
         private const val SCROLLBAR_WIDTH = 5f
     }
 
@@ -131,6 +131,10 @@ class ContextMenu(
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textSize = 28f
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
     }
 
     private val arrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -147,6 +151,7 @@ class ContextMenu(
     }
 
     init {
+        addItem(MenuItem("layout_lock", "Lock", "lock_icon"))
         addItem(
             MenuItem(
                 "create",
@@ -195,6 +200,7 @@ class ContextMenu(
             )
         )
         addItem(MenuItem("settings", "Settings", null))
+        addItem(MenuItem("close_app", "Close", null))
     }
 
     fun addItem(item: MenuItem) {
@@ -203,6 +209,24 @@ class ContextMenu(
 
     fun clearItems() {
         items.clear()
+    }
+
+    fun setLayoutLockState(isLocked: Boolean) {
+        val lockItem = MenuItem(
+            id = "layout_lock",
+            label = if (isLocked) "Unlock" else "Lock",
+            icon = if (isLocked) "unlock_icon" else "lock_icon"
+        )
+        val existingIndex = items.indexOfFirst { it.id == lockItem.id }
+        if (existingIndex >= 0) {
+            items[existingIndex] = lockItem
+        } else {
+            items.add(0, lockItem)
+        }
+        pageStack.firstOrNull()?.let { root ->
+            pageStack[0] = root.copy(entries = items.map { Entry.Menu(it) })
+            rebuildRows()
+        }
     }
 
     fun show(x: Float, y: Float) {
@@ -537,7 +561,7 @@ class ContextMenu(
         val labelPaint = textPaint
         val labelY = rect.centerY() - (labelPaint.descent() + labelPaint.ascent()) / 2f
         val labelX = if (item.icon != null) {
-            canvas.drawText(item.icon, rect.left + 12f, rect.centerY() + iconPaint.textSize / 3f, iconPaint)
+            drawMenuIcon(canvas, item.icon, rect.left + 12f, rect.centerY())
             rect.left + 48f
         } else {
             rect.left + 12f
@@ -548,6 +572,45 @@ class ContextMenu(
         if (item.submenu != null) {
             val arrowY = rect.centerY() - (arrowPaint.descent() + arrowPaint.ascent()) / 2f
             canvas.drawText(">", rect.right - 20f, arrowY, arrowPaint)
+        }
+    }
+
+    private fun drawMenuIcon(canvas: Canvas, icon: String, left: Float, centerY: Float) {
+        when (icon) {
+            "lock_icon" -> drawLockIcon(canvas, left, centerY, locked = true)
+            "unlock_icon" -> drawLockIcon(canvas, left, centerY, locked = false)
+            else -> {
+                val oldStyle = iconPaint.style
+                iconPaint.style = Paint.Style.FILL
+                canvas.drawText(icon, left, centerY + iconPaint.textSize / 3f, iconPaint)
+                iconPaint.style = oldStyle
+            }
+        }
+    }
+
+    private fun drawLockIcon(canvas: Canvas, left: Float, centerY: Float, locked: Boolean) {
+        val bodyLeft = left + 2f
+        val bodyTop = centerY - 2f
+        val bodyRight = left + 24f
+        val bodyBottom = centerY + 15f
+        canvas.drawRoundRect(RectF(bodyLeft, bodyTop, bodyRight, bodyBottom), 3f, 3f, iconPaint)
+
+        val shackleLeft = if (locked) left + 7f else left + 12f
+        val shackleRight = if (locked) left + 19f else left + 27f
+        val shackleTop = centerY - 15f
+        val shackleBottom = centerY + 1f
+        canvas.drawArc(
+            RectF(shackleLeft, shackleTop, shackleRight, shackleBottom),
+            180f,
+            if (locked) 180f else -225f,
+            false,
+            iconPaint
+        )
+        if (locked) {
+            canvas.drawLine(shackleLeft, centerY - 7f, shackleLeft, centerY + 1f, iconPaint)
+            canvas.drawLine(shackleRight, centerY - 7f, shackleRight, centerY + 1f, iconPaint)
+        } else {
+            canvas.drawLine(shackleLeft, centerY - 7f, shackleLeft, centerY + 1f, iconPaint)
         }
     }
 

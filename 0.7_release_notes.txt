@@ -1,0 +1,21 @@
+New hoverable: the "shortcut wheel" or "lemon"
+
+Reworked Finance widget: supports multi-charts, currencies, crypto currencies, candle charts on top of stock markets.
+Backend for crypto: Binance WebSocket (platform specific rates)
+DISCLAIMER: this is an experimental app and the numbers should be seen as indicative only. 
+Prefer direct data sources to rely on for committal financial decisions.
+Use at your own risk. The app developer does not accept responsibility for financial decisions.
+
+Added field to open link or search on glasses from the phone. 
+Added quick share functionality to app: link can be opened right away in the glasses.
+___________
+
+Centered Google Calendar widget for convenient display of text of different sizes.
+Enabled cookies/multi window support on browser widget so google authentication can run seamlessly
+Extended possible angles and cooldown to 0° and 0sec for head up gesture
+Changed phone companion appearance to be more in line with the glasses app minimalism
+___________
+Fixed speedometer not being updated regularly.
+Added refresh for both force refresh data and debug information.
+Browser now auto-unmutes when starting a video 
+Browser now shows loading wheel when loading page

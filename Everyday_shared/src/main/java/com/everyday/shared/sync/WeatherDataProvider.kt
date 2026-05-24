@@ -69,18 +69,32 @@ object WeatherDataProvider {
         return runCatching {
             val apiKey = URLEncoder.encode(geocodeApiKey, "UTF-8")
             val url = "https://geocode.maps.co/reverse?lat=$lat&lon=$lon&api_key=$apiKey"
-            val response = URL(url).readText()
-            val address = JSONObject(response).getJSONObject("address")
-            val town = address.optString("city", null)
-                ?: address.optString("town", null)
-                ?: address.optString("village", null)
-                ?: address.optString("municipality", null)
-                ?: "Unknown"
-            val countryCode = address.optString("country_code", null)
-                ?.takeIf { it.isNotBlank() }
-                ?.uppercase(Locale.ROOT)
-                ?: "Unknown"
-            LocationName(town, countryCode)
+            val connection = URL(url).openConnection() as HttpURLConnection
+            connection.connectTimeout = 10000
+            connection.readTimeout = 10000
+
+            try {
+                val responseCode = connection.responseCode
+                if (responseCode != HttpURLConnection.HTTP_OK) {
+                    val errorText = connection.errorStream?.bufferedReader()?.use { it.readText() }
+                    throw IllegalStateException("Geocode HTTP $responseCode${errorText?.let { ": $it" } ?: ""}")
+                }
+
+                val response = connection.inputStream.bufferedReader().use { it.readText() }
+                val address = JSONObject(response).getJSONObject("address")
+                val town = address.optString("city").takeIf { it.isNotBlank() }
+                    ?: address.optString("town").takeIf { it.isNotBlank() }
+                    ?: address.optString("village").takeIf { it.isNotBlank() }
+                    ?: address.optString("municipality").takeIf { it.isNotBlank() }
+                    ?: "Unknown"
+                val countryCode = address.optString("country_code")
+                    .takeIf { it.isNotBlank() }
+                    ?.uppercase(Locale.ROOT)
+                    ?: "Unknown"
+                LocationName(town, countryCode)
+            } finally {
+                connection.disconnect()
+            }
         }
     }
 

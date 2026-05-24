@@ -8,14 +8,20 @@ def keystorePropertiesFile = rootProject.file('keystore.properties')
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
+def hasExternalSigning = keystoreProperties['storeFile'] &&
+        keystoreProperties['storePassword'] &&
+        keystoreProperties['keyAlias'] &&
+        keystoreProperties['keyPassword']
 
 android {
     signingConfigs {
-        externalOverride {
-            storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
-            storePassword keystoreProperties['storePassword']
+        if (hasExternalSigning) {
+            externalOverride {
+                storeFile file(keystoreProperties['storeFile'])
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+                storePassword keystoreProperties['storePassword']
+            }
         }
     }
     namespace 'com.everyday.everyday_phone'
@@ -30,7 +36,16 @@ android {
     }
 
     buildTypes {
+        debug {
+            if (hasExternalSigning) {
+                signingConfig signingConfigs.externalOverride
+            }
+        }
+
         release {
+            if (hasExternalSigning) {
+                signingConfig signingConfigs.externalOverride
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
@@ -54,4 +69,5 @@ dependencies {
     implementation 'com.google.android.material:material:1.11.0'
     implementation 'com.google.android.gms:play-services-location:21.1.0'
     implementation 'com.google.android.gms:play-services-auth:21.5.1'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 }

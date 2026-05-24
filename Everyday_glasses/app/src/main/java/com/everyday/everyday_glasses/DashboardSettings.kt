@@ -1,30 +1,40 @@
 package com.everyday.everyday_glasses
 
+import android.content.res.Resources
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.drawable.Drawable
+import kotlin.math.ceil
 
 /**
  * A standalone modal menu for app settings (brightness, head-up wake settings).
  * Not a widget (does not extend BaseWidget), but a system overlay similar to ContextMenu.
  *
- * Has three view modes:
- * - Main menu: Brightness slider + adaptive brightness toggle + "Heads-up" button + "Google" button
+ * Has view modes:
+ * - Main menu: Brightness slider + extensible submenu button grid
  * - Heads-up submenu: Head-up specific settings (time, duration, angle, enable toggle)
  * - Google submenu: Google sign-in and Calendar authorization state/actions
+ * - More submenu: secondary toggles
  */
 class DashboardSettings(
+    resources: Resources,
     private val screenWidth: Float,
     private val screenHeight: Float
 ) {
 
     companion object {
         private const val TAG = "DashboardSettings"
-        private const val MENU_WIDTH = 320f
-        private const val MAIN_MENU_HEIGHT = 330f  // Main menu: brightness + adaptive brightness + heads-up + Google button + smart alignment
+        private const val BASE_SCREEN_WIDTH = 640f
+        private const val BASE_SCREEN_HEIGHT = 480f
+        private const val BASE_MENU_WIDTH = 320f
+        private const val MAIN_MENU_BASE_HEIGHT = 176f
         private const val HEADSUP_MENU_HEIGHT = 350f  // Heads-up submenu: 3 sliders + toggle + back button
         private const val GOOGLE_MENU_HEIGHT = 360f
+        private const val MORE_MENU_HEIGHT = 210f
         private const val CORNER_RADIUS = 12f
         private const val CLOSE_BUTTON_SIZE = 40f
         private const val CLOSE_BUTTON_MARGIN = 10f
@@ -36,6 +46,9 @@ class DashboardSettings(
         private const val LABEL_OFFSET_Y = -25f  // Label above slider
 
         private const val BUTTON_HEIGHT = 44f
+        private const val BASE_MAIN_BUTTON_HEIGHT = 64f
+        private const val MAIN_BUTTON_GAP = 10f
+        private const val MAX_MAIN_BUTTONS_PER_ROW = 4
         private const val BUTTON_CORNER_RADIUS = 8f
         private const val TOGGLE_WIDTH = 50f
         private const val TOGGLE_HEIGHT = 28f
@@ -43,14 +56,16 @@ class DashboardSettings(
         private const val GOOGLE_STATUS_BOX_HEIGHT = 122f
 
         // Angle threshold range (degrees)
-        const val MIN_ANGLE_THRESHOLD = 10f
+        const val MIN_ANGLE_THRESHOLD = 0f
         const val MAX_ANGLE_THRESHOLD = 45f
         const val DEFAULT_ANGLE_THRESHOLD = 25f
     }
 
     // View mode
-    private enum class ViewMode { MAIN, HEADSUP, GOOGLE }
+    private enum class ViewMode { MAIN, HEADSUP, GOOGLE, MORE }
     private var currentView = ViewMode.MAIN
+    private enum class MainButton { HEADSUP, GOOGLE, APPEARANCE, SHORTCUTS, MORE }
+    private data class MainButtonSpec(val id: MainButton, val rect: RectF = RectF())
 
     var isVisible = false
         private set
@@ -70,15 +85,15 @@ class DashboardSettings(
             onAdaptiveBrightnessChanged?.invoke(field)
         }
 
-    // Head-up hold time value (0.0 to 1.0, maps to 0.3s - 3s)
-    var headUpTimeValue: Float = 0.26f  // Default ~1 second: (1000-300)/(3000-300) = 0.26
+    // Head-up hold time value (0.0 to 1.0, maps to the configured min/max range)
+    var headUpTimeValue: Float = msToHeadUpTimeValue(HeadUpWakeManager.DEFAULT_HEAD_UP_HOLD_TIME_MS)
         set(value) {
             field = value.coerceIn(0f, 1f)
             onHeadUpTimeChanged?.invoke(field)
         }
 
-    // Wake duration value (0.0 to 1.0, maps to 3s - 30s)
-    var wakeDurationValue: Float = 0.26f  // Default ~10 seconds: (10000-3000)/(30000-3000) = 0.26
+    // Wake duration value (0.0 to 1.0, maps to the configured min/max range)
+    var wakeDurationValue: Float = msToWakeDurationValue(HeadUpWakeManager.DEFAULT_WAKE_DURATION_MS)
         set(value) {
             field = value.coerceIn(0f, 1f)
             onWakeDurationChanged?.invoke(field)
@@ -121,6 +136,8 @@ class DashboardSettings(
     var onGrantCalendarAccess: (() -> Unit)? = null
     var onDisconnectGoogle: (() -> Unit)? = null
     var onRetryGoogleAuth: (() -> Unit)? = null
+    var onAppearanceRequested: (() -> Unit)? = null
+    var onShortcutsRequested: (() -> Unit)? = null
     var onDismissed: (() -> Unit)? = null
 
     // Backwards-compatible aliases for brightness
@@ -209,13 +226,20 @@ class DashboardSettings(
     // Layout - dynamic based on view mode
     private val menuRect = RectF()
     private val closeButtonRect = RectF()
+    private val headsUpIconBitmap: Bitmap? = BitmapFactory.decodeResource(resources, R.drawable.ic_heads_up_cutout)
+    private val googleIconDrawable: Drawable? = resources.getDrawable(R.drawable.ic_google_g, null)
 
     // Main menu elements
     private val brightnessTrackRect = RectF()
+    private val mainButtons = mutableListOf(
+        MainButtonSpec(MainButton.HEADSUP),
+        MainButtonSpec(MainButton.GOOGLE),
+        MainButtonSpec(MainButton.APPEARANCE),
+        MainButtonSpec(MainButton.SHORTCUTS),
+        MainButtonSpec(MainButton.MORE)
+    )
     private val adaptiveBrightnessRowRect = RectF()
     private val adaptiveBrightnessBoxRect = RectF()
-    private val headsUpButtonRect = RectF()
-    private val googleButtonRect = RectF()
     private val smartAlignmentRowRect = RectF()
     private val smartAlignmentBoxRect = RectF()
 
@@ -291,7 +315,7 @@ class DashboardSettings(
     }
 
     private val buttonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#4A90D9")  // Blue button
+        color = Color.parseColor("#1F5F9E")  // Darker blue button for icon contrast
         style = Paint.Style.FILL
     }
 
@@ -371,6 +395,21 @@ class DashboardSettings(
         strokeJoin = Paint.Join.ROUND
     }
 
+    private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+
+    private val iconFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.FILL
+    }
+
+    private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
+
     private val disabledOverlayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#80000000")  // Semi-transparent black overlay
         style = Paint.Style.FILL
@@ -385,15 +424,17 @@ class DashboardSettings(
      */
     private fun updateLayout() {
         val menuHeight = when (currentView) {
-            ViewMode.MAIN -> MAIN_MENU_HEIGHT
+            ViewMode.MAIN -> mainMenuHeight()
             ViewMode.HEADSUP -> HEADSUP_MENU_HEIGHT
             ViewMode.GOOGLE -> GOOGLE_MENU_HEIGHT
+            ViewMode.MORE -> MORE_MENU_HEIGHT
         }
 
         // Center the menu
-        val left = (screenWidth - MENU_WIDTH) / 2f
+        val width = menuWidth()
+        val left = (screenWidth - width) / 2f
         val top = (screenHeight - menuHeight) / 2f
-        menuRect.set(left, top, left + MENU_WIDTH, top + menuHeight)
+        menuRect.set(left, top, left + width, top + menuHeight)
 
         // Close button at top-right inside the menu
         val closeLeft = menuRect.right - CLOSE_BUTTON_SIZE - CLOSE_BUTTON_MARGIN
@@ -410,31 +451,7 @@ class DashboardSettings(
             // Brightness slider
             brightnessTrackRect.set(trackLeft, firstSliderY - 10f, trackRight, firstSliderY + 10f)
 
-            // Adaptive brightness toggle row below the brightness slider
-            val adaptiveRowTop = firstSliderY + 24f
-            adaptiveBrightnessRowRect.set(trackLeft, adaptiveRowTop, trackRight, adaptiveRowTop + 28f)
-            adaptiveBrightnessBoxRect.set(
-                trackLeft,
-                adaptiveRowTop + 3f,
-                trackLeft + CHECKBOX_SIZE,
-                adaptiveRowTop + 3f + CHECKBOX_SIZE
-            )
-
-            // Heads-up button below brightness controls
-            val buttonY = adaptiveBrightnessRowRect.bottom + 16f
-            headsUpButtonRect.set(trackLeft, buttonY, trackRight, buttonY + BUTTON_HEIGHT)
-            val googleButtonY = buttonY + BUTTON_HEIGHT + 12f
-            googleButtonRect.set(trackLeft, googleButtonY, trackRight, googleButtonY + BUTTON_HEIGHT)
-
-            // Smart alignment toggle below the Google button
-            val smartAlignTop = googleButtonRect.bottom + 16f
-            smartAlignmentRowRect.set(trackLeft, smartAlignTop, trackRight, smartAlignTop + 28f)
-            smartAlignmentBoxRect.set(
-                trackLeft,
-                smartAlignTop + 3f,
-                trackLeft + CHECKBOX_SIZE,
-                smartAlignTop + 3f + CHECKBOX_SIZE
-            )
+            layoutMainButtons(trackLeft, trackRight, firstSliderY + 34f)
         } else if (currentView == ViewMode.HEADSUP) {
             // Heads-up submenu layout
             val firstSliderY = menuRect.top + 90f
@@ -460,7 +477,7 @@ class DashboardSettings(
             // Angle threshold slider (third)
             val angleThresholdY = wakeDurationY + SLIDER_SPACING
             angleThresholdTrackRect.set(trackLeft, angleThresholdY - 10f, trackRight, angleThresholdY + 10f)
-        } else {
+        } else if (currentView == ViewMode.GOOGLE) {
             val statusTop = menuRect.top + 74f
             googleStatusRect.set(trackLeft, statusTop, trackRight, statusTop + GOOGLE_STATUS_BOX_HEIGHT)
 
@@ -473,7 +490,79 @@ class DashboardSettings(
             val backButtonLeft = menuRect.left + CLOSE_BUTTON_MARGIN
             val backButtonTop = menuRect.top + CLOSE_BUTTON_MARGIN
             backButtonRect.set(backButtonLeft, backButtonTop, backButtonLeft + CLOSE_BUTTON_SIZE, backButtonTop + CLOSE_BUTTON_SIZE)
+        } else {
+            val backButtonLeft = menuRect.left + CLOSE_BUTTON_MARGIN
+            val backButtonTop = menuRect.top + CLOSE_BUTTON_MARGIN
+            backButtonRect.set(backButtonLeft, backButtonTop, backButtonLeft + CLOSE_BUTTON_SIZE, backButtonTop + CLOSE_BUTTON_SIZE)
+
+            val firstRowTop = menuRect.top + 80f
+            adaptiveBrightnessRowRect.set(trackLeft, firstRowTop, trackRight, firstRowTop + 34f)
+            adaptiveBrightnessBoxRect.set(
+                trackLeft,
+                firstRowTop + 6f,
+                trackLeft + CHECKBOX_SIZE,
+                firstRowTop + 6f + CHECKBOX_SIZE
+            )
+
+            val smartAlignTop = adaptiveBrightnessRowRect.bottom + 20f
+            smartAlignmentRowRect.set(trackLeft, smartAlignTop, trackRight, smartAlignTop + 34f)
+            smartAlignmentBoxRect.set(
+                trackLeft,
+                smartAlignTop + 6f,
+                trackLeft + CHECKBOX_SIZE,
+                smartAlignTop + 6f + CHECKBOX_SIZE
+            )
         }
+    }
+
+    private fun mainMenuHeight(): Float {
+        val rowCount = mainButtonRowCount(mainButtons.size)
+        return MAIN_MENU_BASE_HEIGHT + rowCount * mainButtonHeight() + (rowCount - 1).coerceAtLeast(0) * MAIN_BUTTON_GAP
+    }
+
+    private fun mainButtonRowCount(buttonCount: Int): Int {
+        if (buttonCount <= 0) return 0
+        return ceil(buttonCount / MAX_MAIN_BUTTONS_PER_ROW.toFloat()).toInt()
+    }
+
+    private fun mainButtonRowSizes(buttonCount: Int): List<Int> {
+        val rowCount = mainButtonRowCount(buttonCount)
+        if (rowCount == 0) return emptyList()
+        val baseSize = buttonCount / rowCount
+        val largerRows = buttonCount % rowCount
+        return List(rowCount) { index -> baseSize + if (index < largerRows) 1 else 0 }
+    }
+
+    private fun layoutMainButtons(left: Float, right: Float, top: Float) {
+        val rowSizes = mainButtonRowSizes(mainButtons.size)
+        val buttonHeight = mainButtonHeight()
+        var index = 0
+        var rowTop = top
+
+        for (rowSize in rowSizes) {
+            val totalGap = MAIN_BUTTON_GAP * (rowSize - 1)
+            val buttonWidth = (right - left - totalGap) / rowSize
+            var buttonLeft = left
+
+            repeat(rowSize) {
+                mainButtons[index].rect.set(buttonLeft, rowTop, buttonLeft + buttonWidth, rowTop + buttonHeight)
+                buttonLeft += buttonWidth + MAIN_BUTTON_GAP
+                index++
+            }
+
+            rowTop += buttonHeight + MAIN_BUTTON_GAP
+        }
+    }
+
+    private fun menuWidth(): Float {
+        return (BASE_MENU_WIDTH * (screenWidth / BASE_SCREEN_WIDTH))
+            .coerceIn(300f, 420f)
+            .coerceAtMost(screenWidth - 32f)
+            .coerceAtLeast(260f)
+    }
+
+    private fun mainButtonHeight(): Float {
+        return (BASE_MAIN_BUTTON_HEIGHT * (screenHeight / BASE_SCREEN_HEIGHT)).coerceIn(56f, 76f)
     }
 
     fun show() {
@@ -505,6 +594,11 @@ class DashboardSettings(
         updateLayout()
     }
 
+    private fun showMoreSubmenu() {
+        currentView = ViewMode.MORE
+        updateLayout()
+    }
+
     /**
      * Switch back to the main menu.
      */
@@ -532,6 +626,7 @@ class DashboardSettings(
             ViewMode.MAIN -> drawMainMenu(canvas)
             ViewMode.HEADSUP -> drawHeadsUpSubmenu(canvas)
             ViewMode.GOOGLE -> drawGoogleSubmenu(canvas)
+            ViewMode.MORE -> drawMoreSubmenu(canvas)
         }
     }
 
@@ -557,18 +652,173 @@ class DashboardSettings(
             trackRight
         )
 
-        drawAdaptiveBrightnessToggle(canvas, trackRight)
+        mainButtons.forEach { drawMainButton(canvas, it) }
+    }
 
-        // Draw Heads-up button
-        canvas.drawRoundRect(headsUpButtonRect, BUTTON_CORNER_RADIUS, BUTTON_CORNER_RADIUS, buttonPaint)
-        val buttonTextY = headsUpButtonRect.centerY() + 6f  // Adjust for text baseline
-        canvas.drawText("Heads-up", headsUpButtonRect.centerX(), buttonTextY, buttonTextPaint)
+    private fun drawMainButton(canvas: Canvas, button: MainButtonSpec) {
+        canvas.drawRoundRect(button.rect, BUTTON_CORNER_RADIUS, BUTTON_CORNER_RADIUS, buttonPaint)
 
-        canvas.drawRoundRect(googleButtonRect, BUTTON_CORNER_RADIUS, BUTTON_CORNER_RADIUS, buttonPaint)
-        val googleButtonTextY = googleButtonRect.centerY() + 6f
-        canvas.drawText("Google", googleButtonRect.centerX(), googleButtonTextY, buttonTextPaint)
+        when (button.id) {
+            MainButton.HEADSUP -> drawHeadsUpIcon(canvas, button.rect)
+            MainButton.GOOGLE -> drawGoogleLogo(canvas, button.rect)
+            MainButton.APPEARANCE -> drawAppearanceIcon(canvas, button.rect)
+            MainButton.SHORTCUTS -> drawShortcutsIcon(canvas, button.rect)
+            MainButton.MORE -> drawMoreIcon(canvas, button.rect)
+        }
+    }
 
-        drawSmartAlignmentToggle(canvas, trackRight)
+    private fun drawAppearanceIcon(canvas: Canvas, rect: RectF) {
+        val cx = rect.centerX()
+        val cy = rect.centerY()
+        val r = rect.height() * 0.30f
+        canvas.drawPath(buildFivePointStarPath(cx, cy, r), iconFillPaint)
+
+        val gapTriangleTipRadius = r * 0.78f
+        val gapTriangleBaseRadius = r * 1.16f
+        val gapTriangleHalfBase = r * 0.105f
+        repeat(5) { index ->
+            val angle = Math.toRadians(-90.0 + 36.0 + index * 72.0)
+            canvas.drawPath(
+                buildInwardTrianglePath(
+                    cx,
+                    cy,
+                    angle,
+                    gapTriangleTipRadius,
+                    gapTriangleBaseRadius,
+                    gapTriangleHalfBase
+                ),
+                iconFillPaint
+            )
+        }
+    }
+
+    private fun buildFivePointStarPath(cx: Float, cy: Float, r: Float): android.graphics.Path {
+        val inner = r * 0.42f
+        val points = 10
+        return android.graphics.Path().apply {
+            for (i in 0 until points) {
+                val angle = Math.toRadians(-90.0 + i * 36.0)
+                val radius = if (i % 2 == 0) r else inner
+                val x = cx + kotlin.math.cos(angle).toFloat() * radius
+                val y = cy + kotlin.math.sin(angle).toFloat() * radius
+                if (i == 0) moveTo(x, y) else lineTo(x, y)
+            }
+            close()
+        }
+    }
+
+    private fun buildInwardTrianglePath(
+        cx: Float,
+        cy: Float,
+        angle: Double,
+        tipRadius: Float,
+        baseRadius: Float,
+        halfBase: Float
+    ): android.graphics.Path {
+        val dirX = kotlin.math.cos(angle).toFloat()
+        val dirY = kotlin.math.sin(angle).toFloat()
+        val tangentX = -dirY
+        val tangentY = dirX
+
+        val tipX = cx + dirX * tipRadius
+        val tipY = cy + dirY * tipRadius
+        val baseCenterX = cx + dirX * baseRadius
+        val baseCenterY = cy + dirY * baseRadius
+
+        return android.graphics.Path().apply {
+            moveTo(tipX, tipY)
+            lineTo(baseCenterX + tangentX * halfBase, baseCenterY + tangentY * halfBase)
+            lineTo(baseCenterX - tangentX * halfBase, baseCenterY - tangentY * halfBase)
+            close()
+        }
+    }
+
+    private fun drawHeadsUpIcon(canvas: Canvas, rect: RectF) {
+        val bitmap = headsUpIconBitmap
+        if (bitmap != null) {
+            val padding = rect.height() * 0.12f
+            val dest = fitRect(
+                bitmap.width.toFloat(),
+                bitmap.height.toFloat(),
+                RectF(rect.left + padding, rect.top + padding, rect.right - padding, rect.bottom - padding)
+            )
+            canvas.drawBitmap(bitmap, null, dest, bitmapPaint)
+            return
+        }
+
+        val headCenterX = rect.centerX() - rect.width() * 0.12f
+        val headCenterY = rect.centerY() + rect.height() * 0.08f
+        val radius = rect.height() * 0.18f
+        canvas.drawCircle(headCenterX, headCenterY, radius, iconPaint)
+        canvas.drawLine(
+            headCenterX + radius * 0.6f,
+            headCenterY - radius * 0.6f,
+            headCenterX + radius * 2.0f,
+            headCenterY - radius * 1.65f,
+            iconPaint
+        )
+        canvas.drawLine(
+            headCenterX - radius * 0.2f,
+            headCenterY + radius * 0.95f,
+            headCenterX + radius * 1.1f,
+            headCenterY + radius * 1.85f,
+            iconPaint
+        )
+        val eyeX = headCenterX + radius * 0.4f
+        val eyeY = headCenterY - radius * 0.35f
+        canvas.drawCircle(eyeX, eyeY, 2.2f, iconFillPaint)
+        val arrowX = headCenterX + radius * 2.35f
+        val arrowY = headCenterY - radius * 1.9f
+        canvas.drawLine(arrowX, arrowY, arrowX - 10f, arrowY + 1f, iconPaint)
+        canvas.drawLine(arrowX, arrowY, arrowX - 3f, arrowY + 9f, iconPaint)
+    }
+
+    private fun fitRect(sourceWidth: Float, sourceHeight: Float, bounds: RectF): RectF {
+        val sourceAspect = sourceWidth / sourceHeight
+        val boundsAspect = bounds.width() / bounds.height()
+
+        return if (sourceAspect > boundsAspect) {
+            val height = bounds.width() / sourceAspect
+            val top = bounds.centerY() - height / 2f
+            RectF(bounds.left, top, bounds.right, top + height)
+        } else {
+            val width = bounds.height() * sourceAspect
+            val left = bounds.centerX() - width / 2f
+            RectF(left, bounds.top, left + width, bounds.bottom)
+        }
+    }
+
+    private fun drawGoogleLogo(canvas: Canvas, rect: RectF) {
+        val drawable = googleIconDrawable ?: return
+        val padding = rect.height() * 0.12f
+        val dest = fitRect(
+            drawable.intrinsicWidth.toFloat(),
+            drawable.intrinsicHeight.toFloat(),
+            RectF(rect.left + padding, rect.top + padding, rect.right - padding, rect.bottom - padding)
+        )
+        drawable.setBounds(
+            dest.left.toInt(),
+            dest.top.toInt(),
+            dest.right.toInt(),
+            dest.bottom.toInt()
+        )
+        drawable.draw(canvas)
+    }
+
+    private fun drawShortcutsIcon(canvas: Canvas, rect: RectF) {
+        val padding = rect.height() * 0.16f
+        val iconRect = RectF(rect.left + padding, rect.top + padding, rect.right - padding, rect.bottom - padding)
+        LemonDrawing.draw(canvas, iconRect, slices = 6, selectedIndex = -1)
+    }
+
+    private fun drawMoreIcon(canvas: Canvas, rect: RectF) {
+        val dotRadius = rect.height() * 0.055f
+        val gap = rect.width() * 0.12f
+        val cx = rect.centerX()
+        val cy = rect.centerY()
+        canvas.drawCircle(cx - gap, cy, dotRadius, iconFillPaint)
+        canvas.drawCircle(cx, cy, dotRadius, iconFillPaint)
+        canvas.drawCircle(cx + gap, cy, dotRadius, iconFillPaint)
     }
 
     private fun drawSmartAlignmentToggle(canvas: Canvas, valueRight: Float) {
@@ -627,6 +877,17 @@ class DashboardSettings(
         val labelY = adaptiveBrightnessRowRect.centerY() + 6f
         canvas.drawText("Adaptive brightness", adaptiveBrightnessBoxRect.right + 12f, labelY, labelPaint)
         canvas.drawText(if (adaptiveBrightnessEnabled) "On" else "Off", valueRight, labelY, valuePaint)
+    }
+
+    private fun drawMoreSubmenu(canvas: Canvas) {
+        val titleY = menuRect.top + 45f
+        canvas.drawText("More", menuRect.centerX(), titleY, titlePaint)
+
+        drawBackButton(canvas)
+
+        val trackRight = menuRect.right - SLIDER_MARGIN_X
+        drawAdaptiveBrightnessToggle(canvas, trackRight)
+        drawSmartAlignmentToggle(canvas, trackRight)
     }
 
     /**
@@ -850,16 +1111,7 @@ class DashboardSettings(
 
         // Check view-specific elements
         if (currentView == ViewMode.MAIN) {
-            // Check heads-up button
-            if (headsUpButtonRect.contains(x, y) || googleButtonRect.contains(x, y)) {
-                return true
-            }
-
-            if (adaptiveBrightnessRowRect.contains(x, y)) {
-                return true
-            }
-
-            if (smartAlignmentRowRect.contains(x, y)) {
+            if (mainButtons.any { it.rect.contains(x, y) }) {
                 return true
             }
 
@@ -889,7 +1141,7 @@ class DashboardSettings(
                     return true
                 }
             }
-        } else {
+        } else if (currentView == ViewMode.GOOGLE) {
             if (backButtonRect.contains(x, y)) {
                 return true
             }
@@ -897,6 +1149,13 @@ class DashboardSettings(
                 return true
             }
             if (googleSecondaryActionLabel() != null && googleSecondaryButtonRect.contains(x, y)) {
+                return true
+            }
+        } else {
+            if (backButtonRect.contains(x, y)) {
+                return true
+            }
+            if (adaptiveBrightnessRowRect.contains(x, y) || smartAlignmentRowRect.contains(x, y)) {
                 return true
             }
         }
@@ -916,6 +1175,10 @@ class DashboardSettings(
         if (!isVisible) return false
 
         if (activeSlider != ActiveSlider.NONE) {
+            if (!isTouchInsideSliderHitbox(x, y, activeSlider)) {
+                activeSlider = ActiveSlider.NONE
+                return true
+            }
             updateSliderFromTouch(x, activeSlider)
             return true
         }
@@ -951,21 +1214,24 @@ class DashboardSettings(
 
         // Check view-specific elements
         if (currentView == ViewMode.MAIN) {
-            // Check heads-up button
-            if (headsUpButtonRect.contains(x, y)) {
-                showHeadsUpSubmenu()
-                return true
-            }
-            if (googleButtonRect.contains(x, y)) {
-                showGoogleSubmenu()
-                return true
-            }
-            if (adaptiveBrightnessRowRect.contains(x, y)) {
-                adaptiveBrightnessEnabled = !adaptiveBrightnessEnabled
-                return true
-            }
-            if (smartAlignmentRowRect.contains(x, y)) {
-                smartAlignmentEnabled = !smartAlignmentEnabled
+            mainButtons.firstOrNull { it.rect.contains(x, y) }?.let { button ->
+                when (button.id) {
+                    MainButton.HEADSUP -> showHeadsUpSubmenu()
+                    MainButton.GOOGLE -> showGoogleSubmenu()
+                    MainButton.APPEARANCE -> {
+                        // Hand off control to the layout editor; close this menu so it stays
+                        // out of the way while the editor is on screen.
+                        onAppearanceRequested?.invoke()
+                        dismiss()
+                    }
+                    MainButton.SHORTCUTS -> {
+                        // Hand off to the shortcuts configurator; close this menu so it does
+                        // not stack on top of the new full-screen overlay.
+                        onShortcutsRequested?.invoke()
+                        dismiss()
+                    }
+                    MainButton.MORE -> showMoreSubmenu()
+                }
                 return true
             }
 
@@ -997,7 +1263,7 @@ class DashboardSettings(
                     return true
                 }
             }
-        } else {
+        } else if (currentView == ViewMode.GOOGLE) {
             if (backButtonRect.contains(x, y)) {
                 showMainMenu()
                 return true
@@ -1024,6 +1290,19 @@ class DashboardSettings(
                     GoogleAction.DISCONNECT -> onDisconnectGoogle?.invoke()
                     GoogleAction.NONE -> Unit
                 }
+                return true
+            }
+        } else {
+            if (backButtonRect.contains(x, y)) {
+                showMainMenu()
+                return true
+            }
+            if (adaptiveBrightnessRowRect.contains(x, y)) {
+                adaptiveBrightnessEnabled = !adaptiveBrightnessEnabled
+                return true
+            }
+            if (smartAlignmentRowRect.contains(x, y)) {
+                smartAlignmentEnabled = !smartAlignmentEnabled
                 return true
             }
         }
@@ -1056,6 +1335,16 @@ class DashboardSettings(
         }
 
         return ActiveSlider.NONE
+    }
+
+    private fun isTouchInsideSliderHitbox(x: Float, y: Float, slider: ActiveSlider): Boolean {
+        return when (slider) {
+            ActiveSlider.BRIGHTNESS -> expandRect(brightnessTrackRect, 20f).contains(x, y)
+            ActiveSlider.HEAD_UP_TIME -> expandRect(headUpTimeTrackRect, 20f).contains(x, y)
+            ActiveSlider.WAKE_DURATION -> expandRect(wakeDurationTrackRect, 20f).contains(x, y)
+            ActiveSlider.ANGLE_THRESHOLD -> expandRect(angleThresholdTrackRect, 20f).contains(x, y)
+            ActiveSlider.NONE -> false
+        }
     }
 
     /**

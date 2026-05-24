@@ -327,6 +327,9 @@ class WidgetPersistenceHelper(private val context: Context) {
                 x = c.x, y = c.y, width = c.width, height = c.height,
                 selectedSymbol = it.currentSymbol,
                 selectedRange = it.currentRange.range,
+                tiles = it.getTileConfigs(),
+                navigationIndex = it.getNavigationIndex(),
+                tilingSpan = it.getTilingSpan(),
                 isMinimized = c.isMinimized,
                 isFullscreen = c.isFullscreen,
                 savedMinX = c.savedMinX, savedMinY = c.savedMinY,
@@ -658,8 +661,7 @@ class WidgetPersistenceHelper(private val context: Context) {
             fw.widgetWidth = adjustedWidth
             fw.widgetHeight = adjustedHeight
 
-            // Restore selected symbol and range
-            fw.setSymbolAndRange(state.selectedSymbol, state.selectedRange)
+            fw.restoreDashboard(state.tiles, state.navigationIndex, state.tilingSpan)
 
             restoreCommonState(fw, state, adjustedX, adjustedY)
 

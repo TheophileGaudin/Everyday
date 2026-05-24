@@ -76,7 +76,10 @@ class CalendarWidget(
         val displayGeneration: Long,
         val geometryVersion: Int,
         val event: DisplayEvent?,
-        val titleLines: List<String>
+        val titleLines: List<String>,
+        val iconBounds: RectF,
+        val textLeft: Float,
+        val textTop: Float
     )
 
     private data class EventLayout(
@@ -336,13 +339,11 @@ class CalendarWidget(
     }
 
     private fun drawWindowedContent(canvas: Canvas, displayState: DisplayState) {
-        drawCalendarIcon(canvas, windowIconBounds)
-
-        val top = contentBounds.top + WINDOW_PADDING
-
-        var y = top
         val layout = ensureWindowedLayout(displayState)
-        val textLeft = windowIconBounds.right + 16f
+        drawCalendarIcon(canvas, layout.iconBounds)
+
+        var y = layout.textTop
+        val textLeft = layout.textLeft
         val event = layout.event
         if (event == null) {
             y += lineHeight(titlePaintWindow)
@@ -496,16 +497,23 @@ class CalendarWidget(
 
         val event = displayState.events.firstOrNull()
         val layout = if (event == null) {
+            val title = "No upcoming event"
+            val detail = displayState.emptyStateLine
+            val textBlockWidth = max(titlePaintWindow.measureText(title), detailPaintWindow.measureText(detail))
+            val textBlockHeight = lineHeight(titlePaintWindow) + lineHeight(detailPaintWindow)
+            val geometry = calculateWindowedBlockGeometry(textBlockWidth, textBlockHeight)
             WindowedLayout(
                 displayGeneration = displayState.generation,
                 geometryVersion = geometryVersion,
                 event = null,
-                titleLines = emptyList()
+                titleLines = emptyList(),
+                iconBounds = geometry.iconBounds,
+                textLeft = geometry.textLeft,
+                textTop = geometry.textTop
             )
         } else {
-            val textLeft = windowIconBounds.right + 16f
-            val textRight = contentBounds.right - WINDOW_PADDING
-            val maxWidth = (textRight - textLeft).coerceAtLeast(1f)
+            val iconSize = windowIconBounds.width()
+            val maxWidth = (contentBounds.width() - WINDOW_PADDING * 2f - iconSize - 16f).coerceAtLeast(1f)
             val reserveHeight =
                 lineHeight(detailPaintWindow) +
                     lineHeight(detailPaintWindow) +
@@ -514,22 +522,61 @@ class CalendarWidget(
                 contentBounds.bottom - WINDOW_PADDING - reserveHeight - (contentBounds.top + WINDOW_PADDING)
             ).coerceAtLeast(lineHeight(titlePaintWindow))
             val maxTitleLines = max(1, (titleAvailableHeight / lineHeight(titlePaintWindow)).toInt())
+            val titleLines = fitLines(
+                toWrappedLines(event.title, titlePaintWindow, maxWidth),
+                maxTitleLines,
+                titlePaintWindow,
+                maxWidth
+            )
+            val textBlockWidth = max(
+                maxMeasuredWidth(titleLines, titlePaintWindow),
+                max(detailPaintWindow.measureText(event.relativeLabel), detailPaintWindow.measureText(event.scheduleLabel))
+            )
+            val textBlockHeight = titleLines.size * lineHeight(titlePaintWindow) +
+                CONTENT_GAP +
+                lineHeight(detailPaintWindow) +
+                lineHeight(detailPaintWindow)
+            val geometry = calculateWindowedBlockGeometry(textBlockWidth, textBlockHeight)
             WindowedLayout(
                 displayGeneration = displayState.generation,
                 geometryVersion = geometryVersion,
                 event = event,
-                titleLines = fitLines(
-                    toWrappedLines(event.title, titlePaintWindow, maxWidth),
-                    maxTitleLines,
-                    titlePaintWindow,
-                    maxWidth
-                )
+                titleLines = titleLines,
+                iconBounds = geometry.iconBounds,
+                textLeft = geometry.textLeft,
+                textTop = geometry.textTop
             )
         }
 
         windowedLayoutCache = layout
         return layout
     }
+
+    private data class WindowedBlockGeometry(
+        val iconBounds: RectF,
+        val textLeft: Float,
+        val textTop: Float
+    )
+
+    private fun calculateWindowedBlockGeometry(textBlockWidth: Float, textBlockHeight: Float): WindowedBlockGeometry {
+        val iconSize = windowIconBounds.width()
+        val gap = 16f
+        val blockWidth = iconSize + gap + textBlockWidth
+        val blockHeight = max(iconSize, textBlockHeight)
+        val blockLeft = contentBounds.left + ((contentBounds.width() - blockWidth) / 2f).coerceAtLeast(WINDOW_PADDING)
+        val blockTop = contentBounds.top + ((contentBounds.height() - blockHeight) / 2f).coerceAtLeast(WINDOW_PADDING)
+        val iconTop = blockTop + (blockHeight - iconSize) / 2f
+        val textTop = blockTop + (blockHeight - textBlockHeight) / 2f
+        val iconBounds = RectF(blockLeft, iconTop, blockLeft + iconSize, iconTop + iconSize)
+        return WindowedBlockGeometry(
+            iconBounds = iconBounds,
+            textLeft = iconBounds.right + gap,
+            textTop = textTop
+        )
+    }
+
+    private fun maxMeasuredWidth(lines: List<String>, paint: Paint): Float =
+        lines.maxOfOrNull { paint.measureText(it) } ?: 0f
 
     private fun ensureFullscreenLayout(displayState: DisplayState): FullscreenLayout {
         val cached = fullscreenLayoutCache

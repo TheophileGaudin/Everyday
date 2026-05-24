@@ -9,6 +9,7 @@ import com.everyday.shared.sync.CalendarAccount
 import com.everyday.shared.sync.CalendarEventSnapshot
 import com.everyday.shared.sync.CalendarSnapshot
 import com.everyday.shared.sync.FinanceDataProvider
+import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.FinanceSnapshot
 import com.everyday.shared.sync.FinanceTimeRange
 import com.everyday.shared.sync.NewsDataProvider
@@ -33,7 +34,8 @@ class GlassesDataSyncCoordinator(
     private val googleAuthCoordinatorProvider: () -> GoogleAuthCoordinator?,
     private val googleCalendarClientProvider: () -> GoogleCalendarClient?,
     private val localLocationProvider: () -> Location?,
-    private val notifyContentChanged: () -> Unit
+    private val notifyContentChanged: () -> Unit,
+    private val notifyTransientContentChanged: () -> Unit
 ) {
     companion object {
         private const val TAG = "GlassesDataSync"
@@ -48,7 +50,6 @@ class GlassesDataSyncCoordinator(
     )
     private val localWeatherInFlight = AtomicBoolean(false)
     private val localNewsInFlight = AtomicBoolean(false)
-    private val localFinanceInFlight = AtomicBoolean(false)
     private val localCalendarInFlight = AtomicBoolean(false)
     private val mainHandler = Handler(Looper.getMainLooper())
     private var phoneConnected = false
@@ -104,13 +105,25 @@ class GlassesDataSyncCoordinator(
         }
     }
 
-    fun onFinanceDataRequested(symbol: String, range: String, force: Boolean, reason: String) {
+    fun onFinanceDataRequested(config: FinanceDashboardTileConfig, force: Boolean, reason: String) {
         syncOrchestrator.refresh(
             channels = setOf(SyncChannel.FINANCE),
             force = force,
             reason = reason,
-            financeSymbol = symbol,
-            financeRange = range
+            financeSymbol = config.symbol,
+            financeRange = config.range,
+            financeAssetType = config.assetType,
+            financeChartType = config.chartType,
+            financeTileId = config.id
+        )
+    }
+
+    fun onFinanceVisibilityChanged(visible: Boolean) {
+        syncOrchestrator.refresh(
+            channels = setOf(SyncChannel.FINANCE),
+            force = false,
+            reason = if (visible) "finance_visible" else "finance_hidden",
+            financeLiveEnabled = visible
         )
     }
 
@@ -132,7 +145,16 @@ class GlassesDataSyncCoordinator(
     }
 
     fun onSyncSnapshotReceived(snapshot: SyncSnapshot) {
-        syncOrchestrator.cacheAndApplySnapshot(snapshot, notify = true)
+        val financeOnly = snapshot.finance != null &&
+            snapshot.weather == null &&
+            snapshot.calendar == null &&
+            snapshot.news == null
+        if (financeOnly) {
+            syncOrchestrator.cacheAndApplySnapshot(snapshot, notify = false)
+            notifyTransientContentChanged()
+        } else {
+            syncOrchestrator.cacheAndApplySnapshot(snapshot, notify = true)
+        }
     }
 
     fun onSyncErrorReceived(error: SyncError) {
@@ -166,8 +188,12 @@ class GlassesDataSyncCoordinator(
                 force = request.force,
                 reason = request.reason,
                 countryCode = requestCountry,
-                financeSymbol = request.financeSymbol ?: financeSelection?.first,
-                financeRange = request.financeRange ?: financeSelection?.second
+                financeSymbol = request.financeSymbol ?: financeSelection?.symbol,
+                financeRange = request.financeRange ?: financeSelection?.range,
+                financeAssetType = request.financeAssetType ?: financeSelection?.assetType,
+                financeChartType = request.financeChartType ?: financeSelection?.chartType,
+                financeTileId = request.financeTileId ?: financeSelection?.id,
+                financeLiveEnabled = request.financeLiveEnabled
             )
         )
     }
@@ -175,6 +201,9 @@ class GlassesDataSyncCoordinator(
     private fun refreshLocally(request: SyncRequest) {
         if (!networkStatusProvider.isConnected()) {
             applySnapshot(snapshotStore.loadAll(), notify = true)
+            return
+        }
+        if (request.financeLiveEnabled == false && SyncChannel.FINANCE in request.channels) {
             return
         }
         if (SyncChannel.WEATHER in request.channels) refreshWeatherLocally(request.force)
@@ -188,7 +217,10 @@ class GlassesDataSyncCoordinator(
                 request.reason,
                 request.countryCode,
                 request.financeSymbol,
-                request.financeRange
+                request.financeRange,
+                request.financeAssetType,
+                request.financeChartType,
+                request.financeTileId
             )
         }
     }
@@ -260,24 +292,47 @@ class GlassesDataSyncCoordinator(
         reason: String,
         countryCode: String?,
         financeSymbol: String?,
-        financeRange: String?
+        financeRange: String?,
+        financeAssetType: com.everyday.shared.sync.FinanceAssetType?,
+        financeChartType: com.everyday.shared.sync.FinanceChartType?,
+        financeTileId: String?
     ) {
         val country = countryCode ?: snapshotStore.loadWeather()?.countryCode
         val selection = widgetContainer.currentFinanceSelection()
         val symbol = financeSymbol
-            ?: selection?.first
+            ?: selection?.symbol
             ?: snapshotStore.loadFinance()?.symbol
             ?: FinanceDataProvider.defaultIndexForCountry(country).symbol
-        val range = FinanceTimeRange.fromRange(financeRange ?: selection?.second ?: snapshotStore.loadFinance()?.range)
+        val range = FinanceTimeRange.fromRange(financeRange ?: selection?.range ?: snapshotStore.loadFinance()?.range)
         val cached = snapshotStore.loadFinance()
-        if (!force && cached != null && !cached.isStale() && cached.symbol == symbol && cached.range == range.range) {
+        val assetType = financeAssetType ?: selection?.assetType ?: cached?.assetType
+        if (!force && cached != null && !cached.isStale() && cached.symbol == symbol && cached.range == range.range && cached.assetType == (assetType ?: cached.assetType)) {
             return
         }
-        if (!localFinanceInFlight.compareAndSet(false, true)) return
-
         Thread {
             try {
-                val snapshot = FinanceDataProvider.fetchChart(symbol, range).getOrThrow()
+                val config = FinanceDashboardTileConfig(
+                    id = financeTileId ?: selection?.id ?: "local_${symbol}_${range.range}",
+                    assetType = financeAssetType ?: selection?.assetType ?: cached?.assetType ?: com.everyday.shared.sync.FinanceAssetType.INDEX,
+                    symbol = symbol,
+                    range = range.range,
+                    chartType = financeChartType ?: selection?.chartType ?: cached?.chartType ?: com.everyday.shared.sync.FinanceChartType.LINE
+                )
+                val tile = FinanceDataProvider.fetchTile(config).getOrThrow()
+                val snapshot = FinanceSnapshot(
+                    symbol = tile.symbol,
+                    displayName = tile.displayName,
+                    country = tile.country,
+                    range = tile.range,
+                    rangeLabel = tile.rangeLabel,
+                    points = tile.points,
+                    percentChange = tile.percentChange,
+                    assetType = tile.assetType,
+                    chartType = tile.chartType,
+                    tiles = listOf(tile),
+                    fetchedAtMs = tile.fetchedAtMs,
+                    staleAfterMs = tile.staleAfterMs
+                )
                 snapshotStore.saveFinance(snapshot)
                 applyFinance(snapshot)
                 Log.d(TAG, "Local finance refresh success: reason=$reason symbol=$symbol range=${range.range}")
@@ -287,8 +342,6 @@ class GlassesDataSyncCoordinator(
                     widgetContainer.applyFinanceError("No data")
                     notifyContentChanged()
                 }
-            } finally {
-                localFinanceInFlight.set(false)
             }
         }.start()
     }
@@ -332,7 +385,7 @@ class GlassesDataSyncCoordinator(
             snapshot.weather?.let(::applyWeather)
             snapshot.calendar?.let(::applyCalendar)
             snapshot.news?.let(::applyNews)
-            snapshot.finance?.let(::applyFinance)
+            snapshot.finance?.let { applyFinance(it, notify = false) }
             if (notify) notifyContentChanged()
         }
     }
@@ -345,8 +398,8 @@ class GlassesDataSyncCoordinator(
         postUi { widgetContainer.applyNewsSnapshot(snapshot) }
     }
 
-    private fun applyFinance(snapshot: FinanceSnapshot) {
-        postUi { widgetContainer.applyFinanceSnapshot(snapshot) }
+    private fun applyFinance(snapshot: FinanceSnapshot, notify: Boolean = true) {
+        postUi { widgetContainer.applyFinanceSnapshot(snapshot, notify = notify) }
     }
 
     private fun applyCalendar(snapshot: CalendarSnapshot) {

@@ -4,7 +4,7 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:padding="16dp"
-    android:background="#1a1a2e">
+    android:background="#000000">
 
     <!-- Everyday Bar: Glasses icon + battery + close button -->
     <LinearLayout
@@ -17,7 +17,7 @@
         <!-- Glasses icon -->
         <ImageView
             android:id="@+id/glassesIcon"
-            android:layout_width="24dp"
+            android:layout_width="32dp"
             android:layout_height="24dp"
             android:src="@drawable/glasses_disconnected"
             android:contentDescription="Glasses connection status"/>
@@ -34,6 +34,17 @@
             android:textColor="#FFFFFF"
             android:gravity="start"/>
 
+        <!-- Refresh button -->
+        <ImageButton
+            android:id="@+id/refreshButton"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginEnd="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:padding="8dp"
+            android:src="@drawable/ic_refresh"
+            android:contentDescription="Refresh data"/>
+
         <!-- Close button -->
         <View
             android:id="@+id/closeButton"
@@ -41,6 +52,48 @@
             android:layout_height="40dp"
             android:background="@drawable/close_button_background"
             android:contentDescription="Close app"/>
+
+    </LinearLayout>
+
+    <!-- Link/search field sent directly to the glasses browser -->
+    <LinearLayout
+        android:id="@+id/openOnGlassesRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="8dp">
+
+        <EditText
+            android:id="@+id/linkInput"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:singleLine="true"
+            android:inputType="textUri"
+            android:imeOptions="actionGo"
+            android:hint=""
+            android:textColor="#FFFFFF"
+            android:textColorHint="#AAB0C0"
+            android:backgroundTint="#AAB0C0"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
+        <ImageButton
+            android:id="@+id/openOnGlassesButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:padding="8dp"
+            android:scaleType="fitCenter"
+            android:adjustViewBounds="true"
+            android:src="@drawable/ic_send_to_glasses_clean"
+            android:contentDescription="Open on glasses"
+            android:enabled="false"
+            android:alpha="0.5" />
 
     </LinearLayout>
 

@@ -3,6 +3,10 @@ package com.everyday.everyday_glasses
 import android.content.Context
 import android.os.Environment
 import android.util.Log
+import com.everyday.shared.sync.FinanceAssetType
+import com.everyday.shared.sync.FinanceChartType
+import com.everyday.shared.sync.FinanceDashboardTileConfig
+import com.everyday.shared.sync.FinanceTimeRange
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -21,7 +25,8 @@ object WidgetPersistence {
     private const val TAG = "WidgetPersistence"
     private const val FILENAME = "everyday_widgets.json"
     private const val LAYOUTS_FILENAME = "everyday_widget_layouts.json"
-    const val DEFAULT_LAYOUT_NAME = "Default"
+    const val DEFAULT_LAYOUT_NAME = ShortcutAction.BUILTIN_LAYOUT_STANDARD
+    private const val LEGACY_DEFAULT_LAYOUT_NAME = "Default"
 
     // JSON keys
     private const val KEY_TEXT_WIDGETS = "text_widgets"
@@ -46,6 +51,11 @@ object WidgetPersistence {
     private const val KEY_CLOSED_NEWS_WIDGET = "news_widget"
     private const val KEY_CLOSED_SPEEDOMETER_WIDGET = "speedometer_widget"
     private const val KEY_CLOSED_SUBTITLE_WIDGET = "subtitle_widget"
+    private const val KEY_HOVER_CONTROLS = "hover_controls"
+    private const val KEY_HOVER_CONTROL_ID = "id"
+    private const val KEY_HOVER_CONTROL_COL = "col"
+    private const val KEY_HOVER_CONTROL_ROW = "row"
+    private const val KEY_LAYOUT_LOCKED = "layoutLocked"
     private const val KEY_LAYOUTS = "layouts"
     private const val KEY_LAYOUT_NAME = "name"
     private const val KEY_LAYOUT_CREATED_AT = "createdAt"
@@ -142,8 +152,10 @@ object WidgetPersistence {
         val subtitle: SubtitleWidgetState?,
         val mirror: MirrorWidgetState?,
         val closedTemplates: ClosedWidgetTemplates = ClosedWidgetTemplates(),
+        val hoverControls: List<HoverControlPlacementState>? = null,
         val isFirstRun: Boolean = true,  // True if no saved state exists (create default widgets)
-        val activeLayoutName: String? = null
+        val activeLayoutName: String? = null,
+        val isLayoutLocked: Boolean = false
     )
 
     data class WidgetLayoutRecord(
@@ -164,6 +176,12 @@ object WidgetPersistence {
         val speedometer: SpeedometerWidgetState? = null,
         val subtitle: SubtitleWidgetState? = null,
         val mirror: MirrorWidgetState? = null
+    )
+
+    data class HoverControlPlacementState(
+        val controlId: String,
+        val col: Int,
+        val row: Int
     )
 
     // ==================== Widget state DTOs ====================
@@ -287,6 +305,9 @@ object WidgetPersistence {
         override val height: Float,
         val selectedSymbol: String = "^GSPC",
         val selectedRange: String = "1D",
+        val tiles: List<FinanceDashboardTileConfig> = emptyList(),
+        val navigationIndex: Int = 0,
+        val tilingSpan: Int = 3,
         override val isMinimized: Boolean = false,
         override val isFullscreen: Boolean = false,
         override val savedMinX: Float = 0f,
@@ -371,8 +392,10 @@ object WidgetPersistence {
         speedometerWidgetState: SpeedometerWidgetState? = null,
         subtitleWidgetState: SubtitleWidgetState? = null,
         closedTemplates: ClosedWidgetTemplates = ClosedWidgetTemplates(),
+        hoverControls: List<HoverControlPlacementState>? = null,
         isFirstRun: Boolean = false,
-        activeLayoutName: String? = null
+        activeLayoutName: String? = null,
+        isLayoutLocked: Boolean = false
     ): PersistedState = PersistedState(
         text = textWidgets,
         browser = browserWidgets,
@@ -386,8 +409,10 @@ object WidgetPersistence {
         subtitle = subtitleWidgetState,
         mirror = mirrorWidgetState,
         closedTemplates = closedTemplates,
+        hoverControls = hoverControls,
         isFirstRun = isFirstRun,
-        activeLayoutName = sanitizeLayoutName(activeLayoutName)
+        activeLayoutName = sanitizeLayoutName(activeLayoutName),
+        isLayoutLocked = isLayoutLocked
     )
 
     fun stateToJson(state: PersistedState): JSONObject {
@@ -431,9 +456,21 @@ object WidgetPersistence {
         if (closedTemplatesJson.length() > 0) {
             rootJson.put(KEY_CLOSED_TEMPLATES, closedTemplatesJson)
         }
+        state.hoverControls?.let { placements ->
+            rootJson.put(KEY_HOVER_CONTROLS, JSONArray().apply {
+                placements.forEach { placement ->
+                    put(JSONObject().apply {
+                        put(KEY_HOVER_CONTROL_ID, placement.controlId)
+                        put(KEY_HOVER_CONTROL_COL, placement.col)
+                        put(KEY_HOVER_CONTROL_ROW, placement.row)
+                    })
+                }
+            })
+        }
         sanitizeLayoutName(state.activeLayoutName)?.let {
             rootJson.put(KEY_ACTIVE_LAYOUT_NAME, it)
         }
+        rootJson.put(KEY_LAYOUT_LOCKED, state.isLayoutLocked)
 
         return rootJson
     }
@@ -452,8 +489,10 @@ object WidgetPersistence {
             subtitle = parseSubtitle(rootJson),
             mirror = parseMirror(rootJson),
             closedTemplates = parseClosedTemplates(rootJson),
+            hoverControls = parseHoverControls(rootJson),
             isFirstRun = isFirstRun,
-            activeLayoutName = sanitizeLayoutName(rootJson.optString(KEY_ACTIVE_LAYOUT_NAME, ""))
+            activeLayoutName = sanitizeLayoutName(rootJson.optString(KEY_ACTIVE_LAYOUT_NAME, "")),
+            isLayoutLocked = rootJson.optBoolean(KEY_LAYOUT_LOCKED, false)
         )
 
     /**
@@ -473,7 +512,9 @@ object WidgetPersistence {
         speedometerWidgetState: SpeedometerWidgetState? = null,
         subtitleWidgetState: SubtitleWidgetState? = null,
         closedTemplates: ClosedWidgetTemplates = ClosedWidgetTemplates(),
-        activeLayoutName: String? = null
+        hoverControls: List<HoverControlPlacementState>? = null,
+        activeLayoutName: String? = null,
+        isLayoutLocked: Boolean = false
     ): Boolean = saveState(
         context,
         createPersistedState(
@@ -489,8 +530,10 @@ object WidgetPersistence {
             speedometerWidgetState = speedometerWidgetState,
             subtitleWidgetState = subtitleWidgetState,
             closedTemplates = closedTemplates,
+            hoverControls = hoverControls,
             isFirstRun = false,
-            activeLayoutName = activeLayoutName
+            activeLayoutName = activeLayoutName,
+            isLayoutLocked = isLayoutLocked
         )
     )
 
@@ -528,8 +571,10 @@ object WidgetPersistence {
                 null,
                 null,
                 closedTemplates = ClosedWidgetTemplates(),
+                hoverControls = null,
                 isFirstRun = true,
-                activeLayoutName = DEFAULT_LAYOUT_NAME
+                activeLayoutName = DEFAULT_LAYOUT_NAME,
+                isLayoutLocked = false
             )
 
         return stateFromJson(rootJson, isFirstRun = false)
@@ -602,8 +647,11 @@ object WidgetPersistence {
         }
     }
 
-    fun isDefaultLayoutName(name: String?): Boolean =
-        name?.trim()?.equals(DEFAULT_LAYOUT_NAME, ignoreCase = true) == true
+    fun isDefaultLayoutName(name: String?): Boolean {
+        val trimmed = name?.trim() ?: return false
+        return trimmed.equals(DEFAULT_LAYOUT_NAME, ignoreCase = true) ||
+                trimmed.equals(LEGACY_DEFAULT_LAYOUT_NAME, ignoreCase = true)
+    }
 
     private fun sanitizeLayoutName(name: String?): String? =
         name?.trim()?.takeIf { it.isNotBlank() }
@@ -764,6 +812,21 @@ object WidgetPersistence {
             putCommonFields(state)
             put("selectedSymbol", state.selectedSymbol)
             put("selectedRange", state.selectedRange)
+            put("navigationIndex", state.navigationIndex)
+            put("tilingSpan", state.tilingSpan)
+            put("tiles", JSONArray().apply {
+                state.tiles.forEach { put(financeTileToJson(it)) }
+            })
+        }
+
+    private fun financeTileToJson(tile: FinanceDashboardTileConfig): JSONObject =
+        JSONObject().apply {
+            put("id", tile.id)
+            put("assetType", tile.assetType.name)
+            put("symbol", tile.symbol)
+            put("range", tile.range)
+            put("chartType", tile.chartType.name)
+            put("slot", tile.slot)
         }
 
     private fun newsWidgetToJson(state: NewsWidgetState): JSONObject =
@@ -911,6 +974,9 @@ object WidgetPersistence {
                         x = c.x, y = c.y, width = w, height = h,
                         selectedSymbol = item.optString("selectedSymbol", "^GSPC"),
                         selectedRange = item.optString("selectedRange", "1D"),
+                        tiles = parseFinanceTiles(item, item.optString("selectedSymbol", "^GSPC"), item.optString("selectedRange", "1D")),
+                        navigationIndex = item.optInt("navigationIndex", 0),
+                        tilingSpan = item.optInt("tilingSpan", 3).coerceIn(1, 3),
                         isMinimized = c.isMinimized,
                         isFullscreen = c.isFullscreen,
                         savedMinX = c.savedMinX, savedMinY = c.savedMinY,
@@ -974,6 +1040,26 @@ object WidgetPersistence {
                 }
             }
         )
+    }
+
+    private fun parseHoverControls(rootJson: JSONObject): List<HoverControlPlacementState>? {
+        val jsonArray = rootJson.optJSONArray(KEY_HOVER_CONTROLS) ?: return null
+        val placements = mutableListOf<HoverControlPlacementState>()
+
+        for (i in 0 until jsonArray.length()) {
+            val obj = jsonArray.optJSONObject(i) ?: continue
+            val id = obj.optString(KEY_HOVER_CONTROL_ID, "").trim()
+            if (id.isBlank()) continue
+            placements.add(
+                HoverControlPlacementState(
+                    controlId = id,
+                    col = obj.optInt(KEY_HOVER_CONTROL_COL, 0),
+                    row = obj.optInt(KEY_HOVER_CONTROL_ROW, 0)
+                )
+            )
+        }
+
+        return placements
     }
 
     private fun parseTextWidgets(rootJson: JSONObject): List<TextWidgetState> {
@@ -1094,6 +1180,9 @@ object WidgetPersistence {
                 x = c.x, y = c.y, width = w, height = h,
                 selectedSymbol = obj.optString("selectedSymbol", "^GSPC"),
                 selectedRange = obj.optString("selectedRange", "1D"),
+                tiles = parseFinanceTiles(obj, obj.optString("selectedSymbol", "^GSPC"), obj.optString("selectedRange", "1D")),
+                navigationIndex = obj.optInt("navigationIndex", 0),
+                tilingSpan = obj.optInt("tilingSpan", 3).coerceIn(1, 3),
                 isMinimized = c.isMinimized,
                 isFullscreen = c.isFullscreen,
                 savedMinX = c.savedMinX, savedMinY = c.savedMinY,
@@ -1101,6 +1190,39 @@ object WidgetPersistence {
                 isPinned = c.isPinned
             )
         }
+
+    private fun parseFinanceTiles(obj: JSONObject, fallbackSymbol: String, fallbackRange: String): List<FinanceDashboardTileConfig> {
+        val items = obj.optJSONArray("tiles") ?: JSONArray()
+        val parsed = buildList {
+            for (index in 0 until items.length()) {
+                val tile = items.optJSONObject(index) ?: continue
+                val assetType = FinanceAssetType.fromWireName(tile.optString("assetType"))
+                val symbol = tile.optString("symbol").takeIf { it.isNotBlank() } ?: continue
+                val range = FinanceTimeRange.fromRange(tile.optString("range", "1d")).range
+                add(
+                    FinanceDashboardTileConfig(
+                        id = tile.optString("id", "${assetType.name}_${symbol}_$range"),
+                        assetType = assetType,
+                        symbol = symbol,
+                        range = range,
+                        chartType = FinanceChartType.fromWireName(tile.optString("chartType")),
+                        slot = tile.optInt("slot", index)
+                    )
+                )
+            }
+        }
+        if (parsed.isNotEmpty()) return parsed.take(FinanceWidget.MAX_TILES)
+        return listOf(
+            FinanceDashboardTileConfig(
+                id = "index_${fallbackSymbol}_${fallbackRange}",
+                assetType = FinanceAssetType.INDEX,
+                symbol = fallbackSymbol,
+                range = FinanceTimeRange.fromRange(fallbackRange).range,
+                chartType = FinanceChartType.LINE,
+                slot = 0
+            )
+        )
+    }
 
     private fun parseNews(rootJson: JSONObject): NewsWidgetState? =
         parseSizedWidget(rootJson, KEY_NEWS_WIDGET) { obj, c, w, h ->

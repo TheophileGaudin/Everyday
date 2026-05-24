@@ -8,6 +8,9 @@
 - Primary workflow is Android Studio.
 - Usual build/deploy path is: press the Run button (green triangle) in Android Studio.
 - Prefer validating changes by running from Android Studio run configurations instead of assuming CLI Gradle wrappers are available.
+- If a shell build is needed and no repo `gradlew.bat` exists, use Android Studio's bundled JBR with the downloaded Gradle 8.7 distribution:
+  - `$env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'; $env:Path="$env:JAVA_HOME\bin;$env:Path"; & "$env:USERPROFILE\.gradle\wrapper\dists\gradle-8.7-bin\bhs2wmbdwecv87pi65oeuq5iu\gradle-8.7\bin\gradle.bat" :app:assembleDebug`
+  - Run that from `Everyday_glasses` or `Everyday_phone` as appropriate.
 
 ## Target Device (RayNeo X3 Pro)
 - Chip platform: Qualcomm Snapdragon AR1 Gen1

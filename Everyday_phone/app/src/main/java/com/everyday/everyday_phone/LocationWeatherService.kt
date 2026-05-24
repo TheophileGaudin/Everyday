@@ -11,16 +11,20 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.location.Location
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import com.everyday.shared.sync.LocationName
+import com.everyday.shared.sync.SpeedSnapshot
 import com.everyday.shared.sync.WeatherData
 import com.everyday.shared.sync.WeatherDataProvider
 import com.everyday.shared.sync.WeatherSnapshot
 import com.google.android.gms.location.*
+import com.google.android.gms.tasks.CancellationTokenSource
+import java.util.concurrent.atomic.AtomicBoolean
 
 
 /**
@@ -37,12 +41,15 @@ class LocationWeatherService : Service() {
         private const val NOTIFICATION_ID = 1002
         private const val CHANNEL_ID = "location_weather_channel"
         private const val EXTRA_FORCE_REFRESH = "extra_force_refresh"
-        private const val LOCATION_INTERVAL_MS = 5000L   // Request location every 5 seconds (for speedometer)
+        private const val LOCATION_INTERVAL_MS = 1000L   // Request live speed updates about once per second
         private const val WEATHER_INTERVAL_MS = 600000L  // Fetch weather every 10 minutes
         private const val GEOCODE_INTERVAL_MS = 180000L  // Reverse-geocode every 3 minutes max
         private const val MIN_SPEED_ESTIMATE_INTERVAL_MS = 500L
         private const val MAX_SPEED_ESTIMATE_INTERVAL_MS = 120000L
         private const val MAX_REASONABLE_SPEED_MPS = 60f
+        private const val MAX_ACCEPTABLE_SPEED_AGE_MS = 10000L
+        private const val MAX_ACCEPTABLE_ACCURACY_M = 60f
+        private const val MANUAL_LOCATION_TIMEOUT_MS = 20000L
 
         //This is my free API Key. If too many people access this service it will saturate.
         private const val GEOCODE_MAPS_CO_API_KEY = "6974a768992ec642181119eby0e50e7"
@@ -51,6 +58,7 @@ class LocationWeatherService : Service() {
             private set
 
         var onSnapshotChanged: ((WeatherSnapshot) -> Unit)? = null
+        var onSpeedSnapshotChanged: ((SpeedSnapshot) -> Unit)? = null
 
         fun start(context: Context, forceRefresh: Boolean = false) {
             val intent = Intent(context, LocationWeatherService::class.java).apply {
@@ -70,6 +78,7 @@ class LocationWeatherService : Service() {
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var wakeLock: PowerManager.WakeLock? = null
     // Cached data - Single source of truth for location/weather
     private var cachedTown: String? = null
@@ -78,6 +87,7 @@ class LocationWeatherService : Service() {
     private var cachedLat: Double? = null
     private var cachedLon: Double? = null
     private var cachedSpeedMps: Float? = null
+    private var cachedSpeedSnapshot: SpeedSnapshot? = null
     private var previousSpeedLocation: Location? = null
     private var lastWeatherFetch: Long = 0
     private var lastGeocodeFetch: Long = 0
@@ -194,8 +204,14 @@ class LocationWeatherService : Service() {
     private fun processLocation(location: Location) {
         val lat = location.latitude
         val lon = location.longitude
-        cachedSpeedMps = resolveSpeedMps(location)
-        fileLog("Processing location: $lat, $lon speedMps=${cachedSpeedMps ?: "na"}")
+        val speedSnapshot = resolveSpeedSnapshot(location)
+        cachedSpeedSnapshot = speedSnapshot
+        cachedSpeedMps = if (speedSnapshot.qualityOk) speedSnapshot.speedMps else null
+        notifySpeedSnapshotChanged(speedSnapshot)
+        fileLog(
+            "Processing location: $lat, $lon " +
+                    "speedMps=${cachedSpeedMps ?: "na"} quality=${speedSnapshot.qualityOk}"
+        )
 
         cachedLat = lat
         cachedLon = lon
@@ -209,46 +225,61 @@ class LocationWeatherService : Service() {
      * refresh weather without mutating the speed estimator with synthetic locations.
      */
     private fun refreshCachedPayload(lat: Double, lon: Double, forceWeatherFetch: Boolean) {
+        val now = System.currentTimeMillis()
+        val needsGeocode = cachedTown == null ||
+                cachedCountryCode == null ||
+                (now - lastGeocodeFetch > GEOCODE_INTERVAL_MS)
+        val needsWeatherFetch = forceWeatherFetch || (now - lastWeatherFetch > WEATHER_INTERVAL_MS)
+        if (!needsGeocode && !needsWeatherFetch) {
+            return
+        }
+
         Thread {
-            val now = System.currentTimeMillis()
-            val needsGeocode = cachedTown == null ||
-                    cachedCountryCode == null ||
-                    (now - lastGeocodeFetch > GEOCODE_INTERVAL_MS)
             if (needsGeocode) {
                 geocodeLocation(lat, lon)
                 lastGeocodeFetch = now
             }
 
-            // Fetch weather if needed
-            val needsWeatherFetch = forceWeatherFetch || (now - lastWeatherFetch > WEATHER_INTERVAL_MS)
             if (needsWeatherFetch) {
                 lastWeatherFetch = now
                 // Explicit force-refreshes can push immediately when fresh data arrives.
                 fetchWeather(lat, lon, sendImmediately = forceWeatherFetch)
-            } else {
-                // Normal background refreshes only update cache; transport is driven by the coordinator.
-                if (forceWeatherFetch) {
-                    notifySnapshotChanged()
-                }
             }
         }.start()
     }
 
-    private fun resolveSpeedMps(location: Location): Float? {
+    private fun resolveSpeedSnapshot(location: Location): SpeedSnapshot {
+        val ageMs = System.currentTimeMillis() - location.time
+        val ageOk = ageMs in 0..MAX_ACCEPTABLE_SPEED_AGE_MS
+        val accuracyOk = !location.hasAccuracy() || location.accuracy <= MAX_ACCEPTABLE_ACCURACY_M
         val sensorMps = if (location.hasSpeed()) location.speed.coerceAtLeast(0f) else Float.NaN
-        val validSensorMps = sensorMps.takeIf { it.isFinite() && it in 0f..MAX_REASONABLE_SPEED_MPS }
+        val validSensorMps = sensorMps.takeIf {
+            it.isFinite() && it in 0f..MAX_REASONABLE_SPEED_MPS && ageOk && accuracyOk
+        }
         val previous = previousSpeedLocation
         previousSpeedLocation = Location(location)
         if (validSensorMps != null) {
-            return validSensorMps
+            return SpeedSnapshot(
+                speedMps = validSensorMps,
+                qualityOk = true,
+                timestampMs = location.time.takeIf { it > 0L } ?: System.currentTimeMillis()
+            )
         }
         if (previous == null) {
-            return cachedSpeedMps
+            return SpeedSnapshot(
+                speedMps = null,
+                qualityOk = false,
+                timestampMs = location.time.takeIf { it > 0L } ?: System.currentTimeMillis()
+            )
         }
 
         val deltaTimeMs = location.time - previous.time
         if (deltaTimeMs !in MIN_SPEED_ESTIMATE_INTERVAL_MS..MAX_SPEED_ESTIMATE_INTERVAL_MS) {
-            return cachedSpeedMps
+            return SpeedSnapshot(
+                speedMps = null,
+                qualityOk = false,
+                timestampMs = location.time.takeIf { it > 0L } ?: System.currentTimeMillis()
+            )
         }
 
         val rawDistanceM = previous.distanceTo(location).coerceAtLeast(0f)
@@ -257,7 +288,28 @@ class LocationWeatherService : Service() {
         val noiseFloorM = ((prevAccuracy + currAccuracy) * 0.25f).coerceIn(0.5f, 10f)
         val adjustedDistanceM = (rawDistanceM - noiseFloorM).coerceAtLeast(0f)
         val estimatedMps = adjustedDistanceM / (deltaTimeMs / 1000f)
-        return estimatedMps.takeIf { it.isFinite() && it in 0f..MAX_REASONABLE_SPEED_MPS } ?: cachedSpeedMps
+        val validEstimatedMps = estimatedMps.takeIf {
+            it.isFinite() && it in 0f..MAX_REASONABLE_SPEED_MPS && ageOk && accuracyOk
+        }
+        return SpeedSnapshot(
+            speedMps = validEstimatedMps,
+            qualityOk = validEstimatedMps != null,
+            timestampMs = location.time.takeIf { it > 0L } ?: System.currentTimeMillis()
+        )
+    }
+
+    private fun notifySpeedSnapshotChanged(snapshot: SpeedSnapshot? = cachedSpeedSnapshot) {
+        snapshot ?: return
+        onSpeedSnapshotChanged?.invoke(snapshot)
+    }
+
+    private fun updateLocationCacheForRefresh(location: Location) {
+        cachedLat = location.latitude
+        cachedLon = location.longitude
+        val speedSnapshot = resolveSpeedSnapshot(location)
+        cachedSpeedSnapshot = speedSnapshot
+        cachedSpeedMps = if (speedSnapshot.qualityOk) speedSnapshot.speedMps else null
+        notifySpeedSnapshotChanged(speedSnapshot)
     }
 
     private fun geocodeLocation(lat: Double, lon: Double) {
@@ -289,6 +341,176 @@ class LocationWeatherService : Service() {
                 fileLog("Weather fetch failed - callback returned null")
             }
         }
+    }
+
+    fun forceUpdateDetailed(callback: (Result<WeatherSnapshot>) -> Unit) {
+        fileLog("Detailed force update requested")
+        val lat = cachedLat
+        val lon = cachedLon
+        if (lat != null && lon != null) {
+            refreshCachedPayloadDetailed(lat, lon, callback)
+            return
+        }
+
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED) {
+            callback(Result.failure(SecurityException("Location permission is not granted")))
+            return
+        }
+
+        fusedLocationClient.lastLocation
+            .addOnSuccessListener { location ->
+                if (location != null) {
+                    updateLocationCacheForRefresh(location)
+                    refreshCachedPayloadDetailed(location.latitude, location.longitude, callback)
+                } else {
+                    requestCurrentLocationForDetailedRefresh(callback)
+                }
+            }
+            .addOnFailureListener { error ->
+                fileLog("Detailed refresh lastLocation failed, requesting current location: ${error.message}")
+                requestCurrentLocationForDetailedRefresh(callback)
+            }
+    }
+
+    private fun requestCurrentLocationForDetailedRefresh(callback: (Result<WeatherSnapshot>) -> Unit) {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED) {
+            callback(Result.failure(SecurityException("Location permission is not granted")))
+            return
+        }
+
+        fileLog("Detailed refresh requesting current phone location")
+        val cancellationTokenSource = CancellationTokenSource()
+        fusedLocationClient.getCurrentLocation(
+            Priority.PRIORITY_HIGH_ACCURACY,
+            cancellationTokenSource.token
+        )
+            .addOnSuccessListener { location ->
+                if (location == null) {
+                    requestSingleLocationUpdateForDetailedRefresh(callback)
+                    return@addOnSuccessListener
+                }
+
+                updateLocationCacheForRefresh(location)
+                refreshCachedPayloadDetailed(location.latitude, location.longitude, callback)
+            }
+            .addOnFailureListener { error ->
+                fileLog("Detailed refresh getCurrentLocation failed, requesting single update: ${error.message}")
+                requestSingleLocationUpdateForDetailedRefresh(callback)
+            }
+    }
+
+    private fun requestSingleLocationUpdateForDetailedRefresh(callback: (Result<WeatherSnapshot>) -> Unit) {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED) {
+            callback(Result.failure(SecurityException("Location permission is not granted")))
+            return
+        }
+
+        fileLog("Detailed refresh waiting for one location update")
+        val completed = AtomicBoolean(false)
+        lateinit var singleUpdateCallback: LocationCallback
+
+        fun finish(result: Result<WeatherSnapshot>) {
+            if (!completed.compareAndSet(false, true)) return
+            fusedLocationClient.removeLocationUpdates(singleUpdateCallback)
+            callback(result)
+        }
+
+        singleUpdateCallback = object : LocationCallback() {
+            override fun onLocationResult(locationResult: LocationResult) {
+                val location = locationResult.lastLocation
+                if (location == null) {
+                    return
+                }
+                updateLocationCacheForRefresh(location)
+                refreshCachedPayloadDetailed(location.latitude, location.longitude) { result ->
+                    finish(result)
+                }
+            }
+
+            override fun onLocationAvailability(availability: LocationAvailability) {
+                fileLog("Manual refresh location availability: ${availability.isLocationAvailable}")
+            }
+        }
+
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
+            .setMinUpdateIntervalMillis(500L)
+            .setMaxUpdates(1)
+            .build()
+
+        mainHandler.postDelayed(
+            {
+                finish(
+                    Result.failure(
+                        IllegalStateException(
+                            "Unable to get current phone location after ${MANUAL_LOCATION_TIMEOUT_MS / 1000} seconds. " +
+                                "Check that phone Location is enabled, Everyday has precise location permission, " +
+                                "and the phone has a clear enough GPS/Wi-Fi/cell fix."
+                        )
+                    )
+                )
+            },
+            MANUAL_LOCATION_TIMEOUT_MS
+        )
+
+        fusedLocationClient.requestLocationUpdates(request, singleUpdateCallback, Looper.getMainLooper())
+            .addOnFailureListener { error ->
+                finish(Result.failure(error))
+            }
+    }
+
+    private fun refreshCachedPayloadDetailed(
+        lat: Double,
+        lon: Double,
+        callback: (Result<WeatherSnapshot>) -> Unit
+    ) {
+        Thread {
+            val failures = mutableListOf<Throwable>()
+            val now = System.currentTimeMillis()
+
+            WeatherDataProvider.resolveLocationName(lat, lon, GEOCODE_MAPS_CO_API_KEY)
+                .onSuccess { locationName: LocationName ->
+                    cachedTown = locationName.town
+                    cachedCountryCode = locationName.countryCode
+                    lastGeocodeFetch = now
+                    fileLog("Manual geocode refreshed: $cachedTown, countryCode=$cachedCountryCode")
+                }
+                .onFailure { error ->
+                    fileLog("Manual geocoding failed: ${error.message}")
+                    failures += error
+                }
+
+            WeatherDataProvider.fetchWeather(lat, lon)
+                .onSuccess { weatherData ->
+                    cachedWeatherData = weatherData
+                    lastWeatherFetch = now
+                    fileLog("Manual weather refreshed: temp=${weatherData.tempCurrent}C, desc=${weatherData.weatherDescCurrent}")
+                }
+                .onFailure { error ->
+                    fileLog("Manual weather fetch failed: ${error.message}")
+                    failures += error
+                }
+
+            payloadTimestamp = System.currentTimeMillis()
+            val snapshot = getCurrentLocationData()
+            if (snapshot != null) {
+                onSnapshotChanged?.invoke(snapshot)
+            }
+
+            if (failures.isEmpty()) {
+                if (snapshot == null) {
+                    callback(Result.failure(IllegalStateException("Location/weather refresh completed without a usable snapshot")))
+                } else {
+                    callback(Result.success(snapshot))
+                }
+            } else {
+                val error = IllegalStateException("One or more location/weather calls failed")
+                failures.forEach(error::addSuppressed)
+                callback(Result.failure(error))
+            }
+        }.start()
     }
 
     private fun notifySnapshotChanged() {
@@ -344,6 +566,8 @@ class LocationWeatherService : Service() {
         )
     }
 
+    fun getCurrentSpeedSnapshot(): SpeedSnapshot? = cachedSpeedSnapshot
+
     /**
      * Force an immediate weather/location update and send to glasses.
      * Called when glasses wake from sleep or reconnect.
@@ -360,9 +584,7 @@ class LocationWeatherService : Service() {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
                 fusedLocationClient.lastLocation.addOnSuccessListener { location ->
                     location?.let {
-                        cachedLat = it.latitude
-                        cachedLon = it.longitude
-                        cachedSpeedMps = resolveSpeedMps(it)
+                        updateLocationCacheForRefresh(it)
                         refreshCachedPayload(it.latitude, it.longitude, forceWeatherFetch = true)
                     }
                 }
@@ -380,6 +602,7 @@ class LocationWeatherService : Service() {
         payloadTimestamp = 0
         cachedWeatherData = null
         cachedSpeedMps = null
+        cachedSpeedSnapshot = null
         previousSpeedLocation = null
         lastWeatherFetch = 0
         lastGeocodeFetch = 0

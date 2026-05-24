@@ -378,7 +378,7 @@ class ScreenMirrorWidget(
             streamState == StreamState.STREAMING
     }
 
-    fun shouldApplyMediaBrightnessCap(): Boolean = mirroringEnabled
+    fun shouldApplyMediaBrightnessCap(): Boolean = isBinocularMediaActive()
 
     private fun dispatchMediaStateIfChanged() {
         val isActive = isBinocularMediaActive()

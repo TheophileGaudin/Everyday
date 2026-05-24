@@ -3,6 +3,7 @@ package com.everyday.everyday_glasses
 import com.everyday.shared.sync.SyncError
 import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot
+import com.everyday.shared.sync.SpeedSnapshot
 import com.everyday.shared.sync.SubtitleControl
 import com.everyday.shared.transport.SyncMessenger
 
@@ -20,7 +21,11 @@ class TransportManager(
             reason = request.reason,
             countryCode = request.countryCode,
             financeSymbol = request.financeSymbol,
-            financeRange = request.financeRange
+            financeRange = request.financeRange,
+            financeAssetType = request.financeAssetType,
+            financeChartType = request.financeChartType,
+            financeTileId = request.financeTileId,
+            financeLiveEnabled = request.financeLiveEnabled
         )
         return true
     }
@@ -28,6 +33,8 @@ class TransportManager(
     override fun sendSyncSnapshot(snapshot: SyncSnapshot): Boolean = false
 
     override fun sendSyncError(error: SyncError): Boolean = false
+
+    override fun sendSpeedSnapshot(snapshot: SpeedSnapshot): Boolean = false
 
     fun sendTextFieldFocus(focused: Boolean, fieldId: String? = null): Boolean {
         val client = connectedClient() ?: return false

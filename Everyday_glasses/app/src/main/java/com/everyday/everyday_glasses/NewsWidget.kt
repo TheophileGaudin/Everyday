@@ -13,6 +13,7 @@ import android.util.Log
 import com.everyday.shared.sync.NewsArticle
 import com.everyday.shared.sync.NewsDataProvider
 import com.everyday.shared.sync.NewsSnapshot
+import java.util.Locale
 
 /**
  * Google News RSS widget.
@@ -44,7 +45,8 @@ class NewsWidget(
         private const val WINDOW_PADDING = 16f
         private const val FULLSCREEN_PADDING = 26f
         private const val CONTENT_GAP = 10f
-        private const val MIN_TITLE_LINES_WINDOW = 3
+        private const val BORDER_BADGE_GAP = 6f
+        private const val BORDER_BADGE_HEIGHT = 26f
         private const val BASE_TITLE_WINDOW_SIZE = 24f
         private const val BASE_TITLE_FULLSCREEN_SIZE = 40f
         private const val BASE_BODY_FULLSCREEN_SIZE = 28f
@@ -109,6 +111,29 @@ class NewsWidget(
     private val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#B0BEC5")
         textSize = 14f
+    }
+
+    private val borderBadgeBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.BLACK
+        style = Paint.Style.FILL
+    }
+
+    private val borderBadgeBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#667FA1C4")
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+    }
+
+    private val borderBadgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#D6E3F8")
+        textSize = 13f
+        textAlign = Paint.Align.CENTER
+    }
+
+    private val borderFlagPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 18f
+        textAlign = Paint.Align.CENTER
     }
 
     private val titlePaintWindow = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -403,16 +428,16 @@ class NewsWidget(
             drawResizeHandle(canvas)
         }
 
-        if (shouldShowChrome()) {
-            drawHeader(canvas)
-        }
-
         if (newsItems.isEmpty()) {
             drawCenteredState(canvas)
         } else if (isFullscreen) {
             drawFullscreenContent(canvas)
         } else {
             drawWindowedTitle(canvas)
+        }
+
+        if (shouldShowChrome()) {
+            drawBorderIndicators(canvas)
         }
 
         if (showArrowOverlay && newsItems.isNotEmpty()) {
@@ -426,18 +451,6 @@ class NewsWidget(
 
     // ==================== Drawing Helpers ====================
 
-    private fun drawHeader(canvas: Canvas) {
-        val headline = buildString {
-            append("News ")
-            append(currentCountryCode)
-            append(" ")
-            append(if (dataState.isLoading) "- Refreshing" else "- Live")
-        }
-        val x = contentBounds.left + WINDOW_PADDING
-        val y = contentBounds.top + WINDOW_PADDING + headerPaint.textSize
-        canvas.drawText(headline, x, y, headerPaint)
-    }
-
     private fun drawCenteredState(canvas: Canvas) {
         val text = dataState.displayText()
         val y = widgetBounds.centerY() - (centerInfoPaint.descent() + centerInfoPaint.ascent()) / 2f
@@ -448,22 +461,24 @@ class NewsWidget(
         val item = newsItems.getOrNull(currentIndex) ?: return
         val showChrome = shouldShowChrome()
 
-        val top = contentBounds.top + WINDOW_PADDING + reservedHeaderHeight()
-        val bottom = contentBounds.bottom - WINDOW_PADDING - reservedFooterHeight()
-        val left = contentBounds.left + WINDOW_PADDING
-        val right = contentBounds.right - WINDOW_PADDING
-        val maxWidth = (right - left).coerceAtLeast(1f)
-        val availableHeight = (bottom - top).coerceAtLeast(1f)
+        val maxWidth = (contentBounds.width() - WINDOW_PADDING * 2f).coerceAtLeast(1f)
+        val availableHeight = (contentBounds.height() - WINDOW_PADDING * 2f).coerceAtLeast(1f)
 
         val lineHeight = lineHeight(titlePaintWindow)
-        val maxLinesByHeight = (availableHeight / lineHeight).toInt().coerceAtLeast(MIN_TITLE_LINES_WINDOW)
+        val maxLinesByHeight = maxOf(1, (availableHeight / lineHeight).toInt())
         val titleLines = toWrappedLines(item.title, titlePaintWindow, maxWidth)
+        val maxLines = maxLinesByHeight
 
-        val drawLines = if (titleLines.size > maxLinesByHeight) {
-            titleLines.take(maxLinesByHeight - 1) + ellipsizeLine(titleLines[maxLinesByHeight - 1], titlePaintWindow, maxWidth)
+        val drawLines = if (titleLines.size > maxLines) {
+            titleLines.take(maxLines - 1) + ellipsizeLine(titleLines[maxLines - 1], titlePaintWindow, maxWidth)
         } else {
             titleLines
         }
+
+        val textBlockWidth = maxMeasuredWidth(drawLines, titlePaintWindow).coerceAtMost(maxWidth)
+        val textBlockHeight = drawLines.size * lineHeight
+        val left = contentBounds.left + ((contentBounds.width() - textBlockWidth) / 2f).coerceAtLeast(WINDOW_PADDING)
+        val top = contentBounds.top + ((contentBounds.height() - textBlockHeight) / 2f).coerceAtLeast(WINDOW_PADDING)
 
         var y = top + lineHeight
         for (line in drawLines) {
@@ -474,6 +489,7 @@ class NewsWidget(
         if (showChrome) {
             val status = "${currentIndex + 1}/${newsItems.size}"
             val statusY = contentBounds.bottom - WINDOW_PADDING
+            val right = contentBounds.right - WINDOW_PADDING
             canvas.drawText(status, right, statusY, statusPaint)
         }
     }
@@ -483,7 +499,7 @@ class NewsWidget(
         val layout = buildFullscreenLayout()
 
         val left = contentBounds.left + FULLSCREEN_PADDING
-        val top = contentBounds.top + FULLSCREEN_PADDING + reservedHeaderHeight()
+        val top = contentBounds.top + FULLSCREEN_PADDING
         val titleLineHeight = lineHeight(titlePaintFullscreen)
 
         var y = top + titleLineHeight
@@ -525,6 +541,29 @@ class NewsWidget(
 
         val status = "${currentIndex + 1}/${newsItems.size}"
         canvas.drawText(status, right, bottom, statusPaint)
+    }
+
+    private fun drawBorderIndicators(canvas: Canvas) {
+        val flag = countryFlagEmoji(currentCountryCode)
+        val status = newsStatusLabel()
+        val badgeTop = widgetBounds.top - BORDER_BADGE_HEIGHT / 2f
+        val badgeBottom = widgetBounds.top + BORDER_BADGE_HEIGHT / 2f
+        var left = pinButtonBounds.right + BORDER_BADGE_GAP
+
+        val flagWidth = 32f
+        val flagBounds = RectF(left, badgeTop, left + flagWidth, badgeBottom)
+        canvas.drawRoundRect(flagBounds, 8f, 8f, borderBadgeBackgroundPaint)
+        canvas.drawRoundRect(flagBounds, 8f, 8f, borderBadgeBorderPaint)
+        val flagY = flagBounds.centerY() - (borderFlagPaint.descent() + borderFlagPaint.ascent()) / 2f
+        canvas.drawText(flag, flagBounds.centerX(), flagY, borderFlagPaint)
+
+        left = flagBounds.right + BORDER_BADGE_GAP
+        val statusWidth = (borderBadgeTextPaint.measureText(status) + 18f).coerceAtLeast(46f)
+        val statusBounds = RectF(left, badgeTop, left + statusWidth, badgeBottom)
+        canvas.drawRoundRect(statusBounds, 7f, 7f, borderBadgeBackgroundPaint)
+        canvas.drawRoundRect(statusBounds, 7f, 7f, borderBadgeBorderPaint)
+        val statusY = statusBounds.centerY() - (borderBadgeTextPaint.descent() + borderBadgeTextPaint.ascent()) / 2f
+        canvas.drawText(status, statusBounds.centerX(), statusY, borderBadgeTextPaint)
     }
 
     private fun drawBodyScrollbar(canvas: Canvas, layout: FullscreenLayout) {
@@ -678,7 +717,7 @@ class NewsWidget(
 
         val left = contentBounds.left + FULLSCREEN_PADDING
         val right = contentBounds.right - FULLSCREEN_PADDING
-        val top = contentBounds.top + FULLSCREEN_PADDING + reservedHeaderHeight()
+        val top = contentBounds.top + FULLSCREEN_PADDING
         val bottom = contentBounds.bottom - FULLSCREEN_PADDING - reservedFooterHeight()
         val maxWidth = (right - left).coerceAtLeast(1f)
 
@@ -762,14 +801,32 @@ class NewsWidget(
         centerInfoPaint.textSize = BASE_CENTER_INFO_SIZE * fontScale
     }
 
-    private fun reservedHeaderHeight(): Float = headerPaint.textSize + CONTENT_GAP
-
     private fun reservedFooterHeight(): Float = statusPaint.textSize + CONTENT_GAP
 
     private fun shouldShowChrome(): Boolean = baseState != BaseState.IDLE
 
     private fun ellipsizeLine(text: String, paint: TextPaint, width: Float): String {
         return TextUtils.ellipsize(text, paint, width, TextUtils.TruncateAt.END).toString()
+    }
+
+    private fun maxMeasuredWidth(lines: List<String>, paint: Paint): Float =
+        lines.maxOfOrNull { paint.measureText(it) } ?: 0f
+
+    private fun newsStatusLabel(): String {
+        return when {
+            dataState.isLoading && newsItems.isEmpty() -> "Loading"
+            dataState.isLoading -> "Refreshing"
+            dataState.error != null && newsItems.isNotEmpty() -> "Cached"
+            else -> "Live"
+        }
+    }
+
+    private fun countryFlagEmoji(countryCode: String): String {
+        val normalized = countryCode.uppercase(Locale.US).filter { it in 'A'..'Z' }.take(2)
+        if (normalized.length != 2) return normalized.ifBlank { "?" }
+        val first = String(Character.toChars(0x1F1E6 + (normalized[0] - 'A')))
+        val second = String(Character.toChars(0x1F1E6 + (normalized[1] - 'A')))
+        return first + second
     }
 
     // ==================== Timer Helpers ====================

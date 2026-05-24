@@ -36,9 +36,9 @@ class HeadUpWakeManager(context: Context) : SensorEventListener {
         const val DEFAULT_WAKE_DURATION_MS = 10000L     // 10 seconds screen on
 
         // Minimum/maximum values for settings
-        const val MIN_HEAD_UP_HOLD_TIME_MS = 300L    // 0.3 seconds minimum
+        const val MIN_HEAD_UP_HOLD_TIME_MS = 0L      // 0 seconds minimum
         const val MAX_HEAD_UP_HOLD_TIME_MS = 3000L   // 3 seconds maximum
-        const val MIN_WAKE_DURATION_MS = 3000L       // 3 seconds minimum
+        const val MIN_WAKE_DURATION_MS = 0L          // 0 seconds minimum
         const val MAX_WAKE_DURATION_MS = 30000L      // 30 seconds maximum
 
         // Default angle threshold

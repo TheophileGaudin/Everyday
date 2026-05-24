@@ -8,8 +8,10 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Message
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
@@ -27,7 +29,6 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.os.Bundle
 import org.json.JSONObject
 import java.net.URLEncoder
 
@@ -48,6 +49,7 @@ class BrowserWidget(
     companion object {
         private const val TAG = "BrowserWidget"
         private const val HOME_URL = "https://www.google.com"
+        private const val BLANK_URL = "about:blank"
 
         // Navigation Bar Constants
         private const val NAV_BAR_HEIGHT = 44f
@@ -64,6 +66,9 @@ class BrowserWidget(
         private const val MAX_TABS = 10
         private const val URL_EDITOR_MAX_ROWS = 5
         private const val URL_EDITOR_PADDING = 8f
+        private const val AUTO_FULLSCREEN_VIDEO_WINDOW_MS = 45_000L
+        private const val AUTO_FULLSCREEN_GESTURE_MAX_ATTEMPTS = 10
+        private const val AUTO_FULLSCREEN_GESTURE_RETRY_MS = 900L
     }
 
     /**
@@ -73,7 +78,9 @@ class BrowserWidget(
         val id: Int,
         var title: String = "New Tab",
         var url: String = HOME_URL,
-        var savedState: Bundle? = null
+        var savedState: Bundle? = null,
+        var isLoading: Boolean = false,
+        var loadProgress: Int = 100
     )
 
     // Extended state
@@ -101,9 +108,11 @@ class BrowserWidget(
     private var activeTabIndex = 0
     private var nextTabId = 0
 
-    // Only the active tab owns a live WebView. Inactive tabs keep serialized state.
+    // Normally only the active tab owns a live WebView. Popup auth flows may park
+    // their opener briefly so window.opener/postMessage based sign-ins can finish.
     private var webView: MyWebView? = null
     private var lastAttachedWebViewIndex: Int? = null
+    private val parkedWebViewsByTabId = mutableMapOf<Int, MyWebView>()
 
     private var lastDownTime: Long = 0
     private var isDispatchingSyntheticTouch = false
@@ -367,6 +376,30 @@ class BrowserWidget(
         strokeCap = Paint.Cap.ROUND
     }
 
+    private val loadingScrimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#66000000")
+    }
+
+    private val loadingSpinnerTrackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#44FFFFFF")
+        strokeWidth = 4f
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
+
+    private val loadingSpinnerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        strokeWidth = 4f
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
+
+    private val loadingTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 18f
+        textAlign = Paint.Align.CENTER
+    }
+
     // Hover states for nav bar
     private var isHoveringBack = false
     private var isHoveringForward = false
@@ -403,6 +436,12 @@ class BrowserWidget(
     private var fullscreenTouchOverlay: View? = null
     private var lastTapTime: Long = 0
     private val doubleTapTimeout = 300L // ms between taps to count as double tap
+    private val loadingAnimationHandler = Handler(Looper.getMainLooper())
+    private var loadingAnimationRunnable: Runnable? = null
+    private var loadingSpinnerStartMs: Long = 0L
+    private var autoFullscreenVideoUntilMs: Long = 0L
+    private var autoFullscreenGestureAttempts: Int = 0
+    private var autoFullscreenGestureRunnable: Runnable? = null
 
     // Callbacks (onCloseRequested is inherited from BaseWidget)
     var onStateChanged: ((State) -> Unit)? = null
@@ -446,6 +485,328 @@ class BrowserWidget(
         instance.destroy()
     }
 
+    private fun destroyParkedWebView(tabId: Int) {
+        val parked = parkedWebViewsByTabId.remove(tabId) ?: return
+        (parked.parent as? ViewGroup)?.removeView(parked)
+        destroyWebViewInstance(parked)
+    }
+
+    private fun destroyAllParkedWebViews() {
+        val parkedViews = parkedWebViewsByTabId.values.toList()
+        parkedWebViewsByTabId.clear()
+        parkedViews.forEach { parked ->
+            (parked.parent as? ViewGroup)?.removeView(parked)
+            destroyWebViewInstance(parked)
+        }
+    }
+
+    private fun configureCookiePolicy(webView: WebView) {
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(webView, true)
+        }
+    }
+
+    private fun injectUnmutedMediaDefaults(view: WebView?) {
+        view ?: return
+        val script = """
+            (function() {
+              function unmute(media) {
+                try {
+                  media.defaultMuted = false;
+                  media.muted = false;
+                  media.volume = 1.0;
+                } catch (e) {}
+              }
+              function apply() {
+                document.querySelectorAll('video,audio').forEach(unmute);
+              }
+              if (!window.__everydayUnmutedMediaDefaults) {
+                window.__everydayUnmutedMediaDefaults = true;
+                document.addEventListener('play', function(event) {
+                  var target = event.target;
+                  if (target && (target.tagName === 'VIDEO' || target.tagName === 'AUDIO')) {
+                    unmute(target);
+                  }
+                }, true);
+                var root = document.documentElement || document.body;
+                if (root) {
+                  new MutationObserver(apply).observe(root, { childList: true, subtree: true });
+                }
+                var attempts = 0;
+                var nudge = setInterval(function() {
+                  apply();
+                  attempts += 1;
+                  if (attempts >= 40) {
+                    clearInterval(nudge);
+                  }
+                }, 250);
+              }
+              apply();
+            })();
+        """.trimIndent()
+        view.evaluateJavascript(script, null)
+    }
+
+    private fun injectAutoFullscreenForPlayingVideo(view: WebView?) {
+        view ?: return
+        val script = """
+            (function() {
+              function candidateVideo() {
+                var videos = Array.prototype.slice.call(document.querySelectorAll('video'));
+                var best = null;
+                var bestArea = 0;
+                videos.forEach(function(video) {
+                  try {
+                    var rect = video.getBoundingClientRect();
+                    var area = Math.max(0, rect.width) * Math.max(0, rect.height);
+                    var hasFrames = video.videoWidth > 0 && video.videoHeight > 0;
+                    var isPlaying = !video.paused && !video.ended && video.readyState >= 2;
+                    if (hasFrames && isPlaying && area > bestArea) {
+                      best = video;
+                      bestArea = area;
+                    }
+                  } catch (e) {}
+                });
+                return bestArea >= 12000 ? best : null;
+              }
+
+              function requestFullscreenFor(video) {
+                if (!video ||
+                    window.__everydayAutoFullscreenDone ||
+                    window.__everydayAutoFullscreenInFlight ||
+                    document.fullscreenElement ||
+                    document.webkitFullscreenElement) {
+                  return;
+                }
+
+                var request =
+                  video.requestFullscreen ||
+                  video.webkitRequestFullscreen ||
+                  video.webkitEnterFullscreen ||
+                  video.msRequestFullscreen;
+                if (!request) return;
+
+                window.__everydayAutoFullscreenInFlight = true;
+                try {
+                  var result = request.call(video);
+                  if (result && result.then) {
+                    result.then(function() {
+                      window.__everydayAutoFullscreenDone = true;
+                      window.__everydayAutoFullscreenInFlight = false;
+                    }).catch(function() {
+                      window.__everydayAutoFullscreenInFlight = false;
+                    });
+                  } else {
+                    window.__everydayAutoFullscreenDone = true;
+                    window.__everydayAutoFullscreenInFlight = false;
+                  }
+                } catch (e) {
+                  window.__everydayAutoFullscreenInFlight = false;
+                }
+              }
+
+              function tryFullscreen() {
+                requestFullscreenFor(candidateVideo());
+              }
+
+              function tryFullscreenFromGesture(event) {
+                var shouldConsume = window.__everydayConsumeNextAutoFullscreenGesture === true;
+                tryFullscreen();
+                if (shouldConsume && event) {
+                  try {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+                  } catch (e) {}
+                }
+                window.__everydayConsumeNextAutoFullscreenGesture = false;
+              }
+
+              window.__everydayAutoFullscreenHasCandidate = function() {
+                return !!candidateVideo();
+              };
+              window.__everydayPrimeAutoFullscreenGesture = function() {
+                var hasCandidate = !!candidateVideo();
+                if (hasCandidate) {
+                  window.__everydayConsumeNextAutoFullscreenGesture = true;
+                }
+                return hasCandidate;
+              };
+
+              if (!window.__everydayAutoFullscreenInstalled) {
+                window.__everydayAutoFullscreenInstalled = true;
+                document.addEventListener('play', tryFullscreen, true);
+                document.addEventListener('playing', tryFullscreen, true);
+                document.addEventListener('touchend', tryFullscreenFromGesture, true);
+                document.addEventListener('mouseup', tryFullscreenFromGesture, true);
+                document.addEventListener('click', tryFullscreenFromGesture, true);
+                var root = document.documentElement || document.body;
+                if (root) {
+                  new MutationObserver(tryFullscreen).observe(root, { childList: true, subtree: true });
+                }
+                var attempts = 0;
+                var retry = setInterval(function() {
+                  tryFullscreen();
+                  attempts += 1;
+                  if (window.__everydayAutoFullscreenDone || attempts >= 60) {
+                    clearInterval(retry);
+                  }
+                }, 500);
+              }
+              tryFullscreen();
+            })();
+        """.trimIndent()
+        view.evaluateJavascript(script, null)
+    }
+
+    private fun shouldAutoFullscreenVideo(): Boolean {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (autoFullscreenVideoUntilMs <= now) {
+            autoFullscreenVideoUntilMs = 0L
+            cancelAutoFullscreenGestureAttempts()
+            return false
+        }
+        return true
+    }
+
+    private fun injectMediaPlaybackDefaults(view: WebView?) {
+        injectUnmutedMediaDefaults(view)
+        if (shouldAutoFullscreenVideo()) {
+            injectAutoFullscreenForPlayingVideo(view)
+            scheduleAutoFullscreenGestureAttempt()
+        }
+    }
+
+    private fun cancelAutoFullscreenGestureAttempts() {
+        autoFullscreenGestureRunnable?.let { loadingAnimationHandler.removeCallbacks(it) }
+        autoFullscreenGestureRunnable = null
+    }
+
+    private fun resetAutoFullscreenVideoAutomation() {
+        autoFullscreenVideoUntilMs = 0L
+        autoFullscreenGestureAttempts = 0
+        cancelAutoFullscreenGestureAttempts()
+    }
+
+    private fun scheduleAutoFullscreenGestureAttempt(delayMs: Long = AUTO_FULLSCREEN_GESTURE_RETRY_MS) {
+        if (!shouldAutoFullscreenVideo() ||
+            isVideoFullscreen ||
+            autoFullscreenGestureAttempts >= AUTO_FULLSCREEN_GESTURE_MAX_ATTEMPTS ||
+            autoFullscreenGestureRunnable != null
+        ) {
+            return
+        }
+
+        autoFullscreenGestureRunnable = Runnable {
+            autoFullscreenGestureRunnable = null
+            dispatchAutoFullscreenGestureIfCandidate()
+        }
+        loadingAnimationHandler.postDelayed(autoFullscreenGestureRunnable!!, delayMs)
+    }
+
+    private fun dispatchAutoFullscreenGestureIfCandidate() {
+        val activeWebView = webView ?: return
+        if (!shouldAutoFullscreenVideo() ||
+            isVideoFullscreen ||
+            autoFullscreenGestureAttempts >= AUTO_FULLSCREEN_GESTURE_MAX_ATTEMPTS
+        ) {
+            return
+        }
+
+        activeWebView.evaluateJavascript(
+            "(window.__everydayPrimeAutoFullscreenGesture && window.__everydayPrimeAutoFullscreenGesture()) === true"
+        ) { result ->
+            if (!shouldAutoFullscreenVideo() || isVideoFullscreen) return@evaluateJavascript
+
+            if (result == "true") {
+                autoFullscreenGestureAttempts++
+                val webViewTop = contentBounds.top + NAV_BAR_HEIGHT + TAB_BAR_HEIGHT
+                val tapX = contentBounds.left + (activeWebView.width.coerceAtLeast(1) * 0.5f)
+                val tapY = webViewTop + (activeWebView.height.coerceAtLeast(1) * 0.5f)
+                val downTime = android.os.SystemClock.uptimeMillis()
+                dispatchTouchEventInternal(
+                    activeWebView,
+                    tapX,
+                    tapY,
+                    android.view.MotionEvent.ACTION_DOWN,
+                    downTime,
+                    downTime
+                )
+                dispatchTouchEventInternal(
+                    activeWebView,
+                    tapX,
+                    tapY,
+                    android.view.MotionEvent.ACTION_UP,
+                    downTime,
+                    downTime + 40L
+                )
+            }
+
+            if (shouldAutoFullscreenVideo() &&
+                !isVideoFullscreen &&
+                autoFullscreenGestureAttempts < AUTO_FULLSCREEN_GESTURE_MAX_ATTEMPTS
+            ) {
+                scheduleAutoFullscreenGestureAttempt()
+            }
+        }
+    }
+
+    private fun setTabLoading(tabId: Int, isLoading: Boolean, progress: Int) {
+        val tab = tabs.find { it.id == tabId } ?: return
+        val coercedProgress = progress.coerceIn(0, 100)
+        val nextIsLoading = isLoading && coercedProgress < 100
+        val changed = tab.isLoading != nextIsLoading || tab.loadProgress != coercedProgress
+
+        tab.isLoading = nextIsLoading
+        tab.loadProgress = if (nextIsLoading) coercedProgress else 100
+
+        if (changed && tab.id == currentTab()?.id) {
+            syncLoadingAnimation()
+            notifyStateChanged()
+        }
+    }
+
+    private fun shouldDrawLoadingIndicator(): Boolean {
+        val tab = currentTab() ?: return false
+        return tab.isLoading &&
+            !isMinimized &&
+            !isVideoFullscreen &&
+            isDisplayVisible &&
+            !isHostPaused
+    }
+
+    private fun syncLoadingAnimation() {
+        if (shouldDrawLoadingIndicator()) {
+            startLoadingAnimation()
+        } else {
+            stopLoadingAnimation()
+        }
+    }
+
+    private fun startLoadingAnimation() {
+        if (loadingAnimationRunnable != null) return
+        loadingSpinnerStartMs = android.os.SystemClock.uptimeMillis()
+        loadingAnimationRunnable = object : Runnable {
+            override fun run() {
+                if (!shouldDrawLoadingIndicator()) {
+                    loadingAnimationRunnable = null
+                    loadingSpinnerStartMs = 0L
+                    return
+                }
+                notifyStateChanged()
+                loadingAnimationHandler.postDelayed(this, 50L)
+            }
+        }
+        loadingAnimationHandler.post(loadingAnimationRunnable!!)
+    }
+
+    private fun stopLoadingAnimation() {
+        loadingAnimationRunnable?.let { loadingAnimationHandler.removeCallbacks(it) }
+        loadingAnimationRunnable = null
+        loadingSpinnerStartMs = 0L
+    }
+
     private fun releaseActiveWebView(persistState: Boolean): Int? {
         val activeWebView = webView ?: return null
         if (persistState) {
@@ -470,10 +831,23 @@ class BrowserWidget(
         }
         if (forceRecreate) {
             releaseActiveWebView(persistState = false)
+            destroyParkedWebView(tab.id)
         }
         webView?.let { existing ->
             existing.visibility = View.VISIBLE
             return existing
+        }
+
+        parkedWebViewsByTabId.remove(tab.id)?.let { parked ->
+            val targetIndex = preferredIndex ?: lastAttachedWebViewIndex
+            if (parked.parent != rootLayout) {
+                (parked.parent as? ViewGroup)?.removeView(parked)
+                rootLayout.addView(parked, (targetIndex ?: 0).coerceIn(0, rootLayout.childCount))
+            }
+            rootLayout.indexOfChild(parked).takeIf { it >= 0 }?.let { lastAttachedWebViewIndex = it }
+            webView = parked
+            parked.visibility = View.VISIBLE
+            return parked
         }
 
         val targetIndex = preferredIndex ?: lastAttachedWebViewIndex
@@ -571,6 +945,44 @@ class BrowserWidget(
         return newIndex
     }
 
+    private fun createPopupTabForWindow(opener: MyWebView?): MyWebView? {
+        if (tabs.size >= MAX_TABS) {
+            Log.w(TAG, "Cannot create popup window; maximum tabs reached ($MAX_TABS)")
+            return null
+        }
+
+        val openerTab = currentTab()
+        val openerIndex = opener?.let { rootLayout.indexOfChild(it).takeIf { index -> index >= 0 } }
+        if (opener != null && openerTab != null) {
+            captureActiveTabState()
+            opener.visibility = View.GONE
+            parkedWebViewsByTabId[openerTab.id] = opener
+            if (webView === opener) {
+                webView = null
+            }
+        }
+
+        val tabId = nextTabId++
+        tabs.add(
+            Tab(
+                id = tabId,
+                title = "New Window",
+                url = BLANK_URL
+            )
+        )
+        activeTabIndex = tabs.lastIndex
+
+        val popupWebView = createWebViewForTab(tabId, openerIndex?.plus(1))
+        webView = popupWebView
+        popupWebView.visibility = View.VISIBLE
+
+        syncTabLifecycle()
+        updateTabBounds()
+        updateWebViewLayout()
+        notifyStateChanged()
+        return popupWebView
+    }
+
     /**
      * Create and configure a WebView for a tab.
      */
@@ -604,7 +1016,9 @@ class BrowserWidget(
         // Configure WebView
         webView.settings.apply {
             javaScriptEnabled = true
+            javaScriptCanOpenWindowsAutomatically = true
             domStorageEnabled = true
+            mediaPlaybackRequiresUserGesture = false
             useWideViewPort = true
             loadWithOverviewMode = true
             setSupportZoom(true)
@@ -612,12 +1026,14 @@ class BrowserWidget(
             displayZoomControls = false
             cacheMode = WebSettings.LOAD_DEFAULT
             offscreenPreRaster = false
-            setSupportMultipleWindows(false)
+            setSupportMultipleWindows(true)
 
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                 forceDark = WebSettings.FORCE_DARK_ON
             }
         }
+
+        configureCookiePolicy(webView)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_BOUND, true)
@@ -630,11 +1046,19 @@ class BrowserWidget(
         val tabWebView = webView
 
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                tabs.find { it.id == tabId }?.url = url ?: ""
+                setTabLoading(tabId, isLoading = true, progress = 0)
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 Log.d(TAG, "Page loaded: $url")
                 // Update tab URL
                 tabs.find { it.id == tabId }?.url = url ?: ""
+                injectMediaPlaybackDefaults(view)
+                setTabLoading(tabId, isLoading = false, progress = 100)
             }
 
             override fun onRenderProcessGone(
@@ -645,6 +1069,7 @@ class BrowserWidget(
                     TAG,
                     "WebView render process gone for tab=$tabId, didCrash=${detail?.didCrash() == true}"
                 )
+                setTabLoading(tabId, isLoading = false, progress = 100)
                 recreateTabWebView(tabId, tabs.find { it.id == tabId }?.url)
                 return true
             }
@@ -668,6 +1093,8 @@ class BrowserWidget(
                 customView = view
                 customViewCallback = callback
                 isVideoFullscreen = true
+                resetAutoFullscreenVideoAutomation()
+                injectMediaPlaybackDefaults(tabWebView)
 
                 tabWebView.visibility = View.GONE
 
@@ -707,6 +1134,32 @@ class BrowserWidget(
 
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 super.onProgressChanged(view, newProgress)
+                val progress = newProgress.coerceIn(0, 100)
+                setTabLoading(tabId, isLoading = progress < 100, progress = progress)
+                if (progress >= 40) {
+                    injectMediaPlaybackDefaults(view)
+                }
+            }
+
+            override fun onCreateWindow(
+                view: WebView?,
+                isDialog: Boolean,
+                isUserGesture: Boolean,
+                resultMsg: Message?
+            ): Boolean {
+                val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+                val popupWebView = createPopupTabForWindow((view as? MyWebView) ?: webView) ?: return false
+                transport.webView = popupWebView
+                resultMsg.sendToTarget()
+                Log.d(TAG, "Created popup WebView tab, isDialog=$isDialog, userGesture=$isUserGesture")
+                return true
+            }
+
+            override fun onCloseWindow(window: WebView?) {
+                super.onCloseWindow(window)
+                if (window === webView) {
+                    closeTab(activeTabIndex)
+                }
             }
         }
 
@@ -735,6 +1188,7 @@ class BrowserWidget(
         if (index < 0 || index >= tabs.size) return
         if (index == activeTabIndex && webView != null) {
             updateWebViewLayout()
+            syncLoadingAnimation()
             return
         }
 
@@ -747,6 +1201,7 @@ class BrowserWidget(
 
         syncTabLifecycle()
         updateWebViewLayout()
+        syncLoadingAnimation()
         notifyStateChanged()
     }
 
@@ -772,6 +1227,9 @@ class BrowserWidget(
 
         val tab = tabs[index]
         tab.savedState = null
+        if (index != activeTabIndex) {
+            destroyParkedWebView(tab.id)
+        }
 
         val closingActiveTab = index == activeTabIndex
         val oldIndex = if (closingActiveTab) releaseActiveWebView(persistState = false) else null
@@ -794,6 +1252,7 @@ class BrowserWidget(
         syncTabLifecycle()
         updateWebViewLayout()
         updateTabBounds()
+        syncLoadingAnimation()
         notifyStateChanged()
     }
 
@@ -1002,6 +1461,7 @@ class BrowserWidget(
     override fun toggleMinimize() {
         super.toggleMinimize()
         updateWebViewLayout()
+        syncLoadingAnimation()
         notifyStateChanged()
     }
     
@@ -1035,6 +1495,7 @@ class BrowserWidget(
         isHostPaused = true
         syncLiveWebViewState()
         syncTabLifecycle()
+        syncLoadingAnimation()
     }
 
     override fun onResume() {
@@ -1043,6 +1504,7 @@ class BrowserWidget(
         syncLiveWebViewState()
         syncTabLifecycle()
         updateWebViewLayout()
+        syncLoadingAnimation()
     }
 
     override fun onDisplayVisibilityChanged(visible: Boolean) {
@@ -1051,6 +1513,7 @@ class BrowserWidget(
         customView?.visibility = if (visible) View.VISIBLE else View.GONE
         syncLiveWebViewState()
         updateWebViewLayout()
+        syncLoadingAnimation()
     }
 
     fun onTrimMemory(level: Int) {
@@ -1086,6 +1549,7 @@ class BrowserWidget(
             clearFormData()
             clearSslPreferences()
         }
+        destroyAllParkedWebViews()
         WebStorage.getInstance().deleteAllData()
         CookieManager.getInstance().removeAllCookies(null)
         CookieManager.getInstance().flush()
@@ -1094,8 +1558,11 @@ class BrowserWidget(
     override fun onDestroy() {
         // Exit video fullscreen if active
         exitVideoFullscreen()
+        resetAutoFullscreenVideoAutomation()
+        stopLoadingAnimation()
 
         releaseActiveWebView(persistState = false)
+        destroyAllParkedWebViews()
         for (tab in tabs) {
             tab.savedState = null
         }
@@ -1127,6 +1594,7 @@ class BrowserWidget(
      */
     fun exitVideoFullscreen(): Boolean {
         if (!isVideoFullscreen) return false
+        resetAutoFullscreenVideoAutomation()
         
         Log.d(TAG, "exitVideoFullscreen - manually exiting video fullscreen")
         
@@ -1308,6 +1776,29 @@ class BrowserWidget(
         } else {
             "https://www.google.com/search?q=${URLEncoder.encode(trimmed, "UTF-8")}"
         }
+    }
+
+    fun navigateToAddress(address: String, autoFullscreenVideo: Boolean = false) {
+        val url = normalizeAddressInput(address)
+        if (autoFullscreenVideo) {
+            autoFullscreenGestureAttempts = 0
+            cancelAutoFullscreenGestureAttempts()
+            autoFullscreenVideoUntilMs = android.os.SystemClock.uptimeMillis() + AUTO_FULLSCREEN_VIDEO_WINDOW_MS
+        } else {
+            resetAutoFullscreenVideoAutomation()
+        }
+        currentTab()?.apply {
+            savedState = null
+            this.url = url
+        }
+        ensureActiveWebView()
+        webView?.loadUrl(url)
+        isEditingUrl = false
+        isUrlTextSelected = false
+        editingUrlText.clear()
+        urlEditorScrollLine = 0
+        onRequestKeyboard?.invoke(false)
+        onStateChanged?.invoke(state)
     }
 
     private fun navigateFromAddressBar() {
@@ -1862,6 +2353,10 @@ class BrowserWidget(
             drawFocusedUrlEditor(canvas)
         }
 
+        if (shouldDrawLoadingIndicator()) {
+            drawLoadingIndicator(canvas)
+        }
+
         // Draw keyboard if visible
         if (!isVideoFullscreen) {
             keyboardOverlay.draw(canvas)
@@ -1876,6 +2371,34 @@ class BrowserWidget(
         if (!isFullscreen && !isVideoFullscreen) {
             drawResizeHandle(canvas)
         }
+    }
+
+    private fun drawLoadingIndicator(canvas: Canvas) {
+        val area = RectF(
+            contentBounds.left,
+            tabBarBounds.bottom,
+            contentBounds.right,
+            contentBounds.bottom - keyboardOverlay.getHeight()
+        )
+        if (area.width() <= 0f || area.height() <= 0f) return
+
+        canvas.drawRect(area, loadingScrimPaint)
+
+        val radius = 18f
+        val centerX = area.centerX()
+        val centerY = area.centerY() - 10f
+        val spinnerBounds = RectF(
+            centerX - radius,
+            centerY - radius,
+            centerX + radius,
+            centerY + radius
+        )
+        val elapsedMs = (android.os.SystemClock.uptimeMillis() - loadingSpinnerStartMs).coerceAtLeast(0L)
+        val startAngle = (elapsedMs % 1000L) / 1000f * 360f
+
+        canvas.drawArc(spinnerBounds, 0f, 360f, false, loadingSpinnerTrackPaint)
+        canvas.drawArc(spinnerBounds, startAngle, 270f, false, loadingSpinnerPaint)
+        canvas.drawText("Loading...", centerX, centerY + radius + 28f, loadingTextPaint)
     }
 
     /**

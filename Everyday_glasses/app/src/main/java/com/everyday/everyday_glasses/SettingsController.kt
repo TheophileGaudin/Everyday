@@ -1,9 +1,11 @@
 package com.everyday.everyday_glasses
 
+import android.content.res.Resources
 import android.graphics.Canvas
 import android.util.Log
 
 class SettingsController(
+    private val resources: Resources,
     private val defaultSpeedVisibilityThresholdKmh: Float,
     private val invalidateView: () -> Unit,
     private val notifyContentChanged: () -> Unit,
@@ -21,7 +23,10 @@ class SettingsController(
     private val connectGoogle: () -> Unit,
     private val grantCalendarAccess: () -> Unit,
     private val disconnectGoogle: () -> Unit,
-    private val retryGoogleAuth: () -> Unit
+    private val retryGoogleAuth: () -> Unit,
+    private val shortcutsProvider: () -> List<ShortcutAction> = { ShortcutAction.DEFAULT_LEMON_SHORTCUTS },
+    private val onShortcutsChanged: (List<ShortcutAction>) -> Unit = {},
+    private val savedLayoutNamesProvider: () -> List<String> = { emptyList() }
 ) {
     companion object {
         private const val TAG = "SettingsController"
@@ -29,6 +34,12 @@ class SettingsController(
 
     private var dashboardSettings: DashboardSettings? = null
     private var speedometerSettingsMenu: SpeedometerSettingsMenu? = null
+    private var hoverControlsLayoutEditor: HoverControlsLayoutEditor? = null
+    private var hoverControlPlacements: List<WidgetPersistence.HoverControlPlacementState>? = null
+    private var hasHoverControlPlacements = false
+    private var shortcutsSettingsMenu: ShortcutsSettingsMenu? = null
+    private var lastScreenWidth: Float = 0f
+    private var lastScreenHeight: Float = 0f
 
     private var brightnessValue = 1.0f
     private var adaptiveBrightnessEnabled = true
@@ -39,7 +50,108 @@ class SettingsController(
     private var googleAuthState = GoogleAuthState.signedOut()
     private var speedVisibilityThresholdKmh = defaultSpeedVisibilityThresholdKmh
 
+    fun createHoverControlsLayoutEditor(
+        screenWidth: Float,
+        screenHeight: Float,
+        controls: List<BaseHoverControl>
+    ) {
+        hoverControlsLayoutEditor = HoverControlsLayoutEditor(screenWidth, screenHeight, controls).apply {
+            onLayoutChanged = {
+                hoverControlPlacements = exportPlacements()
+                hasHoverControlPlacements = true
+                invalidateView()
+                notifyContentChanged()
+            }
+            onDismissed = {
+                invalidateView()
+                notifyContentChanged()
+            }
+            if (hasHoverControlPlacements) {
+                applyPersistedPlacements(hoverControlPlacements)
+            }
+        }
+    }
+
+    fun isHoverControlsLayoutEditorVisible(): Boolean =
+        hoverControlsLayoutEditor?.isVisible == true
+
+    fun showHoverControlsLayoutEditor() {
+        val editor = hoverControlsLayoutEditor ?: return
+        editor.show()
+        invalidateView()
+        notifyContentChanged()
+    }
+
+    fun dismissHoverControlsLayoutEditor() {
+        hoverControlsLayoutEditor?.dismiss()
+    }
+
+    fun getHoverControlPlacements(): List<WidgetPersistence.HoverControlPlacementState>? =
+        hoverControlsLayoutEditor?.exportPlacements()
+            ?: hoverControlPlacements.takeIf { hasHoverControlPlacements }
+
+    fun applyHoverControlPlacements(placements: List<WidgetPersistence.HoverControlPlacementState>?) {
+        hoverControlPlacements = placements
+        hasHoverControlPlacements = true
+        hoverControlsLayoutEditor?.applyPersistedPlacements(placements)
+        invalidateView()
+        notifyContentChanged()
+    }
+
+    fun resetHoverControlPlacementsToDefault() {
+        hoverControlPlacements = null
+        hasHoverControlPlacements = false
+        hoverControlsLayoutEditor?.resetPlacementsToDefault()
+        invalidateView()
+        notifyContentChanged()
+    }
+
+    fun drawHoverControlsLayoutEditor(canvas: Canvas) {
+        hoverControlsLayoutEditor?.draw(canvas)
+    }
+
+    fun handleHoverControlsLayoutEditorDown(x: Float, y: Float): Boolean {
+        val editor = hoverControlsLayoutEditor ?: return false
+        if (!editor.isVisible) return false
+        editor.onDown(x, y)
+        notifyContentChanged()
+        return true
+    }
+
+    fun handleHoverControlsLayoutEditorMove(x: Float, y: Float): Boolean {
+        val editor = hoverControlsLayoutEditor ?: return false
+        if (!editor.isVisible) return false
+        editor.onMove(x, y)
+        notifyContentChanged()
+        return true
+    }
+
+    fun handleHoverControlsLayoutEditorUp() {
+        val editor = hoverControlsLayoutEditor ?: return
+        if (!editor.isVisible) return
+        editor.onUp()
+        notifyContentChanged()
+    }
+
+    fun handleHoverControlsLayoutEditorTap(x: Float, y: Float): Boolean? {
+        val editor = hoverControlsLayoutEditor ?: return null
+        if (!editor.isVisible) return null
+        val consumed = editor.onTap(x, y)
+        if (consumed) notifyContentChanged()
+        return true
+    }
+
+    fun handleHoverControlsLayoutEditorDoubleTap(x: Float, y: Float): Boolean? {
+        val editor = hoverControlsLayoutEditor ?: return null
+        if (!editor.isVisible) return null
+        val consumed = editor.onDoubleTap(x, y)
+        if (consumed) notifyContentChanged()
+        return true
+    }
+
     fun createSpeedometerSettingsMenu(screenWidth: Float, screenHeight: Float) {
+        lastScreenWidth = screenWidth
+        lastScreenHeight = screenHeight
         speedometerSettingsMenu = SpeedometerSettingsMenu(screenWidth, screenHeight).apply {
             setThreshold(speedVisibilityThresholdKmh, notify = false)
             onThresholdChanged = { threshold ->
@@ -79,11 +191,87 @@ class SettingsController(
     fun dismissAll() {
         dashboardSettings?.dismiss()
         speedometerSettingsMenu?.dismiss()
+        hoverControlsLayoutEditor?.dismiss()
+        shortcutsSettingsMenu?.dismiss()
     }
 
     fun draw(canvas: Canvas) {
         dashboardSettings?.draw(canvas)
         speedometerSettingsMenu?.draw(canvas)
+        shortcutsSettingsMenu?.draw(canvas)
+    }
+
+    // ==================== Shortcuts menu ====================
+
+    fun isShortcutsSettingsMenuVisible(): Boolean = shortcutsSettingsMenu?.isVisible == true
+
+    fun isDashboardSettingsVisible(): Boolean = dashboardSettings?.isVisible == true
+
+    fun isSpeedometerSettingsMenuVisible(): Boolean = speedometerSettingsMenu?.isVisible == true
+
+    fun showShortcutsSettingsMenu() {
+        val screenWidth = lastScreenWidth.takeIf { it > 0f } ?: return
+        val screenHeight = lastScreenHeight.takeIf { it > 0f } ?: return
+        val menu = ShortcutsSettingsMenu(
+            screenWidth = screenWidth,
+            screenHeight = screenHeight,
+            savedLayoutsProvider = savedLayoutNamesProvider,
+            initialShortcuts = shortcutsProvider()
+        ).apply {
+            onChanged = { actions ->
+                onShortcutsChanged(actions)
+                invalidateView()
+                notifyContentChanged()
+            }
+            onDismissed = {
+                shortcutsSettingsMenu = null
+                invalidateView()
+                notifyContentChanged()
+            }
+            show()
+        }
+        shortcutsSettingsMenu = menu
+        invalidateView()
+        notifyContentChanged()
+    }
+
+    fun handleShortcutsSettingsMenuDown(x: Float, y: Float): Boolean {
+        val menu = shortcutsSettingsMenu ?: return false
+        if (!menu.isVisible) return false
+        menu.onDown(x, y)
+        notifyContentChanged()
+        return true
+    }
+
+    fun handleShortcutsSettingsMenuMove(x: Float, y: Float): Boolean {
+        val menu = shortcutsSettingsMenu ?: return false
+        if (!menu.isVisible) return false
+        menu.onMove(x, y)
+        notifyContentChanged()
+        return true
+    }
+
+    fun handleShortcutsSettingsMenuUp() {
+        val menu = shortcutsSettingsMenu ?: return
+        if (!menu.isVisible) return
+        menu.onUp()
+        notifyContentChanged()
+    }
+
+    fun handleShortcutsSettingsMenuTap(x: Float, y: Float): Boolean? {
+        val menu = shortcutsSettingsMenu ?: return null
+        if (!menu.isVisible) return null
+        val consumed = menu.onTap(x, y)
+        if (consumed) notifyContentChanged()
+        return true
+    }
+
+    fun handleShortcutsSettingsMenuScroll(x: Float, y: Float, dy: Float): Boolean {
+        val menu = shortcutsSettingsMenu ?: return false
+        if (!menu.isVisible) return false
+        menu.onScroll(x, y, dy)
+        notifyContentChanged()
+        return true
     }
 
     fun handleSpeedometerDown(x: Float, y: Float): Boolean {
@@ -220,7 +408,7 @@ class SettingsController(
     }
 
     private fun createDashboardSettings(screenWidth: Float, screenHeight: Float) {
-        dashboardSettings = DashboardSettings(screenWidth, screenHeight).apply {
+        dashboardSettings = DashboardSettings(resources, screenWidth, screenHeight).apply {
             brightnessValue = this@SettingsController.brightnessValue
             adaptiveBrightnessEnabled = this@SettingsController.adaptiveBrightnessEnabled
             setHeadUpTimeMs(this@SettingsController.headUpTimeMs)
@@ -292,6 +480,14 @@ class SettingsController(
             onRetryGoogleAuth = {
                 retryGoogleAuth()
                 invalidateView()
+            }
+
+            onAppearanceRequested = {
+                showHoverControlsLayoutEditor()
+            }
+
+            onShortcutsRequested = {
+                showShortcutsSettingsMenu()
             }
 
             onDismissed = {

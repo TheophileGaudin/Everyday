@@ -17,6 +17,7 @@ import com.everyday.shared.sync.SyncError
 import com.everyday.shared.sync.SyncProtocol
 import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot
+import com.everyday.shared.sync.SpeedSnapshot
 import com.everyday.shared.sync.SubtitleControl
 import com.everyday.shared.sync.SubtitleProtocol
 import com.everyday.shared.sync.SubtitleStatus
@@ -28,6 +29,7 @@ import java.io.OutputStream
 import java.text.SimpleDateFormat
 import android.content.ClipboardManager
 import android.util.Base64
+import org.json.JSONObject
 import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.sqrt
@@ -464,6 +466,30 @@ class RfcommServer(private val context: Context) {
         }
     }
 
+    fun sendOpenBrowser(address: String): Boolean {
+        if (!isConnected.get()) return false
+        val output = outputStream ?: return false
+
+        return try {
+            val data = JSONObject()
+                .put("event", "open_browser")
+                .put("address", address)
+                .toString() + "\n"
+
+            fileLog("Sending browser open request: ${address.take(80)}")
+
+            synchronized(output) {
+                output.write(data.toByteArray())
+                output.flush()
+            }
+            true
+        } catch (e: IOException) {
+            fileLog("Failed to send browser open request: ${e.message}")
+            isConnected.set(false)
+            false
+        }
+    }
+
     fun sendSyncSnapshot(snapshot: SyncSnapshot) {
         if (snapshot.isEmpty) return
         if (!isConnected.get()) return
@@ -498,6 +524,22 @@ class RfcommServer(private val context: Context) {
             }
         } catch (e: IOException) {
             fileLog("Failed to send sync error: ${e.message}")
+            isConnected.set(false)
+        }
+    }
+
+    fun sendSpeedSnapshot(snapshot: SpeedSnapshot) {
+        if (!isConnected.get()) return
+        val output = outputStream ?: return
+
+        try {
+            val data = SyncProtocol.encodeSpeedSnapshot(snapshot) + "\n"
+            synchronized(output) {
+                output.write(data.toByteArray())
+                output.flush()
+            }
+        } catch (e: IOException) {
+            fileLog("Failed to send speed snapshot: ${e.message}")
             isConnected.set(false)
         }
     }

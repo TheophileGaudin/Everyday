@@ -9,7 +9,7 @@ import java.util.Locale
 import kotlin.math.abs
 
 /**
- * Speedometer widget that displays movement speed from local location updates.
+ * Speedometer widget that displays movement speed from local or phone location updates.
  *
  * Behavior:
  * - Uses BaseWidget for move/resize/pin/minimize/fullscreen behavior.

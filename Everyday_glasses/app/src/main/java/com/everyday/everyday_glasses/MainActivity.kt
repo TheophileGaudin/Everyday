@@ -31,8 +31,10 @@ import android.view.inputmethod.InputMethodManager
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import com.everyday.everyday_glasses.binocular.BinocularContentClass
+import com.everyday.everyday_glasses.binocular.DisplayConfig
 import com.everyday.everyday_glasses.binocular.BinocularUpdateType
 import com.everyday.everyday_glasses.binocular.BinocularView
+import com.everyday.shared.sync.SpeedSnapshot
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -126,6 +128,7 @@ class MainActivity : AppCompatActivity() {
     // Glasses battery update
     private var glassesBatteryUpdateRunnable: Runnable? = null
     private var batteryStateReceiver: BroadcastReceiver? = null
+    private var screenStateReceiver: BroadcastReceiver? = null
     
     // Time update
     private var timeUpdateRunnable: Runnable? = null
@@ -187,7 +190,8 @@ class MainActivity : AppCompatActivity() {
         private const val DEFAULT_BRIGHTNESS = 1.0f  // Maximum brightness (no dimming) by default
         private const val DEFAULT_ADAPTIVE_BRIGHTNESS = true
         private const val DEFAULT_SMART_ALIGNMENT = true
-        private const val MEDIA_WIDGET_BRIGHTNESS_CAP = 0.0f
+        // Keep media dimming visible; the only intentional full black mask is DisplayState.OFF.
+        private const val MEDIA_WIDGET_BRIGHTNESS_CAP = 0.18f
         private const val MIN_WINDOW_BRIGHTNESS = 0.01f
         private const val MIN_ADAPTIVE_BRIGHTNESS = 0.08f
         private const val AMBIENT_LUX_REFERENCE = 10000f
@@ -348,13 +352,14 @@ class MainActivity : AppCompatActivity() {
             },
             isPhoneMode = { isPhoneMode },
             isAwake = { !::wakeSleepManager.isInitialized || wakeSleepManager.isAwake() },
-            wakeDisplay = { wakeSleepManager.transitionTo(WakeSleepManager.DisplayState.WAKE) },
+            wakeDisplay = { wakeDisplayFromUserAction("input") },
             notifyUserActivity = ::notifyUserActivity,
             notifyTransientChange = ::notifyTransientBinocularChange,
             onTripleTap = ::handleTripleTap
         )
         updateCursorRedrawMode()
         registerBatteryStateReceiver()
+        registerScreenStateReceiver()
 
         // Initialize Google auth after the mirrored UI is ready.
         setupGoogleAuth()
@@ -470,6 +475,14 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
+            onOpenBrowserRequested = { address ->
+                runOnUiThread {
+                    Log.d(TAG, "Open browser requested from phone: ${address.take(80)}")
+                    widgetContainer.openBrowserAddress(address)
+                    binocularView.notifyContentChanged()
+                }
+            }
+
             onGoogleAuthStateReceived = { status, account, detail ->
                 runOnUiThread {
                     if (status == GooglePhoneAuthStatus.SIGNED_OUT) {
@@ -484,13 +497,18 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     snapshot.weather?.let { maybeApplyPhoneSpeedFallback(it.speedMps) }
                     dataSyncCoordinator.onSyncSnapshotReceived(snapshot)
-                    binocularView.notifyContentChanged()
                 }
             }
 
             onSyncErrorReceived = { error ->
                 runOnUiThread {
                     dataSyncCoordinator.onSyncErrorReceived(error)
+                }
+            }
+
+            onSpeedSnapshotReceived = { snapshot ->
+                runOnUiThread {
+                    applyPhoneSpeedSnapshot(snapshot)
                 }
             }
 
@@ -735,6 +753,20 @@ class MainActivity : AppCompatActivity() {
             requestStoragePermission()
         }
 
+        widgetContainer.onCursorCenterRequested = {
+            val logicalWidth = if (cursorView.width > DisplayConfig.EYE_WIDTH) {
+                DisplayConfig.EYE_WIDTH
+            } else {
+                cursorView.width
+            }
+            val logicalHeight = minOf(cursorView.height, DisplayConfig.EYE_HEIGHT)
+            val centerX = logicalWidth.toFloat() / 2f
+            val centerY = logicalHeight.toFloat() / 2f
+            cursorView.setCursorPosition(centerX, centerY)
+            widgetContainer.setCursorPosition(cursorView.getCursorX(), cursorView.getCursorY())
+            notifyTransientBinocularChange()
+        }
+
         widgetContainer.onSpeedUnitChanged = { unit ->
             saveSpeedUnit(unit)
             speedLog { "Unit changed to ${unit.label}" }
@@ -893,10 +925,16 @@ class MainActivity : AppCompatActivity() {
             localLocationProvider = { previousSpeedLocation },
             notifyContentChanged = {
                 binocularView.notifyContentChanged()
+            },
+            notifyTransientContentChanged = {
+                notifyTransientBinocularChange()
             }
         )
-        widgetContainer.onFinanceDataRequested = { symbol, range, force, reason ->
-            dataSyncCoordinator.onFinanceDataRequested(symbol, range, force, reason)
+        widgetContainer.onFinanceDataRequested = { config, force, reason ->
+            dataSyncCoordinator.onFinanceDataRequested(config, force, reason)
+        }
+        widgetContainer.onFinanceVisibilityChanged = { visible ->
+            dataSyncCoordinator.onFinanceVisibilityChanged(visible)
         }
         widgetContainer.onNewsDataRequested = { countryCode, force, reason ->
             dataSyncCoordinator.onNewsDataRequested(countryCode, force, reason)
@@ -1392,6 +1430,8 @@ class MainActivity : AppCompatActivity() {
      * This resets the sleep timer when the user interacts.
      */
     private fun notifyUserActivity() {
+        wakeDisplayFromUserAction("user_activity")
+
         if (::wakeSleepManager.isInitialized) {
             wakeSleepManager.onUserActivity()
         }
@@ -1399,6 +1439,38 @@ class MainActivity : AppCompatActivity() {
         // If this was a head-up wake session, convert it to a normal session
         // so the screen stays on after user interaction
         cancelHeadUpWakeSession()
+    }
+
+    private fun wakeDisplayFromUserAction(reason: String) {
+        if (!::wakeSleepManager.isInitialized) return
+
+        if (wakeSleepManager.state != WakeSleepManager.DisplayState.WAKE) {
+            Log.d(TAG, "User action waking display from ${wakeSleepManager.state} ($reason)")
+            wakeSleepManager.transitionTo(WakeSleepManager.DisplayState.WAKE)
+            return
+        }
+
+        ensureVisibleWakeState(reason)
+    }
+
+    private fun ensureVisibleWakeState(reason: String) {
+        if (!::widgetContainer.isInitialized || !::cursorView.isInitialized) return
+
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        wakeLock?.let {
+            if (!it.isHeld) it.acquire()
+        }
+
+        val containerWasNotAwake = !widgetContainer.isDisplayAwake()
+        cursorView.setForceHidden(false, useGentleRedraw = true)
+        widgetContainer.setDisplayState(WakeSleepManager.DisplayState.WAKE)
+
+        if (containerWasNotAwake) {
+            Log.d(TAG, "Recovered visible wake state after stale internal mask ($reason)")
+            notifyStructuralBinocularChange(contentClass = BinocularContentClass.INTERACTIVE)
+        }
+
+        applyEffectiveWindowBrightness()
     }
     
     private fun saveWidgetStateDebounced() {
@@ -1416,7 +1488,7 @@ class MainActivity : AppCompatActivity() {
     /**
      * Restore widget state from persistent storage.
      *
-     * On first run (no saved state): Default widgets are created by WidgetContainer.
+     * On first run (no saved state): the built-in Standard layout is created by WidgetContainer.
      * On returning user (saved state exists): Restore currently open widgets and keep the
      * last-closed widget templates available so reopening uses the previous bounds/config.
      *
@@ -1489,6 +1561,25 @@ class MainActivity : AppCompatActivity() {
         }
 
         registerReceiver(batteryStateReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+    }
+
+    private fun registerScreenStateReceiver() {
+        screenStateReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == Intent.ACTION_SCREEN_ON) {
+                    handlePhysicalScreenOn("screen_on_broadcast")
+                }
+            }
+        }
+
+        registerReceiver(screenStateReceiver, IntentFilter(Intent.ACTION_SCREEN_ON))
+    }
+
+    private fun handlePhysicalScreenOn(reason: String) {
+        if (!::wakeSleepManager.isInitialized) return
+
+        Log.d(TAG, "Physical screen-on detected ($reason) in state ${wakeSleepManager.state}")
+        wakeDisplayFromUserAction(reason)
     }
 
     private fun isChargingFromIntent(intent: Intent?): Boolean {
@@ -1633,6 +1724,9 @@ class MainActivity : AppCompatActivity() {
 
         // Hardware action-button wake can resume the activity without an internal
         // WakeSleepManager transition. Let the coordinator refresh visible data.
+        if ((getSystemService(Context.POWER_SERVICE) as PowerManager).isInteractive) {
+            handlePhysicalScreenOn("activity_resume")
+        }
         widgetContainer.onAppResumed()
         if (::dataSyncCoordinator.isInitialized) {
             dataSyncCoordinator.onAppResumed()
@@ -1753,6 +1847,8 @@ class MainActivity : AppCompatActivity() {
         glassesBatteryUpdateRunnable?.let { handler.removeCallbacks(it) }
         batteryStateReceiver?.let { unregisterReceiver(it) }
         batteryStateReceiver = null
+        screenStateReceiver?.let { unregisterReceiver(it) }
+        screenStateReceiver = null
 
         // Stop time updates
         timeUpdateRunnable?.let { handler.removeCallbacks(it) }
@@ -1889,7 +1985,8 @@ class MainActivity : AppCompatActivity() {
 
         // Only process key events if we're in WAKE state
         if (::wakeSleepManager.isInitialized && !wakeSleepManager.isAwake()) {
-            Log.d(TAG, "Ignoring key event - display not awake")
+            Log.d(TAG, "Key event while display not awake - waking display")
+            wakeDisplayFromUserAction("key_event")
             return true  // Consume but don't process
         }
 
@@ -2116,6 +2213,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun maybeApplyPhoneSpeedFallback(speedMps: Float?) {
+        applyPhoneSpeedSnapshot(
+            SpeedSnapshot(
+                speedMps = speedMps,
+                qualityOk = speedMps?.isFinite() == true,
+                timestampMs = System.currentTimeMillis()
+            )
+        )
+    }
+
+    private fun applyPhoneSpeedSnapshot(snapshot: SpeedSnapshot) {
         val nowElapsed = android.os.SystemClock.elapsedRealtime()
         val localFresh = lastSpeedLocationUpdateElapsedMs != 0L &&
                 (nowElapsed - lastSpeedLocationUpdateElapsedMs) < SPEED_STALE_UPDATE_WINDOW_MS &&
@@ -2123,12 +2230,16 @@ class MainActivity : AppCompatActivity() {
         if (localFresh) {
             return
         }
-        val safeSpeedMps = speedMps?.takeIf { it.isFinite() } ?: run {
+        val safeSpeedMps = snapshot.speedMps?.takeIf { snapshot.qualityOk && it.isFinite() } ?: run {
             val now = System.currentTimeMillis()
             if (now - lastMissingPhoneSpeedLogMs >= SPEED_LOG_INTERVAL_MS) {
                 lastMissingPhoneSpeedLogMs = now
-                speedLog { "Phone fallback unavailable: weather payload has no speedMps and local speed is stale" }
+                speedLog { "Phone speed unavailable or low quality and local speed is stale" }
             }
+            smoothSpeedReading(0f, qualityOk = false, source = "phone-unavailable")
+            lastSpeedQualityOk = false
+            isSpeedMoving = false
+            widgetContainer.updateSpeedData(0f, qualityOk = false, isMoving = false)
             return
         }
 
@@ -2143,7 +2254,7 @@ class MainActivity : AppCompatActivity() {
         widgetContainer.updateSpeedData(smoothedSpeedKmh, qualityOk = true, isMoving = isSpeedMoving)
 
         speedLog {
-            "Applied phone speed fallback: " +
+            "Applied phone speed: " +
                     "${String.format(Locale.ENGLISH, "%.2f", smoothedSpeedKmh)} km/h " +
                     "(localFresh=$localFresh)"
         }

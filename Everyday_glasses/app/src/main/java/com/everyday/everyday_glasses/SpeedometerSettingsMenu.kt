@@ -166,6 +166,10 @@ class SpeedometerSettingsMenu(
     fun onMove(x: Float, y: Float): Boolean {
         if (!isVisible) return false
         if (sliderDragging) {
+            if (!expandedSliderRect().contains(x, y)) {
+                sliderDragging = false
+                return true
+            }
             updateThresholdFromTouch(x)
             return true
         }

@@ -3,6 +3,7 @@ package com.everyday.everyday_phone
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -10,15 +11,24 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageButton
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.IntentSenderRequest
@@ -70,7 +80,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var keyboardView: KeyboardView
     // instructionText removed for minimalist design
     // private lateinit var instructionText: TextView
+    private lateinit var refreshButton: ImageButton
     private lateinit var closeButton: View
+    private lateinit var linkInput: EditText
+    private lateinit var openOnGlassesButton: ImageButton
     private var mirrorButton: Button? = null
     private var imagePickerButton: Button? = null
     private lateinit var phoneGoogleAuthManager: PhoneGoogleAuthManager
@@ -84,6 +97,7 @@ class MainActivity : AppCompatActivity() {
     private var isMirroringEnabled = false
     private var isGlassesConnected = false
     private var glassesBatteryPercent: Int? = null
+    private var pendingSharedAddress: String? = null
 
     // Clipboard monitoring
     private var clipboardManager: ClipboardManager? = null
@@ -152,12 +166,10 @@ class MainActivity : AppCompatActivity() {
         keyboardView = findViewById(R.id.keyboardView)
         // instructionText removed for minimalist design
         // instructionText = findViewById(R.id.instructionText)
+        refreshButton = findViewById(R.id.refreshButton)
         closeButton = findViewById(R.id.closeButton)
-        
-        // Close button - closes the app
-        closeButton.setOnClickListener {
-            finish()
-        }
+        linkInput = findViewById(R.id.linkInput)
+        openOnGlassesButton = findViewById(R.id.openOnGlassesButton)
 
         transportManager = TransportManager(
             rfcommServerProvider = { rfcommServer },
@@ -173,6 +185,14 @@ class MainActivity : AppCompatActivity() {
             googleAuthManager = phoneGoogleAuthManager,
             hasLocationPermission = { hasLocationPermission() }
         )
+
+        setupRefreshButton()
+        setupOpenOnGlassesControls()
+
+        // Close button - closes the app
+        closeButton.setOnClickListener {
+            finish()
+        }
         
         rfcommServer = RfcommServer(this).apply {
             onStatusChanged = { status ->
@@ -190,12 +210,14 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         // Also send current clipboard so glasses have it
                         sendCurrentClipboardToGlasses()
+                        sendPendingSharedAddress()
                     }
                     dataSyncCoordinator.onConnectionChanged(connected)
                     updateStatusDisplay()
                     trackpad.alpha = if (connected) 1.0f else 0.5f
                     updateMirrorButton()
                     updateImagePickerButton()
+                    updateOpenOnGlassesButton()
 
                     if (!connected) {
                         hideKeyboard()
@@ -391,7 +413,21 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
+        setIntent(intent)
         handleIntent(intent)
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (
+            event.action == MotionEvent.ACTION_DOWN &&
+            ::linkInput.isInitialized &&
+            linkInput.hasFocus() &&
+            !isTouchInsideView(linkInput, event) &&
+            !isTouchInsideView(openOnGlassesButton, event)
+        ) {
+            clearLinkInputFocus()
+        }
+        return super.dispatchTouchEvent(event)
     }
 
     override fun onResume() {
@@ -402,6 +438,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
+        if (handleSharedTextIntent(intent)) {
+            return
+        }
+
         val isDebuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         if (isDebuggable && intent?.action == ACTION_DEBUG_START_SUBTITLE) {
             fileLog("Received debug start subtitle intent")
@@ -435,6 +475,33 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun handleSharedTextIntent(intent: Intent?): Boolean {
+        if (intent?.action != Intent.ACTION_SEND) return false
+        val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+            ?: intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+            ?: return true
+        val address = extractAddressFromSharedText(sharedText)
+        if (address.isBlank()) return true
+
+        fileLog("Received shared text for glasses browser: ${address.take(120)}")
+        populateLinkInput(address)
+        if (isGlassesConnected) {
+            sendLinkToGlassesBrowser()
+        } else {
+            pendingSharedAddress = address
+            Toast.makeText(this, "Connect glasses to open shared link", Toast.LENGTH_SHORT).show()
+        }
+        return true
+    }
+
+    private fun extractAddressFromSharedText(text: String): String {
+        val trimmed = text.trim()
+        val urlMatch = Regex("""https?://\S+""").find(trimmed)
+        return (urlMatch?.value ?: trimmed)
+            .trim()
+            .trimEnd('.', ',', ';', ')', ']', '}', '"', '\'')
+    }
+
     private fun beginPhoneGoogleAuthorization() {
         phoneGoogleAuthManager.beginAuthorization(
             activity = this,
@@ -466,6 +533,76 @@ class MainActivity : AppCompatActivity() {
                 dataSyncCoordinator.onGoogleDisconnected()
             }
         )
+    }
+
+    private fun setupRefreshButton() {
+        refreshButton.setOnClickListener {
+            if (!hasInternetConnection()) {
+                Toast.makeText(this, "no internet connection", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            refreshButton.isEnabled = false
+            refreshButton.alpha = 0.5f
+            Toast.makeText(this, "Refreshing...", Toast.LENGTH_SHORT).show()
+
+            val started = dataSyncCoordinator.refreshAllExternalApis { result ->
+                runOnUiThread {
+                    refreshButton.isEnabled = true
+                    refreshButton.alpha = 1.0f
+
+                    if (result.errors.isEmpty()) {
+                        Toast.makeText(this, "Refreshed", Toast.LENGTH_SHORT).show()
+                    } else {
+                        showRefreshErrorDialog(result.errorMessage())
+                    }
+                }
+            }
+
+            if (!started) {
+                refreshButton.isEnabled = true
+                refreshButton.alpha = 1.0f
+                Toast.makeText(this, "Refresh already in progress", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun hasInternetConnection(): Boolean {
+        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        return connectivityManager.allNetworks.any { network ->
+            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return@any false
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        }
+    }
+
+    private fun showRefreshErrorDialog(message: String) {
+        val errorText = TextView(this).apply {
+            text = message
+            setTextIsSelectable(true)
+            textSize = 14f
+            setPadding(32, 24, 32, 24)
+        }
+        val scrollView = ScrollView(this).apply {
+            addView(
+                errorText,
+                ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Refresh failed")
+            .setView(scrollView)
+            .setPositiveButton("Close", null)
+            .create()
+            .apply {
+                setCancelable(false)
+                setCanceledOnTouchOutside(false)
+                show()
+            }
     }
     
     override fun onDestroy() {
@@ -637,6 +774,113 @@ class MainActivity : AppCompatActivity() {
             //     else -> key
             // }
         }
+    }
+
+    private fun setupOpenOnGlassesControls() {
+        linkInput.setSelectAllOnFocus(true)
+        linkInput.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus && linkInput.text?.isNotEmpty() == true) {
+                linkInput.selectAll()
+            }
+        }
+        linkInput.setOnClickListener {
+            if (linkInput.text?.isNotEmpty() == true) {
+                linkInput.selectAll()
+            }
+        }
+
+        linkInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                updateOpenOnGlassesButton()
+            }
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
+
+        linkInput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_GO) {
+                sendLinkToGlassesBrowser()
+                true
+            } else {
+                false
+            }
+        }
+
+        openOnGlassesButton.setOnClickListener {
+            sendLinkToGlassesBrowser()
+        }
+
+        updateOpenOnGlassesButton()
+    }
+
+    private fun updateOpenOnGlassesButton() {
+        if (!::openOnGlassesButton.isInitialized || !::linkInput.isInitialized) return
+        val enabled = isGlassesConnected && linkInput.text?.isNotBlank() == true
+        openOnGlassesButton.isEnabled = enabled
+        openOnGlassesButton.alpha = if (enabled) 1.0f else 0.5f
+    }
+
+    private fun populateLinkInput(address: String) {
+        if (!::linkInput.isInitialized) return
+        linkInput.setText(address)
+        linkInput.setSelection(linkInput.text?.length ?: 0)
+        updateOpenOnGlassesButton()
+    }
+
+    private fun sendPendingSharedAddress() {
+        val address = pendingSharedAddress ?: return
+        populateLinkInput(address)
+        if (sendLinkToGlassesBrowser(showToast = false)) {
+            Toast.makeText(this, "Opened shared link on glasses", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun sendLinkToGlassesBrowser(showToast: Boolean = true): Boolean {
+        val address = linkInput.text?.toString()?.trim().orEmpty()
+        if (address.isBlank()) {
+            if (showToast) Toast.makeText(this, "Enter a link or search", Toast.LENGTH_SHORT).show()
+            return false
+        }
+
+        if (!isGlassesConnected) {
+            if (showToast) Toast.makeText(this, "Glasses not connected", Toast.LENGTH_SHORT).show()
+            return false
+        }
+
+        val sent = rfcommServer?.sendOpenBrowser(address) == true
+        if (showToast) {
+            Toast.makeText(
+                this,
+                if (sent) "Sent to glasses" else "Failed to send",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+        if (sent) {
+            if (pendingSharedAddress == address) {
+                pendingSharedAddress = null
+            }
+            linkInput.text?.clear()
+            clearLinkInputFocus()
+        }
+        return sent
+    }
+
+    private fun clearLinkInputFocus() {
+        if (!::linkInput.isInitialized) return
+        linkInput.clearFocus()
+        val inputMethodManager = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        inputMethodManager.hideSoftInputFromWindow(linkInput.windowToken, 0)
+    }
+
+    private fun isTouchInsideView(view: View, event: MotionEvent): Boolean {
+        val location = IntArray(2)
+        view.getLocationOnScreen(location)
+        val left = location[0]
+        val top = location[1]
+        return event.rawX >= left &&
+            event.rawX <= left + view.width &&
+            event.rawY >= top &&
+            event.rawY <= top + view.height
     }
     
     // ==================== Screen Mirroring ====================

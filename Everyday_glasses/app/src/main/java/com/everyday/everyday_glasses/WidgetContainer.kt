@@ -2,10 +2,7 @@ package com.everyday.everyday_glasses
 
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
 import android.graphics.PointF
-import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
 import android.util.AttributeSet
@@ -14,6 +11,7 @@ import android.view.View
 import android.view.ViewGroup
 import com.everyday.everyday_glasses.binocular.BinocularContentClass
 import com.everyday.shared.sync.FinanceSnapshot
+import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.NewsSnapshot
 import com.everyday.shared.sync.SubtitleControl
 import com.everyday.shared.sync.SubtitleStatus
@@ -58,8 +56,7 @@ class WidgetContainer @JvmOverloads constructor(
         private const val DEFAULT_SPEED_VISIBILITY_THRESHOLD_KMH = 0.5f
         private const val LONG_PRESS_DELAY_MS = 250L
         private const val LONG_PRESS_MAX_MOVEMENT = 20f
-        private const val CLOSE_BUTTON_SIZE = 40f
-        private const val CLOSE_BUTTON_MARGIN = 16f
+        private const val HOVER_CONFIRM_RELEASE_TAP_GUARD_MS = 300L
         
         // Phone trackpad sensitivity multiplier
         private const val PHONE_TRACKPAD_SENSITIVITY = 1.5f
@@ -96,14 +93,41 @@ class WidgetContainer @JvmOverloads constructor(
     private var closeConfirmationPopup: CloseConfirmationPopup? = null
     private var layoutDeleteConfirmationPopup: WidgetLayoutDeleteConfirmationPopup? = null
 
-    // Close button
-    private val closeButtonRect = RectF()
-    private var closeButtonHovered = false
+    private val closeAppHoverControl = CloseAppHoverControl {
+        closeConfirmationPopup?.show()
+        notifyContentChanged()
+    }
+    private val youtubeHistoryHoverControl = YouTubeHistoryHoverControl {
+        createYouTubeBrowserWidget()
+    }
 
-    // YouTube button (appears on hover, opens YouTube history in browser widget)
-    private val youtubeButtonRect = RectF()
-    private var youtubeButtonHovered = false
-    private val YOUTUBE_BUTTON_SIZE = 64f  // Same size as minimized widgets
+    // Mutable list of lemon shortcuts; loaded lazily from disk on first access so the
+    // file read doesn't happen during construction (context.getExternalFilesDir is fine
+    // but disk I/O during init is best avoided).
+    private var lemonShortcuts: MutableList<ShortcutAction>? = null
+    private fun ensureLemonShortcuts(): MutableList<ShortcutAction> {
+        val cached = lemonShortcuts
+        if (cached != null) return cached
+        val loaded = ShortcutsStore.load(context).toMutableList()
+        lemonShortcuts = loaded
+        return loaded
+    }
+
+    private val lemonHoverControl: LemonHoverControl = LemonHoverControl(
+        shortcutsProvider = { ensureLemonShortcuts() },
+        onActionSelected = { action -> runShortcutAction(action) },
+        invalidate = { invalidateHoverVisuals() }
+    )
+
+    private val hoverControls: List<BaseHoverControl> = listOf(
+        closeAppHoverControl,
+        youtubeHistoryHoverControl,
+        lemonHoverControl
+    )
+
+    /** Hover control currently capturing the cursor (between down and up). */
+    private var capturedHoverControl: BaseHoverControl? = null
+    private var hoverConfirmTapGuardUntilMs: Long = 0L
 
     // ==================== Widget References ====================
     
@@ -167,6 +191,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     // Settings overlays and persisted app-level settings
     private val settingsController = SettingsController(
+        resources = resources,
         defaultSpeedVisibilityThresholdKmh = DEFAULT_SPEED_VISIBILITY_THRESHOLD_KMH,
         invalidateView = { invalidate() },
         notifyContentChanged = ::notifyContentChanged,
@@ -186,7 +211,12 @@ class WidgetContainer @JvmOverloads constructor(
         connectGoogle = { onConnectGoogle?.invoke() },
         grantCalendarAccess = { onGrantCalendarAccess?.invoke() },
         disconnectGoogle = { onDisconnectGoogle?.invoke() },
-        retryGoogleAuth = { onRetryGoogleAuth?.invoke() }
+        retryGoogleAuth = { onRetryGoogleAuth?.invoke() },
+        shortcutsProvider = { ensureLemonShortcuts().toList() },
+        onShortcutsChanged = { updated -> applyShortcuts(updated) },
+        savedLayoutNamesProvider = {
+            persistenceManager.listLayouts().map { it.name }
+        }
     )
     private var layoutNamePrompt: WidgetLayoutNamePrompt? = null
     private val persistenceManager = PersistenceManager(
@@ -200,7 +230,7 @@ class WidgetContainer @JvmOverloads constructor(
         canApplyLayout = ::isReady,
         captureState = ::captureWidgetStateWithoutLayoutName,
         applyState = ::applyPersistedStateReplacingCurrent,
-        applyDefaultLayout = ::applyDefaultLayoutReplacingCurrent,
+        buildDeliveredLayout = { name -> BuiltInLayouts.build(name, width.toFloat(), height.toFloat()) },
         showNamePrompt = { suggestedName ->
             dismissMenu()
             layoutNamePrompt?.show(suggestedName)
@@ -248,6 +278,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     // Widget being dragged
     private var activeWidget: BaseWidget? = null
+    private var isWidgetLayoutLocked = false
 
     // Drag state flags
     private var mirrorWidgetDragging = false
@@ -255,6 +286,7 @@ class WidgetContainer @JvmOverloads constructor(
     private var statusBarDragging = false
     private var locationWidgetDragging = false
     private var financeWidgetDragging = false
+    private var financeTileDragging = false
     private var newsWidgetDragging = false
     private var speedometerWidgetDragging = false
     private var subtitleWidgetDragging = false
@@ -279,6 +311,7 @@ class WidgetContainer @JvmOverloads constructor(
     private var pendingDragLocationWidget = false
     private var pendingDragCalendarWidget = false
     private var pendingDragFinanceWidget = false
+    private var pendingDragFinanceTile = false
     private var pendingDragNewsWidget = false
     private var pendingDragSpeedometerWidget = false
     private var pendingDragSubtitleWidget = false
@@ -360,9 +393,11 @@ class WidgetContainer @JvmOverloads constructor(
     var onClipboardRequest: (() -> Unit)? = null
     var onFilePickerRequest: (() -> Unit)? = null
     var onStoragePermissionRequest: (() -> Unit)? = null
+    var onCursorCenterRequested: (() -> Unit)? = null
     var onSpeedUnitChanged: ((SpeedometerWidget.SpeedUnit) -> Unit)? = null
     var onSpeedVisibilityThresholdChanged: ((Float) -> Unit)? = null
-    var onFinanceDataRequested: ((symbol: String, range: String, force: Boolean, reason: String) -> Unit)? = null
+    var onFinanceDataRequested: ((config: FinanceDashboardTileConfig, force: Boolean, reason: String) -> Unit)? = null
+    var onFinanceVisibilityChanged: ((visible: Boolean) -> Unit)? = null
     var onNewsDataRequested: ((countryCode: String, force: Boolean, reason: String) -> Unit)? = null
     var onSubtitleControlRequested: ((SubtitleControl) -> Unit)? = null
 
@@ -377,34 +412,6 @@ class WidgetContainer @JvmOverloads constructor(
     // Set to false after restoring state on a returning user to prevent recreating closed widgets.
     private var shouldCreateDefaultSingletons = true
     private var suppressContentChangedCallback = false
-
-    // ==================== Paints ====================
-
-    private val closeButtonHoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#E53935")
-    }
-
-    private val closeButtonCrossPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        strokeWidth = 4f
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-    }
-
-    // YouTube button paints
-    private val youtubeButtonBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#CC000000")  // Semi-transparent black background
-    }
-
-    private val youtubeButtonIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#FF0000")  // YouTube red
-        style = Paint.Style.FILL
-    }
-
-    private val youtubePlayIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        style = Paint.Style.FILL
-    }
 
     init {
         setWillNotDraw(false)
@@ -660,22 +667,11 @@ class WidgetContainer @JvmOverloads constructor(
         smartAlignment.screenWidth = w.toFloat()
         smartAlignment.screenHeight = h.toFloat()
 
-        closeButtonRect.set(
-            w - CLOSE_BUTTON_SIZE - CLOSE_BUTTON_MARGIN,
-            CLOSE_BUTTON_MARGIN,
-            w - CLOSE_BUTTON_MARGIN,
-            CLOSE_BUTTON_MARGIN + CLOSE_BUTTON_SIZE
-        )
-
-        // YouTube button - positioned at bottom-right corner, same hitbox size as minimized widgets
-        youtubeButtonRect.set(
-            w - YOUTUBE_BUTTON_SIZE,
-            h - YOUTUBE_BUTTON_SIZE,
-            w.toFloat(),
-            h.toFloat()
-        )
+        updateDefaultHoverControlBounds(w.toFloat(), h.toFloat())
+        lemonHoverControl.setScreenSize(w.toFloat(), h.toFloat())
 
         contextMenu = ContextMenu(w.toFloat(), h.toFloat()).apply {
+            setLayoutLockState(isWidgetLayoutLocked)
             onItemSelected = { item -> handleMenuItemSelected(item) }
             onSubmenuItemSelected = { _, subItem -> handleSubmenuItemSelected(subItem) }
             onSubmenuItemDoubleTapped = { _, subItem -> handleSubmenuItemDoubleTapped(subItem) }
@@ -719,6 +715,14 @@ class WidgetContainer @JvmOverloads constructor(
 
         settingsController.createSpeedometerSettingsMenu(w.toFloat(), h.toFloat())
 
+        // Initialize the hover-controls layout editor. Constructing it snaps the controls
+        // to default grid cells, so this must run after updateDefaultHoverControlBounds.
+        settingsController.createHoverControlsLayoutEditor(
+            w.toFloat(),
+            h.toFloat(),
+            hoverControls
+        )
+
         layoutNamePrompt = WidgetLayoutNamePrompt(w.toFloat(), h.toFloat()).apply {
             onSubmitted = { name -> layoutManager.saveLayoutWithName(name) }
             onDismissed = {
@@ -727,58 +731,39 @@ class WidgetContainer @JvmOverloads constructor(
             }
         }
 
-        // Only create default singleton widgets on first run.
+        // Only create the built-in Standard layout on first run.
         // For returning users, the restoration code will create widgets based on saved state.
         if (shouldCreateDefaultSingletons) {
-            createDefaultLayoutWidgets(w, h)
-            layoutManager.activeLayoutName = WidgetPersistence.DEFAULT_LAYOUT_NAME
+            applyDefaultLayoutReplacingCurrent()
         }
 
         updateFullscreenBounds()
         Log.d(TAG, "Container sized: ${w}x${h}")
     }
 
-    private fun createDefaultLayoutWidgets(containerWidth: Int, containerHeight: Int) {
-        if (statusBarWidget == null) {
-            val statusWidth = 220f
-            val statusHeight = 110f
-            statusBarWidget = StatusBarWidget(
-                context,
-                (containerWidth - statusWidth) / 2f,
-                containerHeight - statusHeight - containerHeight * 0.15f,
-                statusWidth,
-                statusHeight
-            ).apply {
-                onStateChanged = { state ->
-                    if (state == StatusBarWidget.State.MOVING) statusBarDragging = true
-                    else if (statusBarDragging && state == StatusBarWidget.State.IDLE) statusBarDragging = false
-                    notifyContentChanged()
-                }
-                hookupSingleton(statusBarDesc)
-                onCloseRequested = { toggleStatusBarWidget() }
-            }
-        }
+    private fun updateDefaultHoverControlBounds(containerWidth: Float, containerHeight: Float) {
+        // Initial fallback positions in case the layout editor hasn't been created yet.
+        // The editor takes over and snaps these to grid centers as soon as it is built.
+        closeAppHoverControl.setBounds(
+            containerWidth - CloseAppHoverControl.DEFAULT_SIZE - CloseAppHoverControl.DEFAULT_MARGIN,
+            CloseAppHoverControl.DEFAULT_MARGIN,
+            CloseAppHoverControl.DEFAULT_SIZE
+        )
+        youtubeHistoryHoverControl.setBounds(
+            containerWidth - YouTubeHistoryHoverControl.DEFAULT_SIZE,
+            containerHeight - YouTubeHistoryHoverControl.DEFAULT_SIZE,
+            YouTubeHistoryHoverControl.DEFAULT_SIZE
+        )
+        lemonHoverControl.setBounds(
+            CloseAppHoverControl.DEFAULT_MARGIN,
+            containerHeight - LemonHoverControl.DEFAULT_SIZE - CloseAppHoverControl.DEFAULT_MARGIN,
+            LemonHoverControl.DEFAULT_SIZE
+        )
+    }
 
-        if (locationWidget == null) {
-            val locWidth = 300f
-            val locHeight = 120f
-            locationWidget = LocationWidget(context, 20f, containerHeight - locHeight - 20f, locWidth, locHeight).apply {
-                hookupSingleton(locationDesc)
-                onCloseRequested = { toggleLocationWidget() }
-                if (pendingLocationAddress != null || pendingLocationWeather != null) {
-                    setLocationData(pendingLocationAddress ?: "Loading...", pendingLocationWeather ?: "Checking weather...")
-                }
-                setSunTimes(pendingLocationSunriseEpochMs, pendingLocationSunsetEpochMs)
-            }
-        }
-
-        if (screenMirrorWidget == null) {
-            val mirrorWidth = containerWidth * 0.35f
-            val mirrorHeight = containerHeight * 0.40f
-            screenMirrorWidget = ScreenMirrorWidget(context, 20f, 20f, mirrorWidth, mirrorHeight).apply {
-                configureScreenMirrorWidget(this)
-            }
-        }
+    private fun triggerCloseAppConfirmation() {
+        closeConfirmationPopup?.show()
+        notifyContentChanged()
     }
 
     // ==================== Fullscreen Management ====================
@@ -1096,9 +1081,9 @@ class WidgetContainer @JvmOverloads constructor(
         updateNewsCountryCode(snapshot.countryCode)
     }
 
-    fun applyFinanceSnapshot(snapshot: FinanceSnapshot) {
+    fun applyFinanceSnapshot(snapshot: FinanceSnapshot, notify: Boolean = true) {
         financeWidget?.applySnapshot(snapshot)
-        notifyContentChanged()
+        if (notify) notifyContentChanged()
     }
 
     fun applyFinanceError(message: String) {
@@ -1126,9 +1111,9 @@ class WidgetContainer @JvmOverloads constructor(
 
     fun currentNewsCountryCode(): String? = newsWidget?.getCountryCode() ?: pendingNewsCountryCode
 
-    fun currentFinanceSelection(): Pair<String, String>? {
+    fun currentFinanceSelection(): FinanceDashboardTileConfig? {
         val widget = financeWidget ?: return null
-        return Pair(widget.currentSymbol, widget.currentRange.range)
+        return widget.getVisibleTileConfigs().firstOrNull()
     }
 
     // ==================== Z-Order Management ====================
@@ -1144,7 +1129,7 @@ class WidgetContainer @JvmOverloads constructor(
         longPressRunnable?.let { handler.removeCallbacks(it) }
         longPressRunnable = null
         pendingDragWidget = null; pendingDragStatusBar = false; pendingDragLocationWidget = false
-        pendingDragCalendarWidget = false; pendingDragFinanceWidget = false; pendingDragNewsWidget = false
+        pendingDragCalendarWidget = false; pendingDragFinanceWidget = false; pendingDragFinanceTile = false; pendingDragNewsWidget = false
         pendingDragSpeedometerWidget = false; pendingDragSubtitleWidget = false; pendingDragMirrorWidget = false; pendingDragIsResize = false; pendingTextSelection = false
         pendingFormattingMenuDrag = false
         formattingMenu?.cancelLongPress()
@@ -1167,8 +1152,22 @@ class WidgetContainer @JvmOverloads constructor(
             }
         }
 
+        // The hover-controls layout editor is fully modal; consume input before any
+        // widget hit-testing.
+        if (closeConfirmationPopup?.isVisible != true &&
+            settingsController.handleHoverControlsLayoutEditorDown(x, y)
+        ) return
+
+        // Shortcuts settings menu is also modal.
+        if (settingsController.handleShortcutsSettingsMenuDown(x, y)) return
+
         // Transform to content space for hit testing against widgets
         val (cx, cy) = toContentSpace(x, y)
+
+        // Hover controls sit above every widget — including fullscreen ones — so let any
+        // currently-interacting (e.g. lemon mid-magnify) control or any hover-control
+        // whose bounds contain the cursor consume the press before widget hit-testing.
+        if (hoverControlsConsumeDown(cx, cy)) return
 
         val scrollbarWidget = getScrollbarHoveredWidget(cx, cy)
         if (scrollbarWidget != null) { isScrollbarDragActive = true; this.scrollbarDragWidget = scrollbarWidget }
@@ -1183,6 +1182,16 @@ class WidgetContainer @JvmOverloads constructor(
         focusedWidget?.let { widget -> if (widget.isFocused() && widget.containsPoint(cx, cy)) { bringWidgetToFront(widget); if (widget.hitTest(cx, cy) == TextBoxWidget.HitArea.CONTENT) { pendingTextSelection = true; scheduleLongPress(); return } } }
         fullscreenTextWidget?.let { widget -> if (widget.isFocused() && widget.containsPoint(cx, cy)) { if (widget.hitTest(cx, cy) == TextBoxWidget.HitArea.CONTENT) { pendingTextSelection = true; scheduleLongPress(); return } } }
         
+        if (isFinanceWidgetFullscreen) {
+            financeWidget?.let { fw ->
+                if (fw.containsPoint(cx, cy) && fw.canStartTileDrag(cx, cy)) {
+                    pendingDragFinanceTile = true
+                    scheduleLongPress()
+                    return
+                }
+            }
+        }
+
         if (hasFullscreenWidget()) return
 
         // Modal dashboard check - prioritize input if visible
@@ -1208,10 +1217,24 @@ class WidgetContainer @JvmOverloads constructor(
             registry.forEachWidget { it.snapProvider = smartAlignment }
             if (pendingFormattingMenuDrag) { formattingMenu?.let { if (it.onLongPressTriggered()) { } }; pendingFormattingMenuDrag = false; notifyContentChanged(); return@Runnable }
             if (pendingTextSelection) { val widget = focusedWidget ?: fullscreenTextWidget; widget?.let { if (it.isFocused()) { val (cx, cy) = screenToContentCoordinates(longPressStartX, longPressStartY); it.setCursorFromScreenPosition(cx, cy); it.resetPixelAccumulator(); it.startSelection(); isLongPressSelectionMode = true; isTextSelectionActive = false } }; pendingTextSelection = false; notifyContentChanged(); return@Runnable }
+            if (isWidgetLayoutLocked && hasPendingWidgetDrag()) {
+                clearPendingWidgetDrag()
+                notifyContentChanged()
+                return@Runnable
+            }
             if (pendingDragMirrorWidget) { screenMirrorWidget?.let { it.startDrag(pendingDragIsResize); if (pendingDragIsResize) mirrorWidgetResizing = true else mirrorWidgetDragging = true }; pendingDragMirrorWidget = false; pendingDragIsResize = false; notifyContentChanged(); return@Runnable }
             if (pendingDragStatusBar) { statusBarWidget?.let { it.startDrag(pendingDragIsResize); statusBarDragging = true }; pendingDragStatusBar = false; pendingDragIsResize = false; notifyContentChanged(); return@Runnable }
             if (pendingDragLocationWidget) { locationWidget?.let { it.startDrag(pendingDragIsResize); locationWidgetDragging = true }; pendingDragLocationWidget = false; pendingDragIsResize = false; notifyContentChanged(); return@Runnable }
             if (pendingDragCalendarWidget) { calendarWidget?.let { it.startDrag(pendingDragIsResize); calendarWidgetDragging = true }; pendingDragCalendarWidget = false; pendingDragIsResize = false; notifyContentChanged(); return@Runnable }
+            if (pendingDragFinanceTile) {
+                financeWidget?.let {
+                    val (cx, cy) = screenToContentCoordinates(longPressStartX, longPressStartY)
+                    if (it.startTileDrag(cx, cy)) financeTileDragging = true
+                }
+                pendingDragFinanceTile = false
+                notifyContentChanged()
+                return@Runnable
+            }
             if (pendingDragFinanceWidget) { financeWidget?.let { it.startDrag(pendingDragIsResize); financeWidgetDragging = true }; pendingDragFinanceWidget = false; pendingDragIsResize = false; notifyContentChanged(); return@Runnable }
             if (pendingDragNewsWidget) { newsWidget?.let { it.startDrag(pendingDragIsResize); newsWidgetDragging = true }; pendingDragNewsWidget = false; pendingDragIsResize = false; notifyContentChanged(); return@Runnable }
             if (pendingDragSpeedometerWidget) { speedometerWidget?.let { it.startDrag(pendingDragIsResize); speedometerWidgetDragging = true }; pendingDragSpeedometerWidget = false; pendingDragIsResize = false; notifyContentChanged(); return@Runnable }
@@ -1222,11 +1245,47 @@ class WidgetContainer @JvmOverloads constructor(
         handler.postDelayed(longPressRunnable!!, LONG_PRESS_DELAY_MS)
     }
 
+    private fun hasPendingWidgetDrag(): Boolean =
+        pendingDragWidget != null ||
+                pendingDragMirrorWidget ||
+                pendingDragStatusBar ||
+                pendingDragLocationWidget ||
+                pendingDragCalendarWidget ||
+                pendingDragFinanceWidget ||
+                pendingDragFinanceTile ||
+                pendingDragNewsWidget ||
+                pendingDragSpeedometerWidget ||
+                pendingDragSubtitleWidget
+
+    private fun clearPendingWidgetDrag() {
+        pendingDragWidget = null
+        pendingDragMirrorWidget = false
+        pendingDragStatusBar = false
+        pendingDragLocationWidget = false
+        pendingDragCalendarWidget = false
+        pendingDragFinanceWidget = false
+        pendingDragFinanceTile = false
+        pendingDragNewsWidget = false
+        pendingDragSpeedometerWidget = false
+        pendingDragSubtitleWidget = false
+        pendingDragIsResize = false
+        longPressRunnable = null
+    }
+
     fun onCursorUp(x: Float, y: Float) {
         settingsController.handleSpeedometerUp()
 
         // If DashboardSettings is open, end its interaction (e.g., stop slider drag).
         settingsController.handleDashboardUp()
+
+        // If the hover-controls layout editor is open, finalize any drag.
+        settingsController.handleHoverControlsLayoutEditorUp()
+
+        // Shortcuts settings menu.
+        settingsController.handleShortcutsSettingsMenuUp()
+
+        // Notify any hover control that captured the press of the release.
+        hoverControlsConsumeUp(cursorX, cursorY)
 
         cursorPressed = false; cancelLongPress()
         if (isScrollbarDragActive) { isScrollbarDragActive = false; scrollbarDragWidget = null }
@@ -1236,6 +1295,7 @@ class WidgetContainer @JvmOverloads constructor(
         if (statusBarDragging) { statusBarWidget?.onDragEnd(); statusBarDragging = false; notifyContentChanged() }
         if (locationWidgetDragging) { locationWidget?.onDragEnd(); locationWidgetDragging = false; notifyContentChanged() }
         if (calendarWidgetDragging) { calendarWidget?.onDragEnd(); calendarWidgetDragging = false; notifyContentChanged() }
+        if (financeTileDragging) { financeWidget?.endTileDrag(); financeTileDragging = false; notifyContentChanged() }
         if (financeWidgetDragging) { financeWidget?.onDragEnd(); financeWidgetDragging = false; notifyContentChanged() }
         if (newsWidgetDragging) { newsWidget?.onDragEnd(); newsWidgetDragging = false; notifyContentChanged() }
         if (speedometerWidgetDragging) { speedometerWidget?.onDragEnd(); speedometerWidgetDragging = false; notifyContentChanged() }
@@ -1256,6 +1316,21 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     fun onMove(dx: Float, dy: Float, source: InputSource = InputSource.GLASSES_TEMPLE): Pair<Float, Float> {
+        capturedHoverControl?.takeIf { it.freezesCursorWhileInteracting() }?.let { control ->
+            val moveDelta = if (source == InputSource.PHONE_TRACKPAD) {
+                stabilizedCursorDelta.apply {
+                    set(dx * PHONE_TRACKPAD_SENSITIVITY, dy * PHONE_TRACKPAD_SENSITIVITY)
+                }
+            } else {
+                cursorStabilizer.processInto(dx, dy, stabilizedCursorDelta)
+            }
+            if (control.onCursorMove(cursorX, cursorY, moveDelta.x, moveDelta.y)) {
+                lastCursorX = cursorX
+                lastCursorY = cursorY
+                return Pair(cursorX, cursorY)
+            }
+        }
+
         if (source == InputSource.PHONE_TRACKPAD) {
             cursorX = (cursorX + (dx * PHONE_TRACKPAD_SENSITIVITY)).coerceIn(0f, width.toFloat())
             cursorY = (cursorY + (dy * PHONE_TRACKPAD_SENSITIVITY)).coerceIn(0f, height.toFloat())
@@ -1286,8 +1361,27 @@ class WidgetContainer @JvmOverloads constructor(
             return Pair(cursorX, cursorY)
         }
 
+        // Same for the hover-controls layout editor.
+        if (closeConfirmationPopup?.isVisible != true &&
+            settingsController.handleHoverControlsLayoutEditorMove(cursorX, cursorY)
+        ) {
+            lastCursorX = cursorX; lastCursorY = cursorY
+            return Pair(cursorX, cursorY)
+        }
+
+        if (settingsController.handleShortcutsSettingsMenuMove(cursorX, cursorY)) {
+            lastCursorX = cursorX; lastCursorY = cursorY
+            return Pair(cursorX, cursorY)
+        }
+
         val moveDx = cursorX - lastCursorX; val moveDy = cursorY - lastCursorY
         lastCursorX = cursorX; lastCursorY = cursorY
+
+        // Forward moves to a hover control that captured the cursor on down.
+        if (hoverControlsConsumeMove(cursorX, cursorY, moveDx, moveDy)) {
+            return Pair(cursorX, cursorY)
+        }
+
         handleDragOperations(cursorX, cursorY, moveDx, moveDy)
         return Pair(cursorX, cursorY)
     }
@@ -1299,9 +1393,17 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun updateHover(x: Float, y: Float, isVisible: Boolean) {
+        // The hover-controls editor handles its own cursor state and the dashboard widgets/
+        // controls behind it are hidden, so suppress the regular hover pass.
+        if (settingsController.isHoverControlsLayoutEditorVisible()) {
+            hoverControls.forEach { it.clearHover() }
+            registry.forEachWidget { it.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) }
+            if (!isTransitioningDisplayState) invalidateHoverVisuals()
+            return
+        }
+
         if (!isVisible) {
-            closeButtonHovered = false
-            youtubeButtonHovered = false
+            hoverControls.forEach { it.clearHover() }
             closeConfirmationPopup?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); formattingMenu?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); textEditMenu?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); contextMenu?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
             layoutDeleteConfirmationPopup?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
             layoutNamePrompt?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
@@ -1316,16 +1418,22 @@ class WidgetContainer @JvmOverloads constructor(
         // Transform to content space for widget hit testing
         val (cx, cy) = toContentSpace(x, y)
         
-        // Close button uses content-space coords (it's drawn with 3DOF transform)
-        closeButtonHovered = !hasFullscreenWidget() && closeButtonRect.contains(cx, cy)
-
-        // YouTube button uses content-space coords (it's drawn with 3DOF transform)
-        youtubeButtonHovered = !hasFullscreenWidget() && youtubeButtonRect.contains(cx, cy)
+        // Hover controls live above every widget, including fullscreen ones, so they
+        // always receive hover updates whenever the cursor is visible.
+        hoverControls.forEach { it.updateHover(cx, cy) }
 
         // Menus stay head-locked, use screen coords
         closeConfirmationPopup?.updateHover(x, y); formattingMenu?.updateHover(x, y); textEditMenu?.updateHover(x, y); contextMenu?.updateHover(x, y)
         layoutDeleteConfirmationPopup?.updateHover(x, y)
         layoutNamePrompt?.updateHover(x, y)
+
+        if (!isAnyModalOverHoverControls() && hoverControls.any { it.isHovered || it.isInteracting() }) {
+            clearWidgetHoverStates()
+            if (!isTransitioningDisplayState) {
+                invalidateHoverVisuals()
+            }
+            return
+        }
         
         // Widgets use content-space coordinates for hit testing
         if (hasFullscreenWidget()) {
@@ -1383,6 +1491,16 @@ class WidgetContainer @JvmOverloads constructor(
         }
     }
 
+    private fun clearWidgetHoverStates() {
+        if (hasFullscreenWidget()) {
+            fullscreenTextWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
+            fullscreenBrowserWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
+            fullscreenImageWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
+            fullscreenFileBrowserWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
+        }
+        registry.forEachWidget { it.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) }
+    }
+
     private fun toContentSpace(screenX: Float, screenY: Float): Pair<Float, Float> {
         return screenToContentCoordinates(screenX, screenY)
     }
@@ -1408,6 +1526,12 @@ class WidgetContainer @JvmOverloads constructor(
         if (statusBarDragging) { statusBarWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
         if (locationWidgetDragging) { locationWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
         if (calendarWidgetDragging) { calendarWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
+        if (financeTileDragging) {
+            val (cx, cy) = toContentSpace(x, y)
+            financeWidget?.onTileDrag(cx, cy)
+            notifyContentChanged()
+            return
+        }
         if (financeWidgetDragging) { financeWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
         if (newsWidgetDragging) { newsWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
         if (speedometerWidgetDragging) { speedometerWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
@@ -1493,6 +1617,8 @@ class WidgetContainer @JvmOverloads constructor(
             return handled
         }
         if (closeConfirmationPopup?.isVisible == true) return closeConfirmationPopup?.onTap(x, y) ?: false
+        settingsController.handleHoverControlsLayoutEditorTap(x, y)?.let { return it }
+        settingsController.handleShortcutsSettingsMenuTap(x, y)?.let { return it }
         if (formattingMenu?.isVisible == true) return formattingMenu?.onTap(x, y) ?: false
         if (textEditMenu?.isVisible == true) return textEditMenu?.onTap(x, y) ?: false
         if (contextMenu?.isVisible == true) return contextMenu?.onTap(x, y) ?: false
@@ -1500,6 +1626,10 @@ class WidgetContainer @JvmOverloads constructor(
 
         // Transform to content space for widget hit testing
         val (cx, cy) = toContentSpace(x, y)
+
+        // Hover controls are above every widget, including fullscreen ones.
+        if (isHoverConfirmReleaseTapGuardActive()) return true
+        if (hoverControlsConsumeTap(cx, cy)) return true
 
         statusBarWidget?.let {
             if (it.handleToggleMenuTapOrDismiss(cx, cy)) {
@@ -1549,14 +1679,6 @@ class WidgetContainer @JvmOverloads constructor(
             if (isSpeedometerWidgetFullscreen) { speedometerWidget?.let { if (it.containsPoint(cx, cy)) return handleSpeedometerWidgetTap(it, cx, cy) }; return false }
             if (isSubtitleWidgetFullscreen) { subtitleWidget?.let { if (it.containsPoint(cx, cy)) return handleSubtitleWidgetTap(it, cx, cy) }; return false }
             if (isMirrorWidgetFullscreen) { screenMirrorWidget?.let { if (it.containsPoint(cx, cy)) return handleMirrorWidgetTap(it, cx, cy) }; return false }
-        }
-
-        if (!hasFullscreenWidget() && closeButtonRect.contains(cx, cy)) { closeConfirmationPopup?.show(); notifyContentChanged(); return true }
-
-        // YouTube button - opens YouTube history in fullscreen browser widget
-        if (!hasFullscreenWidget() && youtubeButtonRect.contains(cx, cy)) {
-            createYouTubeBrowserWidget()
-            return true
         }
 
         // Modal dashboard check
@@ -1667,6 +1789,10 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     fun onDoubleTap(x: Float, y: Float): Boolean {
+        if (closeConfirmationPopup?.isVisible != true) {
+            settingsController.handleHoverControlsLayoutEditorDoubleTap(x, y)?.let { return it }
+        }
+
         if (contextMenu?.isVisible == true) {
             val handled = contextMenu?.onDoubleTap(x, y) ?: false
             if (handled) notifyContentChanged()
@@ -1683,6 +1809,9 @@ class WidgetContainer @JvmOverloads constructor(
 
         // Transform to content space for widget hit testing
         val (cx, cy) = toContentSpace(x, y)
+
+        if (isHoverConfirmReleaseTapGuardActive()) return true
+        if (hoverControlsConsumeDoubleTap(cx, cy)) return true
 
         if (!hasFullscreenWidget() && isAppContextMenuBorderDoubleTap(cx, cy)) {
             showAppContextMenu(x, y, cx, cy)
@@ -1711,6 +1840,16 @@ class WidgetContainer @JvmOverloads constructor(
 
         if (isCalendarWidgetFullscreen) {
             calendarWidget?.let {
+                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
+                    notifyContentChanged()
+                    return true
+                }
+            }
+            return false
+        }
+
+        if (isFinanceWidgetFullscreen) {
+            financeWidget?.let {
                 if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
                     notifyContentChanged()
                     return true
@@ -1762,6 +1901,13 @@ class WidgetContainer @JvmOverloads constructor(
             }
 
             newsWidget?.let {
+                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
+                    notifyContentChanged()
+                    return true
+                }
+            }
+
+            financeWidget?.let {
                 if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
                     notifyContentChanged()
                     return true
@@ -1839,6 +1985,7 @@ class WidgetContainer @JvmOverloads constructor(
     private fun showAppContextMenu(screenX: Float, screenY: Float, contentX: Float, contentY: Float) {
         pendingCreateX = contentX
         pendingCreateY = contentY
+        contextMenu?.setLayoutLockState(isWidgetLayoutLocked)
         contextMenu?.show(screenX, screenY)
         notifyContentChanged()
     }
@@ -1863,6 +2010,7 @@ class WidgetContainer @JvmOverloads constructor(
         if (statusBarDragging) { statusBarWidget?.onDragEnd(); statusBarDragging = false; notifyContentChanged() }
         if (locationWidgetDragging) { locationWidget?.onDragEnd(); locationWidgetDragging = false; notifyContentChanged() }
         if (calendarWidgetDragging) { calendarWidget?.onDragEnd(); calendarWidgetDragging = false; notifyContentChanged() }
+        if (financeTileDragging) { financeWidget?.endTileDrag(); financeTileDragging = false; notifyContentChanged() }
         if (financeWidgetDragging) { financeWidget?.onDragEnd(); financeWidgetDragging = false; notifyContentChanged() }
         if (newsWidgetDragging) { newsWidget?.onDragEnd(); newsWidgetDragging = false; notifyContentChanged() }
         if (speedometerWidgetDragging) { speedometerWidget?.onDragEnd(); speedometerWidgetDragging = false; notifyContentChanged() }
@@ -1874,10 +2022,12 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun handleMenuItemSelected(item: ContextMenu.MenuItem) {
         when (item.id) { 
+            "layout_lock" -> setWidgetLayoutLocked(!isWidgetLayoutLocked)
             "create_textbox" -> createTextBox(pendingCreateX, pendingCreateY)
             "create_browser" -> createBrowserWidget(pendingCreateX, pendingCreateY)
             "open_file" -> onFilePickerRequest?.invoke()
             "settings" -> settingsController.toggleDashboardSettings(width.toFloat(), height.toFloat())
+            "close_app" -> triggerCloseAppConfirmation()
         }
         notifyContentChanged()
     }
@@ -1999,6 +2149,20 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     fun isSmartAlignmentEnabled(): Boolean = smartAlignment.enabled
+
+    fun setWidgetLayoutLocked(locked: Boolean, persist: Boolean = true) {
+        if (isWidgetLayoutLocked == locked) {
+            contextMenu?.setLayoutLockState(isWidgetLayoutLocked)
+            return
+        }
+        isWidgetLayoutLocked = locked
+        contextMenu?.setLayoutLockState(isWidgetLayoutLocked)
+        if (locked) {
+            cancelLongPress()
+            onDragEnd()
+        }
+        if (persist) notifyContentChanged()
+    }
 
     private fun handleSubmenuItemDoubleTapped(subItem: ContextMenu.SubMenuItem): Boolean {
         return layoutManager.handleSubmenuItemDoubleTapped(subItem)
@@ -2151,6 +2315,7 @@ class WidgetContainer @JvmOverloads constructor(
                 )
             }
             teardownSingleton(financeDesc)
+            onFinanceVisibilityChanged?.invoke(false)
             financeWidget?.onDestroy()
             financeWidget = null
             Log.d(TAG, "FinanceWidget removed")
@@ -2166,11 +2331,17 @@ class WidgetContainer @JvmOverloads constructor(
                 hookupSingleton(financeDesc)
                 onCloseRequested = { toggleFinanceWidget() }
                 onStateChanged = { notifyContentChanged() }
-                onDataRequested = { symbol, range, force, reason ->
-                    onFinanceDataRequested?.invoke(symbol, range, force, reason)
+                onDataRequested = { config, force, reason ->
+                    onFinanceDataRequested?.invoke(config, force, reason)
+                }
+                onMinimizeToggled = { isMinimized ->
+                    handleSingletonMinimizeToggle(financeDesc, isMinimized)
+                    onFinanceVisibilityChanged?.invoke(!isMinimized)
+                    if (!isMinimized) requestData(force = false, reason = "finance_unminimized")
                 }
                 pendingFinanceCountryCode?.let { setCountryCode(it) }
                 requestData(force = true, reason = "widget_toggled_on")
+                onFinanceVisibilityChanged?.invoke(true)
             }
             Log.d(TAG, "FinanceWidget created")
         }
@@ -2298,6 +2469,39 @@ class WidgetContainer @JvmOverloads constructor(
         widget.setFocused(true)
         setFocusedWidget(widget)
         notifyContentChanged()
+    }
+
+    fun openBrowserAddress(address: String) {
+        val widget = focusedBrowserWidget
+            ?: fullscreenBrowserWidget
+            ?: createFullscreenBrowserWidget()
+            ?: return
+
+        if (widget.isMinimized) {
+            widget.toggleMinimize()
+        }
+        bringWidgetToFront(widget)
+        widget.setFocused(true)
+        setFocusedWidget(widget)
+        widget.navigateToAddress(address, autoFullscreenVideo = true)
+        notifyContentChanged()
+    }
+
+    private fun createFullscreenBrowserWidget(): BrowserWidget? {
+        val rootView = (parent as? ViewGroup) ?: return null
+        val widget = BrowserWidget(context, rootView, 0f, 0f, width.toFloat(), height.toFloat()).apply {
+            configureBrowserWidget(this)
+        }
+        val containerIndex = rootView.indexOfChild(this)
+        val insertIndex = if (containerIndex >= 0) containerIndex else 0
+        widget.getWebView()?.let { webView ->
+            if (webView.parent == rootView) rootView.removeView(webView)
+            rootView.addView(webView, insertIndex)
+        }
+        registry.addBrowserWidget(widget)
+        notifyMediaBrightnessCapChanged()
+        widget.toggleFullscreen()
+        return widget
     }
 
     private fun removeBrowserWidget(widget: BrowserWidget) {
@@ -2643,6 +2847,7 @@ class WidgetContainer @JvmOverloads constructor(
         statusBarDragging ||
         locationWidgetDragging ||
         calendarWidgetDragging ||
+        financeTileDragging ||
         financeWidgetDragging ||
         newsWidgetDragging ||
         speedometerWidgetDragging ||
@@ -2777,12 +2982,18 @@ class WidgetContainer @JvmOverloads constructor(
             if (pinnedFullscreenWidget != null) {
                 // Only draw the pinned fullscreen widget - it covers everything else
                 pinnedFullscreenWidget.draw(canvas)
+                if (!settingsController.isHoverControlsLayoutEditorVisible()) {
+                    drawHoverControls(canvas)
+                }
                 drawOverlayMenus(canvas)
                 return
             }
 
             // No pinned fullscreen widget - draw all pinned widgets normally
             for (widget in registry.getPinnedWidgetsSortedByZOrder()) widget.draw(canvas)
+            if (!settingsController.isHoverControlsLayoutEditorVisible()) {
+                drawHoverControls(canvas)
+            }
             drawOverlayMenus(canvas)
             return
         }
@@ -2801,6 +3012,11 @@ class WidgetContainer @JvmOverloads constructor(
             if (isSpeedometerWidgetFullscreen) speedometerWidget?.draw(canvas)
             if (isSubtitleWidgetFullscreen) subtitleWidget?.draw(canvas)
             if (isMirrorWidgetFullscreen) screenMirrorWidget?.draw(canvas)
+            // Hover controls stay above fullscreen widgets so the user can always reach
+            // them (Close, YouTube history, the lemon shortcuts, …).
+            if (!settingsController.isHoverControlsLayoutEditorVisible()) {
+                drawHoverControls(canvas)
+            }
             drawOverlayMenus(canvas)
             return
         }
@@ -2817,15 +3033,20 @@ class WidgetContainer @JvmOverloads constructor(
             canvas.rotate(-threeDofRollDeg, cx, cy)
         }
 
-        // Draw close button (affected by 3DOF to stay with content)
-        drawCloseButton(canvas)
+        // While the hover-controls layout editor is open, hide widgets and the regular
+        // dashboard hover overlays — the editor renders the controls itself in their
+        // dashboard positions.
+        val editorActive = settingsController.isHoverControlsLayoutEditorVisible()
 
-        // Draw YouTube button (only when hovered, affected by 3DOF to stay with content)
-        drawYoutubeButton(canvas)
+        if (!editorActive) {
+            // Draw all widgets (affected by 3DOF transformation)
+            for (widget in registry.getAllSortedByZOrder()) {
+                widget.draw(canvas)
+            }
 
-        // Draw all widgets (affected by 3DOF transformation)
-        for (widget in registry.getAllSortedByZOrder()) {
-            widget.draw(canvas)
+            // Hover controls are dashboard overlays and should visually win over any
+            // widget they overlap while hovered.
+            drawHoverControls(canvas)
         }
 
         // Draw smart alignment guides (only present while a drag/resize is active
@@ -2859,54 +3080,116 @@ class WidgetContainer @JvmOverloads constructor(
         contextMenu?.draw(canvas)
         textEditMenu?.draw(canvas)
         formattingMenu?.draw(canvas)
+        // Draw the hover-controls editor before the close-app confirmation so the popup
+        // appears on top of it when the user invokes Close from the editor's context menu.
+        settingsController.drawHoverControlsLayoutEditor(canvas)
         closeConfirmationPopup?.draw(canvas)
         layoutDeleteConfirmationPopup?.draw(canvas)
         settingsController.draw(canvas)
         layoutNamePrompt?.draw(canvas)
     }
 
-    private fun drawCloseButton(canvas: Canvas) {
-        if (!closeButtonHovered) return
-        canvas.drawRoundRect(closeButtonRect, 4f, 4f, closeButtonHoverPaint)
-        val padding = 10f
-        canvas.drawLine(closeButtonRect.left + padding, closeButtonRect.top + padding, closeButtonRect.right - padding, closeButtonRect.bottom - padding, closeButtonCrossPaint)
-        canvas.drawLine(closeButtonRect.right - padding, closeButtonRect.top + padding, closeButtonRect.left + padding, closeButtonRect.bottom - padding, closeButtonCrossPaint)
+    private fun drawHoverControls(canvas: Canvas) {
+        hoverControls.forEach { it.draw(canvas) }
+    }
+
+    // ==================== Hover-control input pipeline ====================
+
+    /**
+     * Forward a cursor-down. Returns true if a hover control captured the press; the
+     * caller should stop further widget hit-testing in that case.
+     */
+    private fun hoverControlsConsumeDown(cx: Float, cy: Float): Boolean {
+        if (isAnyModalOverHoverControls()) return false
+        // Iterate top-most last so it gets first crack (matches draw order which is also
+        // last-on-top).
+        for (control in hoverControls.asReversed()) {
+            if (!control.isPlaced) continue
+            if (control.onCursorDown(cx, cy)) {
+                capturedHoverControl = control
+                invalidateHoverVisuals()
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun isAnyModalOverHoverControls(): Boolean {
+        if (settingsController.isHoverControlsLayoutEditorVisible()) return true
+        if (settingsController.isShortcutsSettingsMenuVisible()) return true
+        if (settingsController.isDashboardSettingsVisible()) return true
+        if (settingsController.isSpeedometerSettingsMenuVisible()) return true
+        if (closeConfirmationPopup?.isVisible == true) return true
+        if (layoutDeleteConfirmationPopup?.isVisible == true) return true
+        if (layoutNamePrompt?.isVisible == true) return true
+        if (contextMenu?.isVisible == true) return true
+        if (textEditMenu?.isVisible == true) return true
+        if (formattingMenu?.isVisible == true) return true
+        return false
+    }
+
+    private fun hoverControlsConsumeMove(cx: Float, cy: Float, dx: Float, dy: Float): Boolean {
+        val captured = capturedHoverControl ?: return false
+        return captured.onCursorMove(cx, cy, dx, dy)
+    }
+
+    private fun hoverControlsConsumeUp(cx: Float, cy: Float): Boolean {
+        val captured = capturedHoverControl ?: return false
+        val handled = captured.onCursorUp(cx, cy)
+        if (handled && captured.shouldGuardTapAfterCursorUp()) {
+            hoverConfirmTapGuardUntilMs = System.currentTimeMillis() + HOVER_CONFIRM_RELEASE_TAP_GUARD_MS
+        }
+        capturedHoverControl = null
+        return handled
     }
 
     /**
-     * Draw the YouTube button with YouTube icon.
-     * Only draws when the button is hovered.
+     * Tap pass for hover controls. Any control with a still-active interaction state
+     * (e.g. the lemon in CONFIRMING) gets the tap first, even when the cursor is outside
+     * its idle bounds — taps outside a magnified slice need to reach the lemon to cancel
+     * the selection.
      */
-    private fun drawYoutubeButton(canvas: Canvas) {
-        if (!youtubeButtonHovered) return
+    private fun hoverControlsConsumeTap(cx: Float, cy: Float): Boolean {
+        // Interacting controls always take precedence regardless of cursor position.
+        for (control in hoverControls.asReversed()) {
+            if (control.isInteracting() && control.handleTap(cx, cy)) {
+                return true
+            }
+        }
+        if (isAnyModalOverHoverControls()) return false
+        for (control in hoverControls.asReversed()) {
+            if (!control.isPlaced) continue
+            if (control.handleTap(cx, cy)) return true
+        }
+        return false
+    }
 
-        // Draw background
-        canvas.drawRoundRect(youtubeButtonRect, 8f, 8f, youtubeButtonBackgroundPaint)
+    private fun hoverControlsConsumeDoubleTap(cx: Float, cy: Float): Boolean {
+        for (control in hoverControls.asReversed()) {
+            if (control.isInteracting() && control.handleDoubleTap(cx, cy)) {
+                notifyContentChanged()
+                if (control === lemonHoverControl) {
+                    onCursorCenterRequested?.invoke()
+                }
+                return true
+            }
+        }
+        return false
+    }
 
-        // Draw YouTube icon (rounded rectangle with play button)
-        val cx = youtubeButtonRect.centerX()
-        val cy = youtubeButtonRect.centerY()
-        val iconWidth = YOUTUBE_BUTTON_SIZE * 0.6f
-        val iconHeight = YOUTUBE_BUTTON_SIZE * 0.42f
-        val cornerRadius = 8f
+    private fun isHoverConfirmReleaseTapGuardActive(): Boolean {
+        if (hoverConfirmTapGuardUntilMs <= 0L) return false
+        if (System.currentTimeMillis() > hoverConfirmTapGuardUntilMs) {
+            hoverConfirmTapGuardUntilMs = 0L
+            return false
+        }
+        return hoverControls.any { it.isInteracting() }
+    }
 
-        // YouTube red rounded rectangle
-        val iconRect = RectF(
-            cx - iconWidth / 2,
-            cy - iconHeight / 2,
-            cx + iconWidth / 2,
-            cy + iconHeight / 2
-        )
-        canvas.drawRoundRect(iconRect, cornerRadius, cornerRadius, youtubeButtonIconPaint)
-
-        // White play triangle
-        val playSize = iconHeight * 0.4f
-        val playPath = android.graphics.Path()
-        playPath.moveTo(cx - playSize * 0.4f, cy - playSize)
-        playPath.lineTo(cx - playSize * 0.4f, cy + playSize)
-        playPath.lineTo(cx + playSize * 0.8f, cy)
-        playPath.close()
-        canvas.drawPath(playPath, youtubePlayIconPaint)
+    private fun cancelHoverControlInteractions() {
+        for (control in hoverControls) control.cancelInteraction()
+        capturedHoverControl = null
+        hoverConfirmTapGuardUntilMs = 0L
     }
 
     // ==================== Persistence ====================
@@ -2944,9 +3227,71 @@ class WidgetContainer @JvmOverloads constructor(
             speedometerWidgetState = getSpeedometerWidgetState(),
             subtitleWidgetState = getSubtitleWidgetState(),
             closedTemplates = getClosedWidgetTemplates(),
+            hoverControls = settingsController.getHoverControlPlacements(),
             isFirstRun = false,
-            activeLayoutName = null
+            activeLayoutName = null,
+            isLayoutLocked = isWidgetLayoutLocked
         )
+
+    // ==================== Shortcuts ====================
+
+    private fun applyShortcuts(actions: List<ShortcutAction>) {
+        val list = ensureLemonShortcuts()
+        list.clear()
+        // De-dup by id and cap to MAX_LEMON_SLICES.
+        val seen = mutableSetOf<String>()
+        for (a in actions) {
+            if (a.id in seen) continue
+            seen.add(a.id)
+            list.add(a)
+            if (list.size >= ShortcutAction.MAX_LEMON_SLICES) break
+        }
+        ShortcutsStore.save(context, list.toList())
+        lemonHoverControl.cancelInteraction()
+        notifyContentChanged()
+    }
+
+    private fun runShortcutAction(action: ShortcutAction) {
+        when (action) {
+            ShortcutAction.ToggleStatus -> toggleStatusBarWidget()
+            ShortcutAction.ToggleLocation -> toggleLocationWidget()
+            ShortcutAction.ToggleCalendar -> toggleCalendarWidget()
+            ShortcutAction.ToggleFinance -> toggleFinanceWidget()
+            ShortcutAction.ToggleNews -> toggleNewsWidget()
+            ShortcutAction.ToggleSpeedometer -> toggleSpeedometerWidget()
+            ShortcutAction.ToggleSubtitle -> toggleSubtitleWidget()
+            ShortcutAction.ToggleMirror -> toggleScreenMirrorWidget()
+            ShortcutAction.CreateText -> {
+                val cx = (width * 0.5f) - (width * DEFAULT_TEXTBOX_WIDTH_PERCENT) / 2f
+                val cy = (height * 0.5f) - (height * DEFAULT_TEXTBOX_HEIGHT_PERCENT) / 2f
+                pendingCreateX = cx
+                pendingCreateY = cy
+                createTextBox(cx, cy)
+            }
+            ShortcutAction.CreateBrowser -> {
+                pendingCreateX = 0f
+                pendingCreateY = 0f
+                createBrowserWidget(0f, 0f)
+            }
+            ShortcutAction.OpenYouTubeHistory -> createYouTubeBrowserWidget()
+            is ShortcutAction.Layout -> loadShortcutLayout(action.name)
+        }
+        notifyContentChanged()
+        onCursorCenterRequested?.invoke()
+    }
+
+    private fun loadShortcutLayout(name: String) {
+        if (!isReady()) return
+        val saved = persistenceManager.loadLayout(name)
+        if (saved != null) {
+            applyPersistedStateReplacingCurrent(saved)
+            layoutManager.activeLayoutName = name
+            return
+        }
+        val builtIn = BuiltInLayouts.build(name, width.toFloat(), height.toFloat()) ?: return
+        applyPersistedStateReplacingCurrent(builtIn)
+        layoutManager.activeLayoutName = name
+    }
 
     fun applyPersistedStateReplacingCurrent(state: WidgetPersistence.PersistedState) {
         if (!isReady()) return
@@ -2970,6 +3315,8 @@ class WidgetContainer @JvmOverloads constructor(
             state.news?.let { restoreNewsWidget(it) }
             state.speedometer?.let { restoreSpeedometerWidget(it) }
             state.subtitle?.let { restoreSubtitleWidget(it) }
+            settingsController.applyHoverControlPlacements(state.hoverControls)
+            setWidgetLayoutLocked(state.isLayoutLocked, persist = false)
 
             updateMinimizedWidgetPositions()
             notifyMediaBrightnessCapChanged()
@@ -2982,21 +3329,13 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun applyDefaultLayoutReplacingCurrent() {
-        suppressContentChangedCallback = true
-        try {
-            dismissAllTransientOverlays()
-            clearWidgetsForLayoutReplace()
-            shouldCreateDefaultSingletons = false
-            setClosedWidgetTemplates(WidgetPersistence.ClosedWidgetTemplates())
-            createDefaultLayoutWidgets(width, height)
-            layoutManager.activeLayoutName = WidgetPersistence.DEFAULT_LAYOUT_NAME
-            updateMinimizedWidgetPositions()
-            notifyMediaBrightnessCapChanged()
-        } finally {
-            suppressContentChangedCallback = false
-        }
-
-        notifyContentChanged()
+        val defaultState = BuiltInLayouts.build(
+            WidgetPersistence.DEFAULT_LAYOUT_NAME,
+            width.toFloat(),
+            height.toFloat()
+        ) ?: return
+        settingsController.resetHoverControlPlacementsToDefault()
+        applyPersistedStateReplacingCurrent(defaultState)
     }
 
     private fun dismissAllTransientOverlays() {
@@ -3008,6 +3347,7 @@ class WidgetContainer @JvmOverloads constructor(
         settingsController.dismissAll()
         layoutNamePrompt?.dismiss()
         cancelLongPress()
+        cancelHoverControlInteractions()
         setFocusedWidget(null)
     }
 
@@ -3142,9 +3482,7 @@ class WidgetContainer @JvmOverloads constructor(
     fun hasVisibleBrowserWidget(): Boolean = browserWidgets.any { isBrowserWidgetVisible(it) }
 
     fun shouldApplyMediaBrightnessCap(): Boolean {
-        val browserCapActive = hasVisibleBrowserWidget()
-        val mirrorCapActive = screenMirrorWidget?.shouldApplyMediaBrightnessCap() == true
-        return browserCapActive || mirrorCapActive
+        return screenMirrorWidget?.shouldApplyMediaBrightnessCap() == true
     }
 
     fun restoreImageWidgets(states: List<WidgetPersistence.ImageWidgetState>) {
@@ -3209,15 +3547,25 @@ class WidgetContainer @JvmOverloads constructor(
                 hookupSingleton(financeDesc)
                 onCloseRequested = { toggleFinanceWidget() }
                 onStateChanged = { notifyContentChanged() }
-                onDataRequested = { symbol, range, force, reason ->
-                    onFinanceDataRequested?.invoke(symbol, range, force, reason)
+                onDataRequested = { config, force, reason ->
+                    onFinanceDataRequested?.invoke(config, force, reason)
+                }
+                onMinimizeToggled = { isMinimized ->
+                    handleSingletonMinimizeToggle(financeDesc, isMinimized)
+                    onFinanceVisibilityChanged?.invoke(!isMinimized)
+                    if (!isMinimized) requestData(force = false, reason = "finance_unminimized")
                 }
                 pendingFinanceCountryCode?.let { setCountryCode(it) }
             }
         }
         persistenceHelper.restoreFinanceWidgetPosition(financeWidget, state, width, height)
         restoreFullscreenIfNeeded(financeWidget, state.isFullscreen)
-        financeWidget?.requestData(force = true, reason = "widget_restored")
+        if (financeWidget?.isMinimized == true) {
+            onFinanceVisibilityChanged?.invoke(false)
+        } else {
+            financeWidget?.requestData(force = true, reason = "widget_restored")
+            onFinanceVisibilityChanged?.invoke(true)
+        }
         notifyContentChanged()
     }
 

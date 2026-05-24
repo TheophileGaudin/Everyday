@@ -3,7 +3,28 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+def hasExternalSigning = keystoreProperties['storeFile'] &&
+        keystoreProperties['storePassword'] &&
+        keystoreProperties['keyAlias'] &&
+        keystoreProperties['keyPassword']
+
 android {
+    signingConfigs {
+        if (hasExternalSigning) {
+            externalOverride {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
+
     namespace 'com.everyday.everyday_glasses'
     compileSdk 34
 
@@ -16,7 +37,16 @@ android {
     }
 
     buildTypes {
+        debug {
+            if (hasExternalSigning) {
+                signingConfig signingConfigs.externalOverride
+            }
+        }
+
         release {
+            if (hasExternalSigning) {
+                signingConfig signingConfigs.externalOverride
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }

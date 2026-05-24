@@ -9,6 +9,8 @@ import org.junit.Test
 class WidgetLayoutPersistenceTest {
     @Test
     fun `default layout name is reserved case-insensitively`() {
+        assertTrue(WidgetPersistence.isDefaultLayoutName("Standard"))
+        assertTrue(WidgetPersistence.isDefaultLayoutName(" standard "))
         assertTrue(WidgetPersistence.isDefaultLayoutName("Default"))
         assertTrue(WidgetPersistence.isDefaultLayoutName(" default "))
         assertFalse(WidgetPersistence.isDefaultLayoutName("Work"))
@@ -135,8 +137,21 @@ class WidgetLayoutPersistenceTest {
                     url = "https://closed.example"
                 )
             ),
+            hoverControls = listOf(
+                WidgetPersistence.HoverControlPlacementState(
+                    controlId = CloseAppHoverControl.ID,
+                    col = 2,
+                    row = 1
+                ),
+                WidgetPersistence.HoverControlPlacementState(
+                    controlId = YouTubeHistoryHoverControl.ID,
+                    col = 7,
+                    row = 4
+                )
+            ),
             isFirstRun = false,
-            activeLayoutName = "Work"
+            activeLayoutName = "Work",
+            isLayoutLocked = true
         )
 
         val restored = WidgetPersistence.stateFromJson(WidgetPersistence.stateToJson(original))
@@ -162,7 +177,15 @@ class WidgetLayoutPersistenceTest {
         assertTrue(restored.mirror!!.isPinned)
         assertEquals("closed", restored.closedTemplates.text!!.text)
         assertEquals("https://closed.example", restored.closedTemplates.browser!!.url)
+        assertEquals(2, restored.hoverControls!!.size)
+        assertEquals(CloseAppHoverControl.ID, restored.hoverControls!![0].controlId)
+        assertEquals(2, restored.hoverControls!![0].col)
+        assertEquals(1, restored.hoverControls!![0].row)
+        assertEquals(YouTubeHistoryHoverControl.ID, restored.hoverControls!![1].controlId)
+        assertEquals(7, restored.hoverControls!![1].col)
+        assertEquals(4, restored.hoverControls!![1].row)
         assertEquals("Work", restored.activeLayoutName)
+        assertTrue(restored.isLayoutLocked)
         assertNull(restored.closedTemplates.status)
     }
 }

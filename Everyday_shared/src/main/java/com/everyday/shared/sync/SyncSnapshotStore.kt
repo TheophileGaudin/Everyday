@@ -98,7 +98,9 @@ class SyncSnapshotStore(context: Context) : SyncSnapshotCache {
             cachedFinance = snapshot
             financeLoaded = true
         }
-        prefs.edit().putString(KEY_FINANCE, SyncProtocol.financeToJson(snapshot).toString()).apply()
+        if (!snapshot.isLiveFinanceUpdate()) {
+            prefs.edit().putString(KEY_FINANCE, SyncProtocol.financeToJson(snapshot).toString()).apply()
+        }
     }
 
     fun loadFinance(): FinanceSnapshot? = synchronized(cacheLock) {
@@ -124,4 +126,7 @@ class SyncSnapshotStore(context: Context) : SyncSnapshotCache {
             news = if (SyncChannel.NEWS in channels) loadNews() else null,
             finance = if (SyncChannel.FINANCE in channels) loadFinance() else null
         )
+
+    private fun FinanceSnapshot.isLiveFinanceUpdate(): Boolean =
+        tiles.any { it.source == "BINANCE_WS" || it.streamStatus == "Live" }
 }

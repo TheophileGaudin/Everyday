@@ -9,7 +9,7 @@ class WidgetLayoutManager(
     private val canApplyLayout: () -> Boolean,
     private val captureState: () -> WidgetPersistence.PersistedState,
     private val applyState: (WidgetPersistence.PersistedState) -> Unit,
-    private val applyDefaultLayout: () -> Unit,
+    private val buildDeliveredLayout: (String) -> WidgetPersistence.PersistedState?,
     private val showNamePrompt: (String) -> Unit,
     private val showNameError: (String) -> Unit,
     private val dismissNamePrompt: () -> Unit,
@@ -27,28 +27,42 @@ class WidgetLayoutManager(
             ContextMenu.SubMenuItem("layout_save", "Save"),
             ContextMenu.SubMenuItem("layout_save_as", "Save As...")
         )
-        val defaultLayout = ContextMenu.SubMenuItem(
-            "layout_load_default",
-            WidgetPersistence.DEFAULT_LAYOUT_NAME
-        )
-        val layouts = persistenceManager.listLayouts()
+        val savedLayouts = persistenceManager.listLayouts()
             .filterNot { WidgetPersistence.isDefaultLayoutName(it.name) }
             .map { layout ->
                 ContextMenu.SubMenuItem("layout_load:${layout.name}", layout.name)
             }
-        val loadItems = if (layouts.isEmpty()) {
-            listOf(defaultLayout)
-        } else {
-            listOf(defaultLayout) + layouts
-        }
+        val savedNames = savedLayouts.map { it.label }
+        val deliveredLayouts = BuiltInLayouts.DELIVERED_LAYOUTS
+            .filterNot { deliveredName ->
+                savedNames.any { it.equals(deliveredName, ignoreCase = true) }
+            }
+            .map { name -> ContextMenu.SubMenuItem("layout_load:$name", name) }
+        val loadItems = deliveredLayouts + savedLayouts
         return actions + ContextMenu.SubMenuItem("layout_load_menu", "Load", submenu = loadItems)
+    }
+
+    private fun loadLayoutByNameOrDelivered(name: String): WidgetPersistence.PersistedState? {
+        val saved = persistenceManager.loadLayout(name)
+        if (saved != null) return saved
+        return buildDeliveredLayout(name)
+    }
+
+    private fun isDeliveredWithoutSavedOverride(name: String): Boolean {
+        if (!BuiltInLayouts.isDelivered(name)) return false
+        return persistenceManager.loadLayout(name) == null
+    }
+
+    private fun canonicalLoadName(name: String): String {
+        val trimmed = name.trim()
+        return BuiltInLayouts.DELIVERED_LAYOUTS.firstOrNull { it.equals(trimmed, ignoreCase = true) }
+            ?: trimmed
     }
 
     fun handleSubmenuItemSelected(subItem: ContextMenu.SubMenuItem): Boolean {
         when (subItem.id) {
             "layout_save" -> saveCurrentLayout()
             "layout_save_as" -> showSaveLayoutAsPrompt()
-            "layout_load_default" -> loadDefaultLayout()
             else -> {
                 if (subItem.id.startsWith("layout_load:")) {
                     loadLayoutByName(subItem.id.removePrefix("layout_load:"))
@@ -64,7 +78,11 @@ class WidgetLayoutManager(
         if (!subItem.id.startsWith("layout_load:")) {
             return false
         }
-        showDeleteConfirmation(subItem.id.removePrefix("layout_load:"))
+        val name = subItem.id.removePrefix("layout_load:")
+        if (isDeliveredWithoutSavedOverride(name)) {
+            return false
+        }
+        showDeleteConfirmation(name)
         notifyContentChanged()
         return true
     }
@@ -80,7 +98,7 @@ class WidgetLayoutManager(
             return
         }
         if (WidgetPersistence.isDefaultLayoutName(trimmedName)) {
-            showNameError("Default is protected")
+            showNameError("${WidgetPersistence.DEFAULT_LAYOUT_NAME} is protected")
             notifyContentChanged()
             return
         }
@@ -123,18 +141,12 @@ class WidgetLayoutManager(
         notifyContentChanged()
     }
 
-    private fun loadDefaultLayout() {
-        if (!canApplyLayout()) return
-        Log.d(TAG, "Loading built-in default widget layout")
-        applyDefaultLayout()
-        activeLayoutName = WidgetPersistence.DEFAULT_LAYOUT_NAME
-    }
-
     private fun loadLayoutByName(name: String) {
         if (!canApplyLayout()) return
-        val state = persistenceManager.loadLayout(name) ?: return
-        Log.d(TAG, "Loading widget layout '$name'")
+        val state = loadLayoutByNameOrDelivered(name) ?: return
+        val loadedName = canonicalLoadName(name)
+        Log.d(TAG, "Loading widget layout '$loadedName'")
         applyState(state)
-        activeLayoutName = name.trim()
+        activeLayoutName = loadedName
     }
 }
