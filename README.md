@@ -5,24 +5,27 @@ A lightweight, fully customizable HUD / dashboard for RayNeo X3 Pro.
 
 The most important thing we expect from AR glasses is **not to obstruct**. What we want displayed on the screen, most of the time, is nothing. Everyday is built around that idea: you can let it run all day long while wearing the glasses, and it will mostly stay out of your view, except when you need it.
 
-Everyday is structured around draggable, resizable, minimizable widgets. You choose what appears in your FOV. A phone companion app handles interaction with the phone, but the glasses app can work standalone too.
+Everyday is structured around draggable, resizable, minimizable widgets. You choose what appears in your FOV. A phone companion app handles interaction with the phone, but the glasses app can work standalone too. The phone companion app can also receive shared links from Android and search queries and send them directly to the glasses browser.
+
+Everyday also includes a configurable hover shortcut control, "the lemon", for quickly switching between app features such as layouts, subtitling, mirroring, and other shortcuts.
 
 ## Widgets
 
 1. **Time / Date / Battery**: time, date, and phone / glasses battery. Double-tap to configure what's shown.
 2. **Location / Weather**: current city and weather with an icon. Double-tap to configure.
 3. **Screen mirror**: mirrors your phone screen over wifi.
-4. **Web browser**: supports tabs, full screen video, and Google services. Hover the bottom right corner to access a YouTube shortcut.
+4. **Web browser**: supports tabs, full-screen video, Google services, cookies / multi-window authentication flows, and direct link or search launch from the phone companion app.
 5. **Text editor**: text can be formatted and arranged in columns. Paste directly from your phone clipboard.
 6. **Image display**: open an image from phone or glasses storage.
 7. **News**: RSS feed for your country. Titles auto-update and can be expanded.
-8. **Finance**: follow a stock market in real time. Defaults to your country's market.
+8. **Finance**: follow stocks, currencies, cryptocurrencies, and multiple charts, including candle charts. Double-tap to open full screen and configure / order charts. Finance data are experimental and indicative only. Do not rely on them for financial decisions. The app developer does not provide financial advice. 
 9. **Speedometer**: shows your current speed. Has an adjustable threshold below which it disappears.
 10. **Google Calendar**: see what's next on your agenda. Tap to browse upcoming events, double-tap to go back. Requires Google sign-in (see below).
 11. **Subtitles**: Subtitle the audio content from your phone. Useful for hearing disabiilities or when ambient noise is high.
 
 ## Other features
 
+- *The lemon*: a configurable hover shortcut control. Move the cursor to bottom left corner, tap, slide to a slice, and release to open or cancel the selected shortcut. Slices can be configured in settings, including custom layouts.
 - *Heads-up gesture*: the display wakes up briefly when you look up. The angle, trigger time, and switch-off time are all adjustable in settings.
 - *Dimmer*: makes the glasses comfortable to use at night.
 - *Adaptive brightness*: optionally adapts display brightness to ambient light rather than keeping it fixed.
@@ -34,9 +37,11 @@ Everyday is structured around draggable, resizable, minimizable widgets. You cho
 
 The phone companion app is not strictly necessary, but most features that rely on phone data require it.
 
-Via bluetooth, the phone acts as a trackpad and a keyboard. All text typed on the phone is sent to widget in focus if it can accept text. The phone clipboard is also synced, so you can paste, say, a grocery list into the text editor rather than typing it letter by letter.
+Via bluetooth, the phone acts as a trackpad and a keyboard. All text typed on the phone is sent to widget in focus if it can accept text. The phone clipboard is also synced, so you can paste, say, a grocery list into the text editor rather than typing it letter by letter. The phone companion app also appears in the Android Share Sheet, so links can be shared from apps such as YouTube directly to the glasses browser. You can also paste a link or enter a search string in the phone companion app to open it on the glasses browser.
 
 The phone app also handles screen mirroring over wifi, location data for the weather widget, and the Google authentication flow.
+
+Finally, the companion app includes a refresh control to force-refresh data and collect shareable debug information when something goes wrong with data from external APIs or WebSockets.
 
 ## Installation
 
@@ -51,11 +56,11 @@ Then:
 1. Plug glasses to computer
 2. Open a terminal
 3. Navigate to where the APK is
-4. Run `adb install everyday0.6_glasses.apk`
+4. Run `adb install everyday0.7_glasses.apk`
 
 **On phone**
 
-Install `everyday0.6_phone.apk` via sideloading on your Android phone.
+Install `everyday0.7_phone.apk` via sideloading on your Android phone.
 
 See the [InformalTech tutorial](https://www.youtube.com/watch?v=l3wu7x14LKY) for a full walkthrough.
 
