@@ -1575,17 +1575,10 @@ class WidgetContainer @JvmOverloads constructor(
 
         // Transform to content space for widget hit testing
         val (cx, cy) = toContentSpace(cursorX, cursorY)
-        
-        fullscreenTextWidget?.let { if (it.containsPoint(cx, cy)) { it.onScroll(dy); notifyContentChanged(); return } }
-        fullscreenBrowserWidget?.let {
-            val hit = it.hitTest(cx, cy)
-            if (hit == BrowserWidget.HitArea.CONTENT || hit == BrowserWidget.HitArea.NAV_URL) {
-                it.onScroll(dy)
-                notifyContentChanged()
-                return
-            }
-        }
-        fullscreenFileBrowserWidget?.let { if (it.containsPoint(cx, cy)) { it.onScroll(dy); notifyContentChanged(); return } }
+
+        if (scrollFullscreenWidgetAt(cx, cy, dy)) return
+        if (hasFullscreenWidget()) return
+
         calendarWidget?.let { if (it.containsPoint(cx, cy) && !it.isMinimized) { it.onScroll(dy); notifyContentChanged(); return } }
         financeWidget?.let { if (it.containsPoint(cx, cy) && !it.isMinimized) { it.onScroll(dy); notifyContentChanged(); return } }
         newsWidget?.let { if (it.containsPoint(cx, cy) && !it.isMinimized) { it.onScroll(dy); notifyContentChanged(); return } }
@@ -1600,6 +1593,58 @@ class WidgetContainer @JvmOverloads constructor(
         for (widget in imageWidgets.reversed()) { if (widget.containsPoint(cx, cy) && !widget.isMinimized) { widget.onScroll(dy); notifyContentChanged(); return } }
         for (widget in fileBrowserWidgets.reversed()) { if (widget.containsPoint(cx, cy) && !widget.isMinimized) { widget.onScroll(dy); notifyContentChanged(); return } }
         for (widget in widgets.reversed()) { if (widget.containsPoint(cx, cy) && !widget.isMinimized) { widget.onScroll(dy); notifyContentChanged(); return } }
+    }
+
+    private fun scrollFullscreenWidgetAt(cx: Float, cy: Float, dy: Float): Boolean {
+        fullscreenTextWidget?.let {
+            if (it.containsPoint(cx, cy)) {
+                it.onScroll(dy)
+                notifyContentChanged()
+                return true
+            }
+        }
+        fullscreenBrowserWidget?.let {
+            val hit = it.hitTest(cx, cy)
+            if (hit == BrowserWidget.HitArea.CONTENT || hit == BrowserWidget.HitArea.NAV_URL) {
+                it.onScroll(dy)
+                notifyContentChanged()
+                return true
+            }
+        }
+        fullscreenFileBrowserWidget?.let {
+            if (it.containsPoint(cx, cy)) {
+                it.onScroll(dy)
+                notifyContentChanged()
+                return true
+            }
+        }
+        if (isCalendarWidgetFullscreen) {
+            calendarWidget?.let {
+                if (it.containsPoint(cx, cy)) {
+                    it.onScroll(dy)
+                    notifyContentChanged()
+                    return true
+                }
+            }
+        }
+        if (isFinanceWidgetFullscreen) {
+            financeWidget?.let {
+                if (it.containsPoint(cx, cy)) {
+                    if (it.onScrollAt(cx, cy, dy)) notifyContentChanged()
+                    return true
+                }
+            }
+        }
+        if (isNewsWidgetFullscreen) {
+            newsWidget?.let {
+                if (it.containsPoint(cx, cy)) {
+                    it.onScroll(dy)
+                    notifyContentChanged()
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     // ==================== Tap Handling ====================

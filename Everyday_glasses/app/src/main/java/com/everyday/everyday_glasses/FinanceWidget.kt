@@ -340,10 +340,34 @@ class FinanceWidget(
 
     override fun onScroll(dy: Float) {
         if (dropdownVisible) {
-            val maxScroll = (FinanceDataProvider.allInstruments.size * ROW_HEIGHT - dropdownPanelBounds().height()).coerceAtLeast(0f)
-            dropdownScrollOffset = (dropdownScrollOffset + dy).coerceIn(0f, maxScroll)
+            scrollDropdown(dy)
             return
         }
+        scrollDashboard(dy)
+    }
+
+    fun onScrollAt(px: Float, py: Float, dy: Float): Boolean {
+        if (!containsPoint(px, py)) return false
+        if (dropdownVisible) {
+            val anchorBounds = tileBounds.firstOrNull { it.first == dropdownTileIndex }?.second
+            if (dropdownPanelBounds().contains(px, py) || anchorBounds?.contains(px, py) == true) {
+                scrollDropdown(dy)
+                return true
+            }
+            return false
+        }
+        val tileHit = tileBounds.firstOrNull { it.second.contains(px, py) } ?: return false
+        selectedTileIndex = tileHit.first
+        scrollDashboard(dy)
+        return true
+    }
+
+    private fun scrollDropdown(dy: Float) {
+        val maxScroll = (FinanceDataProvider.allInstruments.size * ROW_HEIGHT - dropdownPanelBounds().height()).coerceAtLeast(0f)
+        dropdownScrollOffset = (dropdownScrollOffset + dy).coerceIn(0f, maxScroll)
+    }
+
+    private fun scrollDashboard(dy: Float): Boolean {
         if (tileBounds.size < tiles.size) {
             val next = if (dy > 0) navigationIndex + 1 else navigationIndex - 1
             val updated = next.coerceIn(0, tiles.lastIndex)
@@ -352,7 +376,9 @@ class FinanceWidget(
                 updateInternalBounds()
                 requestData(force = false, reason = "finance_scroll_visible")
             }
+            return true
         }
+        return false
     }
 
     override fun updateHover(px: Float, py: Float) {
@@ -433,7 +459,7 @@ class FinanceWidget(
             } else {
                 drawLineChart(canvas, chartRect(bounds), snapshot.points.ifEmpty { snapshot.candles.map { it.close } }, snapshot.percentChange)
             }
-            if (hoveredTileIndex == index || tileDragActive) {
+            if (hoveredTileIndex == index || (tileDragActive && tileDragIndex == index)) {
                 drawTileHoverControls(canvas, index, config)
             }
             if (tileDragActive && slotForIndex(index) == tileDragOverSlot) {
@@ -614,8 +640,12 @@ class FinanceWidget(
     private fun handleTileControlTap(px: Float, py: Float): Boolean {
         val hit = tileControlBounds.firstOrNull {
             it.tileIndex == hoveredTileIndex && it.bounds.contains(px, py)
+        } ?: tileControlBounds.firstOrNull { control ->
+            control.bounds.contains(px, py) &&
+                tileBounds.any { it.first == control.tileIndex && it.second.contains(px, py) }
         } ?: return false
         val tile = tiles.getOrNull(hit.tileIndex) ?: return true
+        hoveredTileIndex = hit.tileIndex
         selectedTileIndex = hit.tileIndex
         when (hit.action) {
             TileControlAction.INSTRUMENT -> {
@@ -676,14 +706,18 @@ class FinanceWidget(
         val cols = tilingSpan
         val rows = tilingSpan
         val gap = TILE_GAP
-        val tileW = (dashboardContentBounds.width() - gap * (cols - 1)) / cols
-        val tileH = (dashboardContentBounds.height() - gap * (rows - 1)) / rows
+        val tileW = floor(((dashboardContentBounds.width() - gap * (cols - 1)) / cols).coerceAtLeast(1f))
+        val tileH = floor(((dashboardContentBounds.height() - gap * (rows - 1)) / rows).coerceAtLeast(1f))
+        val gridW = tileW * cols + gap * (cols - 1)
+        val gridH = tileH * rows + gap * (rows - 1)
+        val gridLeft = dashboardContentBounds.left + floor((dashboardContentBounds.width() - gridW).coerceAtLeast(0f) / 2f)
+        val gridTop = dashboardContentBounds.top + floor((dashboardContentBounds.height() - gridH).coerceAtLeast(0f) / 2f)
         val slotCount = cols * rows
         repeat(slotCount) { slot ->
             val row = slot / cols
             val col = slot % cols
-            val left = dashboardContentBounds.left + col * (tileW + gap)
-            val top = dashboardContentBounds.top + row * (tileH + gap)
+            val left = gridLeft + col * (tileW + gap)
+            val top = gridTop + row * (tileH + gap)
             slotBounds.add(slot to RectF(left, top, left + tileW, top + tileH))
         }
         visibleIndices.forEachIndexed { position, tileIndex ->
@@ -765,11 +799,22 @@ class FinanceWidget(
         navBounds.clear()
         if (!showNav) return
         val ordered = orderedTileIndices()
-        val buttonW = 18f
+        if (ordered.isEmpty()) return
+        val horizontalPadding = BORDER_WIDTH + 8f
+        val availableW = (widgetWidth - horizontalPadding * 2f).coerceAtLeast(0f)
+        if (availableW < ordered.size) return
+        val preferredButtonW = 18f
         val buttonH = 14f
-        val gap = 4f
+        val gap = if (ordered.size > 1) {
+            val maxGap = floor((availableW - ordered.size) / (ordered.size - 1)).coerceAtLeast(0f)
+            min(4f, maxGap)
+        } else {
+            0f
+        }
+        val buttonW = floor((availableW - (ordered.size - 1) * gap) / ordered.size)
+            .coerceIn(1f, preferredButtonW)
         val totalW = ordered.size * buttonW + (ordered.size - 1).coerceAtLeast(0) * gap
-        var left = (x + widgetWidth / 2f - totalW / 2f).coerceIn(x + BORDER_WIDTH + 8f, x + widgetWidth - totalW - BORDER_WIDTH - 8f)
+        var left = x + horizontalPadding + floor((availableW - totalW).coerceAtLeast(0f) / 2f)
         val top = y + BORDER_WIDTH + 8f
         ordered.forEachIndexed { position, _ ->
             navBounds.add(position to RectF(left, top, left + buttonW, top + buttonH))
