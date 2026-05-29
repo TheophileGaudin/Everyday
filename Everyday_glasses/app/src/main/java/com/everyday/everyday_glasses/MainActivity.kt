@@ -2099,7 +2099,7 @@ class MainActivity : AppCompatActivity() {
             }
             val fallbackProviders = locationCandidates
                 .ifEmpty { listOf("fused", LocationManager.PASSIVE_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER) }
-            startSpeedFallbackPolling(locationManager, fallbackProviders as List<String>)
+            startSpeedFallbackPolling(locationManager, fallbackProviders.toList())
 
             var bestLocation: Location? = null
             for (provider in locationCandidates) {
