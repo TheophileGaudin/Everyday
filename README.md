@@ -11,27 +11,34 @@ Everyday also includes a configurable hover shortcut control, "the lemon", for q
 
 ## Widgets
 
-1. **Time / Date / Battery**: time, date, and phone / glasses battery. Double-tap to configure what's shown.
-2. **Location / Weather**: current city and weather with an icon. Double-tap to configure.
-3. **Screen mirror**: mirrors your phone screen over wifi.
-4. **Web browser**: supports tabs, full-screen video, Google services, cookies / multi-window authentication flows, and direct link or search launch from the phone companion app.
-5. **Text editor**: text can be formatted and arranged in columns. Paste directly from your phone clipboard.
-6. **Image display**: open an image from phone or glasses storage.
-7. **News**: RSS feed for your country. Titles auto-update and can be expanded.
-8. **Finance**: follow stocks, currencies, cryptocurrencies, and multiple charts, including candle charts. Double-tap to open full screen and configure / order charts. Finance data are experimental and indicative only. Do not rely on them for financial decisions. The app developer does not provide financial advice.
-9. **Speedometer**: shows your current speed. Has an adjustable threshold below which it disappears.
-10. **Google Calendar**: see what's next on your agenda. Tap to browse upcoming events, double-tap to go back. Requires Google sign-in (see below).
-11. **Subtitles**: Subtitle the audio content from your phone. Useful for hearing disabiilities or when ambient noise is high.
+| Widget                | Description                                                                                                                                                                                                                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Time / Date / Battery | Time, date, and phone / glasses battery. Double-tap to configure what's shown.                                                                                                                                                                                                                               |
+| Location / Weather    | Current city and weather with an icon. Double-tap to configure.                                                                                                                                                                                                                                              |
+| Screen mirror         | Mirrors your phone screen over Wi-Fi.                                                                                                                                                                                                                                                                        |
+| Web browser           | Supports tabs, full-screen video, Google services, cookies / multi-window authentication flows, and direct link or search launch from the phone companion app.                                                                                                                                               |
+| Text editor           | Text can be formatted and arranged in columns. Paste directly from your phone clipboard.                                                                                                                                                                                                                     |
+| Image display         | Open an image from phone or glasses storage.                                                                                                                                                                                                                                                                 |
+| News                  | RSS feed for your country. Titles auto-update and can be expanded.                                                                                                                                                                                                                                           |
+| Finance               | Follow stocks, currencies, cryptocurrencies, and multiple charts, including candle charts. Double-tap to open full screen and configure / order charts. Finance data are experimental and indicative only. Do not rely on them for financial decisions. The app developer does not provide financial advice. |
+| Speedometer           | Shows your current speed. Has an adjustable threshold below which it disappears.                                                                                                                                                                                                                             |
+| Google Calendar       | See what's next on your agenda. Tap to browse upcoming events, double-tap to go back. Requires Google sign-in.                                                                                                                                                                                               |
+| Subtitles             | Subtitle the audio content from your phone. Useful for hearing disabilities or when ambient noise is high.                                                                                                                                                                                                   |
+| Notifications         | Access notifications stored from your phone. The widget displays the latest ones, and tapping on it lets you browse them.                                                                                                                                                                                    |
+
 
 ## Other features
 
-- *The lemon*: a configurable hover shortcut control. Move the cursor to bottom left corner, tap, slide to a slice, and release to open or cancel the selected shortcut. Slices can be configured in settings, including custom layouts.
-- *Heads-up gesture*: the display wakes up briefly when you look up. The angle, trigger time, and switch-off time are all adjustable in settings.
-- *Dimmer*: makes the glasses comfortable to use at night.
-- *Adaptive brightness*: optionally adapts display brightness to ambient light rather than keeping it fixed.
-- *3dof mode*: pin the dashboard relative to head rotation.
-- *Google OAuth*: authenticate with your Google account via your phone. Opt-in via settings. Required for the Calendar widget.
-- *Alignment guides*: helps to align widgets relative to each other and to the screen.
+| Feature             | Description                                                                                                                                                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The lemon           | A configurable hover shortcut control. Move the cursor to bottom left corner, tap, slide to a slice, and release to open or cancel the selected shortcut. Slices can be configured in settings, including custom layouts. |
+| Heads-up gesture    | The display wakes up briefly when you look up. The angle, trigger time, and switch-off time are all adjustable in settings.                                                                                               |
+| Dimmer              | Makes the glasses comfortable to use at night.                                                                                                                                                                            |
+| Adaptive brightness | Optionally adapts display brightness to ambient light rather than keeping it fixed.                                                                                                                                       |
+| 3dof mode           | Pins the dashboard relative to head rotation.                                                                                                                                                                             |
+| Google OAuth        | Authenticate with your Google account via your phone. Opt-in via settings. Required for the Calendar widget.                                                                                                              |
+| Alignment guides    | Helps to align widgets relative to each other and to the screen.                                                                                                                                                          |
+
 
 ## Phone companion app
 
