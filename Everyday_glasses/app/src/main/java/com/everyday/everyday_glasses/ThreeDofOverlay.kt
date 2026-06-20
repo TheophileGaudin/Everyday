@@ -38,10 +38,6 @@ class ThreeDofOverlay {
         // Mode indicator dimensions
         private const val INDICATOR_SIZE = 24f
         private const val INDICATOR_MARGIN = 12f
-
-        // Direction arrow dimensions
-        private const val ARROW_SIZE = 16f
-        private const val ARROW_OFFSET = 40f
     }
 
     // ==================== State ====================
@@ -75,16 +71,6 @@ class ThreeDofOverlay {
         strokeWidth = STROKE_WIDTH + 1f
         color = Color.parseColor("#AAAAFF")  // Brighter blue when active
         pathEffect = DashPathEffect(floatArrayOf(DASH_LENGTH, GAP_LENGTH), 0f)
-    }
-
-    private val indicatorBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        color = Color.parseColor("#44000044")  // Semi-transparent dark
-    }
-
-    private val indicatorActivePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        color = Color.parseColor("#446688FF")  // Blue when active
     }
 
     private val indicatorIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -209,87 +195,6 @@ class ThreeDofOverlay {
         // Bottom-right corner
         canvas.drawLine(rect.right - markerLength, rect.bottom, rect.right, rect.bottom, markerPaint)
         canvas.drawLine(rect.right, rect.bottom - markerLength, rect.right, rect.bottom, markerPaint)
-    }
-
-    /**
-     * Draw direction indicators showing which way the user is looking relative to center.
-     */
-    private fun drawDirectionIndicators(canvas: Canvas, alpha: Int) {
-        val centerX = screenWidth / 2f
-        val centerY = screenHeight / 2f
-
-        arrowPaint.alpha = alpha
-        arrowStrokePaint.alpha = alpha
-
-        // Show arrow pointing back to content if significantly offset
-        val offsetMagnitude = kotlin.math.sqrt(contentOffsetX * contentOffsetX + contentOffsetY * contentOffsetY)
-        if (offsetMagnitude < 20f) return
-
-        // Draw an arrow pointing toward the content center
-        val angle = kotlin.math.atan2(contentOffsetY.toDouble(), contentOffsetX.toDouble()).toFloat()
-
-        // Position arrow at the edge of screen in the direction of the content
-        val arrowX = centerX + kotlin.math.cos(angle.toDouble()).toFloat() * ARROW_OFFSET
-        val arrowY = centerY + kotlin.math.sin(angle.toDouble()).toFloat() * ARROW_OFFSET
-
-        drawArrow(canvas, arrowX, arrowY, angle)
-    }
-
-    /**
-     * Draw a directional arrow.
-     */
-    private fun drawArrow(canvas: Canvas, x: Float, y: Float, angle: Float) {
-        canvas.save()
-        canvas.translate(x, y)
-        canvas.rotate(Math.toDegrees(angle.toDouble()).toFloat())
-
-        val path = Path().apply {
-            // Arrow pointing right (will be rotated)
-            moveTo(ARROW_SIZE, 0f)
-            lineTo(-ARROW_SIZE / 2, -ARROW_SIZE / 2)
-            lineTo(-ARROW_SIZE / 2, ARROW_SIZE / 2)
-            close()
-        }
-
-        canvas.drawPath(path, arrowPaint)
-        canvas.restore()
-    }
-
-    /**
-     * Draw the 3DOF mode indicator in the corner.
-     */
-    private fun drawModeIndicator(canvas: Canvas, alpha: Int) {
-        val bgPaint = if (is3DofEnabled) indicatorActivePaint else indicatorBackgroundPaint
-        bgPaint.alpha = (alpha * 0.8f).toInt()
-        indicatorIconPaint.alpha = alpha
-
-        canvas.drawRoundRect(indicatorRect, 6f, 6f, bgPaint)
-
-        // Draw 3DOF icon (three rotation axes)
-        val cx = indicatorRect.centerX()
-        val cy = indicatorRect.centerY()
-        val iconRadius = INDICATOR_SIZE * 0.3f
-
-        // Draw three circular arrows representing rotation axes
-        val axisPath = Path()
-
-        // X-axis rotation (pitch) - horizontal oval
-        canvas.drawArc(
-            cx - iconRadius, cy - iconRadius * 0.5f,
-            cx + iconRadius, cy + iconRadius * 0.5f,
-            30f, 300f, false, indicatorIconPaint
-        )
-
-        // Y-axis rotation (yaw) - vertical line with curves
-        canvas.drawLine(cx, cy - iconRadius * 0.8f, cx, cy + iconRadius * 0.8f, indicatorIconPaint)
-
-        // Small arrow heads to indicate rotation
-        val arrowHeadSize = 3f
-        canvas.drawLine(
-            cx + iconRadius - arrowHeadSize, cy - iconRadius * 0.3f,
-            cx + iconRadius, cy - iconRadius * 0.5f + 2f,
-            indicatorIconPaint
-        )
     }
 
     // ==================== Layout ====================

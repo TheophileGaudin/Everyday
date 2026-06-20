@@ -98,7 +98,6 @@ class GlassesKeyboardView(
     // Colors
     private val keyColor = Color.parseColor("#404050")
     private val keyPressedColor = Color.parseColor("#6060AA")
-    private val keyHighlightColor = Color.parseColor("#5555AA")
     private val specialKeyColor = Color.parseColor("#303040")
     private val spaceKeyColor = Color.parseColor("#505060")
     private val shiftActiveColor = Color.parseColor("#5070AA")
@@ -279,16 +278,6 @@ class GlassesKeyboardView(
      */
     fun onTap(x: Float, y: Float): Boolean {
         val key = findKeyAt(x, y) ?: return false
-        handleKeyPress(key)
-        return true
-    }
-
-    /**
-     * Simulate pressing the currently highlighted key.
-     * Used for temple tap or trackpad tap when cursor is over a key.
-     */
-    fun pressHighlightedKey(): Boolean {
-        val key = highlightedKey ?: return false
         handleKeyPress(key)
         return true
     }

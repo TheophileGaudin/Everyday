@@ -35,6 +35,7 @@ class WidgetRegistry {
     var screenMirrorWidget: ScreenMirrorWidget? = null
     var financeWidget: FinanceWidget? = null
     var newsWidget: NewsWidget? = null
+    var notificationsWidget: NotificationsWidget? = null
     var speedometerWidget: SpeedometerWidget? = null
     var subtitleWidget: SubtitleWidget? = null
     
@@ -93,32 +94,6 @@ class WidgetRegistry {
         Log.d(TAG, "Updated WebView z-order for browser at index $widgetIndex, inserted at $insertAt")
     }
 
-    /**
-     * Reorder all browser WebViews to match their list order.
-     * Call this after list modifications or when bringing a widget to front.
-     */
-    fun reorderAllBrowserWebViews(rootView: ViewGroup, containerView: View) {
-        val containerIndex = rootView.indexOfChild(containerView)
-        if (containerIndex < 0) return
-        
-        // Remove all browser WebViews first
-        for (browser in browserWidgets) {
-            browser.getWebView()?.let { webView ->
-                if (webView.parent == rootView) {
-                    rootView.removeView(webView)
-                }
-            }
-        }
-        
-        // Re-add them in list order (first in list = lowest z-index)
-        for (browser in browserWidgets) {
-            browser.getWebView()?.let { webView ->
-                val insertAt = containerIndex.coerceIn(0, rootView.childCount)
-                rootView.addView(webView, insertAt)
-            }
-        }
-    }
-
     // ==================== Widget Iteration Utilities ====================
 
     /**
@@ -136,6 +111,7 @@ class WidgetRegistry {
         calendarWidget?.let { result.add(it) }
         financeWidget?.let { result.add(it) }
         newsWidget?.let { result.add(it) }
+        notificationsWidget?.let { result.add(it) }
         speedometerWidget?.let { result.add(it) }
         subtitleWidget?.let { result.add(it) }
         screenMirrorWidget?.let { result.add(it) }
@@ -171,34 +147,6 @@ class WidgetRegistry {
      * Used by WakeSleepManager to determine if there's visible content in SLEEP mode.
      */
     fun hasPinnedWidgets(): Boolean = allWidgets().any { it.isPinned }
-
-    /**
-     * Find the text widget at the given coordinates.
-     * Returns null if no text widget contains the point.
-     * Searches in reverse order (topmost first).
-     */
-    fun getTextWidgetAt(x: Float, y: Float): TextBoxWidget? {
-        for (widget in textWidgets.reversed()) {
-            if (widget.containsPoint(x, y)) {
-                return widget
-            }
-        }
-        return null
-    }
-
-    /**
-     * Find the browser widget at the given coordinates.
-     * Returns null if no browser widget contains the point.
-     * Searches in reverse order (topmost first).
-     */
-    fun getBrowserWidgetAt(x: Float, y: Float): BrowserWidget? {
-        for (widget in browserWidgets.reversed()) {
-            if (widget.containsPoint(x, y)) {
-                return widget
-            }
-        }
-        return null
-    }
 
     /**
      * Find any widget at the given coordinates.
@@ -287,13 +235,6 @@ class WidgetRegistry {
         imageWidgets.clear()
         fileBrowserWidgets.clear()
         nextZOrder = 0
-    }
-
-    /**
-     * Get the total count of all widgets (excluding special widgets).
-     */
-    fun getTotalWidgetCount(): Int {
-        return textWidgets.size + browserWidgets.size + imageWidgets.size + fileBrowserWidgets.size
     }
 
     /**

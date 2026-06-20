@@ -1,132 +1,86 @@
 package com.everyday.shared.sync
 
 import android.content.Context
+import org.json.JSONObject
 
 class SyncSnapshotStore(context: Context) : SyncSnapshotCache {
     companion object {
         private const val PREFS_NAME = "sync_snapshots"
-        private const val KEY_WEATHER = "weather"
-        private const val KEY_CALENDAR = "calendar"
-        private const val KEY_NEWS = "news"
-        private const val KEY_FINANCE = "finance"
     }
 
     private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val cacheLock = Any()
-    private var weatherLoaded = false
-    private var cachedWeather: WeatherSnapshot? = null
-    private var calendarLoaded = false
-    private var cachedCalendar: CalendarSnapshot? = null
-    private var newsLoaded = false
-    private var cachedNews: NewsSnapshot? = null
-    private var financeLoaded = false
-    private var cachedFinance: FinanceSnapshot? = null
+
+    // In-memory cache keyed by channel. A channel present in [loaded] has been
+    // read from prefs (its value may legitimately be null), so we never re-read.
+    private val cache = mutableMapOf<SyncChannel, Any?>()
+    private val loaded = mutableSetOf<SyncChannel>()
 
     override fun save(snapshot: SyncSnapshot) {
-        snapshot.weather?.let(::saveWeather)
-        snapshot.calendar?.let(::saveCalendar)
-        snapshot.news?.let(::saveNews)
-        snapshot.finance?.let(::saveFinance)
+        for (codec in SyncProtocol.CHANNEL_CODECS) {
+            codec.extractAny(snapshot)?.let { storeValue(codec, it) }
+        }
     }
 
-    fun saveWeather(snapshot: WeatherSnapshot) {
+    override fun loadAll(): SyncSnapshot = load(SyncChannel.ALL)
+
+    override fun load(channels: Set<SyncChannel>): SyncSnapshot {
+        var snapshot = SyncSnapshot()
+        for (codec in SyncProtocol.CHANNEL_CODECS) {
+            if (codec.channel in channels) {
+                snapshot = codec.placeAny(snapshot, loadValue(codec))
+            }
+        }
+        return snapshot
+    }
+
+    // ==================== Typed accessors ====================
+
+    fun saveWeather(snapshot: WeatherSnapshot) = storeValue(SyncProtocol.WEATHER_CODEC, snapshot)
+    fun loadWeather(): WeatherSnapshot? = loadValue(SyncProtocol.WEATHER_CODEC) as WeatherSnapshot?
+
+    fun saveCalendar(snapshot: CalendarSnapshot) = storeValue(SyncProtocol.CALENDAR_CODEC, snapshot)
+    fun loadCalendar(): CalendarSnapshot? = loadValue(SyncProtocol.CALENDAR_CODEC) as CalendarSnapshot?
+    fun clearCalendar() = clearValue(SyncProtocol.CALENDAR_CODEC)
+
+    fun saveNews(snapshot: NewsSnapshot) = storeValue(SyncProtocol.NEWS_CODEC, snapshot)
+    fun loadNews(): NewsSnapshot? = loadValue(SyncProtocol.NEWS_CODEC) as NewsSnapshot?
+
+    fun saveFinance(snapshot: FinanceSnapshot) = storeValue(SyncProtocol.FINANCE_CODEC, snapshot)
+    fun loadFinance(): FinanceSnapshot? = loadValue(SyncProtocol.FINANCE_CODEC) as FinanceSnapshot?
+
+    fun saveNotifications(snapshot: PhoneNotificationsSnapshot) =
+        storeValue(SyncProtocol.NOTIFICATIONS_CODEC, snapshot)
+    fun loadNotifications(): PhoneNotificationsSnapshot? =
+        loadValue(SyncProtocol.NOTIFICATIONS_CODEC) as PhoneNotificationsSnapshot?
+
+    // ==================== Generic channel storage ====================
+
+    private fun storeValue(codec: SyncChannelCodec<*>, value: Any) {
         synchronized(cacheLock) {
-            cachedWeather = snapshot
-            weatherLoaded = true
+            cache[codec.channel] = value
+            loaded += codec.channel
         }
-        prefs.edit().putString(KEY_WEATHER, SyncProtocol.weatherToJson(snapshot).toString()).apply()
+        if (codec.shouldPersistAny(value)) {
+            prefs.edit().putString(codec.channel.wireName, codec.toJsonAny(value).toString()).apply()
+        }
     }
 
-    fun loadWeather(): WeatherSnapshot? = synchronized(cacheLock) {
-        if (!weatherLoaded) {
-            cachedWeather = prefs.getString(KEY_WEATHER, null)?.let(SyncProtocol::weatherFromJson)
-            weatherLoaded = true
+    private fun loadValue(codec: SyncChannelCodec<*>): Any? = synchronized(cacheLock) {
+        if (codec.channel !in loaded) {
+            cache[codec.channel] = prefs.getString(codec.channel.wireName, null)?.let { raw ->
+                runCatching { codec.fromJson(JSONObject(raw)) }.getOrNull()
+            }
+            loaded += codec.channel
         }
-        cachedWeather
+        cache[codec.channel]
     }
 
-    fun clearWeather() {
+    private fun clearValue(codec: SyncChannelCodec<*>) {
         synchronized(cacheLock) {
-            cachedWeather = null
-            weatherLoaded = true
+            cache[codec.channel] = null
+            loaded += codec.channel
         }
-        prefs.edit().remove(KEY_WEATHER).apply()
+        prefs.edit().remove(codec.channel.wireName).apply()
     }
-
-    fun saveCalendar(snapshot: CalendarSnapshot) {
-        synchronized(cacheLock) {
-            cachedCalendar = snapshot
-            calendarLoaded = true
-        }
-        prefs.edit().putString(KEY_CALENDAR, SyncProtocol.calendarToJson(snapshot).toString()).apply()
-    }
-
-    fun loadCalendar(): CalendarSnapshot? = synchronized(cacheLock) {
-        if (!calendarLoaded) {
-            cachedCalendar = prefs.getString(KEY_CALENDAR, null)?.let(SyncProtocol::calendarFromJson)
-            calendarLoaded = true
-        }
-        cachedCalendar
-    }
-
-    fun clearCalendar() {
-        synchronized(cacheLock) {
-            cachedCalendar = null
-            calendarLoaded = true
-        }
-        prefs.edit().remove(KEY_CALENDAR).apply()
-    }
-
-    fun saveNews(snapshot: NewsSnapshot) {
-        synchronized(cacheLock) {
-            cachedNews = snapshot
-            newsLoaded = true
-        }
-        prefs.edit().putString(KEY_NEWS, SyncProtocol.newsToJson(snapshot).toString()).apply()
-    }
-
-    fun loadNews(): NewsSnapshot? = synchronized(cacheLock) {
-        if (!newsLoaded) {
-            cachedNews = prefs.getString(KEY_NEWS, null)?.let(SyncProtocol::newsFromJson)
-            newsLoaded = true
-        }
-        cachedNews
-    }
-
-    fun saveFinance(snapshot: FinanceSnapshot) {
-        synchronized(cacheLock) {
-            cachedFinance = snapshot
-            financeLoaded = true
-        }
-        if (!snapshot.isLiveFinanceUpdate()) {
-            prefs.edit().putString(KEY_FINANCE, SyncProtocol.financeToJson(snapshot).toString()).apply()
-        }
-    }
-
-    fun loadFinance(): FinanceSnapshot? = synchronized(cacheLock) {
-        if (!financeLoaded) {
-            cachedFinance = prefs.getString(KEY_FINANCE, null)?.let(SyncProtocol::financeFromJson)
-            financeLoaded = true
-        }
-        cachedFinance
-    }
-
-    override fun loadAll(): SyncSnapshot =
-        SyncSnapshot(
-            weather = loadWeather(),
-            calendar = loadCalendar(),
-            news = loadNews(),
-            finance = loadFinance()
-        )
-
-    override fun load(channels: Set<SyncChannel>): SyncSnapshot =
-        SyncSnapshot(
-            weather = if (SyncChannel.WEATHER in channels) loadWeather() else null,
-            calendar = if (SyncChannel.CALENDAR in channels) loadCalendar() else null,
-            news = if (SyncChannel.NEWS in channels) loadNews() else null,
-            finance = if (SyncChannel.FINANCE in channels) loadFinance() else null
-        )
-
-    private fun FinanceSnapshot.isLiveFinanceUpdate(): Boolean =
-        tiles.any { it.source == "BINANCE_WS" || it.streamStatus == "Live" }
 }

@@ -14,6 +14,7 @@ class WidgetLayoutManager(
     private val showNameError: (String) -> Unit,
     private val dismissNamePrompt: () -> Unit,
     private val showDeleteConfirmation: (String) -> Unit,
+    private val beforeApplyLayout: () -> Unit,
     private val notifyContentChanged: () -> Unit
 ) {
     companion object {
@@ -146,6 +147,7 @@ class WidgetLayoutManager(
         val state = loadLayoutByNameOrDelivered(name) ?: return
         val loadedName = canonicalLoadName(name)
         Log.d(TAG, "Loading widget layout '$loadedName'")
+        beforeApplyLayout()
         applyState(state)
         activeLayoutName = loadedName
     }

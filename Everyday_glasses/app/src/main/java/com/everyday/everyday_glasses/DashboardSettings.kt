@@ -150,21 +150,6 @@ class DashboardSettings(
         set(value) { onBrightnessChanged = value }
 
     /**
-     * Get head-up hold time in milliseconds.
-     */
-    fun getHeadUpTimeMs(): Long = headUpTimeValueToMs(headUpTimeValue)
-
-    /**
-     * Get wake duration in milliseconds.
-     */
-    fun getWakeDurationMs(): Long = wakeDurationValueToMs(wakeDurationValue)
-
-    /**
-     * Get angle threshold in degrees.
-     */
-    fun getAngleThresholdDegrees(): Float = angleThresholdValueToDegrees(angleThresholdValue)
-
-    /**
      * Set head-up hold time from milliseconds.
      */
     fun setHeadUpTimeMs(ms: Long) {
@@ -249,7 +234,6 @@ class DashboardSettings(
     private val wakeDurationTrackRect = RectF()
     private val angleThresholdTrackRect = RectF()
     private val toggleRect = RectF()
-    private val toggleKnobRect = RectF()
 
     // Google submenu elements
     private val googleStatusRect = RectF()
@@ -409,11 +393,6 @@ class DashboardSettings(
     }
 
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
-
-    private val disabledOverlayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#80000000")  // Semi-transparent black overlay
-        style = Paint.Style.FILL
-    }
 
     init {
         updateLayout()

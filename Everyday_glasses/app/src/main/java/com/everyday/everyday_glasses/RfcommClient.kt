@@ -25,6 +25,7 @@ import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot
 import com.everyday.shared.sync.FinanceAssetType
 import com.everyday.shared.sync.FinanceChartType
+import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.SpeedSnapshot
 import com.everyday.shared.sync.SubtitleControl
 import com.everyday.shared.sync.SubtitleProtocol
@@ -35,6 +36,7 @@ import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStream
 import java.util.*
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -75,6 +77,9 @@ class RfcommClient(private val context: Context) {
 
     private val isRunning = AtomicBoolean(false)
     private val isConnected = AtomicBoolean(false)
+    private val writerExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "RfcommWriter").apply { isDaemon = true }
+    }
 
     // @Volatile ensures the background thread sees changes from the UI thread immediately
     @Volatile
@@ -82,6 +87,7 @@ class RfcommClient(private val context: Context) {
     
     // Battery monitoring
     private var batteryUpdateRunnable: Runnable? = null
+    private val batteryWritePending = AtomicBoolean(false)
 
 
     private val handler = Handler(Looper.getMainLooper())
@@ -147,43 +153,21 @@ class RfcommClient(private val context: Context) {
      * When focused, phone shows keyboard; when unfocused, phone hides keyboard.
      */
     fun sendTextFieldFocus(focused: Boolean, fieldId: String? = null) {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-        
-        try {
-            val batteryLevel = getGlassesBatteryLevel()
-            val fieldIdPart = if (fieldId != null) ""","fieldId":"$fieldId"""" else ""
-            val message = """{"textFieldFocused":$focused$fieldIdPart,"battery":$batteryLevel}""" + "\n"
-            
-            Log.d(TAG, "Sending to phone: $message")
-            
-            synchronized(output) {
-                output.write(message.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to send text field focus", e)
-        }
+        val batteryLevel = getGlassesBatteryLevel()
+        val fieldIdPart = if (fieldId != null) ""","fieldId":"$fieldId"""" else ""
+        val message = """{"textFieldFocused":$focused$fieldIdPart,"battery":$batteryLevel}""" + "\n"
+
+        Log.d(TAG, "Sending to phone: $message")
+        enqueueWrite(message, "send text field focus")
     }
 
     /**
      * Send request to start/stop mirroring.
      */
     fun sendMirrorRequest(start: Boolean) {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-        
-        try {
-            val message = """{"action":"mirrorRequest","start":$start}""" + "\n"
-            Log.d(TAG, "Sending mirror request: $message")
-            
-            synchronized(output) {
-                output.write(message.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to send mirror request", e)
-        }
+        val message = """{"action":"mirrorRequest","start":$start}""" + "\n"
+        Log.d(TAG, "Sending mirror request: $message")
+        enqueueWrite(message, "send mirror request")
     }
     
     /**
@@ -191,20 +175,9 @@ class RfcommClient(private val context: Context) {
      * This is useful when opening paste menu to ensure we have latest clipboard.
      */
     fun requestClipboard() {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-
-        try {
-            val message = """{"action":"requestClipboard"}""" + "\n"
-            Log.d(TAG, "Requesting clipboard from phone")
-
-            synchronized(output) {
-                output.write(message.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to request clipboard", e)
-        }
+        val message = """{"action":"requestClipboard"}""" + "\n"
+        Log.d(TAG, "Requesting clipboard from phone")
+        enqueueWrite(message, "request clipboard")
     }
 
     fun requestSync(
@@ -212,6 +185,8 @@ class RfcommClient(private val context: Context) {
         force: Boolean,
         reason: String,
         countryCode: String? = null,
+        financeTiles: List<FinanceDashboardTileConfig> = emptyList(),
+        financeRefreshTileIds: List<String> = emptyList(),
         financeSymbol: String? = null,
         financeRange: String? = null,
         financeAssetType: FinanceAssetType? = null,
@@ -219,81 +194,41 @@ class RfcommClient(private val context: Context) {
         financeTileId: String? = null,
         financeLiveEnabled: Boolean? = null
     ) {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
+        val message = SyncProtocol.encodeRequest(
+            SyncRequest(
+                channels = channels,
+                force = force,
+                reason = reason,
+                countryCode = countryCode,
+                financeTiles = financeTiles,
+                financeRefreshTileIds = financeRefreshTileIds,
+                financeSymbol = financeSymbol,
+                financeRange = financeRange,
+                financeAssetType = financeAssetType,
+                financeChartType = financeChartType,
+                financeTileId = financeTileId,
+                financeLiveEnabled = financeLiveEnabled
+            )
+        ) + "\n"
 
-        try {
-            val message = SyncProtocol.encodeRequest(
-                SyncRequest(
-                    channels = channels,
-                    force = force,
-                    reason = reason,
-                    countryCode = countryCode,
-                    financeSymbol = financeSymbol,
-                    financeRange = financeRange,
-                    financeAssetType = financeAssetType,
-                    financeChartType = financeChartType,
-                    financeTileId = financeTileId,
-                    financeLiveEnabled = financeLiveEnabled
-                )
-            ) + "\n"
-
-            synchronized(output) {
-                output.write(message.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to request sync", e)
-        }
+        enqueueWrite(message, "request sync")
     }
 
     fun sendSubtitleControl(control: SubtitleControl) {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-
-        try {
-            val message = SubtitleProtocol.encodeControl(control) + "\n"
-            synchronized(output) {
-                output.write(message.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to send subtitle control", e)
-        }
+        val message = SubtitleProtocol.encodeControl(control) + "\n"
+        enqueueWrite(message, "send subtitle control")
     }
 
     fun requestGooglePhoneAuthorization() {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-
-        try {
-            val message = """{"action":"requestGoogleAuth"}""" + "\n"
-            Log.d(TAG, "Requesting Google auth from phone")
-
-            synchronized(output) {
-                output.write(message.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to request Google auth", e)
-        }
+        val message = """{"action":"requestGoogleAuth"}""" + "\n"
+        Log.d(TAG, "Requesting Google auth from phone")
+        enqueueWrite(message, "request Google auth")
     }
 
     fun disconnectGooglePhoneAuth() {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-
-        try {
-            val message = """{"action":"disconnectGoogleAuth"}""" + "\n"
-            Log.d(TAG, "Requesting Google disconnect on phone")
-
-            synchronized(output) {
-                output.write(message.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to request Google disconnect", e)
-        }
+        val message = """{"action":"disconnectGoogleAuth"}""" + "\n"
+        Log.d(TAG, "Requesting Google disconnect on phone")
+        enqueueWrite(message, "request Google disconnect")
     }
     
     /**
@@ -301,19 +236,45 @@ class RfcommClient(private val context: Context) {
      */
     private fun sendBatteryUpdate() {
         if (!isConnected.get()) return
-        val output = outputStream ?: return
-        
-        try {
-            val batteryLevel = getGlassesBatteryLevel()
-            val message = """{"battery":$batteryLevel}""" + "\n"
-            
-            synchronized(output) {
-                output.write(message.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to send battery update", e)
+        if (!batteryWritePending.compareAndSet(false, true)) return
+
+        val batteryLevel = getGlassesBatteryLevel()
+        val message = """{"battery":$batteryLevel}""" + "\n"
+        val queued = enqueueWrite(message, "send battery update") {
+            batteryWritePending.set(false)
         }
+        if (!queued) {
+            batteryWritePending.set(false)
+        }
+    }
+
+    /**
+     * Serialize socket writes away from the main thread. BluetoothOutputStream.write()
+     * can block indefinitely when the peer stops reading, so it must never run on the UI
+     * handler that processes touch and layout changes.
+     */
+    private fun enqueueWrite(
+        message: String,
+        operation: String,
+        onComplete: (() -> Unit)? = null
+    ): Boolean {
+        if (!isConnected.get()) return false
+        val output = outputStream ?: return false
+
+        writerExecutor.execute {
+            try {
+                if (!isConnected.get() || outputStream !== output) return@execute
+                synchronized(output) {
+                    output.write(message.toByteArray())
+                    output.flush()
+                }
+            } catch (e: IOException) {
+                Log.e(TAG, "Failed to $operation", e)
+            } finally {
+                onComplete?.invoke()
+            }
+        }
+        return true
     }
     
     /**

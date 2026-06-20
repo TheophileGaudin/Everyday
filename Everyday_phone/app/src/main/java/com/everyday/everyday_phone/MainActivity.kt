@@ -62,6 +62,8 @@ class MainActivity : AppCompatActivity() {
         private const val REQUEST_IMAGE_PICKER = 2002
         private const val REQUEST_IMAGE_PERMISSION = 2003
         private const val REQUEST_SUBTITLE_AUDIO_PERMISSION = 2004
+        private const val PREFS_NAME = "everyday_phone"
+        private const val KEY_NOTIFICATION_ACCESS_PROMPT_DISMISSED = "notification_access_prompt_dismissed"
     }
 
     private enum class ProjectionPurpose {
@@ -344,6 +346,7 @@ class MainActivity : AppCompatActivity() {
             rfcommServer?.start()
             // Request background location for Android 10+ (must be after foreground location is granted)
             requestBackgroundLocationIfNeeded()
+            maybePromptNotificationAccess()
         } else {
             fileLog("Missing permissions, requesting")
             requestPermissions()
@@ -1314,6 +1317,23 @@ class MainActivity : AppCompatActivity() {
         ActivityCompat.requestPermissions(this, permissions, REQUEST_PERMISSIONS)
     }
 
+    private fun maybePromptNotificationAccess() {
+        if (PhoneNotificationRepository.isListenerEnabled(this)) return
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        if (prefs.getBoolean(KEY_NOTIFICATION_ACCESS_PROMPT_DISMISSED, false)) return
+
+        AlertDialog.Builder(this)
+            .setTitle("Enable phone notifications")
+            .setMessage("Allow Everyday notification access to show phone notifications on the glasses.")
+            .setPositiveButton("Open settings") { _, _ ->
+                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            }
+            .setNegativeButton("Not now") { _, _ ->
+                prefs.edit().putBoolean(KEY_NOTIFICATION_ACCESS_PROMPT_DISMISSED, true).apply()
+            }
+            .show()
+    }
+
     private fun requestSubtitleAudioPermission() {
         ActivityCompat.requestPermissions(
             this,
@@ -1334,6 +1354,7 @@ class MainActivity : AppCompatActivity() {
                 if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
                     rfcommServer?.start()
                     requestBackgroundLocationIfNeeded()
+                    maybePromptNotificationAccess()
                     if (::dataSyncCoordinator.isInitialized) {
                         dataSyncCoordinator.onForeground()
                     }

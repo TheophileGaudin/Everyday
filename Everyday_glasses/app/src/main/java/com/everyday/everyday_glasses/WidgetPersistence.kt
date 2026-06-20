@@ -38,6 +38,7 @@ object WidgetPersistence {
     private const val KEY_MIRROR_WIDGET = "mirror_widget"
     private const val KEY_FINANCE_WIDGET = "finance_widget"
     private const val KEY_NEWS_WIDGET = "news_widget"
+    private const val KEY_NOTIFICATIONS_WIDGET = "notifications_widget"
     private const val KEY_SPEEDOMETER_WIDGET = "speedometer_widget"
     private const val KEY_SUBTITLE_WIDGET = "subtitle_widget"
     private const val KEY_CLOSED_TEMPLATES = "closed_templates"
@@ -49,6 +50,7 @@ object WidgetPersistence {
     private const val KEY_CLOSED_MIRROR_WIDGET = "mirror_widget"
     private const val KEY_CLOSED_FINANCE_WIDGET = "finance_widget"
     private const val KEY_CLOSED_NEWS_WIDGET = "news_widget"
+    private const val KEY_CLOSED_NOTIFICATIONS_WIDGET = "notifications_widget"
     private const val KEY_CLOSED_SPEEDOMETER_WIDGET = "speedometer_widget"
     private const val KEY_CLOSED_SUBTITLE_WIDGET = "subtitle_widget"
     private const val KEY_HOVER_CONTROLS = "hover_controls"
@@ -148,6 +150,7 @@ object WidgetPersistence {
         val calendar: CalendarWidgetState?,
         val finance: FinanceWidgetState?,
         val news: NewsWidgetState?,
+        val notifications: NotificationsWidgetState?,
         val speedometer: SpeedometerWidgetState?,
         val subtitle: SubtitleWidgetState?,
         val mirror: MirrorWidgetState?,
@@ -173,6 +176,7 @@ object WidgetPersistence {
         val calendar: CalendarWidgetState? = null,
         val finance: FinanceWidgetState? = null,
         val news: NewsWidgetState? = null,
+        val notifications: NotificationsWidgetState? = null,
         val speedometer: SpeedometerWidgetState? = null,
         val subtitle: SubtitleWidgetState? = null,
         val mirror: MirrorWidgetState? = null
@@ -334,6 +338,23 @@ object WidgetPersistence {
         override val isPinned: Boolean = false
     ) : SizedWidgetFields
 
+    data class NotificationsWidgetState(
+        override val x: Float,
+        override val y: Float,
+        override val width: Float,
+        override val height: Float,
+        val widgetFontScale: Float = 1f,
+        val toastFontScale: Float = 1f,
+        val scrollIndex: Int = 0,
+        override val isMinimized: Boolean = false,
+        override val isFullscreen: Boolean = false,
+        override val savedMinX: Float = 0f,
+        override val savedMinY: Float = 0f,
+        override val savedMinWidth: Float = 0f,
+        override val savedMinHeight: Float = 0f,
+        override val isPinned: Boolean = false
+    ) : SizedWidgetFields
+
     data class SpeedometerWidgetState(
         override val x: Float,
         override val y: Float,
@@ -389,6 +410,7 @@ object WidgetPersistence {
         mirrorWidgetState: MirrorWidgetState? = null,
         financeWidgetState: FinanceWidgetState? = null,
         newsWidgetState: NewsWidgetState? = null,
+        notificationsWidgetState: NotificationsWidgetState? = null,
         speedometerWidgetState: SpeedometerWidgetState? = null,
         subtitleWidgetState: SubtitleWidgetState? = null,
         closedTemplates: ClosedWidgetTemplates = ClosedWidgetTemplates(),
@@ -405,6 +427,7 @@ object WidgetPersistence {
         calendar = calendarWidgetState,
         finance = financeWidgetState,
         news = newsWidgetState,
+        notifications = notificationsWidgetState,
         speedometer = speedometerWidgetState,
         subtitle = subtitleWidgetState,
         mirror = mirrorWidgetState,
@@ -439,6 +462,7 @@ object WidgetPersistence {
         state.mirror?.let { rootJson.put(KEY_MIRROR_WIDGET, mirrorWidgetToJson(it)) }
         state.finance?.let { rootJson.put(KEY_FINANCE_WIDGET, financeWidgetToJson(it)) }
         state.news?.let { rootJson.put(KEY_NEWS_WIDGET, newsWidgetToJson(it)) }
+        state.notifications?.let { rootJson.put(KEY_NOTIFICATIONS_WIDGET, notificationsWidgetToJson(it)) }
         state.speedometer?.let { rootJson.put(KEY_SPEEDOMETER_WIDGET, speedometerWidgetToJson(it)) }
         state.subtitle?.let { rootJson.put(KEY_SUBTITLE_WIDGET, subtitleWidgetToJson(it)) }
 
@@ -451,6 +475,7 @@ object WidgetPersistence {
         state.closedTemplates.mirror?.let { closedTemplatesJson.put(KEY_CLOSED_MIRROR_WIDGET, mirrorWidgetToJson(it)) }
         state.closedTemplates.finance?.let { closedTemplatesJson.put(KEY_CLOSED_FINANCE_WIDGET, financeWidgetToJson(it)) }
         state.closedTemplates.news?.let { closedTemplatesJson.put(KEY_CLOSED_NEWS_WIDGET, newsWidgetToJson(it)) }
+        state.closedTemplates.notifications?.let { closedTemplatesJson.put(KEY_CLOSED_NOTIFICATIONS_WIDGET, notificationsWidgetToJson(it)) }
         state.closedTemplates.speedometer?.let { closedTemplatesJson.put(KEY_CLOSED_SPEEDOMETER_WIDGET, speedometerWidgetToJson(it)) }
         state.closedTemplates.subtitle?.let { closedTemplatesJson.put(KEY_CLOSED_SUBTITLE_WIDGET, subtitleWidgetToJson(it)) }
         if (closedTemplatesJson.length() > 0) {
@@ -485,6 +510,7 @@ object WidgetPersistence {
             calendar = parseCalendar(rootJson),
             finance = parseFinance(rootJson),
             news = parseNews(rootJson),
+            notifications = parseNotifications(rootJson),
             speedometer = parseSpeedometer(rootJson),
             subtitle = parseSubtitle(rootJson),
             mirror = parseMirror(rootJson),
@@ -494,48 +520,6 @@ object WidgetPersistence {
             activeLayoutName = sanitizeLayoutName(rootJson.optString(KEY_ACTIVE_LAYOUT_NAME, "")),
             isLayoutLocked = rootJson.optBoolean(KEY_LAYOUT_LOCKED, false)
         )
-
-    /**
-     * Save all widget states to file.
-     */
-    fun saveWidgets(
-        context: Context,
-        textWidgets: List<TextWidgetState>,
-        browserWidgets: List<BrowserWidgetState>,
-        imageWidgets: List<ImageWidgetState>,
-        statusBarState: StatusBarState?,
-        locationWidgetState: LocationWidgetState? = null,
-        calendarWidgetState: CalendarWidgetState? = null,
-        mirrorWidgetState: MirrorWidgetState? = null,
-        financeWidgetState: FinanceWidgetState? = null,
-        newsWidgetState: NewsWidgetState? = null,
-        speedometerWidgetState: SpeedometerWidgetState? = null,
-        subtitleWidgetState: SubtitleWidgetState? = null,
-        closedTemplates: ClosedWidgetTemplates = ClosedWidgetTemplates(),
-        hoverControls: List<HoverControlPlacementState>? = null,
-        activeLayoutName: String? = null,
-        isLayoutLocked: Boolean = false
-    ): Boolean = saveState(
-        context,
-        createPersistedState(
-            textWidgets = textWidgets,
-            browserWidgets = browserWidgets,
-            imageWidgets = imageWidgets,
-            statusBarState = statusBarState,
-            locationWidgetState = locationWidgetState,
-            calendarWidgetState = calendarWidgetState,
-            mirrorWidgetState = mirrorWidgetState,
-            financeWidgetState = financeWidgetState,
-            newsWidgetState = newsWidgetState,
-            speedometerWidgetState = speedometerWidgetState,
-            subtitleWidgetState = subtitleWidgetState,
-            closedTemplates = closedTemplates,
-            hoverControls = hoverControls,
-            isFirstRun = false,
-            activeLayoutName = activeLayoutName,
-            isLayoutLocked = isLayoutLocked
-        )
-    )
 
     fun saveState(context: Context, state: PersistedState): Boolean {
         try {
@@ -559,17 +543,18 @@ object WidgetPersistence {
     fun loadAll(context: Context): PersistedState {
         val rootJson = loadRootJson(context)
             ?: return PersistedState(
-                emptyList(),
-                emptyList(),
-                emptyList(),
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
+                text = emptyList(),
+                browser = emptyList(),
+                image = emptyList(),
+                status = null,
+                location = null,
+                calendar = null,
+                finance = null,
+                news = null,
+                notifications = null,
+                speedometer = null,
+                subtitle = null,
+                mirror = null,
                 closedTemplates = ClosedWidgetTemplates(),
                 hoverControls = null,
                 isFirstRun = true,
@@ -656,20 +641,6 @@ object WidgetPersistence {
     private fun sanitizeLayoutName(name: String?): String? =
         name?.trim()?.takeIf { it.isNotBlank() }
 
-    /**
-     * Clear all saved widget data.
-     */
-    fun clearAll(context: Context) {
-        try {
-            val file = getStorageFile(context)
-            if (file.exists()) {
-                file.delete()
-                Log.d(TAG, "Cleared saved widget data")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error clearing widget data", e)
-        }
-    }
 
     private fun parseLayoutRecords(rootJson: JSONObject): List<WidgetLayoutRecord> {
         val layoutsJson = rootJson.optJSONArray(KEY_LAYOUTS) ?: return emptyList()
@@ -837,6 +808,14 @@ object WidgetPersistence {
             put("fontScale", state.fontScale)
         }
 
+    private fun notificationsWidgetToJson(state: NotificationsWidgetState): JSONObject =
+        JSONObject().apply {
+            putCommonFields(state)
+            put("widgetFontScale", state.widgetFontScale)
+            put("toastFontScale", state.toastFontScale)
+            put("scrollIndex", state.scrollIndex)
+        }
+
     private fun speedometerWidgetToJson(state: SpeedometerWidgetState): JSONObject =
         JSONObject().apply { putCommonFields(state) }
 
@@ -992,6 +971,21 @@ object WidgetPersistence {
                         countryCode = item.optString("countryCode", "US"),
                         selectedIndex = item.optInt("selectedIndex", 0),
                         fontScale = item.optDouble("fontScale", 1.0).toFloat(),
+                        isMinimized = c.isMinimized,
+                        isFullscreen = c.isFullscreen,
+                        savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                        savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                        isPinned = c.isPinned
+                    )
+                }
+            },
+            notifications = obj.optJSONObject(KEY_CLOSED_NOTIFICATIONS_WIDGET)?.let {
+                parseSizedWidgetObject(it) { item, c, w, h ->
+                    NotificationsWidgetState(
+                        x = c.x, y = c.y, width = w, height = h,
+                        widgetFontScale = item.optDouble("widgetFontScale", 1.0).toFloat(),
+                        toastFontScale = item.optDouble("toastFontScale", 1.0).toFloat(),
+                        scrollIndex = item.optInt("scrollIndex", 0).coerceAtLeast(0),
                         isMinimized = c.isMinimized,
                         isFullscreen = c.isFullscreen,
                         savedMinX = c.savedMinX, savedMinY = c.savedMinY,
@@ -1231,6 +1225,21 @@ object WidgetPersistence {
                 countryCode = obj.optString("countryCode", "US"),
                 selectedIndex = obj.optInt("selectedIndex", 0),
                 fontScale = obj.optDouble("fontScale", 1.0).toFloat(),
+                isMinimized = c.isMinimized,
+                isFullscreen = c.isFullscreen,
+                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                isPinned = c.isPinned
+            )
+        }
+
+    private fun parseNotifications(rootJson: JSONObject): NotificationsWidgetState? =
+        parseSizedWidget(rootJson, KEY_NOTIFICATIONS_WIDGET) { obj, c, w, h ->
+            NotificationsWidgetState(
+                x = c.x, y = c.y, width = w, height = h,
+                widgetFontScale = obj.optDouble("widgetFontScale", 1.0).toFloat(),
+                toastFontScale = obj.optDouble("toastFontScale", 1.0).toFloat(),
+                scrollIndex = obj.optInt("scrollIndex", 0).coerceAtLeast(0),
                 isMinimized = c.isMinimized,
                 isFullscreen = c.isFullscreen,
                 savedMinX = c.savedMinX, savedMinY = c.savedMinY,

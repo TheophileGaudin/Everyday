@@ -115,8 +115,6 @@ class SpeedometerSettingsMenu(
         onDismissed?.invoke()
     }
 
-    fun getThreshold(): Float = thresholdValue
-
     fun setThreshold(value: Float, notify: Boolean = true) {
         val clamped = value.coerceIn(0f, 1f)
         if (thresholdValue == clamped) return

@@ -7,12 +7,14 @@ import android.os.Handler
 import android.os.Looper
 import android.util.AttributeSet
 import android.util.Log
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import com.everyday.everyday_glasses.binocular.BinocularContentClass
 import com.everyday.shared.sync.FinanceSnapshot
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.NewsSnapshot
+import com.everyday.shared.sync.PhoneNotificationsSnapshot
 import com.everyday.shared.sync.SubtitleControl
 import com.everyday.shared.sync.SubtitleStatus
 import com.everyday.shared.sync.SubtitleTranscript
@@ -57,6 +59,7 @@ class WidgetContainer @JvmOverloads constructor(
         private const val LONG_PRESS_DELAY_MS = 250L
         private const val LONG_PRESS_MAX_MOVEMENT = 20f
         private const val HOVER_CONFIRM_RELEASE_TAP_GUARD_MS = 300L
+        private const val BROWSER_TOUCH_TAP_SUPPRESSION_MS = 350L
         
         // Phone trackpad sensitivity multiplier
         private const val PHONE_TRACKPAD_SENSITIVITY = 1.5f
@@ -168,6 +171,10 @@ class WidgetContainer @JvmOverloads constructor(
     // Pending country code for news widget
     private var pendingNewsCountryCode: String? = null
 
+    var notificationsWidget: NotificationsWidget?
+        get() = registry.notificationsWidget
+        private set(value) { registry.notificationsWidget = value }
+
     // Speedometer widget - delegated to registry
     var speedometerWidget: SpeedometerWidget?
         get() = registry.speedometerWidget
@@ -239,6 +246,7 @@ class WidgetContainer @JvmOverloads constructor(
         showNameError = { error -> layoutNamePrompt?.showError(error) },
         dismissNamePrompt = { layoutNamePrompt?.dismiss() },
         showDeleteConfirmation = { name -> layoutDeleteConfirmationPopup?.show(name) },
+        beforeApplyLayout = ::requestLayoutSwitchBrightness,
         notifyContentChanged = ::notifyContentChanged
     )
 
@@ -246,6 +254,8 @@ class WidgetContainer @JvmOverloads constructor(
     var onBrightnessChanged: ((Float) -> Unit)? = null
     var onAdaptiveBrightnessChanged: ((Boolean) -> Unit)? = null
     var onMediaBrightnessCapChanged: ((Boolean) -> Unit)? = null
+    var onBrowserMinimumBrightnessChanged: ((Boolean) -> Unit)? = null
+    var onLayoutSwitchBrightnessRequested: (() -> Unit)? = null
 
     // Callbacks for head-up wake settings (set by MainActivity)
     var onHeadUpTimeChanged: ((Long) -> Unit)? = null
@@ -280,18 +290,14 @@ class WidgetContainer @JvmOverloads constructor(
     private var activeWidget: BaseWidget? = null
     private var isWidgetLayoutLocked = false
 
-    // Drag state flags
-    private var mirrorWidgetDragging = false
-    private var mirrorWidgetResizing = false
-    private var statusBarDragging = false
-    private var locationWidgetDragging = false
-    private var financeWidgetDragging = false
+    // Drag state flags.
+    // Per-singleton-widget drag state lives on each SingletonDesc (desc.dragging);
+    // the finance dashboard's per-tile drag is a separate, widget-internal gesture.
     private var financeTileDragging = false
-    private var newsWidgetDragging = false
-    private var speedometerWidgetDragging = false
-    private var subtitleWidgetDragging = false
-    private var calendarWidgetDragging = false
     private var cursorPressed = false
+    private var activeBrowserTouchWidget: BrowserWidget? = null
+    private var suppressBrowserContentTapWidget: BrowserWidget? = null
+    private var suppressBrowserContentTapUntilMs: Long = 0L
 
     // ==================== Cursor State ====================
     
@@ -303,19 +309,17 @@ class WidgetContainer @JvmOverloads constructor(
     // ==================== Long-press Detection ====================
     
     private val handler = Handler(Looper.getMainLooper())
+    private var latestNotificationsSnapshot = PhoneNotificationsSnapshot(
+        items = emptyList(),
+        listenerEnabled = false,
+        capturedAtMs = 0L
+    )
     private var longPressRunnable: Runnable? = null
     private var longPressStartX = 0f
     private var longPressStartY = 0f
     private var pendingDragWidget: BaseWidget? = null
-    private var pendingDragStatusBar = false
-    private var pendingDragLocationWidget = false
-    private var pendingDragCalendarWidget = false
-    private var pendingDragFinanceWidget = false
+    // Per-singleton pending-drag state lives on each SingletonDesc (desc.pendingDrag).
     private var pendingDragFinanceTile = false
-    private var pendingDragNewsWidget = false
-    private var pendingDragSpeedometerWidget = false
-    private var pendingDragSubtitleWidget = false
-    private var pendingDragMirrorWidget = false
     private var pendingDragIsResize = false
     private var pendingTextSelection = false
     private var pendingCreateX = 0f
@@ -333,6 +337,7 @@ class WidgetContainer @JvmOverloads constructor(
     private var isCalendarWidgetFullscreen = false
     private var isFinanceWidgetFullscreen = false
     private var isNewsWidgetFullscreen = false
+    private var isNotificationsWidgetFullscreen = false
     private var isSpeedometerWidgetFullscreen = false
     private var isSubtitleWidgetFullscreen = false
     private var isMirrorWidgetFullscreen = false
@@ -341,23 +346,64 @@ class WidgetContainer @JvmOverloads constructor(
     // Each descriptor binds a singleton widget's fullscreen flag and widget reference to the
     // shared lifecycle helpers (teardownSingleton / hookupSingleton / handleSingletonXxx).
 
+    /** Outcome of hit-testing a singleton widget for drag/resize purposes. */
+    private enum class DragHit { NONE, DRAG, RESIZE }
+
     private inner class SingletonDesc(
         val isFullscreen: () -> Boolean,
         val setFullscreen: (Boolean) -> Unit,
-        val widget: () -> BaseWidget?
-    )
+        val widget: () -> BaseWidget?,
+        // Normalizes each widget's bespoke hit-test enum to a shared DragHit.
+        // Defaults to BaseWidget.baseHitTest; widgets with their own HitArea enum
+        // (status bar, screen mirror) supply a custom mapping.
+        val dragHit: (Float, Float) -> DragHit = { px, py -> baseDragHit(widget(), px, py) }
+    ) {
+        // Live drag state, previously held in parallel per-widget boolean fields.
+        var dragging = false
+        var pendingDrag = false
+    }
 
-    private val statusBarDesc   = SingletonDesc({ isStatusBarFullscreen },        { isStatusBarFullscreen = it },        { statusBarWidget })
+    private fun baseDragHit(widget: BaseWidget?, px: Float, py: Float): DragHit {
+        widget ?: return DragHit.NONE
+        return when (widget.baseHitTest(px, py)) {
+            BaseWidget.BaseHitArea.BORDER, BaseWidget.BaseHitArea.CONTENT -> DragHit.DRAG
+            BaseWidget.BaseHitArea.RESIZE_HANDLE -> DragHit.RESIZE
+            else -> DragHit.NONE
+        }
+    }
+
+    private val statusBarDesc   = SingletonDesc({ isStatusBarFullscreen },        { isStatusBarFullscreen = it },        { statusBarWidget }, { px, py ->
+        when (statusBarWidget?.hitTest(px, py)) {
+            StatusBarWidget.HitArea.BORDER, StatusBarWidget.HitArea.CONTENT -> DragHit.DRAG
+            StatusBarWidget.HitArea.RESIZE_HANDLE -> DragHit.RESIZE
+            else -> DragHit.NONE
+        }
+    })
     private val locationDesc    = SingletonDesc({ isLocationWidgetFullscreen },    { isLocationWidgetFullscreen = it },    { locationWidget })
     private val calendarDesc    = SingletonDesc({ isCalendarWidgetFullscreen },    { isCalendarWidgetFullscreen = it },    { calendarWidget })
     private val financeDesc     = SingletonDesc({ isFinanceWidgetFullscreen },     { isFinanceWidgetFullscreen = it },     { financeWidget })
     private val newsDesc        = SingletonDesc({ isNewsWidgetFullscreen },        { isNewsWidgetFullscreen = it },        { newsWidget })
+    private val notificationsDesc = SingletonDesc({ isNotificationsWidgetFullscreen }, { isNotificationsWidgetFullscreen = it }, { notificationsWidget })
     private val speedometerDesc = SingletonDesc({ isSpeedometerWidgetFullscreen }, { isSpeedometerWidgetFullscreen = it }, { speedometerWidget })
     private val subtitleDesc    = SingletonDesc({ isSubtitleWidgetFullscreen },    { isSubtitleWidgetFullscreen = it },    { subtitleWidget })
-    private val mirrorDesc      = SingletonDesc({ isMirrorWidgetFullscreen },      { isMirrorWidgetFullscreen = it },      { screenMirrorWidget })
+    private val mirrorDesc      = SingletonDesc({ isMirrorWidgetFullscreen },      { isMirrorWidgetFullscreen = it },      { screenMirrorWidget }, { px, py ->
+        val mirror = screenMirrorWidget
+        when {
+            mirror == null || !mirror.containsPoint(px, py) -> DragHit.NONE
+            else -> when (mirror.hitTest(px, py)) {
+                ScreenMirrorWidget.HitArea.BORDER, ScreenMirrorWidget.HitArea.CONTENT -> DragHit.DRAG
+                ScreenMirrorWidget.HitArea.RESIZE_HANDLE -> DragHit.RESIZE
+                else -> DragHit.NONE
+            }
+        }
+    })
 
-    private val singletonDescs: List<SingletonDesc>
-        get() = listOf(statusBarDesc, locationDesc, calendarDesc, financeDesc, newsDesc, speedometerDesc, subtitleDesc, mirrorDesc)
+    // Canonical singleton list in hit-priority order (screen mirror first, matching
+    // the original pointer-down precedence). Drag handling, fullscreen and minimize
+    // all iterate this single list. Built once to avoid per-frame allocation while
+    // dragging.
+    private val singletonDescs: List<SingletonDesc> =
+        listOf(mirrorDesc, statusBarDesc, locationDesc, calendarDesc, financeDesc, newsDesc, notificationsDesc, speedometerDesc, subtitleDesc)
 
     // ==================== Clipboard ====================
     
@@ -396,7 +442,7 @@ class WidgetContainer @JvmOverloads constructor(
     var onCursorCenterRequested: (() -> Unit)? = null
     var onSpeedUnitChanged: ((SpeedometerWidget.SpeedUnit) -> Unit)? = null
     var onSpeedVisibilityThresholdChanged: ((Float) -> Unit)? = null
-    var onFinanceDataRequested: ((config: FinanceDashboardTileConfig, force: Boolean, reason: String) -> Unit)? = null
+    var onFinanceDataRequested: ((visibleConfigs: List<FinanceDashboardTileConfig>, refreshTileIds: List<String>, force: Boolean, reason: String) -> Unit)? = null
     var onFinanceVisibilityChanged: ((visible: Boolean) -> Unit)? = null
     var onNewsDataRequested: ((countryCode: String, force: Boolean, reason: String) -> Unit)? = null
     var onSubtitleControlRequested: ((SubtitleControl) -> Unit)? = null
@@ -416,6 +462,10 @@ class WidgetContainer @JvmOverloads constructor(
     init {
         setWillNotDraw(false)
         setupPersistenceHelperCallbacks()
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
     }
 
     private fun setupPersistenceHelperCallbacks() {
@@ -461,6 +511,7 @@ class WidgetContainer @JvmOverloads constructor(
             isCalendarWidgetFullscreen ||
             isFinanceWidgetFullscreen ||
             isNewsWidgetFullscreen ||
+            isNotificationsWidgetFullscreen ||
             isSpeedometerWidgetFullscreen ||
             isSubtitleWidgetFullscreen ||
             isMirrorWidgetFullscreen
@@ -492,6 +543,7 @@ class WidgetContainer @JvmOverloads constructor(
                 browser.onDisplayVisibilityChanged(isBrowserWidgetVisible(browser))
             }
             notifyMediaBrightnessCapChanged()
+            notifyBrowserMinimumBrightnessChanged()
 
             screenMirrorWidget?.let { mirror ->
                 mirror.onDisplayVisibilityChanged(isMirrorWidgetVisible(mirror))
@@ -579,6 +631,14 @@ class WidgetContainer @JvmOverloads constructor(
         onMediaBrightnessCapChanged?.invoke(shouldApplyMediaBrightnessCap())
     }
 
+    private fun notifyBrowserMinimumBrightnessChanged() {
+        onBrowserMinimumBrightnessChanged?.invoke(shouldApplyBrowserMinimumBrightness())
+    }
+
+    private fun requestLayoutSwitchBrightness() {
+        onLayoutSwitchBrightnessRequested?.invoke()
+    }
+
     private fun isBrowserWidgetVisible(widget: BrowserWidget): Boolean {
         return when (displayState) {
             WakeSleepManager.DisplayState.OFF -> false
@@ -618,17 +678,14 @@ class WidgetContainer @JvmOverloads constructor(
             onBrowserKeyboardRequest?.invoke(show)
         }
         widget.onDisplayVisibilityChanged(isBrowserWidgetVisible(widget))
-        notifyMediaBrightnessCapChanged()
+        notifyBrowserMinimumBrightnessChanged()
     }
 
     private fun configureScreenMirrorWidget(widget: ScreenMirrorWidget) {
         widget.onStateChanged = { state ->
             when (state) {
-                ScreenMirrorWidget.State.MOVING -> mirrorWidgetDragging = true
-                ScreenMirrorWidget.State.IDLE -> {
-                    mirrorWidgetDragging = false
-                    mirrorWidgetResizing = false
-                }
+                ScreenMirrorWidget.State.MOVING -> mirrorDesc.dragging = true
+                ScreenMirrorWidget.State.IDLE -> mirrorDesc.dragging = false
                 else -> {}
             }
             widget.onDisplayVisibilityChanged(isMirrorWidgetVisible(widget))
@@ -737,6 +794,7 @@ class WidgetContainer @JvmOverloads constructor(
             applyDefaultLayoutReplacingCurrent()
         }
 
+        notificationsWidget?.setScreenHeight(h.toFloat())
         updateFullscreenBounds()
         Log.d(TAG, "Container sized: ${w}x${h}")
     }
@@ -787,6 +845,7 @@ class WidgetContainer @JvmOverloads constructor(
             exitAllFullscreen()
             desc.setFullscreen(true)
             desc.widget()?.setFullscreenBounds(width.toFloat(), height.toFloat())
+            notificationsWidget?.setScreenHeight(height.toFloat())
         } else {
             desc.setFullscreen(false)
         }
@@ -982,6 +1041,7 @@ class WidgetContainer @JvmOverloads constructor(
         }
         widget.onDisplayVisibilityChanged(isBrowserWidgetVisible(widget))
         notifyMediaBrightnessCapChanged()
+        notifyBrowserMinimumBrightnessChanged()
         updateMinimizedWidgetPositions()
         notifyContentChanged()
     }
@@ -1026,6 +1086,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun updateFullscreenBounds() {
         if (width <= 0 || height <= 0) return
+        notificationsWidget?.setScreenHeight(height.toFloat())
         fullscreenTextWidget?.setFullscreenBounds(width.toFloat(), height.toFloat())
         fullscreenBrowserWidget?.setFullscreenBounds(width.toFloat(), height.toFloat())
         fullscreenImageWidget?.setFullscreenBounds(width.toFloat(), height.toFloat())
@@ -1096,25 +1157,21 @@ class WidgetContainer @JvmOverloads constructor(
         notifyContentChanged()
     }
 
+    fun applyNotificationsSnapshot(snapshot: PhoneNotificationsSnapshot) {
+        latestNotificationsSnapshot = snapshot
+        notificationsWidget?.setNotificationsSnapshot(snapshot)
+        notifyContentChanged()
+    }
+
     fun applyNewsError(message: String) {
         newsWidget?.applyError(message)
         notifyContentChanged()
     }
 
-    fun requestVisibleFinanceData(force: Boolean, reason: String) {
-        financeWidget?.requestData(force = force, reason = reason)
-    }
-
-    fun requestVisibleNewsData(force: Boolean, reason: String) {
-        newsWidget?.requestData(force = force, reason = reason)
-    }
-
     fun currentNewsCountryCode(): String? = newsWidget?.getCountryCode() ?: pendingNewsCountryCode
 
-    fun currentFinanceSelection(): FinanceDashboardTileConfig? {
-        val widget = financeWidget ?: return null
-        return widget.getVisibleTileConfigs().firstOrNull()
-    }
+    fun currentFinanceVisibleConfigs(): List<FinanceDashboardTileConfig> =
+        financeWidget?.getVisibleTileConfigs().orEmpty()
 
     // ==================== Z-Order Management ====================
 
@@ -1128,9 +1185,8 @@ class WidgetContainer @JvmOverloads constructor(
     override fun cancelLongPress() {
         longPressRunnable?.let { handler.removeCallbacks(it) }
         longPressRunnable = null
-        pendingDragWidget = null; pendingDragStatusBar = false; pendingDragLocationWidget = false
-        pendingDragCalendarWidget = false; pendingDragFinanceWidget = false; pendingDragFinanceTile = false; pendingDragNewsWidget = false
-        pendingDragSpeedometerWidget = false; pendingDragSubtitleWidget = false; pendingDragMirrorWidget = false; pendingDragIsResize = false; pendingTextSelection = false
+        pendingDragWidget = null; pendingDragFinanceTile = false; pendingDragIsResize = false; pendingTextSelection = false
+        singletonDescs.forEach { it.pendingDrag = false }
         pendingFormattingMenuDrag = false
         formattingMenu?.cancelLongPress()
     }
@@ -1167,6 +1223,13 @@ class WidgetContainer @JvmOverloads constructor(
         // Hover controls sit above every widget — including fullscreen ones — so let any
         // currently-interacting (e.g. lemon mid-magnify) control or any hover-control
         // whose bounds contain the cursor consume the press before widget hit-testing.
+        if (isVisibleKeyboardAt(cx, cy)) {
+            cancelHoverControlInteractions()
+            updateKeyboardHoverAt(cx, cy)
+            notifyContentChanged()
+            return
+        }
+
         if (hoverControlsConsumeDown(cx, cy)) return
 
         val scrollbarWidget = getScrollbarHoveredWidget(cx, cy)
@@ -1192,20 +1255,29 @@ class WidgetContainer @JvmOverloads constructor(
             }
         }
 
-        if (hasFullscreenWidget()) return
+        if (hasFullscreenWidget()) {
+            fullscreenBrowserWidget?.let { widget ->
+                if (widget.containsPoint(cx, cy) && widget.hitTest(cx, cy) == BrowserWidget.HitArea.CONTENT) {
+                    handleBrowserContentDown(widget, cx, cy)
+                    return
+                }
+            }
+            return
+        }
 
         // Modal dashboard check - prioritize input if visible
         if (settingsController.handleDashboardDown(x, y)) return
-        screenMirrorWidget?.let { mirror -> if (mirror.containsPoint(cx, cy)) { val hitArea = mirror.hitTest(cx, cy); if (hitArea == ScreenMirrorWidget.HitArea.BORDER || hitArea == ScreenMirrorWidget.HitArea.CONTENT) { bringWidgetToFront(mirror); pendingDragMirrorWidget = true; pendingDragIsResize = false; scheduleLongPress(); return } else if (hitArea == ScreenMirrorWidget.HitArea.RESIZE_HANDLE) { bringWidgetToFront(mirror); pendingDragMirrorWidget = true; pendingDragIsResize = true; scheduleLongPress(); return } } }
-        statusBarWidget?.let { statusBar -> val hitArea = statusBar.hitTest(cx, cy); if (hitArea == StatusBarWidget.HitArea.BORDER || hitArea == StatusBarWidget.HitArea.CONTENT) { bringWidgetToFront(statusBar); pendingDragStatusBar = true; pendingDragIsResize = false; scheduleLongPress(); return } else if (hitArea == StatusBarWidget.HitArea.RESIZE_HANDLE) { bringWidgetToFront(statusBar); pendingDragStatusBar = true; pendingDragIsResize = true; scheduleLongPress(); return } }
-        locationWidget?.let { loc -> val hitArea = loc.baseHitTest(cx, cy); if (hitArea == BaseWidget.BaseHitArea.BORDER || hitArea == BaseWidget.BaseHitArea.CONTENT) { bringWidgetToFront(loc); pendingDragLocationWidget = true; pendingDragIsResize = false; scheduleLongPress(); return } else if (hitArea == BaseWidget.BaseHitArea.RESIZE_HANDLE) { bringWidgetToFront(loc); pendingDragLocationWidget = true; pendingDragIsResize = true; scheduleLongPress(); return } }
-        calendarWidget?.let { cal -> val hitArea = cal.baseHitTest(cx, cy); if (hitArea == BaseWidget.BaseHitArea.BORDER || hitArea == BaseWidget.BaseHitArea.CONTENT) { bringWidgetToFront(cal); pendingDragCalendarWidget = true; pendingDragIsResize = false; scheduleLongPress(); return } else if (hitArea == BaseWidget.BaseHitArea.RESIZE_HANDLE) { bringWidgetToFront(cal); pendingDragCalendarWidget = true; pendingDragIsResize = true; scheduleLongPress(); return } }
-        financeWidget?.let { fw -> val hitArea = fw.baseHitTest(cx, cy); if (hitArea == BaseWidget.BaseHitArea.BORDER || hitArea == BaseWidget.BaseHitArea.CONTENT) { bringWidgetToFront(fw); pendingDragFinanceWidget = true; pendingDragIsResize = false; scheduleLongPress(); return } else if (hitArea == BaseWidget.BaseHitArea.RESIZE_HANDLE) { bringWidgetToFront(fw); pendingDragFinanceWidget = true; pendingDragIsResize = true; scheduleLongPress(); return } }
-        newsWidget?.let { nw -> val hitArea = nw.baseHitTest(cx, cy); if (hitArea == BaseWidget.BaseHitArea.BORDER || hitArea == BaseWidget.BaseHitArea.CONTENT) { bringWidgetToFront(nw); pendingDragNewsWidget = true; pendingDragIsResize = false; scheduleLongPress(); return } else if (hitArea == BaseWidget.BaseHitArea.RESIZE_HANDLE) { bringWidgetToFront(nw); pendingDragNewsWidget = true; pendingDragIsResize = true; scheduleLongPress(); return } }
-        speedometerWidget?.let { sw -> val hitArea = sw.baseHitTest(cx, cy); if (hitArea == BaseWidget.BaseHitArea.BORDER || hitArea == BaseWidget.BaseHitArea.CONTENT) { bringWidgetToFront(sw); pendingDragSpeedometerWidget = true; pendingDragIsResize = false; scheduleLongPress(); return } else if (hitArea == BaseWidget.BaseHitArea.RESIZE_HANDLE) { bringWidgetToFront(sw); pendingDragSpeedometerWidget = true; pendingDragIsResize = true; scheduleLongPress(); return } }
-        subtitleWidget?.let { sub -> val hitArea = sub.baseHitTest(cx, cy); if (hitArea == BaseWidget.BaseHitArea.BORDER || hitArea == BaseWidget.BaseHitArea.CONTENT) { bringWidgetToFront(sub); pendingDragSubtitleWidget = true; pendingDragIsResize = false; scheduleLongPress(); return } else if (hitArea == BaseWidget.BaseHitArea.RESIZE_HANDLE) { bringWidgetToFront(sub); pendingDragSubtitleWidget = true; pendingDragIsResize = true; scheduleLongPress(); return } }
+        for (desc in singletonDescs) {
+            val hit = desc.dragHit(cx, cy)
+            if (hit == DragHit.NONE) continue
+            desc.widget()?.let { bringWidgetToFront(it) }
+            desc.pendingDrag = true
+            pendingDragIsResize = hit == DragHit.RESIZE
+            scheduleLongPress()
+            return
+        }
 
-        for (widget in browserWidgets.reversed()) { if (widget.containsPoint(cx, cy)) { val hitArea = widget.hitTest(cx, cy); bringWidgetToFront(widget); if (hitArea == BrowserWidget.HitArea.CONTENT) { widget.setFocused(true); setFocusedWidget(widget); return } else if (hitArea == BrowserWidget.HitArea.BORDER) { pendingDragWidget = widget; pendingDragIsResize = false; scheduleLongPress(); return } else if (hitArea == BrowserWidget.HitArea.RESIZE_HANDLE) { pendingDragWidget = widget; pendingDragIsResize = true; scheduleLongPress(); return } } }
+        for (widget in browserWidgets.reversed()) { if (widget.containsPoint(cx, cy)) { val hitArea = widget.hitTest(cx, cy); bringWidgetToFront(widget); if (hitArea == BrowserWidget.HitArea.CONTENT) { handleBrowserContentDown(widget, cx, cy); return } else if (hitArea == BrowserWidget.HitArea.BORDER) { pendingDragWidget = widget; pendingDragIsResize = false; scheduleLongPress(); return } else if (hitArea == BrowserWidget.HitArea.RESIZE_HANDLE) { pendingDragWidget = widget; pendingDragIsResize = true; scheduleLongPress(); return } } }
         for (widget in imageWidgets.reversed()) { if (widget.containsPoint(cx, cy)) { val hitArea = widget.baseHitTest(cx, cy); bringWidgetToFront(widget); if (hitArea == BaseWidget.BaseHitArea.BORDER || hitArea == BaseWidget.BaseHitArea.CONTENT) { pendingDragWidget = widget; pendingDragIsResize = false; scheduleLongPress(); return } else if (hitArea == BaseWidget.BaseHitArea.RESIZE_HANDLE) { pendingDragWidget = widget; pendingDragIsResize = true; scheduleLongPress(); return } } }
         for (widget in fileBrowserWidgets.reversed()) { if (widget.containsPoint(cx, cy)) { val hitArea = widget.hitTest(cx, cy); bringWidgetToFront(widget); if (hitArea == FileBrowserWidget.HitArea.BORDER) { pendingDragWidget = widget; pendingDragIsResize = false; scheduleLongPress(); return } else if (hitArea == FileBrowserWidget.HitArea.RESIZE_HANDLE) { pendingDragWidget = widget; pendingDragIsResize = true; scheduleLongPress(); return } else if (hitArea == FileBrowserWidget.HitArea.CONTENT || hitArea == FileBrowserWidget.HitArea.FILE_ITEM) { return } } }
         for (widget in widgets.reversed()) { if (widget.containsPoint(cx, cy)) { val hitArea = widget.hitTest(cx, cy); bringWidgetToFront(widget); if (hitArea == TextBoxWidget.HitArea.BORDER) { pendingDragWidget = widget; pendingDragIsResize = false; scheduleLongPress(); return } else if (hitArea == TextBoxWidget.HitArea.RESIZE_HANDLE) { pendingDragWidget = widget; pendingDragIsResize = true; scheduleLongPress(); return } else if (hitArea == TextBoxWidget.HitArea.CONTENT) { return } } }
@@ -1222,10 +1294,6 @@ class WidgetContainer @JvmOverloads constructor(
                 notifyContentChanged()
                 return@Runnable
             }
-            if (pendingDragMirrorWidget) { screenMirrorWidget?.let { it.startDrag(pendingDragIsResize); if (pendingDragIsResize) mirrorWidgetResizing = true else mirrorWidgetDragging = true }; pendingDragMirrorWidget = false; pendingDragIsResize = false; notifyContentChanged(); return@Runnable }
-            if (pendingDragStatusBar) { statusBarWidget?.let { it.startDrag(pendingDragIsResize); statusBarDragging = true }; pendingDragStatusBar = false; pendingDragIsResize = false; notifyContentChanged(); return@Runnable }
-            if (pendingDragLocationWidget) { locationWidget?.let { it.startDrag(pendingDragIsResize); locationWidgetDragging = true }; pendingDragLocationWidget = false; pendingDragIsResize = false; notifyContentChanged(); return@Runnable }
-            if (pendingDragCalendarWidget) { calendarWidget?.let { it.startDrag(pendingDragIsResize); calendarWidgetDragging = true }; pendingDragCalendarWidget = false; pendingDragIsResize = false; notifyContentChanged(); return@Runnable }
             if (pendingDragFinanceTile) {
                 financeWidget?.let {
                     val (cx, cy) = screenToContentCoordinates(longPressStartX, longPressStartY)
@@ -1235,10 +1303,11 @@ class WidgetContainer @JvmOverloads constructor(
                 notifyContentChanged()
                 return@Runnable
             }
-            if (pendingDragFinanceWidget) { financeWidget?.let { it.startDrag(pendingDragIsResize); financeWidgetDragging = true }; pendingDragFinanceWidget = false; pendingDragIsResize = false; notifyContentChanged(); return@Runnable }
-            if (pendingDragNewsWidget) { newsWidget?.let { it.startDrag(pendingDragIsResize); newsWidgetDragging = true }; pendingDragNewsWidget = false; pendingDragIsResize = false; notifyContentChanged(); return@Runnable }
-            if (pendingDragSpeedometerWidget) { speedometerWidget?.let { it.startDrag(pendingDragIsResize); speedometerWidgetDragging = true }; pendingDragSpeedometerWidget = false; pendingDragIsResize = false; notifyContentChanged(); return@Runnable }
-            if (pendingDragSubtitleWidget) { subtitleWidget?.let { it.startDrag(pendingDragIsResize); subtitleWidgetDragging = true }; pendingDragSubtitleWidget = false; pendingDragIsResize = false; notifyContentChanged(); return@Runnable }
+            for (desc in singletonDescs) {
+                if (!desc.pendingDrag) continue
+                desc.widget()?.let { it.startDrag(pendingDragIsResize); desc.dragging = true }
+                desc.pendingDrag = false; pendingDragIsResize = false; notifyContentChanged(); return@Runnable
+            }
             pendingDragWidget?.let { widget -> widget.startDrag(pendingDragIsResize); activeWidget = widget; notifyContentChanged() }
             pendingDragWidget = null; pendingDragIsResize = false; longPressRunnable = null
         }
@@ -1247,29 +1316,54 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun hasPendingWidgetDrag(): Boolean =
         pendingDragWidget != null ||
-                pendingDragMirrorWidget ||
-                pendingDragStatusBar ||
-                pendingDragLocationWidget ||
-                pendingDragCalendarWidget ||
-                pendingDragFinanceWidget ||
                 pendingDragFinanceTile ||
-                pendingDragNewsWidget ||
-                pendingDragSpeedometerWidget ||
-                pendingDragSubtitleWidget
+                singletonDescs.any { it.pendingDrag }
 
     private fun clearPendingWidgetDrag() {
         pendingDragWidget = null
-        pendingDragMirrorWidget = false
-        pendingDragStatusBar = false
-        pendingDragLocationWidget = false
-        pendingDragCalendarWidget = false
-        pendingDragFinanceWidget = false
         pendingDragFinanceTile = false
-        pendingDragNewsWidget = false
-        pendingDragSpeedometerWidget = false
-        pendingDragSubtitleWidget = false
+        singletonDescs.forEach { it.pendingDrag = false }
         pendingDragIsResize = false
         longPressRunnable = null
+    }
+
+    private fun beginBrowserContentTouch(widget: BrowserWidget, x: Float, y: Float) {
+        activeBrowserTouchWidget = widget
+        widget.setFocused(true)
+        setFocusedWidget(widget)
+        widget.dispatchTouchEvent(x, y, MotionEvent.ACTION_DOWN)
+    }
+
+    private fun handleBrowserContentDown(widget: BrowserWidget, x: Float, y: Float) {
+        widget.setFocused(true)
+        setFocusedWidget(widget)
+        if (widget.shouldStartContentTouch(x, y)) {
+            beginBrowserContentTouch(widget, x, y)
+        }
+    }
+
+    private fun finishBrowserContentTouch(x: Float, y: Float) {
+        val widget = activeBrowserTouchWidget ?: return
+        val (cx, cy) = toContentSpace(x, y)
+        widget.dispatchTouchEvent(cx, cy, MotionEvent.ACTION_UP)
+        activeBrowserTouchWidget = null
+        suppressBrowserContentTapWidget = widget
+        suppressBrowserContentTapUntilMs = android.os.SystemClock.uptimeMillis() + BROWSER_TOUCH_TAP_SUPPRESSION_MS
+    }
+
+    private fun shouldSuppressBrowserContentTap(widget: BrowserWidget): Boolean {
+        if (suppressBrowserContentTapWidget != widget) return false
+        if (android.os.SystemClock.uptimeMillis() <= suppressBrowserContentTapUntilMs) return true
+        suppressBrowserContentTapWidget = null
+        suppressBrowserContentTapUntilMs = 0L
+        return false
+    }
+
+    private fun cancelBrowserContentTouch() {
+        val widget = activeBrowserTouchWidget ?: return
+        val (cx, cy) = toContentSpace(cursorX, cursorY)
+        widget.dispatchTouchEvent(cx, cy, MotionEvent.ACTION_CANCEL)
+        activeBrowserTouchWidget = null
     }
 
     fun onCursorUp(x: Float, y: Float) {
@@ -1284,29 +1378,33 @@ class WidgetContainer @JvmOverloads constructor(
         // Shortcuts settings menu.
         settingsController.handleShortcutsSettingsMenuUp()
 
-        // Notify any hover control that captured the press of the release.
-        hoverControlsConsumeUp(cursorX, cursorY)
+        // Notify any hover control that captured the press of the release, unless
+        // the visible keyboard owns the release point.
+        val (cx, cy) = toContentSpace(cursorX, cursorY)
+        if (isVisibleKeyboardAt(cx, cy)) {
+            cancelHoverControlInteractions()
+        } else {
+            hoverControlsConsumeUp(cursorX, cursorY)
+        }
+
+        finishBrowserContentTouch(x, y)
 
         cursorPressed = false; cancelLongPress()
         if (isScrollbarDragActive) { isScrollbarDragActive = false; scrollbarDragWidget = null }
         formattingMenu?.let { if (it.isDragging()) it.onDragEnd() }
         if (isLongPressSelectionMode) { (focusedWidget ?: fullscreenTextWidget)?.endSelection(); isLongPressSelectionMode = false; isTextSelectionActive = false }
-        if (mirrorWidgetDragging || mirrorWidgetResizing) { screenMirrorWidget?.onDragEnd(); mirrorWidgetDragging = false; mirrorWidgetResizing = false; notifyContentChanged() }
-        if (statusBarDragging) { statusBarWidget?.onDragEnd(); statusBarDragging = false; notifyContentChanged() }
-        if (locationWidgetDragging) { locationWidget?.onDragEnd(); locationWidgetDragging = false; notifyContentChanged() }
-        if (calendarWidgetDragging) { calendarWidget?.onDragEnd(); calendarWidgetDragging = false; notifyContentChanged() }
         if (financeTileDragging) { financeWidget?.endTileDrag(); financeTileDragging = false; notifyContentChanged() }
-        if (financeWidgetDragging) { financeWidget?.onDragEnd(); financeWidgetDragging = false; notifyContentChanged() }
-        if (newsWidgetDragging) { newsWidget?.onDragEnd(); newsWidgetDragging = false; notifyContentChanged() }
-        if (speedometerWidgetDragging) { speedometerWidget?.onDragEnd(); speedometerWidgetDragging = false; notifyContentChanged() }
-        if (subtitleWidgetDragging) { subtitleWidget?.onDragEnd(); subtitleWidgetDragging = false; notifyContentChanged() }
+        singletonDescs.forEach { desc -> if (desc.dragging) { desc.widget()?.onDragEnd(); desc.dragging = false; notifyContentChanged() } }
         if (activeWidget != null) { activeWidget?.onDragEnd(); activeWidget = null; notifyContentChanged() }
         isTwoFingerScrollMode = false; currentPointerCount = 1
     }
     
     fun onPointerCountChanged(pointerCount: Int) {
         val wasScrollMode = isTwoFingerScrollMode; currentPointerCount = pointerCount; isTwoFingerScrollMode = pointerCount >= 2
-        if (isTwoFingerScrollMode && !wasScrollMode) cancelLongPress()
+        if (isTwoFingerScrollMode && !wasScrollMode) {
+            cancelLongPress()
+            cancelBrowserContentTouch()
+        }
     }
 
     fun setCursorPosition(x: Float, y: Float) {
@@ -1382,6 +1480,12 @@ class WidgetContainer @JvmOverloads constructor(
             return Pair(cursorX, cursorY)
         }
 
+        activeBrowserTouchWidget?.let { widget ->
+            val (cx, cy) = toContentSpace(cursorX, cursorY)
+            widget.dispatchTouchEvent(cx, cy, MotionEvent.ACTION_MOVE)
+            return Pair(cursorX, cursorY)
+        }
+
         handleDragOperations(cursorX, cursorY, moveDx, moveDy)
         return Pair(cursorX, cursorY)
     }
@@ -1407,7 +1511,7 @@ class WidgetContainer @JvmOverloads constructor(
             closeConfirmationPopup?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); formattingMenu?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); textEditMenu?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); contextMenu?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
             layoutDeleteConfirmationPopup?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
             layoutNamePrompt?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
-            if (hasFullscreenWidget()) { fullscreenTextWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); fullscreenBrowserWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); fullscreenImageWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isStatusBarFullscreen) statusBarWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isLocationWidgetFullscreen) locationWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isCalendarWidgetFullscreen) calendarWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isFinanceWidgetFullscreen) financeWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isNewsWidgetFullscreen) newsWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isSpeedometerWidgetFullscreen) speedometerWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isSubtitleWidgetFullscreen) subtitleWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isMirrorWidgetFullscreen) screenMirrorWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) }
+            if (hasFullscreenWidget()) { fullscreenTextWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); fullscreenBrowserWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); fullscreenImageWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isStatusBarFullscreen) statusBarWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isLocationWidgetFullscreen) locationWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isCalendarWidgetFullscreen) calendarWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isFinanceWidgetFullscreen) financeWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isNewsWidgetFullscreen) newsWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isNotificationsWidgetFullscreen) notificationsWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isSpeedometerWidgetFullscreen) speedometerWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isSubtitleWidgetFullscreen) subtitleWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isMirrorWidgetFullscreen) screenMirrorWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) }
             else { registry.forEachWidget { it.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) } }
             cursorStabilizer.reset()
             // Hover clear is transient visual state only.
@@ -1417,6 +1521,13 @@ class WidgetContainer @JvmOverloads constructor(
         
         // Transform to content space for widget hit testing
         val (cx, cy) = toContentSpace(x, y)
+
+        if (updateKeyboardHoverAt(cx, cy)) {
+            hoverControls.forEach { it.clearHover() }
+            clearWidgetHoverStatesExcept(visibleKeyboardHostAt(cx, cy))
+            if (!isTransitioningDisplayState) invalidateHoverVisuals()
+            return
+        }
         
         // Hover controls live above every widget, including fullscreen ones, so they
         // always receive hover updates whenever the cursor is visible.
@@ -1446,6 +1557,7 @@ class WidgetContainer @JvmOverloads constructor(
             if (isCalendarWidgetFullscreen) calendarWidget?.updateHover(if (calendarWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
             if (isFinanceWidgetFullscreen) financeWidget?.updateHover(if (financeWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
             if (isNewsWidgetFullscreen) newsWidget?.updateHover(if (newsWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
+            if (isNotificationsWidgetFullscreen) notificationsWidget?.updateHover(if (notificationsWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
             if (isSpeedometerWidgetFullscreen) speedometerWidget?.updateHover(if (speedometerWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
             if (isSubtitleWidgetFullscreen) subtitleWidget?.updateHover(if (subtitleWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
             if (isMirrorWidgetFullscreen) screenMirrorWidget?.updateHover(if (screenMirrorWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
@@ -1458,6 +1570,7 @@ class WidgetContainer @JvmOverloads constructor(
             calendarWidget?.let { if (it.containsPoint(cx, cy)) it.updateHover(cx, cy) else it.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) }
             financeWidget?.let { if (it.containsPoint(cx, cy)) it.updateHover(cx, cy) else it.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) }
             newsWidget?.let { if (it.containsPoint(cx, cy)) it.updateHover(cx, cy) else it.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) }
+            notificationsWidget?.let { if (it.containsPoint(cx, cy)) it.updateHover(cx, cy) else it.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) }
             speedometerWidget?.let { if (it.containsPoint(cx, cy)) it.updateHover(cx, cy) else it.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) }
             subtitleWidget?.let { if (it.containsPoint(cx, cy)) it.updateHover(cx, cy) else it.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) }
             // Consolidate widget hover updates by iterating over all widgets sorted by Z-order (reverse order isn't strictly necessary for hover STATE, but good for consistency)
@@ -1522,20 +1635,15 @@ class WidgetContainer @JvmOverloads constructor(
         // Long-press cancellation uses screen-space (cursor movement)
         if (longPressRunnable != null) { val totalMovement = kotlin.math.sqrt((x - longPressStartX) * (x - longPressStartX) + (y - longPressStartY) * (y - longPressStartY)); if (totalMovement > LONG_PRESS_MAX_MOVEMENT) cancelLongPress() }
         // Widget dragging uses delta values (works in both spaces)
-        if (mirrorWidgetDragging || mirrorWidgetResizing) { screenMirrorWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
-        if (statusBarDragging) { statusBarWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
-        if (locationWidgetDragging) { locationWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
-        if (calendarWidgetDragging) { calendarWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
         if (financeTileDragging) {
             val (cx, cy) = toContentSpace(x, y)
             financeWidget?.onTileDrag(cx, cy)
             notifyContentChanged()
             return
         }
-        if (financeWidgetDragging) { financeWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
-        if (newsWidgetDragging) { newsWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
-        if (speedometerWidgetDragging) { speedometerWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
-        if (subtitleWidgetDragging) { subtitleWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
+        for (desc in singletonDescs) {
+            if (desc.dragging) { desc.widget()?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
+        }
         if (activeWidget != null) { activeWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
         if (isScrollbarDragActive && scrollbarDragWidget != null) { scrollbarDragWidget?.onScrollbarDrag(dy); notifyContentChanged(); return }
     }
@@ -1549,15 +1657,8 @@ class WidgetContainer @JvmOverloads constructor(
         return null
     }
 
-    fun isCursorOverScrollbar(x: Float, y: Float): Boolean = getScrollbarHoveredWidget(x, y) != null
     fun isScrollbarDragActive(): Boolean = isScrollbarDragActive
     fun getScrollbarDragWidget(): TextBoxWidget? = scrollbarDragWidget
-
-    fun onScrollWithPosition(dy: Float, cursorX: Float, cursorY: Float): Boolean {
-        val scrollbarWidget = getScrollbarHoveredWidget(cursorX, cursorY)
-        if (scrollbarWidget != null) { scrollbarWidget.onScroll(dy); notifyContentChanged(); return true }
-        onScroll(dy); return false
-    }
 
     fun onScroll(dy: Float) {
         for (widget in widgets) { if (widget.state == TextBoxWidget.State.HOVER_CONTENT || widget.state == TextBoxWidget.State.EDITING) { widget.onScroll(dy); notifyContentChanged(); break } }
@@ -1582,6 +1683,7 @@ class WidgetContainer @JvmOverloads constructor(
         calendarWidget?.let { if (it.containsPoint(cx, cy) && !it.isMinimized) { it.onScroll(dy); notifyContentChanged(); return } }
         financeWidget?.let { if (it.containsPoint(cx, cy) && !it.isMinimized) { it.onScroll(dy); notifyContentChanged(); return } }
         newsWidget?.let { if (it.containsPoint(cx, cy) && !it.isMinimized) { it.onScroll(dy); notifyContentChanged(); return } }
+        notificationsWidget?.let { if (it.containsPoint(cx, cy) && !it.isMinimized) { it.onScroll(dy); notifyContentChanged(); return } }
         for (widget in browserWidgets.reversed()) {
             val hit = widget.hitTest(cx, cy)
             if (!widget.isMinimized && (hit == BrowserWidget.HitArea.CONTENT || hit == BrowserWidget.HitArea.NAV_URL)) {
@@ -1672,6 +1774,8 @@ class WidgetContainer @JvmOverloads constructor(
         // Transform to content space for widget hit testing
         val (cx, cy) = toContentSpace(x, y)
 
+        if (consumeVisibleKeyboardTap(cx, cy)) return true
+
         // Hover controls are above every widget, including fullscreen ones.
         if (isHoverConfirmReleaseTapGuardActive()) return true
         if (hoverControlsConsumeTap(cx, cy)) return true
@@ -1704,10 +1808,20 @@ class WidgetContainer @JvmOverloads constructor(
             }
         }
 
+        notificationsWidget?.let {
+            if (it.handleFontMenuTapOrDismiss(cx, cy)) {
+                notifyContentChanged()
+                return true
+            }
+        }
+
         if (hasFullscreenWidget()) {
             fullscreenTextWidget?.let { if (it.containsPoint(cx, cy)) return handleTextWidgetTap(it, cx, cy); return false }
             fullscreenBrowserWidget?.let {
                 if (it.containsPoint(cx, cy)) {
+                    if (it.hitTest(cx, cy) == BrowserWidget.HitArea.CONTENT && shouldSuppressBrowserContentTap(it)) {
+                        return true
+                    }
                     val result = it.onTap(cx, cy)
                     if (it.isEditingAddress()) ensureDrawnAboveNativeOverlays()
                     return result
@@ -1721,6 +1835,7 @@ class WidgetContainer @JvmOverloads constructor(
             if (isCalendarWidgetFullscreen) { calendarWidget?.let { if (it.containsPoint(cx, cy)) return handleCalendarWidgetTap(it, cx, cy) }; return false }
             if (isFinanceWidgetFullscreen) { financeWidget?.let { if (it.containsPoint(cx, cy)) return handleFinanceWidgetTap(it, cx, cy) }; return false }
             if (isNewsWidgetFullscreen) { newsWidget?.let { if (it.containsPoint(cx, cy)) return handleNewsWidgetTap(it, cx, cy) }; return false }
+            if (isNotificationsWidgetFullscreen) { notificationsWidget?.let { if (it.containsPoint(cx, cy)) return handleNotificationsWidgetTap(it, cx, cy) }; return false }
             if (isSpeedometerWidgetFullscreen) { speedometerWidget?.let { if (it.containsPoint(cx, cy)) return handleSpeedometerWidgetTap(it, cx, cy) }; return false }
             if (isSubtitleWidgetFullscreen) { subtitleWidget?.let { if (it.containsPoint(cx, cy)) return handleSubtitleWidgetTap(it, cx, cy) }; return false }
             if (isMirrorWidgetFullscreen) { screenMirrorWidget?.let { if (it.containsPoint(cx, cy)) return handleMirrorWidgetTap(it, cx, cy) }; return false }
@@ -1734,11 +1849,15 @@ class WidgetContainer @JvmOverloads constructor(
         calendarWidget?.let { if (it.containsPoint(cx, cy)) { if (it.isMinimized) { it.toggleMinimize(); notifyContentChanged(); return true }; return handleCalendarWidgetTap(it, cx, cy) } }
         financeWidget?.let { if (it.containsPoint(cx, cy)) { if (it.isMinimized) { it.toggleMinimize(); notifyContentChanged(); return true }; return handleFinanceWidgetTap(it, cx, cy) } }
         newsWidget?.let { if (it.containsPoint(cx, cy)) { if (it.isMinimized) { it.toggleMinimize(); notifyContentChanged(); return true }; return handleNewsWidgetTap(it, cx, cy) } }
+        notificationsWidget?.let { if (it.containsPoint(cx, cy)) { if (it.isMinimized) { it.toggleMinimize(); notifyContentChanged(); return true }; return handleNotificationsWidgetTap(it, cx, cy) } }
         speedometerWidget?.let { if (it.containsPoint(cx, cy)) { if (it.isMinimized) { it.toggleMinimize(); notifyContentChanged(); return true }; return handleSpeedometerWidgetTap(it, cx, cy) } }
         subtitleWidget?.let { if (it.containsPoint(cx, cy)) { if (it.isMinimized) { it.toggleMinimize(); notifyContentChanged(); return true }; return handleSubtitleWidgetTap(it, cx, cy) } }
         for (widget in browserWidgets.reversed()) {
             if (widget.containsPoint(cx, cy)) {
                 if (widget.isMinimized) { widget.toggleMinimize(); notifyContentChanged(); return true }
+                if (widget.hitTest(cx, cy) == BrowserWidget.HitArea.CONTENT && shouldSuppressBrowserContentTap(widget)) {
+                    return true
+                }
                 val result = widget.onTap(cx, cy)
                 if (widget.isEditingAddress()) ensureDrawnAboveNativeOverlays()
                 return result
@@ -1823,6 +1942,11 @@ class WidgetContainer @JvmOverloads constructor(
         return handleBaseTap(nw, x, y)
     }
 
+    private fun handleNotificationsWidgetTap(widget: NotificationsWidget, x: Float, y: Float): Boolean {
+        if (widget.onTap(x, y)) { notifyContentChanged(); return true }
+        return handleBaseTap(widget, x, y)
+    }
+
     private fun handleSpeedometerWidgetTap(sw: SpeedometerWidget, x: Float, y: Float): Boolean {
         if (sw.onTap(x, y)) { notifyContentChanged(); return true }
         return handleBaseTap(sw, x, y)
@@ -1854,6 +1978,8 @@ class WidgetContainer @JvmOverloads constructor(
 
         // Transform to content space for widget hit testing
         val (cx, cy) = toContentSpace(x, y)
+
+        if (isVisibleKeyboardAt(cx, cy)) return true
 
         if (isHoverConfirmReleaseTapGuardActive()) return true
         if (hoverControlsConsumeDoubleTap(cx, cy)) return true
@@ -1913,6 +2039,16 @@ class WidgetContainer @JvmOverloads constructor(
             return false
         }
 
+        if (isNotificationsWidgetFullscreen) {
+            notificationsWidget?.let {
+                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
+                    notifyContentChanged()
+                    return true
+                }
+            }
+            return false
+        }
+
         if (isSubtitleWidgetFullscreen) {
             subtitleWidget?.let {
                 if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
@@ -1946,6 +2082,13 @@ class WidgetContainer @JvmOverloads constructor(
             }
 
             newsWidget?.let {
+                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
+                    notifyContentChanged()
+                    return true
+                }
+            }
+
+            notificationsWidget?.let {
                 if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
                     notifyContentChanged()
                     return true
@@ -2009,6 +2152,7 @@ class WidgetContainer @JvmOverloads constructor(
         locationWidget?.let { if (it.containsPoint(cx, cy)) return false }
         financeWidget?.let { if (it.containsPoint(cx, cy)) return false }
         newsWidget?.let { if (it.containsPoint(cx, cy)) return false }
+        notificationsWidget?.let { if (it.containsPoint(cx, cy)) return false }
         subtitleWidget?.let { if (it.containsPoint(cx, cy)) return false }
         speedometerWidget?.let {
             if (it.containsPoint(cx, cy)) {
@@ -2051,15 +2195,8 @@ class WidgetContainer @JvmOverloads constructor(
 
     fun onDragEnd() {
         cancelLongPress()
-        if (mirrorWidgetDragging || mirrorWidgetResizing) { screenMirrorWidget?.onDragEnd(); mirrorWidgetDragging = false; mirrorWidgetResizing = false; notifyContentChanged() }
-        if (statusBarDragging) { statusBarWidget?.onDragEnd(); statusBarDragging = false; notifyContentChanged() }
-        if (locationWidgetDragging) { locationWidget?.onDragEnd(); locationWidgetDragging = false; notifyContentChanged() }
-        if (calendarWidgetDragging) { calendarWidget?.onDragEnd(); calendarWidgetDragging = false; notifyContentChanged() }
         if (financeTileDragging) { financeWidget?.endTileDrag(); financeTileDragging = false; notifyContentChanged() }
-        if (financeWidgetDragging) { financeWidget?.onDragEnd(); financeWidgetDragging = false; notifyContentChanged() }
-        if (newsWidgetDragging) { newsWidget?.onDragEnd(); newsWidgetDragging = false; notifyContentChanged() }
-        if (speedometerWidgetDragging) { speedometerWidget?.onDragEnd(); speedometerWidgetDragging = false; notifyContentChanged() }
-        if (subtitleWidgetDragging) { subtitleWidget?.onDragEnd(); subtitleWidgetDragging = false; notifyContentChanged() }
+        singletonDescs.forEach { desc -> if (desc.dragging) { desc.widget()?.onDragEnd(); desc.dragging = false; notifyContentChanged() } }
         if (activeWidget != null) { activeWidget?.onDragEnd(); activeWidget = null; notifyContentChanged() }
     }
 
@@ -2159,6 +2296,7 @@ class WidgetContainer @JvmOverloads constructor(
                 ContextMenu.SubMenuItem("toggle_speedometer", "Speedometer", speedometerWidget != null),
                 ContextMenu.SubMenuItem("toggle_finance", "Finance", financeWidget != null),
                 ContextMenu.SubMenuItem("toggle_news", "News", newsWidget != null),
+                ContextMenu.SubMenuItem("toggle_notifications", "Notifications", notificationsWidget != null),
                 ContextMenu.SubMenuItem("toggle_subtitle", "Subtitles", subtitleWidget != null),
                 ContextMenu.SubMenuItem("toggle_mirror", "Screen Mirror", screenMirrorWidget != null)
             )
@@ -2180,6 +2318,7 @@ class WidgetContainer @JvmOverloads constructor(
             "toggle_speedometer" -> toggleSpeedometerWidget()
             "toggle_finance" -> toggleFinanceWidget()
             "toggle_news" -> toggleNewsWidget()
+            "toggle_notifications" -> toggleNotificationsWidget()
             "toggle_subtitle" -> toggleSubtitleWidget()
             "toggle_mirror" -> toggleScreenMirrorWidget()
             else -> {
@@ -2239,8 +2378,8 @@ class WidgetContainer @JvmOverloads constructor(
                 context, (width - statusWidth) / 2f, height - statusHeight - height * 0.15f, statusWidth, statusHeight
             ).apply {
                 onStateChanged = { state ->
-                    if (state == StatusBarWidget.State.MOVING) statusBarDragging = true
-                    else if (statusBarDragging && state == StatusBarWidget.State.IDLE) statusBarDragging = false
+                    if (state == StatusBarWidget.State.MOVING) statusBarDesc.dragging = true
+                    else if (statusBarDesc.dragging && state == StatusBarWidget.State.IDLE) statusBarDesc.dragging = false
                     notifyContentChanged()
                 }
                 hookupSingleton(statusBarDesc)
@@ -2376,8 +2515,8 @@ class WidgetContainer @JvmOverloads constructor(
                 hookupSingleton(financeDesc)
                 onCloseRequested = { toggleFinanceWidget() }
                 onStateChanged = { notifyContentChanged() }
-                onDataRequested = { config, force, reason ->
-                    onFinanceDataRequested?.invoke(config, force, reason)
+                onDataRequested = { visibleConfigs, refreshTileIds, force, reason ->
+                    onFinanceDataRequested?.invoke(visibleConfigs, refreshTileIds, force, reason)
                 }
                 onMinimizeToggled = { isMinimized ->
                     handleSingletonMinimizeToggle(financeDesc, isMinimized)
@@ -2428,6 +2567,36 @@ class WidgetContainer @JvmOverloads constructor(
                 requestData(force = true, reason = "widget_toggled_on")
             }
             Log.d(TAG, "NewsWidget created")
+        }
+    }
+
+    private fun toggleNotificationsWidget() {
+        if (notificationsWidget != null) {
+            notificationsWidget?.let {
+                closedWidgetTemplates = closedWidgetTemplates.copy(
+                    notifications = persistenceHelper.getNotificationsWidgetState(it)
+                )
+            }
+            teardownSingleton(notificationsDesc)
+            notificationsWidget = null
+            Log.d(TAG, "NotificationsWidget removed")
+        } else {
+            closedWidgetTemplates.notifications?.let {
+                restoreNotificationsWidget(it)
+                Log.d(TAG, "NotificationsWidget restored from last closed state")
+                return
+            }
+            val nWidth = NotificationsWidget.DEFAULT_WIDTH
+            val nHeight = NotificationsWidget.DEFAULT_HEIGHT
+            val startX = (width - nWidth - 20f).coerceAtLeast(20f)
+            val startY = 20f
+            notificationsWidget = NotificationsWidget(context, startX, startY, nWidth, nHeight, height.toFloat()).apply {
+                hookupSingleton(notificationsDesc)
+                onCloseRequested = { toggleNotificationsWidget() }
+                onStateChanged = { notifyContentChanged() }
+                setNotificationsSnapshot(latestNotificationsSnapshot)
+            }
+            Log.d(TAG, "NotificationsWidget created")
         }
     }
 
@@ -2510,6 +2679,7 @@ class WidgetContainer @JvmOverloads constructor(
         widget.getWebView()?.let { webView -> if (webView.parent == rootView) rootView.removeView(webView); rootView.addView(webView, insertIndex) }
         registry.addBrowserWidget(widget)
         notifyMediaBrightnessCapChanged()
+        notifyBrowserMinimumBrightnessChanged()
         widget.toggleFullscreen()
         widget.setFocused(true)
         setFocusedWidget(widget)
@@ -2545,6 +2715,7 @@ class WidgetContainer @JvmOverloads constructor(
         }
         registry.addBrowserWidget(widget)
         notifyMediaBrightnessCapChanged()
+        notifyBrowserMinimumBrightnessChanged()
         widget.toggleFullscreen()
         return widget
     }
@@ -2560,48 +2731,9 @@ class WidgetContainer @JvmOverloads constructor(
         destroyWidget(widget)
         registry.removeBrowserWidget(widget)
         notifyMediaBrightnessCapChanged()
+        notifyBrowserMinimumBrightnessChanged()
         updateMinimizedWidgetPositions()
         notifyContentChanged()
-    }
-
-    fun showGoogleAuthBrowser(url: String) {
-        closeGoogleAuthBrowser()
-
-        val rootView = (parent as? ViewGroup) ?: return
-        val widget = BrowserWidget(context, rootView, 0f, 0f, width.toFloat(), height.toFloat()).apply {
-            shouldPersist = false
-            // Keep auth visible while the display is asleep; only hide it when the display is OFF.
-            isPinned = true
-            configureBrowserWidget(this)
-            onCloseRequested = {
-                val wasActiveAuthBrowser = googleAuthBrowserWidget == this
-                removeBrowserWidget(this)
-                if (wasActiveAuthBrowser) {
-                    onGoogleAuthBrowserClosed?.invoke()
-                }
-            }
-        }
-
-        val containerIndex = rootView.indexOfChild(this)
-        val insertIndex = if (containerIndex >= 0) containerIndex else 0
-        widget.getWebView()?.let { webView ->
-            if (webView.parent == rootView) rootView.removeView(webView)
-            rootView.addView(webView, insertIndex)
-            webView.loadUrl(url)
-        }
-
-        registry.addBrowserWidget(widget)
-        googleAuthBrowserWidget = widget
-        widget.toggleFullscreen()
-        widget.setFocused(true)
-        setFocusedWidget(widget)
-        notifyContentChanged()
-    }
-
-    fun closeGoogleAuthBrowser() {
-        val authWidget = googleAuthBrowserWidget ?: return
-        googleAuthBrowserWidget = null
-        removeBrowserWidget(authWidget)
     }
 
     /**
@@ -2617,6 +2749,7 @@ class WidgetContainer @JvmOverloads constructor(
         val containerIndex = rootView.indexOfChild(this); val insertIndex = if (containerIndex >= 0) containerIndex else 0
         widget.getWebView()?.let { webView -> if (webView.parent == rootView) rootView.removeView(webView); rootView.addView(webView, insertIndex) }
         registry.addBrowserWidget(widget)
+        notifyBrowserMinimumBrightnessChanged()
 
         // Load YouTube history URL
         widget.getWebView()?.loadUrl("https://www.youtube.com/feed/history")
@@ -2869,7 +3002,6 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Public Accessors ====================
 
-    fun getEffectiveClipboard(): String? = glassesClipboard ?: phoneClipboard
     fun setPhoneClipboard(content: String?) {
         phoneClipboard = content
         // Update visible text edit menu with new clipboard content
@@ -2886,19 +3018,10 @@ class WidgetContainer @JvmOverloads constructor(
             layoutDeleteConfirmationPopup?.isVisible == true
     fun isAnyPopupVisible(): Boolean = isMenuVisible() || isClosePopupVisible()
     fun dismissMenu() { contextMenu?.dismiss(); textEditMenu?.dismiss(); formattingMenu?.dismiss(); layoutNamePrompt?.dismiss() }
-    fun dismissClosePopup() { closeConfirmationPopup?.dismiss(); layoutDeleteConfirmationPopup?.dismiss() }
     fun isDragging(): Boolean =
         activeWidget != null ||
-        statusBarDragging ||
-        locationWidgetDragging ||
-        calendarWidgetDragging ||
         financeTileDragging ||
-        financeWidgetDragging ||
-        newsWidgetDragging ||
-        speedometerWidgetDragging ||
-        subtitleWidgetDragging ||
-        mirrorWidgetDragging ||
-        mirrorWidgetResizing ||
+        singletonDescs.any { it.dragging } ||
         formattingMenu?.isDragging() == true
     fun isLongPressPending(): Boolean = longPressRunnable != null || formattingMenu?.isLongPressPending() == true
 
@@ -2995,10 +3118,6 @@ class WidgetContainer @JvmOverloads constructor(
         return Pair(xRot, yRot)
     }
 
-    /**
-     * Get the current 3DOF content offset.
-     */
-    fun get3DofOffset(): Pair<Float, Float> = Pair(threeDofOffsetX, threeDofOffsetY)
 
     // ==================== Drawing ====================
 
@@ -3018,6 +3137,7 @@ class WidgetContainer @JvmOverloads constructor(
                 isCalendarWidgetFullscreen && calendarWidget?.isPinned == true -> calendarWidget
                 isFinanceWidgetFullscreen && financeWidget?.isPinned == true -> financeWidget
                 isNewsWidgetFullscreen && newsWidget?.isPinned == true -> newsWidget
+                isNotificationsWidgetFullscreen && notificationsWidget?.isPinned == true -> notificationsWidget
                 isSpeedometerWidgetFullscreen && speedometerWidget?.isPinned == true -> speedometerWidget
                 isSubtitleWidgetFullscreen && subtitleWidget?.isPinned == true -> subtitleWidget
                 isMirrorWidgetFullscreen && screenMirrorWidget?.isPinned == true -> screenMirrorWidget
@@ -3030,6 +3150,7 @@ class WidgetContainer @JvmOverloads constructor(
                 if (!settingsController.isHoverControlsLayoutEditorVisible()) {
                     drawHoverControls(canvas)
                 }
+                drawVisibleKeyboardOverlays(canvas)
                 drawOverlayMenus(canvas)
                 return
             }
@@ -3039,6 +3160,7 @@ class WidgetContainer @JvmOverloads constructor(
             if (!settingsController.isHoverControlsLayoutEditorVisible()) {
                 drawHoverControls(canvas)
             }
+            drawVisibleKeyboardOverlays(canvas)
             drawOverlayMenus(canvas)
             return
         }
@@ -3054,6 +3176,7 @@ class WidgetContainer @JvmOverloads constructor(
             if (isCalendarWidgetFullscreen) calendarWidget?.draw(canvas)
             if (isFinanceWidgetFullscreen) financeWidget?.draw(canvas)
             if (isNewsWidgetFullscreen) newsWidget?.draw(canvas)
+            if (isNotificationsWidgetFullscreen) notificationsWidget?.draw(canvas)
             if (isSpeedometerWidgetFullscreen) speedometerWidget?.draw(canvas)
             if (isSubtitleWidgetFullscreen) subtitleWidget?.draw(canvas)
             if (isMirrorWidgetFullscreen) screenMirrorWidget?.draw(canvas)
@@ -3062,6 +3185,7 @@ class WidgetContainer @JvmOverloads constructor(
             if (!settingsController.isHoverControlsLayoutEditorVisible()) {
                 drawHoverControls(canvas)
             }
+            drawVisibleKeyboardOverlays(canvas)
             drawOverlayMenus(canvas)
             return
         }
@@ -3090,8 +3214,9 @@ class WidgetContainer @JvmOverloads constructor(
             }
 
             // Hover controls are dashboard overlays and should visually win over any
-            // widget they overlap while hovered.
+            // widget they overlap while hovered, except for visible keyboard keys.
             drawHoverControls(canvas)
+            drawVisibleKeyboardOverlays(canvas)
         }
 
         // Draw smart alignment guides (only present while a drag/resize is active
@@ -3136,6 +3261,84 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun drawHoverControls(canvas: Canvas) {
         hoverControls.forEach { it.draw(canvas) }
+    }
+
+    private fun drawVisibleKeyboardOverlays(canvas: Canvas) {
+        if (hasFullscreenWidget()) {
+            fullscreenBrowserWidget?.takeIf { it.isKeyboardVisible }?.getKeyboard()?.draw(canvas)
+            fullscreenTextWidget?.takeIf { it.isKeyboardVisible }?.getKeyboard()?.draw(canvas)
+            return
+        }
+
+        registry.getAllSortedByZOrder().forEach { widget ->
+            when (widget) {
+                is BrowserWidget -> if (!widget.isMinimized && widget.isKeyboardVisible) {
+                    widget.getKeyboard()?.draw(canvas)
+                }
+                is TextBoxWidget -> if (!widget.isMinimized && widget.isKeyboardVisible) {
+                    widget.getKeyboard()?.draw(canvas)
+                }
+            }
+        }
+    }
+
+    // ==================== Keyboard overlay input priority ====================
+
+    private fun visibleKeyboardHostAt(cx: Float, cy: Float): BaseWidget? {
+        if (hasFullscreenWidget()) {
+            fullscreenBrowserWidget?.let {
+                if (it.isKeyboardVisible && it.getKeyboard()?.containsPoint(cx, cy) == true) return it
+            }
+            fullscreenTextWidget?.let {
+                if (it.isKeyboardVisible && it.getKeyboard()?.containsPoint(cx, cy) == true) return it
+            }
+            return null
+        }
+
+        return registry.getAllSortedByZOrder()
+            .asReversed()
+            .firstOrNull { widget ->
+                when (widget) {
+                    is BrowserWidget -> !widget.isMinimized &&
+                        widget.isKeyboardVisible &&
+                        widget.getKeyboard()?.containsPoint(cx, cy) == true
+                    is TextBoxWidget -> !widget.isMinimized &&
+                        widget.isKeyboardVisible &&
+                        widget.getKeyboard()?.containsPoint(cx, cy) == true
+                    else -> false
+                }
+            }
+    }
+
+    private fun isVisibleKeyboardAt(cx: Float, cy: Float): Boolean =
+        visibleKeyboardHostAt(cx, cy) != null
+
+    private fun updateKeyboardHoverAt(cx: Float, cy: Float): Boolean {
+        val host = visibleKeyboardHostAt(cx, cy) ?: return false
+        host.updateHover(cx, cy)
+        return true
+    }
+
+    private fun consumeVisibleKeyboardTap(cx: Float, cy: Float): Boolean {
+        return when (val host = visibleKeyboardHostAt(cx, cy)) {
+            is BrowserWidget -> {
+                host.getKeyboard()?.onTap(cx, cy)
+                notifyContentChanged()
+                true
+            }
+            is TextBoxWidget -> {
+                host.getKeyboard()?.onTap(cx, cy)
+                notifyContentChanged()
+                true
+            }
+            else -> false
+        }
+    }
+
+    private fun clearWidgetHoverStatesExcept(except: BaseWidget?) {
+        registry.forEachWidget {
+            if (it !== except) it.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
+        }
     }
 
     // ==================== Hover-control input pipeline ====================
@@ -3247,6 +3450,7 @@ class WidgetContainer @JvmOverloads constructor(
     fun getCalendarWidgetState(): WidgetPersistence.CalendarWidgetState? = persistenceHelper.getCalendarWidgetState(calendarWidget)
     fun getFinanceWidgetState(): WidgetPersistence.FinanceWidgetState? = persistenceHelper.getFinanceWidgetState(financeWidget)
     fun getNewsWidgetState(): WidgetPersistence.NewsWidgetState? = persistenceHelper.getNewsWidgetState(newsWidget)
+    fun getNotificationsWidgetState(): WidgetPersistence.NotificationsWidgetState? = persistenceHelper.getNotificationsWidgetState(notificationsWidget)
     fun getSpeedometerWidgetState(): WidgetPersistence.SpeedometerWidgetState? = persistenceHelper.getSpeedometerWidgetState(speedometerWidget)
     fun getSubtitleWidgetState(): WidgetPersistence.SubtitleWidgetState? = persistenceHelper.getSubtitleWidgetState(subtitleWidget)
     fun getMirrorWidgetState(): WidgetPersistence.MirrorWidgetState? = persistenceHelper.getMirrorWidgetState(screenMirrorWidget)
@@ -3269,6 +3473,7 @@ class WidgetContainer @JvmOverloads constructor(
             mirrorWidgetState = getMirrorWidgetState(),
             financeWidgetState = getFinanceWidgetState(),
             newsWidgetState = getNewsWidgetState(),
+            notificationsWidgetState = getNotificationsWidgetState(),
             speedometerWidgetState = getSpeedometerWidgetState(),
             subtitleWidgetState = getSubtitleWidgetState(),
             closedTemplates = getClosedWidgetTemplates(),
@@ -3303,6 +3508,7 @@ class WidgetContainer @JvmOverloads constructor(
             ShortcutAction.ToggleCalendar -> toggleCalendarWidget()
             ShortcutAction.ToggleFinance -> toggleFinanceWidget()
             ShortcutAction.ToggleNews -> toggleNewsWidget()
+            ShortcutAction.ToggleNotifications -> toggleNotificationsWidget()
             ShortcutAction.ToggleSpeedometer -> toggleSpeedometerWidget()
             ShortcutAction.ToggleSubtitle -> toggleSubtitleWidget()
             ShortcutAction.ToggleMirror -> toggleScreenMirrorWidget()
@@ -3329,11 +3535,13 @@ class WidgetContainer @JvmOverloads constructor(
         if (!isReady()) return
         val saved = persistenceManager.loadLayout(name)
         if (saved != null) {
+            requestLayoutSwitchBrightness()
             applyPersistedStateReplacingCurrent(saved)
             layoutManager.activeLayoutName = name
             return
         }
         val builtIn = BuiltInLayouts.build(name, width.toFloat(), height.toFloat()) ?: return
+        requestLayoutSwitchBrightness()
         applyPersistedStateReplacingCurrent(builtIn)
         layoutManager.activeLayoutName = name
     }
@@ -3358,6 +3566,7 @@ class WidgetContainer @JvmOverloads constructor(
             state.mirror?.let { restoreMirrorWidget(it) }
             state.finance?.let { restoreFinanceWidget(it) }
             state.news?.let { restoreNewsWidget(it) }
+            state.notifications?.let { restoreNotificationsWidget(it) }
             state.speedometer?.let { restoreSpeedometerWidget(it) }
             state.subtitle?.let { restoreSubtitleWidget(it) }
             settingsController.applyHoverControlPlacements(state.hoverControls)
@@ -3365,6 +3574,7 @@ class WidgetContainer @JvmOverloads constructor(
 
             updateMinimizedWidgetPositions()
             notifyMediaBrightnessCapChanged()
+            notifyBrowserMinimumBrightnessChanged()
             layoutManager.activeLayoutName = state.activeLayoutName
         } finally {
             suppressContentChangedCallback = false
@@ -3409,6 +3619,7 @@ class WidgetContainer @JvmOverloads constructor(
         calendarWidget = null
         financeWidget = null
         newsWidget = null
+        notificationsWidget = null
         speedometerWidget = null
         subtitleWidget = null
         screenMirrorWidget = null
@@ -3420,15 +3631,20 @@ class WidgetContainer @JvmOverloads constructor(
         isCalendarWidgetFullscreen = false
         isFinanceWidgetFullscreen = false
         isNewsWidgetFullscreen = false
+        isNotificationsWidgetFullscreen = false
         isSpeedometerWidgetFullscreen = false
         isSubtitleWidgetFullscreen = false
         isMirrorWidgetFullscreen = false
         registry.clear()
+        notifyBrowserMinimumBrightnessChanged()
     }
 
     private fun destroyWidget(widget: BaseWidget) {
         if (widget is ScreenMirrorWidget) {
             setBinocularMediaSourceActive(widget.binocularSourceId, false)
+        }
+        if (widget is FinanceWidget) {
+            onFinanceVisibilityChanged?.invoke(false)
         }
         widget.onDestroy()
     }
@@ -3461,6 +3677,7 @@ class WidgetContainer @JvmOverloads constructor(
         configureBrowserWidget(widget)
         registry.addBrowserWidget(widget)
         notifyMediaBrightnessCapChanged()
+        notifyBrowserMinimumBrightnessChanged()
         restoreFullscreenIfNeeded(widget, template.isFullscreen)
         if (!widget.isMinimized) {
             widget.setFocused(true)
@@ -3499,8 +3716,8 @@ class WidgetContainer @JvmOverloads constructor(
                 context, state.x, state.y, statusWidth, statusHeight
             ).apply {
                 onStateChanged = { s ->
-                    if (s == StatusBarWidget.State.MOVING) statusBarDragging = true
-                    else if (statusBarDragging && s == StatusBarWidget.State.IDLE) statusBarDragging = false
+                    if (s == StatusBarWidget.State.MOVING) statusBarDesc.dragging = true
+                    else if (statusBarDesc.dragging && s == StatusBarWidget.State.IDLE) statusBarDesc.dragging = false
                     notifyContentChanged()
                 }
                 hookupSingleton(statusBarDesc)
@@ -3521,10 +3738,13 @@ class WidgetContainer @JvmOverloads constructor(
             restoreFullscreenIfNeeded(widget, states.getOrNull(index)?.isFullscreen == true)
         }
         notifyMediaBrightnessCapChanged()
+        notifyBrowserMinimumBrightnessChanged()
         notifyContentChanged()
     }
 
-    fun hasVisibleBrowserWidget(): Boolean = browserWidgets.any { isBrowserWidgetVisible(it) }
+    fun shouldApplyBrowserMinimumBrightness(): Boolean {
+        return browserWidgets.any { !it.isMinimized }
+    }
 
     fun shouldApplyMediaBrightnessCap(): Boolean {
         return screenMirrorWidget?.shouldApplyMediaBrightnessCap() == true
@@ -3592,8 +3812,8 @@ class WidgetContainer @JvmOverloads constructor(
                 hookupSingleton(financeDesc)
                 onCloseRequested = { toggleFinanceWidget() }
                 onStateChanged = { notifyContentChanged() }
-                onDataRequested = { config, force, reason ->
-                    onFinanceDataRequested?.invoke(config, force, reason)
+                onDataRequested = { visibleConfigs, refreshTileIds, force, reason ->
+                    onFinanceDataRequested?.invoke(visibleConfigs, refreshTileIds, force, reason)
                 }
                 onMinimizeToggled = { isMinimized ->
                     handleSingletonMinimizeToggle(financeDesc, isMinimized)
@@ -3632,6 +3852,21 @@ class WidgetContainer @JvmOverloads constructor(
         persistenceHelper.restoreNewsWidgetPosition(newsWidget, state, width, height)
         restoreFullscreenIfNeeded(newsWidget, state.isFullscreen)
         newsWidget?.requestData(force = true, reason = "widget_restored")
+        notifyContentChanged()
+    }
+
+    fun restoreNotificationsWidget(state: WidgetPersistence.NotificationsWidgetState) {
+        if (notificationsWidget == null) {
+            notificationsWidget = NotificationsWidget(context, state.x, state.y, state.width, state.height, height.toFloat()).apply {
+                hookupSingleton(notificationsDesc)
+                onCloseRequested = { toggleNotificationsWidget() }
+                onStateChanged = { notifyContentChanged() }
+            }
+        }
+        persistenceHelper.restoreNotificationsWidgetPosition(notificationsWidget, state, width, height)
+        notificationsWidget?.setScreenHeight(height.toFloat())
+        notificationsWidget?.setNotificationsSnapshot(latestNotificationsSnapshot)
+        restoreFullscreenIfNeeded(notificationsWidget, state.isFullscreen)
         notifyContentChanged()
     }
 
@@ -3684,14 +3919,6 @@ class WidgetContainer @JvmOverloads constructor(
         notifyMediaBrightnessCapChanged()
         notifyContentChanged()
     }
-
-    // Keep old methods for backwards compatibility but mark them as deprecated
-    @Deprecated("Use restoreStatusBarWidget instead", ReplaceWith("restoreStatusBarWidget(state)"))
-    fun restoreStatusBarPosition(state: WidgetPersistence.StatusBarState) { restoreStatusBarWidget(state) }
-    @Deprecated("Use restoreLocationWidget instead", ReplaceWith("restoreLocationWidget(state)"))
-    fun restoreLocationWidgetPosition(state: WidgetPersistence.LocationWidgetState) { restoreLocationWidget(state) }
-    @Deprecated("Use restoreMirrorWidget instead", ReplaceWith("restoreMirrorWidget(state)"))
-    fun restoreMirrorWidgetPosition(state: WidgetPersistence.MirrorWidgetState) { restoreMirrorWidget(state) }
 
     fun isReady(): Boolean = width > 0 && height > 0
 

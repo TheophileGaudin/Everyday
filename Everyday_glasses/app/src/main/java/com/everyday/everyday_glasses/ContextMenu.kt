@@ -207,10 +207,6 @@ class ContextMenu(
         items.add(item)
     }
 
-    fun clearItems() {
-        items.clear()
-    }
-
     fun setLayoutLockState(isLocked: Boolean) {
         val lockItem = MenuItem(
             id = "layout_lock",

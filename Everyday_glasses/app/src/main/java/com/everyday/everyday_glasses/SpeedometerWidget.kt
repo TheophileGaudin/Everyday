@@ -88,8 +88,6 @@ class SpeedometerWidget(
         speedUnit = unit
     }
 
-    fun getUnit(): SpeedUnit = speedUnit
-
     fun setForceVisibleWhenIdle(forceVisible: Boolean): Boolean {
         if (forceVisibleWhenIdle == forceVisible) return false
         forceVisibleWhenIdle = forceVisible

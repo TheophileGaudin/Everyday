@@ -9,16 +9,75 @@ object SyncProtocol {
     private const val EVENT_SYNC_ERROR = "sync_error"
     private const val EVENT_SPEED_SNAPSHOT = "speed_snapshot"
 
+    // ==================== Channel codecs ====================
+    // Each codec is the single place that knows a channel's snapshot shape.
+    // encodeSnapshot/decodeSnapshot and SyncSnapshotStore iterate CHANNEL_CODECS
+    // instead of repeating one branch per channel.
+
+    val WEATHER_CODEC: SyncChannelCodec<WeatherSnapshot> =
+        object : SyncChannelCodec<WeatherSnapshot>(SyncChannel.WEATHER) {
+            override fun extract(snapshot: SyncSnapshot) = snapshot.weather
+            override fun place(into: SyncSnapshot, value: WeatherSnapshot?) = into.copy(weather = value)
+            override fun toJson(value: WeatherSnapshot) = value.toJson()
+            override fun fromJson(json: JSONObject) = json.toWeatherSnapshot()
+        }
+
+    val CALENDAR_CODEC: SyncChannelCodec<CalendarSnapshot> =
+        object : SyncChannelCodec<CalendarSnapshot>(SyncChannel.CALENDAR) {
+            override fun extract(snapshot: SyncSnapshot) = snapshot.calendar
+            override fun place(into: SyncSnapshot, value: CalendarSnapshot?) = into.copy(calendar = value)
+            override fun toJson(value: CalendarSnapshot) = value.toJson()
+            override fun fromJson(json: JSONObject) = json.toCalendarSnapshot()
+        }
+
+    val NEWS_CODEC: SyncChannelCodec<NewsSnapshot> =
+        object : SyncChannelCodec<NewsSnapshot>(SyncChannel.NEWS) {
+            override fun extract(snapshot: SyncSnapshot) = snapshot.news
+            override fun place(into: SyncSnapshot, value: NewsSnapshot?) = into.copy(news = value)
+            override fun toJson(value: NewsSnapshot) = value.toJson()
+            override fun fromJson(json: JSONObject) = json.toNewsSnapshot()
+        }
+
+    val FINANCE_CODEC: SyncChannelCodec<FinanceSnapshot> =
+        object : SyncChannelCodec<FinanceSnapshot>(SyncChannel.FINANCE) {
+            override fun extract(snapshot: SyncSnapshot) = snapshot.finance
+            override fun place(into: SyncSnapshot, value: FinanceSnapshot?) = into.copy(finance = value)
+            override fun toJson(value: FinanceSnapshot) = value.toJson()
+            override fun fromJson(json: JSONObject) = json.toFinanceSnapshot()
+
+            // Live (streaming) finance updates are display-only and must not
+            // overwrite the persisted snapshot.
+            override fun shouldPersist(value: FinanceSnapshot): Boolean =
+                value.tiles.none { it.source == "BINANCE_WS" || it.streamStatus == "Live" }
+        }
+
+    val NOTIFICATIONS_CODEC: SyncChannelCodec<PhoneNotificationsSnapshot> =
+        object : SyncChannelCodec<PhoneNotificationsSnapshot>(SyncChannel.NOTIFICATIONS) {
+            override fun extract(snapshot: SyncSnapshot) = snapshot.notifications
+            override fun place(into: SyncSnapshot, value: PhoneNotificationsSnapshot?) =
+                into.copy(notifications = value)
+            override fun toJson(value: PhoneNotificationsSnapshot) = value.toJson()
+            override fun fromJson(json: JSONObject) = json.toPhoneNotificationsSnapshot()
+
+            override fun shouldPersist(value: PhoneNotificationsSnapshot): Boolean = false
+        }
+
+    /** All channel codecs in a stable order. */
+    val CHANNEL_CODECS: List<SyncChannelCodec<*>> =
+        listOf(WEATHER_CODEC, CALENDAR_CODEC, NEWS_CODEC, FINANCE_CODEC, NOTIFICATIONS_CODEC)
+
+    // ==================== Request ====================
+
     fun encodeRequest(request: SyncRequest): String {
         return JSONObject()
             .put("event", EVENT_SYNC_REQUEST)
-            .put("channels", JSONArray().apply {
-                request.channels.forEach { put(it.wireName) }
-            })
+            .put("channels", request.channels.toJsonArray { it.wireName })
             .put("force", request.force)
             .put("reason", request.reason)
             .put("requestedAtMs", request.requestedAtMs)
             .putNullable("countryCode", request.countryCode)
+            .put("financeTiles", request.financeTiles.toJsonArray { it.toJson() })
+            .put("financeRefreshTileIds", request.financeRefreshTileIds.toJsonArray { it })
             .putNullable("financeSymbol", request.financeSymbol)
             .putNullable("financeRange", request.financeRange)
             .putNullable("financeAssetType", request.financeAssetType?.name)
@@ -45,6 +104,8 @@ object SyncProtocol {
             reason = root.optString("reason", "manual"),
             requestedAtMs = root.optLong("requestedAtMs", System.currentTimeMillis()),
             countryCode = root.optStringOrNull("countryCode"),
+            financeTiles = root.optJSONArray("financeTiles").mapObjects { it.toFinanceDashboardTileConfig() },
+            financeRefreshTileIds = root.optJSONArray("financeRefreshTileIds").toStringList(),
             financeSymbol = root.optStringOrNull("financeSymbol"),
             financeRange = root.optStringOrNull("financeRange"),
             financeAssetType = root.optStringOrNull("financeAssetType")?.let(FinanceAssetType::fromWireName),
@@ -58,26 +119,27 @@ object SyncProtocol {
         )
     }
 
+    // ==================== Snapshot ====================
+
     fun encodeSnapshot(snapshot: SyncSnapshot): String {
-        return JSONObject()
-            .put("event", EVENT_SYNC_SNAPSHOT)
-            .putNullable("weather", snapshot.weather?.toJson())
-            .putNullable("calendar", snapshot.calendar?.toJson())
-            .putNullable("news", snapshot.news?.toJson())
-            .putNullable("finance", snapshot.finance?.toJson())
-            .toString()
+        val json = JSONObject().put("event", EVENT_SYNC_SNAPSHOT)
+        for (codec in CHANNEL_CODECS) {
+            json.putNullable(codec.channel.wireName, codec.extractJson(snapshot))
+        }
+        return json.toString()
     }
 
     fun decodeSnapshot(raw: String): SyncSnapshot? {
         val root = runCatching { JSONObject(raw) }.getOrNull() ?: return null
         if (root.optString("event") != EVENT_SYNC_SNAPSHOT) return null
-        return SyncSnapshot(
-            weather = root.optJSONObject("weather")?.toWeatherSnapshot(),
-            calendar = root.optJSONObject("calendar")?.toCalendarSnapshot(),
-            news = root.optJSONObject("news")?.toNewsSnapshot(),
-            finance = root.optJSONObject("finance")?.toFinanceSnapshot()
-        )
+        var snapshot = SyncSnapshot()
+        for (codec in CHANNEL_CODECS) {
+            root.optJSONObject(codec.channel.wireName)?.let { snapshot = codec.placeFromJson(snapshot, it) }
+        }
+        return snapshot
     }
+
+    // ==================== Error ====================
 
     fun encodeError(error: SyncError): String {
         return JSONObject()
@@ -98,6 +160,8 @@ object SyncProtocol {
             timestampMs = root.optLong("timestampMs", System.currentTimeMillis())
         )
     }
+
+    // ==================== Speed ====================
 
     fun encodeSpeedSnapshot(snapshot: SpeedSnapshot): String {
         return JSONObject()
@@ -123,21 +187,7 @@ object SyncProtocol {
         )
     }
 
-    fun weatherToJson(snapshot: WeatherSnapshot): JSONObject = snapshot.toJson()
-    fun weatherFromJson(raw: String): WeatherSnapshot? =
-        runCatching { JSONObject(raw).toWeatherSnapshot() }.getOrNull()
-
-    fun calendarToJson(snapshot: CalendarSnapshot): JSONObject = snapshot.toJson()
-    fun calendarFromJson(raw: String): CalendarSnapshot? =
-        runCatching { JSONObject(raw).toCalendarSnapshot() }.getOrNull()
-
-    fun newsToJson(snapshot: NewsSnapshot): JSONObject = snapshot.toJson()
-    fun newsFromJson(raw: String): NewsSnapshot? =
-        runCatching { JSONObject(raw).toNewsSnapshot() }.getOrNull()
-
-    fun financeToJson(snapshot: FinanceSnapshot): JSONObject = snapshot.toJson()
-    fun financeFromJson(raw: String): FinanceSnapshot? =
-        runCatching { JSONObject(raw).toFinanceSnapshot() }.getOrNull()
+    // ==================== Per-type (de)serialization ====================
 
     private fun WeatherSnapshot.toJson(): JSONObject {
         return JSONObject()
@@ -188,22 +238,16 @@ object SyncProtocol {
     private fun CalendarSnapshot.toJson(): JSONObject {
         return JSONObject()
             .putNullable("account", account?.toJson())
-            .put("events", JSONArray().apply { events.forEach { put(it.toJson()) } })
+            .put("events", events.toJsonArray { it.toJson() })
             .put("fetchedAtMs", fetchedAtMs)
             .put("staleAfterMs", staleAfterMs)
             .put("sourceMode", sourceMode)
     }
 
     private fun JSONObject.toCalendarSnapshot(): CalendarSnapshot {
-        val items = optJSONArray("events") ?: JSONArray()
-        val events = buildList {
-            for (index in 0 until items.length()) {
-                items.optJSONObject(index)?.toCalendarEvent()?.let(::add)
-            }
-        }
         return CalendarSnapshot(
             account = optJSONObject("account")?.toCalendarAccount(),
-            events = events,
+            events = optJSONArray("events").mapObjects { it.toCalendarEvent() },
             fetchedAtMs = optLong("fetchedAtMs", 0L),
             staleAfterMs = optLong("staleAfterMs", SyncCachePolicy.CALENDAR_STALE_AFTER_MS),
             sourceMode = optString("sourceMode", "PHONE_FALLBACK")
@@ -245,21 +289,15 @@ object SyncProtocol {
     private fun NewsSnapshot.toJson(): JSONObject {
         return JSONObject()
             .put("countryCode", countryCode)
-            .put("items", JSONArray().apply { items.forEach { put(it.toJson()) } })
+            .put("items", items.toJsonArray { it.toJson() })
             .put("fetchedAtMs", fetchedAtMs)
             .put("staleAfterMs", staleAfterMs)
     }
 
     private fun JSONObject.toNewsSnapshot(): NewsSnapshot {
-        val items = optJSONArray("items") ?: JSONArray()
-        val articles = buildList {
-            for (index in 0 until items.length()) {
-                items.optJSONObject(index)?.toNewsArticle()?.let(::add)
-            }
-        }
         return NewsSnapshot(
             countryCode = optString("countryCode", "US"),
-            items = articles,
+            items = optJSONArray("items").mapObjects { it.toNewsArticle() },
             fetchedAtMs = optLong("fetchedAtMs", 0L),
             staleAfterMs = optLong("staleAfterMs", SyncCachePolicy.NEWS_STALE_AFTER_MS)
         )
@@ -291,47 +329,30 @@ object SyncProtocol {
             .put("country", country)
             .put("range", range)
             .put("rangeLabel", rangeLabel)
-            .put("points", JSONArray().apply { points.forEach { put(it.toDouble()) } })
-            .put("candles", JSONArray().apply { candles.forEach { put(it.toJson()) } })
+            .put("points", points.toJsonArray { it.toDouble() })
+            .put("candles", candles.toJsonArray { it.toJson() })
             .put("percentChange", percentChange.toDouble())
             .put("assetType", assetType.name)
             .put("chartType", chartType.name)
             .put("navigationIndex", navigationIndex)
-            .put("tiles", JSONArray().apply { tiles.forEach { put(it.toJson()) } })
+            .put("tiles", tiles.toJsonArray { it.toJson() })
             .put("fetchedAtMs", fetchedAtMs)
             .put("staleAfterMs", staleAfterMs)
     }
 
     private fun JSONObject.toFinanceSnapshot(): FinanceSnapshot {
-        val pointsJson = optJSONArray("points") ?: JSONArray()
-        val points = buildList {
-            for (index in 0 until pointsJson.length()) {
-                add(pointsJson.optDouble(index).toFloat())
-            }
-        }
-        val tilesJson = optJSONArray("tiles") ?: JSONArray()
-        val tiles = buildList {
-            for (index in 0 until tilesJson.length()) {
-                tilesJson.optJSONObject(index)?.toFinanceTileSnapshot()?.let(::add)
-            }
-        }
         return FinanceSnapshot(
             symbol = optString("symbol"),
             displayName = optString("displayName"),
             country = optString("country"),
             range = optString("range"),
             rangeLabel = optString("rangeLabel"),
-            points = points,
-            candles = buildList {
-                val candlesJson = optJSONArray("candles") ?: JSONArray()
-                for (index in 0 until candlesJson.length()) {
-                    candlesJson.optJSONObject(index)?.toFinanceCandle()?.let(::add)
-                }
-            },
+            points = optJSONArray("points").toFloatList(),
+            candles = optJSONArray("candles").mapObjects { it.toFinanceCandle() },
             percentChange = optDouble("percentChange").toFloat(),
             assetType = FinanceAssetType.fromWireName(optStringOrNull("assetType")),
             chartType = FinanceChartType.fromWireName(optStringOrNull("chartType")),
-            tiles = tiles,
+            tiles = optJSONArray("tiles").mapObjects { it.toFinanceTileSnapshot() },
             navigationIndex = optInt("navigationIndex", 0),
             fetchedAtMs = optLong("fetchedAtMs", 0L),
             staleAfterMs = optLong("staleAfterMs", SyncCachePolicy.FINANCE_STALE_AFTER_MS)
@@ -348,8 +369,8 @@ object SyncProtocol {
             .put("range", range)
             .put("rangeLabel", rangeLabel)
             .put("chartType", chartType.name)
-            .put("points", JSONArray().apply { points.forEach { put(it.toDouble()) } })
-            .put("candles", JSONArray().apply { candles.forEach { put(it.toJson()) } })
+            .put("points", points.toJsonArray { it.toDouble() })
+            .put("candles", candles.toJsonArray { it.toJson() })
             .putNullable("latestValue", latestValue?.toDouble())
             .put("percentChange", percentChange.toDouble())
             .put("source", source)
@@ -358,18 +379,6 @@ object SyncProtocol {
             .put("staleAfterMs", staleAfterMs)
 
     private fun JSONObject.toFinanceTileSnapshot(): FinanceTileSnapshot {
-        val pointsJson = optJSONArray("points") ?: JSONArray()
-        val points = buildList {
-            for (index in 0 until pointsJson.length()) {
-                add(pointsJson.optDouble(index).toFloat())
-            }
-        }
-        val candlesJson = optJSONArray("candles") ?: JSONArray()
-        val candles = buildList {
-            for (index in 0 until candlesJson.length()) {
-                candlesJson.optJSONObject(index)?.toFinanceCandle()?.let(::add)
-            }
-        }
         return FinanceTileSnapshot(
             id = optString("id"),
             assetType = FinanceAssetType.fromWireName(optStringOrNull("assetType")),
@@ -379,14 +388,80 @@ object SyncProtocol {
             range = optString("range"),
             rangeLabel = optString("rangeLabel"),
             chartType = FinanceChartType.fromWireName(optStringOrNull("chartType")),
-            points = points,
-            candles = candles,
+            points = optJSONArray("points").toFloatList(),
+            candles = optJSONArray("candles").mapObjects { it.toFinanceCandle() },
             latestValue = if (has("latestValue") && !isNull("latestValue")) optDouble("latestValue").toFloat() else null,
             percentChange = optDouble("percentChange").toFloat(),
             source = optString("source", "UNKNOWN"),
             streamStatus = optStringOrNull("streamStatus"),
             fetchedAtMs = optLong("fetchedAtMs", 0L),
             staleAfterMs = optLong("staleAfterMs", SyncCachePolicy.FINANCE_STALE_AFTER_MS)
+        )
+    }
+
+    private fun FinanceDashboardTileConfig.toJson(): JSONObject =
+        JSONObject()
+            .put("id", id)
+            .put("assetType", assetType.name)
+            .put("symbol", symbol)
+            .put("range", range)
+            .put("chartType", chartType.name)
+            .put("slot", slot)
+
+    private fun JSONObject.toFinanceDashboardTileConfig(): FinanceDashboardTileConfig? {
+        val id = optString("id").takeIf { it.isNotBlank() } ?: return null
+        val symbol = optString("symbol").takeIf { it.isNotBlank() } ?: return null
+        return FinanceDashboardTileConfig(
+            id = id,
+            assetType = FinanceAssetType.fromWireName(optStringOrNull("assetType")),
+            symbol = symbol,
+            range = FinanceTimeRange.fromRange(optStringOrNull("range")).range,
+            chartType = FinanceChartType.fromWireName(optStringOrNull("chartType")),
+            slot = optInt("slot", -1)
+        )
+    }
+
+    private fun PhoneNotificationsSnapshot.toJson(): JSONObject =
+        JSONObject()
+            .put("items", items.toJsonArray { it.toJson() })
+            .put("listenerEnabled", listenerEnabled)
+            .put("capturedAtMs", capturedAtMs)
+
+    private fun JSONObject.toPhoneNotificationsSnapshot(): PhoneNotificationsSnapshot =
+        PhoneNotificationsSnapshot(
+            items = optJSONArray("items").mapObjects { it.toPhoneNotificationItem() },
+            listenerEnabled = optBoolean("listenerEnabled", false),
+            capturedAtMs = optLong("capturedAtMs", 0L)
+        )
+
+    private fun PhoneNotificationItem.toJson(): JSONObject =
+        JSONObject()
+            .put("key", key)
+            .put("packageName", packageName)
+            .put("appLabel", appLabel)
+            .put("title", title)
+            .put("text", text)
+            .put("subText", subText)
+            .put("postTime", postTime)
+            .put("importance", importance)
+            .put("isOngoing", isOngoing)
+            .put("isClearable", isClearable)
+            .putNullable("category", category)
+
+    private fun JSONObject.toPhoneNotificationItem(): PhoneNotificationItem? {
+        val key = optString("key").takeIf { it.isNotBlank() } ?: return null
+        return PhoneNotificationItem(
+            key = key,
+            packageName = optString("packageName"),
+            appLabel = optString("appLabel"),
+            title = optString("title"),
+            text = optString("text"),
+            subText = optString("subText"),
+            postTime = optLong("postTime", 0L),
+            importance = optInt("importance", 0),
+            isOngoing = optBoolean("isOngoing", false),
+            isClearable = optBoolean("isClearable", true),
+            category = optStringOrNull("category")
         )
     }
 
@@ -410,6 +485,40 @@ object SyncProtocol {
             volume = optDouble("volume", 0.0).toFloat(),
             isClosed = optBoolean("isClosed", true)
         )
+
+    // ==================== JSON helpers ====================
+
+    /** Build a [JSONArray] from any iterable, mapping each element via [transform]. */
+    private inline fun <T> Iterable<T>.toJsonArray(transform: (T) -> Any): JSONArray =
+        JSONArray().apply { this@toJsonArray.forEach { put(transform(it)) } }
+
+    /** Map each JSON object element via [transform], dropping nulls. Null array -> empty. */
+    private inline fun <T> JSONArray?.mapObjects(transform: (JSONObject) -> T?): List<T> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (index in 0 until length()) {
+                optJSONObject(index)?.let(transform)?.let(::add)
+            }
+        }
+    }
+
+    private fun JSONArray?.toFloatList(): List<Float> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (index in 0 until length()) {
+                add(optDouble(index).toFloat())
+            }
+        }
+    }
+
+    private fun JSONArray?.toStringList(): List<String> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (index in 0 until length()) {
+                optString(index).takeIf { it.isNotBlank() }?.let(::add)
+            }
+        }
+    }
 
     private fun JSONObject.putNullable(name: String, value: Any?): JSONObject {
         if (value == null) {

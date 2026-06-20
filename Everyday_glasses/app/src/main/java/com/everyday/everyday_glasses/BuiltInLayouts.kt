@@ -30,8 +30,6 @@ object BuiltInLayouts {
         }
     }
 
-    fun isBuiltin(name: String): Boolean = canonicalBuiltinName(name) != null
-
     fun isDelivered(name: String): Boolean =
         DELIVERED_LAYOUTS.any { it.equals(name.trim(), ignoreCase = true) }
 
@@ -49,6 +47,7 @@ object BuiltInLayouts {
         calendar = null,
         finance = null,
         news = null,
+        notifications = null,
         speedometer = null,
         subtitle = null,
         mirror = null,

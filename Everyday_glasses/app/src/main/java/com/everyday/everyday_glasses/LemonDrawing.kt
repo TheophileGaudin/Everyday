@@ -145,29 +145,6 @@ object LemonDrawing {
         canvas.drawCircle(cx, cy, r * PITH_INNER_R, stroke)
     }
 
-    /**
-     * Returns the slice index for an (x, y) tap, or -1 if the tap is outside the
-     * annular segment band (rind / pith hole / outside circle).
-     */
-    fun sliceAt(bounds: RectF, slices: Int, x: Float, y: Float): Int {
-        if (slices <= 0) return -1
-        val cx = bounds.centerX()
-        val cy = bounds.centerY()
-        val r = min(bounds.width(), bounds.height()) / 2f
-        if (r <= 0f) return -1
-        val dx = x - cx
-        val dy = y - cy
-        val dist = kotlin.math.sqrt(dx * dx + dy * dy)
-        val outerR = r * SEGMENT_OUTER_R
-        val innerR = r * SEGMENT_INNER_R
-        if (dist > outerR || dist < innerR) return -1
-        val anglePer = 360f / slices
-        val angleDeg = Math.toDegrees(kotlin.math.atan2(dy.toDouble(), dx.toDouble())).toFloat()
-        val sliceStart0 = -90f - anglePer / 2f
-        val rel = (((angleDeg - sliceStart0) % 360f) + 360f) % 360f
-        return (rel / anglePer).toInt() % slices
-    }
-
     private fun drawSeed(
         canvas: Canvas,
         cx: Float,

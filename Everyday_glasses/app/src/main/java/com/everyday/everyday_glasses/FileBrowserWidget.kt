@@ -130,10 +130,6 @@ class FileBrowserWidget(
         style = Paint.Style.FILL
     }
 
-    private val selectedItemPaint = Paint().apply {
-        color = Color.parseColor("#5050AA")
-        style = Paint.Style.FILL
-    }
 
     private val textPaint = Paint().apply {
         color = Color.WHITE
@@ -875,22 +871,4 @@ class FileBrowserWidget(
         loadDirectory(getDefaultDirectory())
     }
 
-    /**
-     * Navigate to a specific directory
-     */
-    fun navigateTo(path: String) {
-        val dir = File(path)
-        if (dir.exists() && dir.isDirectory && dir.canRead()) {
-            loadDirectory(dir)
-        }
-    }
-
-    /**
-     * Change the file filter and reload
-     */
-    fun setFilter(filter: FileFilter) {
-        if (filter != fileFilter) {
-            loadDirectory(currentDirectory)
-        }
-    }
 }

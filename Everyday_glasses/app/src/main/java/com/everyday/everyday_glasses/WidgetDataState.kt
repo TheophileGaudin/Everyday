@@ -23,13 +23,6 @@ class WidgetDataState(
         }
     }
 
-    fun setLoadingIfEmpty(hasRenderableContent: Boolean) {
-        isLoading = !hasRenderableContent
-        if (!hasRenderableContent) {
-            error = null
-        }
-    }
-
     fun markLoaded() {
         isLoading = false
         error = null
@@ -40,11 +33,6 @@ class WidgetDataState(
         if (showError) {
             error = message
         }
-    }
-
-    fun setIdleError(message: String?) {
-        isLoading = false
-        error = message
     }
 
     fun clearError() {

@@ -20,6 +20,8 @@ class TransportManager(
             force = request.force,
             reason = request.reason,
             countryCode = request.countryCode,
+            financeTiles = request.financeTiles,
+            financeRefreshTileIds = request.financeRefreshTileIds,
             financeSymbol = request.financeSymbol,
             financeRange = request.financeRange,
             financeAssetType = request.financeAssetType,

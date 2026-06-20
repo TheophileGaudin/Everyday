@@ -12,7 +12,9 @@ import com.everyday.shared.sync.FinanceChartType
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.FinanceSnapshot
 import com.everyday.shared.sync.FinanceTimeRange
+import com.everyday.shared.sync.FinanceTileSnapshot
 import com.everyday.shared.sync.NewsDataProvider
+import com.everyday.shared.sync.PhoneNotificationsSnapshot
 import com.everyday.shared.sync.SyncCachePolicy
 import com.everyday.shared.sync.SyncChannel
 import com.everyday.shared.sync.SyncError
@@ -56,11 +58,16 @@ class PhoneDataSyncCoordinator(
         },
         log = ::fileLog
     )
+    private val notificationObserver: (PhoneNotificationsSnapshot) -> Unit = { snapshot ->
+        onNotificationsSnapshotChanged(snapshot)
+    }
     private var isGlassesConnected = false
+    @Volatile private var visibleFinanceConfigs: List<FinanceDashboardTileConfig> = emptyList()
 
     init {
         LocationWeatherService.onSnapshotChanged = ::onWeatherSnapshotChanged
         LocationWeatherService.onSpeedSnapshotChanged = ::onSpeedSnapshotChanged
+        PhoneNotificationRepository.addObserver(notificationObserver, appContext)
     }
 
     fun onForeground() {
@@ -78,6 +85,7 @@ class PhoneDataSyncCoordinator(
         isGlassesConnected = connected
         if (!connected) {
             LocationWeatherService.stop(appContext)
+            visibleFinanceConfigs = emptyList()
             binanceStreamManager.stopAll()
             return
         }
@@ -93,7 +101,12 @@ class PhoneDataSyncCoordinator(
 
     fun onSyncRequest(request: SyncRequest) {
         if (!isGlassesConnected) return
-        pushCachedSnapshots(channels = request.channels, pushGoogleState = true)
+        val cachedChannels = if (SyncChannel.FINANCE in request.channels && request.financeLiveEnabled == false) {
+            request.channels - SyncChannel.FINANCE
+        } else {
+            request.channels
+        }
+        pushCachedSnapshots(channels = cachedChannels, pushGoogleState = true)
         syncOrchestrator.dispatch(request)
     }
 
@@ -119,7 +132,6 @@ class PhoneDataSyncCoordinator(
         }
 
         val errors = mutableListOf<String>()
-        val remaining = AtomicInteger(4)
 
         fun addError(label: String, error: Throwable) {
             synchronized(errors) {
@@ -130,6 +142,18 @@ class PhoneDataSyncCoordinator(
                 }
             }
         }
+
+        // Each entry runs one external refresh and reports its outcome (a failure
+        // Throwable, or null on success) to the supplied callback. The completion
+        // count is derived from this list, so adding/removing a refresh here stays
+        // self-consistent.
+        val operations: List<Pair<String, ((Throwable?) -> Unit) -> Unit>> = listOf(
+            "Location/weather refresh" to { done -> refreshWeatherForManual { done(it.exceptionOrNull()) } },
+            "Calendar refresh" to { done -> refreshCalendarForManual { done(it.exceptionOrNull()) } },
+            "News refresh" to { done -> refreshNewsForManual { done(it.exceptionOrNull()) } },
+            "Finance refresh" to { done -> refreshFinanceForManual { done(it.exceptionOrNull()) } }
+        )
+        val remaining = AtomicInteger(operations.size)
 
         fun completeOne() {
             if (remaining.decrementAndGet() != 0) return
@@ -142,21 +166,11 @@ class PhoneDataSyncCoordinator(
             }
         }
 
-        refreshWeatherForManual { result ->
-            result.onFailure { addError("Location/weather refresh", it) }
-            completeOne()
-        }
-        refreshCalendarForManual { result ->
-            result.onFailure { addError("Calendar refresh", it) }
-            completeOne()
-        }
-        refreshNewsForManual { result ->
-            result.onFailure { addError("News refresh", it) }
-            completeOne()
-        }
-        refreshFinanceForManual { result ->
-            result.onFailure { addError("Finance refresh", it) }
-            completeOne()
+        operations.forEach { (label, run) ->
+            run { error ->
+                if (error != null) addError(label, error)
+                completeOne()
+            }
         }
 
         return true
@@ -165,6 +179,7 @@ class PhoneDataSyncCoordinator(
     fun release() {
         LocationWeatherService.onSnapshotChanged = null
         LocationWeatherService.onSpeedSnapshotChanged = null
+        PhoneNotificationRepository.removeObserver(notificationObserver)
         binanceStreamManager.stopAll()
     }
 
@@ -193,12 +208,15 @@ class PhoneDataSyncCoordinator(
         if (serviceSnapshot != null) cachedChannels -= SyncChannel.WEATHER
         if (sharedCalendarSnapshot != null) cachedChannels -= SyncChannel.CALENDAR
         val cachedSnapshot = syncOrchestrator.cachedSnapshot(cachedChannels)
+        val notificationSnapshot = PhoneNotificationRepository.current(appContext)
+            .takeIf { SyncChannel.NOTIFICATIONS in channels }
         val snapshot = SyncSnapshot(
             weather = serviceSnapshot?.takeIf { SyncChannel.WEATHER in channels }
                 ?: cachedSnapshot.weather,
             calendar = sharedCalendarSnapshot ?: cachedSnapshot.calendar,
             news = cachedSnapshot.news,
-            finance = cachedSnapshot.finance
+            finance = cachedSnapshot.finance,
+            notifications = notificationSnapshot
         )
         send(snapshot)
     }
@@ -215,6 +233,9 @@ class PhoneDataSyncCoordinator(
         }
         if (SyncChannel.FINANCE in request.channels) {
             refreshFinance(request)
+        }
+        if (SyncChannel.NOTIFICATIONS in request.channels) {
+            send(SyncSnapshot(notifications = PhoneNotificationRepository.current(appContext)))
         }
     }
 
@@ -350,35 +371,44 @@ class PhoneDataSyncCoordinator(
 
     private fun refreshFinance(request: SyncRequest) {
         if (request.financeLiveEnabled == false) {
+            visibleFinanceConfigs = emptyList()
             binanceStreamManager.stopAll()
             return
         }
-        val countryCode = request.countryCode
-            ?: snapshotStore.loadWeather()?.countryCode
-            ?: snapshotStore.loadFinance()?.country
-        val symbol = request.financeSymbol
-            ?: snapshotStore.loadFinance()?.symbol
-            ?: FinanceDataProvider.defaultIndexForCountry(countryCode).symbol
-        val range = FinanceTimeRange.fromRange(request.financeRange ?: snapshotStore.loadFinance()?.range)
+        val visibleConfigs = resolveVisibleFinanceConfigs(request)
+        if (visibleConfigs.isEmpty()) {
+            visibleFinanceConfigs = emptyList()
+            binanceStreamManager.stopAll()
+            return
+        }
+        visibleFinanceConfigs = visibleConfigs
         val cached = snapshotStore.loadFinance()
-        val assetType = request.financeAssetType ?: cached?.assetType ?: FinanceAssetType.INDEX
-        if (!request.force && cached != null && !cached.isStale() && cached.symbol == symbol && cached.range == range.range && cached.assetType == assetType) {
+        val cachedTilesById = cached?.tiles.orEmpty().associateBy { it.id }
+        binanceStreamManager.reconcileVisible(visibleConfigs, cachedTilesById)
+
+        val refreshIds = request.financeRefreshTileIds.toSet()
+        val configsToFetch = visibleConfigs.filter { config ->
+            request.force ||
+                config.id in refreshIds ||
+                cachedTilesById[config.id]?.let { tileNeedsRefresh(it, config) } ?: true
+        }
+        if (configsToFetch.isEmpty()) {
             return
         }
         Thread {
             try {
-                val config = FinanceDashboardTileConfig(
-                    id = request.financeTileId ?: "phone_${symbol}_${range.range}",
-                    assetType = assetType,
-                    symbol = symbol,
-                    range = range.range,
-                    chartType = request.financeChartType ?: cached?.chartType ?: FinanceChartType.LINE
-                )
-                val tile = FinanceDataProvider.fetchTile(config).getOrThrow()
-                    .copy(staleAfterMs = SyncCachePolicy.FINANCE_STALE_AFTER_MS)
-                if (tile.assetType == FinanceAssetType.CRYPTO) {
-                    binanceStreamManager.subscribe(config, tile)
+                val fetchedTiles = configsToFetch.map { config ->
+                    FinanceDataProvider.fetchTile(config).getOrThrow()
+                        .copy(staleAfterMs = SyncCachePolicy.FINANCE_STALE_AFTER_MS)
                 }
+                binanceStreamManager.reconcileVisible(
+                    visibleConfigs,
+                    cachedTilesById + fetchedTiles.associateBy { it.id }
+                )
+                val tiles = (visibleConfigs.mapNotNull { config ->
+                    fetchedTiles.firstOrNull { it.id == config.id } ?: cachedTilesById[config.id]
+                }).ifEmpty { fetchedTiles }
+                val tile = tiles.first()
                 val snapshot = FinanceSnapshot(
                     symbol = tile.symbol,
                     displayName = tile.displayName,
@@ -389,7 +419,7 @@ class PhoneDataSyncCoordinator(
                     percentChange = tile.percentChange,
                     assetType = tile.assetType,
                     chartType = tile.chartType,
-                    tiles = listOf(tile),
+                    tiles = tiles,
                     fetchedAtMs = tile.fetchedAtMs,
                     staleAfterMs = tile.staleAfterMs
                 )
@@ -402,17 +432,57 @@ class PhoneDataSyncCoordinator(
         }.start()
     }
 
+    private fun resolveVisibleFinanceConfigs(request: SyncRequest): List<FinanceDashboardTileConfig> {
+        request.financeTiles.takeIf { it.isNotEmpty() }?.let { return it }
+        val symbol = request.financeSymbol ?: return emptyList()
+        val range = FinanceTimeRange.fromRange(request.financeRange)
+        val cached = snapshotStore.loadFinance()
+        return listOf(
+            FinanceDashboardTileConfig(
+                id = request.financeTileId ?: "phone_${symbol}_${range.range}",
+                assetType = request.financeAssetType ?: cached?.assetType ?: FinanceAssetType.INDEX,
+                symbol = symbol,
+                range = range.range,
+                chartType = request.financeChartType ?: cached?.chartType ?: FinanceChartType.LINE
+            )
+        )
+    }
+
+    private fun tileNeedsRefresh(tile: FinanceTileSnapshot, config: FinanceDashboardTileConfig): Boolean =
+        SyncCachePolicy.isStale(tile.fetchedAtMs, tile.staleAfterMs) ||
+            tile.symbol != config.symbol ||
+            tile.range != config.range ||
+            tile.assetType != config.assetType ||
+            (config.chartType == FinanceChartType.CANDLE && tile.candles.isEmpty())
+
     private fun refreshFinanceForManual(callback: (Result<Unit>) -> Unit) {
-        val countryCode = snapshotStore.loadWeather()?.countryCode
-            ?: snapshotStore.loadFinance()?.country
-        val symbol = snapshotStore.loadFinance()?.symbol
-            ?: FinanceDataProvider.defaultIndexForCountry(countryCode).symbol
-        val range = FinanceTimeRange.fromRange(snapshotStore.loadFinance()?.range)
+        val configs = visibleFinanceConfigs
+        if (configs.isEmpty()) {
+            callback(Result.success(Unit))
+            return
+        }
 
         Thread {
             try {
-                val snapshot = FinanceDataProvider.fetchChart(symbol, range).getOrThrow()
-                    .copy(staleAfterMs = SyncCachePolicy.FINANCE_STALE_AFTER_MS)
+                val tiles = configs.map { config ->
+                    FinanceDataProvider.fetchTile(config).getOrThrow()
+                        .copy(staleAfterMs = SyncCachePolicy.FINANCE_STALE_AFTER_MS)
+                }
+                val tile = tiles.first()
+                val snapshot = FinanceSnapshot(
+                    symbol = tile.symbol,
+                    displayName = tile.displayName,
+                    country = tile.country,
+                    range = tile.range,
+                    rangeLabel = tile.rangeLabel,
+                    points = tile.points,
+                    percentChange = tile.percentChange,
+                    assetType = tile.assetType,
+                    chartType = tile.chartType,
+                    tiles = tiles,
+                    fetchedAtMs = tile.fetchedAtMs,
+                    staleAfterMs = tile.staleAfterMs
+                )
                 snapshotStore.saveFinance(snapshot)
                 send(SyncSnapshot(finance = snapshot))
                 callback(Result.success(Unit))
@@ -438,6 +508,10 @@ class PhoneDataSyncCoordinator(
 
     private fun onSpeedSnapshotChanged(snapshot: SpeedSnapshot) {
         sendSpeed(snapshot)
+    }
+
+    private fun onNotificationsSnapshotChanged(snapshot: PhoneNotificationsSnapshot) {
+        send(SyncSnapshot(notifications = snapshot))
     }
 
     private fun pushGoogleState(state: PhoneGoogleAuthState) {

@@ -82,11 +82,6 @@ class ShortcutsSettingsMenu(
         textSize = 16f
         textAlign = Paint.Align.LEFT
     }
-    private val rowSubPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#AAAAAA")
-        textSize = 13f
-        textAlign = Paint.Align.LEFT
-    }
     private val closeButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#E53935") }
     private val closeIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
@@ -125,16 +120,6 @@ class ShortcutsSettingsMenu(
         if (!isVisible) return
         isVisible = false
         onDismissed?.invoke()
-    }
-
-    fun replaceShortcuts(actions: List<ShortcutAction>) {
-        onLemon.clear()
-        for (a in actions) {
-            if (onLemon.none { it.id == a.id }) onLemon.add(a)
-            if (onLemon.size >= ShortcutAction.MAX_LEMON_SLICES) break
-        }
-        rebuildAvailable()
-        updateLayout()
     }
 
     fun containsPoint(x: Float, y: Float): Boolean = isVisible

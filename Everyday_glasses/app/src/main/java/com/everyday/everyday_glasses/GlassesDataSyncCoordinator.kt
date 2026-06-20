@@ -12,6 +12,7 @@ import com.everyday.shared.sync.FinanceDataProvider
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.FinanceSnapshot
 import com.everyday.shared.sync.FinanceTimeRange
+import com.everyday.shared.sync.SyncCachePolicy
 import com.everyday.shared.sync.NewsDataProvider
 import com.everyday.shared.sync.NewsSnapshot
 import com.everyday.shared.sync.SyncChannel
@@ -105,25 +106,30 @@ class GlassesDataSyncCoordinator(
         }
     }
 
-    fun onFinanceDataRequested(config: FinanceDashboardTileConfig, force: Boolean, reason: String) {
+    fun onFinanceDataRequested(
+        visibleConfigs: List<FinanceDashboardTileConfig>,
+        refreshTileIds: List<String>,
+        force: Boolean,
+        reason: String
+    ) {
         syncOrchestrator.refresh(
             channels = setOf(SyncChannel.FINANCE),
             force = force,
             reason = reason,
-            financeSymbol = config.symbol,
-            financeRange = config.range,
-            financeAssetType = config.assetType,
-            financeChartType = config.chartType,
-            financeTileId = config.id
+            financeTiles = visibleConfigs,
+            financeRefreshTileIds = refreshTileIds,
+            financeLiveEnabled = visibleConfigs.isNotEmpty()
         )
     }
 
     fun onFinanceVisibilityChanged(visible: Boolean) {
+        val visibleConfigs = if (visible) widgetContainer.currentFinanceVisibleConfigs() else emptyList()
         syncOrchestrator.refresh(
             channels = setOf(SyncChannel.FINANCE),
             force = false,
             reason = if (visible) "finance_visible" else "finance_hidden",
-            financeLiveEnabled = visible
+            financeTiles = visibleConfigs,
+            financeLiveEnabled = visible && visibleConfigs.isNotEmpty()
         )
     }
 
@@ -148,10 +154,13 @@ class GlassesDataSyncCoordinator(
         val financeOnly = snapshot.finance != null &&
             snapshot.weather == null &&
             snapshot.calendar == null &&
-            snapshot.news == null
+            snapshot.news == null &&
+            snapshot.notifications == null
         if (financeOnly) {
             syncOrchestrator.cacheAndApplySnapshot(snapshot, notify = false)
-            notifyTransientContentChanged()
+            if (widgetContainer.currentFinanceVisibleConfigs().isNotEmpty()) {
+                notifyTransientContentChanged()
+            }
         } else {
             syncOrchestrator.cacheAndApplySnapshot(snapshot, notify = true)
         }
@@ -177,23 +186,31 @@ class GlassesDataSyncCoordinator(
     }
 
     private fun requestPhoneSync(request: SyncRequest) {
-        val financeSelection = widgetContainer.currentFinanceSelection()
+        val visibleFinanceConfigs = resolveVisibleFinanceConfigs(request)
+        val financeSelection = visibleFinanceConfigs.firstOrNull()
         val requestCountry = request.countryCode
             ?: widgetContainer.currentNewsCountryCode()
             ?: snapshotStore.loadWeather()?.countryCode
             ?: snapshotStore.loadNews()?.countryCode
+        val financeLiveEnabled = if (SyncChannel.FINANCE in request.channels) {
+            request.financeLiveEnabled ?: visibleFinanceConfigs.isNotEmpty()
+        } else {
+            request.financeLiveEnabled
+        }
         syncMessengerProvider()?.sendSyncRequest(
             request.copy(
                 channels = request.channels,
                 force = request.force,
                 reason = request.reason,
                 countryCode = requestCountry,
+                financeTiles = visibleFinanceConfigs,
+                financeRefreshTileIds = request.financeRefreshTileIds,
                 financeSymbol = request.financeSymbol ?: financeSelection?.symbol,
                 financeRange = request.financeRange ?: financeSelection?.range,
                 financeAssetType = request.financeAssetType ?: financeSelection?.assetType,
                 financeChartType = request.financeChartType ?: financeSelection?.chartType,
                 financeTileId = request.financeTileId ?: financeSelection?.id,
-                financeLiveEnabled = request.financeLiveEnabled
+                financeLiveEnabled = financeLiveEnabled
             )
         )
     }
@@ -212,16 +229,7 @@ class GlassesDataSyncCoordinator(
             refreshNewsLocally(request.force, request.reason, request.countryCode)
         }
         if (SyncChannel.FINANCE in request.channels) {
-            refreshFinanceLocally(
-                request.force,
-                request.reason,
-                request.countryCode,
-                request.financeSymbol,
-                request.financeRange,
-                request.financeAssetType,
-                request.financeChartType,
-                request.financeTileId
-            )
+            refreshFinanceLocally(request)
         }
     }
 
@@ -287,38 +295,33 @@ class GlassesDataSyncCoordinator(
         }.start()
     }
 
-    private fun refreshFinanceLocally(
-        force: Boolean,
-        reason: String,
-        countryCode: String?,
-        financeSymbol: String?,
-        financeRange: String?,
-        financeAssetType: com.everyday.shared.sync.FinanceAssetType?,
-        financeChartType: com.everyday.shared.sync.FinanceChartType?,
-        financeTileId: String?
-    ) {
-        val country = countryCode ?: snapshotStore.loadWeather()?.countryCode
-        val selection = widgetContainer.currentFinanceSelection()
-        val symbol = financeSymbol
-            ?: selection?.symbol
-            ?: snapshotStore.loadFinance()?.symbol
-            ?: FinanceDataProvider.defaultIndexForCountry(country).symbol
-        val range = FinanceTimeRange.fromRange(financeRange ?: selection?.range ?: snapshotStore.loadFinance()?.range)
+    private fun refreshFinanceLocally(request: SyncRequest) {
+        val visibleConfigs = resolveVisibleFinanceConfigs(request)
+        if (visibleConfigs.isEmpty()) return
         val cached = snapshotStore.loadFinance()
-        val assetType = financeAssetType ?: selection?.assetType ?: cached?.assetType
-        if (!force && cached != null && !cached.isStale() && cached.symbol == symbol && cached.range == range.range && cached.assetType == (assetType ?: cached.assetType)) {
-            return
+        val cachedTilesById = cached?.tiles.orEmpty().associateBy { it.id }
+        val refreshIds = request.financeRefreshTileIds.toSet()
+        val configsToFetch = visibleConfigs.filter { config ->
+            request.force ||
+                config.id in refreshIds ||
+                cachedTilesById[config.id]?.let {
+                    SyncCachePolicy.isStale(it.fetchedAtMs, it.staleAfterMs) ||
+                        it.symbol != config.symbol ||
+                        it.range != config.range ||
+                        it.assetType != config.assetType ||
+                        (config.chartType == com.everyday.shared.sync.FinanceChartType.CANDLE && it.candles.isEmpty())
+                } ?: true
         }
+        if (configsToFetch.isEmpty()) return
         Thread {
             try {
-                val config = FinanceDashboardTileConfig(
-                    id = financeTileId ?: selection?.id ?: "local_${symbol}_${range.range}",
-                    assetType = financeAssetType ?: selection?.assetType ?: cached?.assetType ?: com.everyday.shared.sync.FinanceAssetType.INDEX,
-                    symbol = symbol,
-                    range = range.range,
-                    chartType = financeChartType ?: selection?.chartType ?: cached?.chartType ?: com.everyday.shared.sync.FinanceChartType.LINE
-                )
-                val tile = FinanceDataProvider.fetchTile(config).getOrThrow()
+                val fetchedTiles = configsToFetch.map { config ->
+                    FinanceDataProvider.fetchTile(config).getOrThrow()
+                }
+                val tiles = (visibleConfigs.mapNotNull { config ->
+                    fetchedTiles.firstOrNull { it.id == config.id } ?: cachedTilesById[config.id]
+                }).ifEmpty { fetchedTiles }
+                val tile = tiles.first()
                 val snapshot = FinanceSnapshot(
                     symbol = tile.symbol,
                     displayName = tile.displayName,
@@ -329,13 +332,13 @@ class GlassesDataSyncCoordinator(
                     percentChange = tile.percentChange,
                     assetType = tile.assetType,
                     chartType = tile.chartType,
-                    tiles = listOf(tile),
+                    tiles = tiles,
                     fetchedAtMs = tile.fetchedAtMs,
                     staleAfterMs = tile.staleAfterMs
                 )
                 snapshotStore.saveFinance(snapshot)
                 applyFinance(snapshot)
-                Log.d(TAG, "Local finance refresh success: reason=$reason symbol=$symbol range=${range.range}")
+                Log.d(TAG, "Local finance refresh success: reason=${request.reason} tiles=${fetchedTiles.size}")
             } catch (error: Throwable) {
                 Log.w(TAG, "Local finance refresh failed", error)
                 postUi {
@@ -344,6 +347,26 @@ class GlassesDataSyncCoordinator(
                 }
             }
         }.start()
+    }
+
+    private fun resolveVisibleFinanceConfigs(request: SyncRequest): List<FinanceDashboardTileConfig> {
+        if (request.financeLiveEnabled == false) return emptyList()
+        request.financeTiles.takeIf { it.isNotEmpty() }?.let { return it }
+        widgetContainer.currentFinanceVisibleConfigs().takeIf { it.isNotEmpty() }?.let { return it }
+        val symbol = request.financeSymbol
+        if (symbol != null) {
+            val range = FinanceTimeRange.fromRange(request.financeRange)
+            return listOf(
+                FinanceDashboardTileConfig(
+                    id = request.financeTileId ?: "finance_${symbol}_${range.range}",
+                    assetType = request.financeAssetType ?: snapshotStore.loadFinance()?.assetType ?: com.everyday.shared.sync.FinanceAssetType.INDEX,
+                    symbol = symbol,
+                    range = range.range,
+                    chartType = request.financeChartType ?: snapshotStore.loadFinance()?.chartType ?: com.everyday.shared.sync.FinanceChartType.LINE
+                )
+            )
+        }
+        return emptyList()
     }
 
     private fun refreshCalendarLocally(force: Boolean) {
@@ -386,6 +409,7 @@ class GlassesDataSyncCoordinator(
             snapshot.calendar?.let(::applyCalendar)
             snapshot.news?.let(::applyNews)
             snapshot.finance?.let { applyFinance(it, notify = false) }
+            snapshot.notifications?.let(widgetContainer::applyNotificationsSnapshot)
             if (notify) notifyContentChanged()
         }
     }

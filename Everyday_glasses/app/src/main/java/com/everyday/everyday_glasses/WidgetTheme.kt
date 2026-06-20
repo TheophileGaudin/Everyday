@@ -31,7 +31,6 @@ object WidgetTheme {
         val selectionHighlight: Int = Color.parseColor("#806699FF")
         val scrollbarTrack: Int = Color.parseColor("#22666688")
         val scrollbarThumb: Int = Color.parseColor("#66888899")
-        val streamOkBorder: Int = Color.parseColor("#44AA44")
         val streamErrorBorder: Int = dangerButton
         val streamErrorText: Int = Color.parseColor("#FF6666")
         val stopButton: Int = Color.parseColor("#D32F2F")

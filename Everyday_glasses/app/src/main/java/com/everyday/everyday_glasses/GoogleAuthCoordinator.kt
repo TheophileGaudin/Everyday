@@ -170,17 +170,6 @@ class GoogleAuthCoordinator(
         }
     }
 
-    fun cancelActiveFlow() {
-        val flow = activeFlow ?: return
-        flow.canceled.set(true)
-        activeFlow = null
-
-        pendingTokenCallback?.invoke(Result.failure(GoogleUserCanceledException()))
-        pendingTokenCallback = null
-
-        saveStableState(flow.fallbackState)
-    }
-
     fun disconnect() {
         activeFlow?.canceled?.set(true)
         activeFlow = null

@@ -265,20 +265,6 @@ class ThreeDofManager(context: Context) : SensorEventListener {
         )
     }
 
-    fun recenter() {
-        if (!is3DofEnabled) return
-        Log.d(TAG, "Recentering 3DOF view")
-        accumulatedYaw = 0f
-        accumulatedPitch = 0f
-        accumulatedRoll = 0f
-        smoothYaw = 0f
-        smoothPitch = 0f
-        smoothRoll = 0f
-        referenceOrientationAngles = null
-        onOrientationChanged?.invoke(0f, 0f)
-        onRollChanged?.invoke(0f)
-    }
-
     fun release() {
         stopSensorListening()
         stopUpdateLoop()

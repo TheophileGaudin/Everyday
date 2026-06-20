@@ -280,6 +280,23 @@ class WidgetPersistenceHelper(private val context: Context) {
         }
     }
 
+    fun getNotificationsWidgetState(notificationsWidget: NotificationsWidget?): WidgetPersistence.NotificationsWidgetState? {
+        return notificationsWidget?.let {
+            val c = extractCommonFields(it)
+            WidgetPersistence.NotificationsWidgetState(
+                x = c.x, y = c.y, width = c.width, height = c.height,
+                widgetFontScale = it.getWidgetFontScale(),
+                toastFontScale = it.getToastFontScale(),
+                scrollIndex = it.getScrollIndex(),
+                isMinimized = c.isMinimized,
+                isFullscreen = c.isFullscreen,
+                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                isPinned = c.isPinned
+            )
+        }
+    }
+
     /**
      * Get speedometer widget state for persistence.
      */
@@ -699,6 +716,30 @@ class WidgetPersistenceHelper(private val context: Context) {
             restoreCommonState(nw, state, adjustedX, adjustedY)
 
             Log.d(TAG, "Restored news widget: ($adjustedX, $adjustedY) ${adjustedWidth}x${adjustedHeight} country=${state.countryCode} index=${state.selectedIndex} fontScale=${state.fontScale}")
+        }
+    }
+
+    fun restoreNotificationsWidgetPosition(
+        notificationsWidget: NotificationsWidget?,
+        state: WidgetPersistence.NotificationsWidgetState,
+        screenWidth: Int,
+        screenHeight: Int
+    ) {
+        notificationsWidget?.let { widget ->
+            val adjustedX = state.x.coerceIn(0f, (screenWidth - state.width).coerceAtLeast(0f))
+            val adjustedY = state.y.coerceIn(0f, (screenHeight - state.height).coerceAtLeast(0f))
+            val adjustedWidth = state.width.coerceIn(220f, screenWidth.toFloat())
+            val adjustedHeight = state.height.coerceIn(120f, screenHeight.toFloat())
+
+            widget.setPosition(adjustedX, adjustedY)
+            widget.widgetWidth = adjustedWidth
+            widget.widgetHeight = adjustedHeight
+            widget.setWidgetFontScale(state.widgetFontScale)
+            widget.setToastFontScale(state.toastFontScale)
+            widget.setScrollIndex(state.scrollIndex)
+            restoreCommonState(widget, state, adjustedX, adjustedY)
+
+            Log.d(TAG, "Restored notifications widget: ($adjustedX, $adjustedY) ${adjustedWidth}x${adjustedHeight} index=${state.scrollIndex}")
         }
     }
 

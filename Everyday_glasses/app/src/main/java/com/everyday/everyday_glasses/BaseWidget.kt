@@ -349,14 +349,6 @@ abstract class BaseWidget(
     }
 
     /**
-     * Check if cursor is hovering over the border area (not content).
-     * DEPRECATED: Use isBorderHovered instead for visibility decisions.
-     */
-    protected open fun isHoveringBorder(): Boolean {
-        return _isBorderHovered
-    }
-
-    /**
      * Check if border buttons should be shown.
      * Buttons remain a border-specific affordance even though the border itself
      * is now visible whenever the widget is hovered anywhere.
@@ -411,34 +403,20 @@ abstract class BaseWidget(
         }
 
         // Check resize handle (if not fullscreen or minimized)
-        if (!isFullscreen && !isMinimized) {
-            val expandedResizeBounds = RectF(
-                resizeHandleBounds.left - 10f,
-                resizeHandleBounds.top - 10f,
-                resizeHandleBounds.right + 10f,
-                resizeHandleBounds.bottom + 10f
-            )
-            if (expandedResizeBounds.contains(px, py)) {
-                return BaseHitArea.RESIZE_HANDLE
-            }
+        if (!isFullscreen && !isMinimized && getResizeHitArea().contains(px, py)) {
+            return BaseHitArea.RESIZE_HANDLE
         }
-        
+
         // Check content area
         if (contentBounds.contains(px, py)) {
             return BaseHitArea.CONTENT
         }
-        
+
         // Check border (expanded hit area)
-        val expandedBounds = RectF(
-            widgetBounds.left - BORDER_HIT_AREA,
-            widgetBounds.top - BORDER_HIT_AREA,
-            widgetBounds.right + BORDER_HIT_AREA,
-            widgetBounds.bottom + BORDER_HIT_AREA
-        )
-        if (expandedBounds.contains(px, py)) {
+        if (getBorderHitArea().contains(px, py)) {
             return BaseHitArea.BORDER
         }
-        
+
         return BaseHitArea.NONE
     }
     
@@ -453,23 +431,9 @@ abstract class BaseWidget(
         if (minimizeButtonBounds.contains(px, py)) return true
         if (pinButtonBounds.contains(px, py)) return true
 
-        if (!isFullscreen && !isMinimized) {
-            val expandedResizeBounds = RectF(
-                resizeHandleBounds.left - 10f,
-                resizeHandleBounds.top - 10f,
-                resizeHandleBounds.right + 10f,
-                resizeHandleBounds.bottom + 10f
-            )
-            if (expandedResizeBounds.contains(px, py)) return true
-        }
-        
-        val expandedBounds = RectF(
-            widgetBounds.left - BORDER_HIT_AREA,
-            widgetBounds.top - BORDER_HIT_AREA,
-            widgetBounds.right + BORDER_HIT_AREA,
-            widgetBounds.bottom + BORDER_HIT_AREA
-        )
-        return expandedBounds.contains(px, py)
+        if (!isFullscreen && !isMinimized && getResizeHitArea().contains(px, py)) return true
+
+        return getBorderHitArea().contains(px, py)
     }
     
     // ==================== Hover Update ====================
@@ -484,6 +448,16 @@ abstract class BaseWidget(
             widgetBounds.top - BORDER_HIT_AREA,
             widgetBounds.right + BORDER_HIT_AREA,
             widgetBounds.bottom + BORDER_HIT_AREA
+        )
+    }
+
+    /** Resize-handle hit area, expanded 10px on every side. */
+    protected fun getResizeHitArea(): RectF {
+        return RectF(
+            resizeHandleBounds.left - 10f,
+            resizeHandleBounds.top - 10f,
+            resizeHandleBounds.right + 10f,
+            resizeHandleBounds.bottom + 10f
         )
     }
 
@@ -514,15 +488,7 @@ abstract class BaseWidget(
         if (pinButtonBounds.contains(px, py)) return true
 
         // Resize handle counts as border
-        if (!isFullscreen && !isMinimized) {
-            val expandedResizeBounds = RectF(
-                resizeHandleBounds.left - 10f,
-                resizeHandleBounds.top - 10f,
-                resizeHandleBounds.right + 10f,
-                resizeHandleBounds.bottom + 10f
-            )
-            if (expandedResizeBounds.contains(px, py)) return true
-        }
+        if (!isFullscreen && !isMinimized && getResizeHitArea().contains(px, py)) return true
 
         return false
     }
@@ -568,26 +534,15 @@ abstract class BaseWidget(
         }
 
         // Also check resize handle specifically
-        if (!isFullscreen && !isMinimized) {
-            val expandedResizeBounds = RectF(
-                resizeHandleBounds.left - 10f,
-                resizeHandleBounds.top - 10f,
-                resizeHandleBounds.right + 10f,
-                resizeHandleBounds.bottom + 10f
-            )
-            if (expandedResizeBounds.contains(px, py)) {
-                baseState = BaseState.HOVER_RESIZE
-                _isBorderHovered = true
-                return BaseState.HOVER_RESIZE
-            }
+        if (!isFullscreen && !isMinimized && getResizeHitArea().contains(px, py)) {
+            baseState = BaseState.HOVER_RESIZE
+            _isBorderHovered = true
+            return BaseState.HOVER_RESIZE
         }
 
         baseState = newState
         return newState
     }
-
-    protected fun currentInteractionState(): WidgetInteractionState =
-        WidgetInteractionState(baseState)
 
     /**
      * Update hover state from cursor position.
@@ -624,24 +579,6 @@ abstract class BaseWidget(
         }
     }
 
-    /**
-     * Clear hover state - call when cursor leaves the widget entirely.
-     */
-    fun clearHoverState() {
-        if (baseState != BaseState.MOVING && baseState != BaseState.RESIZING) {
-            baseState = BaseState.IDLE
-            _isBorderHovered = false
-        }
-    }
-
-    /**
-     * Update base hover state from cursor position.
-     * DEPRECATED: Use updateHoverState instead for unified behavior.
-     */
-    protected open fun updateBaseHover(px: Float, py: Float): BaseState {
-        return updateHoverState(px, py)
-    }
-    
     // ==================== Fullscreen ====================
     
     fun toggleFullscreen() {
@@ -1005,7 +942,7 @@ abstract class BaseWidget(
     }
 
     protected fun drawResizeHandle(canvas: Canvas) {
-        if (!isFullscreen && !isMinimized && isHoveringBorder()) {
+        if (!isFullscreen && !isMinimized && isBorderHovered) {
             val hx = resizeHandleBounds.right - 4f
             val hy = resizeHandleBounds.bottom - 4f
             canvas.drawLine(hx - 16f, hy, hx, hy - 16f, resizeHandlePaint)

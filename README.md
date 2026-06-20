@@ -18,7 +18,7 @@ Everyday also includes a configurable hover shortcut control, "the lemon", for q
 5. **Text editor**: text can be formatted and arranged in columns. Paste directly from your phone clipboard.
 6. **Image display**: open an image from phone or glasses storage.
 7. **News**: RSS feed for your country. Titles auto-update and can be expanded.
-8. **Finance**: follow stocks, currencies, cryptocurrencies, and multiple charts, including candle charts. Double-tap to open full screen and configure / order charts. Finance data are experimental and indicative only. Do not rely on them for financial decisions. The app developer does not provide financial advice. 
+8. **Finance**: follow stocks, currencies, cryptocurrencies, and multiple charts, including candle charts. Double-tap to open full screen and configure / order charts. Finance data are experimental and indicative only. Do not rely on them for financial decisions. The app developer does not provide financial advice.
 9. **Speedometer**: shows your current speed. Has an adjustable threshold below which it disappears.
 10. **Google Calendar**: see what's next on your agenda. Tap to browse upcoming events, double-tap to go back. Requires Google sign-in (see below).
 11. **Subtitles**: Subtitle the audio content from your phone. Useful for hearing disabiilities or when ambient noise is high.
@@ -56,11 +56,11 @@ Then:
 1. Plug glasses to computer
 2. Open a terminal
 3. Navigate to where the APK is
-4. Run `adb install everyday0.7_glasses.apk`
+4. Run `adb install everyday0.8_glasses.apk`
 
 **On phone**
 
-Install `everyday0.7_phone.apk` via sideloading on your Android phone.
+Install `everyday0.8_phone.apk` via sideloading on your Android phone.
 
 See the [InformalTech tutorial](https://www.youtube.com/watch?v=l3wu7x14LKY) for a full walkthrough.
 

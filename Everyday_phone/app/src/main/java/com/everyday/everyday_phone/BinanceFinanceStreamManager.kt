@@ -25,6 +25,25 @@ class BinanceFinanceStreamManager(
     private val lastSentAtMs = ConcurrentHashMap<String, Long>()
     private val latestCandles = ConcurrentHashMap<String, MutableList<FinanceCandle>>()
 
+    fun reconcileVisible(configs: List<FinanceDashboardTileConfig>, seeds: Map<String, FinanceTileSnapshot> = emptyMap()) {
+        val visibleCryptoConfigs = configs.filter { it.assetType == FinanceAssetType.CRYPTO }
+        val visibleKeys = visibleCryptoConfigs.map(::key).toSet()
+        sockets.keys
+            .filter { it !in visibleKeys }
+            .forEach { key ->
+                sockets.remove(key)?.close(1000, "tile hidden")
+                latestCandles.remove(key)
+                lastSentAtMs.remove(key)
+            }
+        visibleCryptoConfigs.forEach { config ->
+            subscribe(config, seeds[config.id])
+        }
+        if (visibleCryptoConfigs.isEmpty()) {
+            latestCandles.clear()
+            lastSentAtMs.clear()
+        }
+    }
+
     fun subscribe(config: FinanceDashboardTileConfig, seed: FinanceTileSnapshot? = null) {
         if (config.assetType != FinanceAssetType.CRYPTO) return
         val key = key(config)
@@ -39,23 +58,22 @@ class BinanceFinanceStreamManager(
         sockets[key] = client.newWebSocket(request, Listener(config))
     }
 
-    fun unsubscribe(config: FinanceDashboardTileConfig) {
-        sockets.remove(key(config))?.close(1000, "tile removed")
-    }
-
     fun stopAll() {
         sockets.values.forEach { it.close(1000, "finance stream stopped") }
         sockets.clear()
+        latestCandles.clear()
+        lastSentAtMs.clear()
     }
 
     private inner class Listener(private val config: FinanceDashboardTileConfig) : WebSocketListener() {
         override fun onMessage(webSocket: WebSocket, text: String) {
+            val key = key(config)
+            if (!sockets.containsKey(key)) return
             val tile = runCatching { parseKline(config, text) }.getOrElse {
                 log("Binance parse failed: ${it.message}")
                 return
             }
             val now = System.currentTimeMillis()
-            val key = key(config)
             if (now - (lastSentAtMs[key] ?: 0L) < 1000L) return
             lastSentAtMs[key] = now
             onSnapshot(tile.toSnapshot())

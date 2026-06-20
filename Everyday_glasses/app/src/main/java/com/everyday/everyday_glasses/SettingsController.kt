@@ -82,10 +82,6 @@ class SettingsController(
         notifyContentChanged()
     }
 
-    fun dismissHoverControlsLayoutEditor() {
-        hoverControlsLayoutEditor?.dismiss()
-    }
-
     fun getHoverControlPlacements(): List<WidgetPersistence.HoverControlPlacementState>? =
         hoverControlsLayoutEditor?.exportPlacements()
             ?: hoverControlPlacements.takeIf { hasHoverControlPlacements }
@@ -266,13 +262,6 @@ class SettingsController(
         return true
     }
 
-    fun handleShortcutsSettingsMenuScroll(x: Float, y: Float, dy: Float): Boolean {
-        val menu = shortcutsSettingsMenu ?: return false
-        if (!menu.isVisible) return false
-        menu.onScroll(x, y, dy)
-        notifyContentChanged()
-        return true
-    }
 
     fun handleSpeedometerDown(x: Float, y: Float): Boolean {
         val menu = speedometerSettingsMenu ?: return false

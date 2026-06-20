@@ -61,8 +61,6 @@ class TextInputView @JvmOverloads constructor(
         isFocusable = true
     }
     
-    fun getText(): String = text
-    
     fun setText(newText: String) {
         text = newText
         invalidate()

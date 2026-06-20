@@ -250,6 +250,7 @@ class LemonHoverControl(
         ShortcutAction.ToggleCalendar -> "Calendar"
         ShortcutAction.ToggleFinance -> "Finance"
         ShortcutAction.ToggleNews -> "News"
+        ShortcutAction.ToggleNotifications -> "Alerts"
         ShortcutAction.ToggleSpeedometer -> "Speed"
         ShortcutAction.ToggleSubtitle -> "Subs"
         ShortcutAction.ToggleMirror -> "Mirror"

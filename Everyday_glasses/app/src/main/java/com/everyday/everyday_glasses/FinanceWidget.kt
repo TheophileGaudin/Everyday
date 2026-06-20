@@ -34,10 +34,7 @@ class FinanceWidget(
         const val MAX_TILES = 9
 
         private const val HEADER_HEIGHT = 0f
-        private const val NAV_WIDTH = 24f
         private const val TILE_GAP = 6f
-        private const val SETTINGS_WIDTH = 420f
-        private const val SETTINGS_HEIGHT = 330f
         private const val ROW_HEIGHT = 32f
         private const val DEFAULT_FULLSCREEN_WIDTH = 640f
         private const val DEFAULT_FULLSCREEN_HEIGHT = 480f
@@ -68,11 +65,8 @@ class FinanceWidget(
     private val slotBounds = mutableListOf<Pair<Int, RectF>>()
     private val tileControlBounds = mutableListOf<TileControlHit>()
     private val navBounds = mutableListOf<Pair<Int, RectF>>()
-    private val settingsRows = mutableListOf<Pair<Int, RectF>>()
-    private val settingsButtonBounds = mutableMapOf<String, RectF>()
     private val tilingMenuButtonBounds = mutableMapOf<String, RectF>()
     private val dashboardContentBounds = RectF()
-    private val settingsBounds = RectF()
     private val tilingMenuBounds = RectF()
     private val tilingMenuHoverBounds = RectF()
 
@@ -93,7 +87,7 @@ class FinanceWidget(
     private var tiles = mutableListOf(defaultTile("^GSPC"))
 
     var onStateChanged: (() -> Unit)? = null
-    var onDataRequested: ((config: FinanceDashboardTileConfig, force: Boolean, reason: String) -> Unit)? = null
+    var onDataRequested: ((visibleConfigs: List<FinanceDashboardTileConfig>, refreshTileIds: List<String>, force: Boolean, reason: String) -> Unit)? = null
 
     private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
@@ -194,18 +188,9 @@ class FinanceWidget(
         textSize = 13f
         textAlign = Paint.Align.CENTER
     }
-    private val settingsTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        textSize = 22f
-        isFakeBoldText = true
-    }
     private val settingsTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textSize = 14f
-    }
-    private val settingsMutedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#AEB4C4")
-        textSize = 12f
     }
 
     init {
@@ -254,22 +239,13 @@ class FinanceWidget(
         }
     }
 
-    fun setSymbolAndRange(symbol: String, range: String) {
-        countryCodeSet = true
-        tiles = mutableListOf(defaultTile(symbol).copy(range = FinanceTimeRange.fromRange(range).range, slot = 0))
-        navigationIndex = 0
-        selectedTileIndex = 0
-        updateLegacySelection()
-        updateInternalBounds()
-    }
-
     fun requestData(force: Boolean = false, reason: String = "manual") {
-        visibleTileConfigs().forEach { config ->
-            val needsData = shouldRequest(config)
-            if (force || needsData) {
-                onDataRequested?.invoke(config, force || needsData, reason)
-            }
-        }
+        val visibleConfigs = visibleTileConfigs()
+        if (visibleConfigs.isEmpty()) return
+        val refreshTileIds = visibleConfigs
+            .filter { config -> force || shouldRequest(config) }
+            .map { it.id }
+        onDataRequested?.invoke(visibleConfigs, refreshTileIds, force, reason)
     }
 
     fun applySnapshot(snapshot: FinanceSnapshot) {
@@ -822,28 +798,6 @@ class FinanceWidget(
         }
     }
 
-    private fun layoutSettings() {
-        settingsButtonBounds.clear()
-        settingsRows.clear()
-        val left = x + (widgetWidth - SETTINGS_WIDTH).coerceAtLeast(0f) / 2f
-        val top = y + (widgetHeight - SETTINGS_HEIGHT).coerceAtLeast(0f) / 2f
-        settingsBounds.set(left, top, (left + SETTINGS_WIDTH).coerceAtMost(x + widgetWidth), (top + SETTINGS_HEIGHT).coerceAtMost(y + widgetHeight))
-        val buttonTop = settingsBounds.top + 66f
-        var buttonLeft = settingsBounds.left + 18f
-        listOf("add", "remove", "up", "down", "done").forEach { id ->
-            val width = if (id == "done") 72f else 64f
-            settingsButtonBounds[id] = RectF(buttonLeft, buttonTop, buttonLeft + width, buttonTop + 28f)
-            buttonLeft += width + 8f
-        }
-        var rowTop = buttonTop + 42f
-        tiles.indices.forEach { index ->
-            if (rowTop + ROW_HEIGHT <= settingsBounds.bottom - 12f) {
-                settingsRows.add(index to RectF(settingsBounds.left + 18f, rowTop, settingsBounds.right - 18f, rowTop + ROW_HEIGHT - 4f))
-            }
-            rowTop += ROW_HEIGHT
-        }
-    }
-
     private fun layoutTilingMenu() {
         tilingMenuButtonBounds.clear()
         val buttonW = 32f
@@ -951,9 +905,7 @@ class FinanceWidget(
         if (index !in visibleIndices(capacity)) return
         val config = tiles.getOrNull(index) ?: return
         val needsData = shouldRequest(config)
-        if (force || needsData) {
-            onDataRequested?.invoke(config, force || needsData, reason)
-        }
+        onDataRequested?.invoke(listOf(config), if (force || needsData) listOf(config.id) else emptyList(), force, reason)
     }
 
     private fun shouldRequest(config: FinanceDashboardTileConfig): Boolean {

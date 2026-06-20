@@ -1,0 +1,12 @@
+New widget
+
+Added notification center. Just a way to access the notifications from within the app.
+
+Fixes / optimization
+
+Optimized finance widget to request updates only for visible charts
+Fixed limited interaction with YouTube window (eg, interaction with time bar)
+Fixed inconsistent brightness override with browser widget
+Added brightness change on layout change
+Made keyboard top priority over any hover controls like lemon
+Streamlined functionality / removed deprecated code

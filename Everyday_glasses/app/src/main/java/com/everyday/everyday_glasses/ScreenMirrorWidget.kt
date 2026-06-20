@@ -103,11 +103,6 @@ class ScreenMirrorWidget(
     private var isDisplayVisible = true
     private var lastReportedMediaActive = false
     
-    private val streamingBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = BORDER_WIDTH
-        color = WidgetTheme.ColorValue.streamOkBorder
-    }
     private val errorBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = BORDER_WIDTH

@@ -537,20 +537,6 @@ class LocationWeatherService : Service() {
     }
 
     /**
-     * Push the current cached payload to the glasses without forcing a provider refresh.
-     * Returns true when there was a valid payload to send.
-     */
-    fun pushCachedPayloadToCoordinator(): Boolean {
-        val hasPayload = cachedTown != null && cachedCountryCode != null && payloadTimestamp > 0L
-        if (hasPayload) {
-            notifySnapshotChanged()
-        } else if (payloadTimestamp == 0L) {
-            fileLog("Skipping cached payload push - timestamp is 0 (data not yet refreshed this session)")
-        }
-        return hasPayload
-    }
-
-    /**
      * Get current cached location data. Used by RfcommServer for immediate sends.
      * Returns town, countryCode, full WeatherData, and timestamp for proper display.
      */

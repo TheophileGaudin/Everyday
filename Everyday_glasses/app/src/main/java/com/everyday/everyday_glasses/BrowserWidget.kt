@@ -69,6 +69,8 @@ class BrowserWidget(
         private const val AUTO_FULLSCREEN_VIDEO_WINDOW_MS = 45_000L
         private const val AUTO_FULLSCREEN_GESTURE_MAX_ATTEMPTS = 10
         private const val AUTO_FULLSCREEN_GESTURE_RETRY_MS = 900L
+        private const val CONTENT_INTERACTION_QUERY_INTERVAL_MS = 80L
+        private const val CONTENT_INTERACTION_CACHE_RADIUS_PX = 36f
     }
 
     /**
@@ -414,6 +416,11 @@ class BrowserWidget(
     private var isHoveringNewTab = false
     private var cursorSafeX = Float.NEGATIVE_INFINITY
     private var cursorSafeY = Float.NEGATIVE_INFINITY
+    private var isContentInteractionTarget = false
+    private var contentInteractionTargetX = Float.NEGATIVE_INFINITY
+    private var contentInteractionTargetY = Float.NEGATIVE_INFINITY
+    private var lastContentInteractionQueryMs = 0L
+    private var contentInteractionQueryGeneration = 0
     
     // URL editing state
     private var isEditingUrl = false
@@ -433,9 +440,6 @@ class BrowserWidget(
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var isVideoFullscreen = false
-    private var fullscreenTouchOverlay: View? = null
-    private var lastTapTime: Long = 0
-    private val doubleTapTimeout = 300L // ms between taps to count as double tap
     private val loadingAnimationHandler = Handler(Looper.getMainLooper())
     private var loadingAnimationRunnable: Runnable? = null
     private var loadingSpinnerStartMs: Long = 0L
@@ -505,6 +509,27 @@ class BrowserWidget(
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(webView, true)
         }
+    }
+
+    private fun injectBrowserInputDefaults(view: WebView?) {
+        view ?: return
+        val script = """
+            (function() {
+              if (!window.__everydayBrowserInputDefaultsInstalled) {
+                window.__everydayBrowserInputDefaultsInstalled = true;
+
+                var style = document.createElement('style');
+                style.id = 'everyday-browser-input-defaults';
+                style.textContent =
+                  'html, body, * {' +
+                  '  touch-action: none !important;' +
+                  '  overscroll-behavior: none !important;' +
+                  '}';
+                (document.head || document.documentElement || document.body).appendChild(style);
+              }
+            })();
+        """.trimIndent()
+        view.evaluateJavascript(script, null)
     }
 
     private fun injectUnmutedMediaDefaults(view: WebView?) {
@@ -671,6 +696,7 @@ class BrowserWidget(
     }
 
     private fun injectMediaPlaybackDefaults(view: WebView?) {
+        injectBrowserInputDefaults(view)
         injectUnmutedMediaDefaults(view)
         if (shouldAutoFullscreenVideo()) {
             injectAutoFullscreenForPlayingVideo(view)
@@ -1701,10 +1727,77 @@ class BrowserWidget(
             if (lastDownTime > 0) lastDownTime else now
         }
 
+        injectBrowserInputDefaults(activeWebView)
         dispatchTouchEventInternal(activeWebView, x, y, action, downTime, now)
 
         if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
             lastDownTime = 0L
+        }
+    }
+
+    fun shouldStartContentTouch(px: Float, py: Float): Boolean {
+        updateContentInteractionTarget(px, py)
+        if (!isContentInteractionTarget) return false
+
+        val dx = px - contentInteractionTargetX
+        val dy = py - contentInteractionTargetY
+        return dx * dx + dy * dy <= CONTENT_INTERACTION_CACHE_RADIUS_PX * CONTENT_INTERACTION_CACHE_RADIUS_PX
+    }
+
+    private fun updateContentInteractionTarget(px: Float, py: Float) {
+        val activeWebView = webView ?: return
+        val contentArea = getWebViewBounds()
+        if (!contentArea.contains(px, py)) {
+            isContentInteractionTarget = false
+            return
+        }
+
+        val now = android.os.SystemClock.uptimeMillis()
+        val dx = px - contentInteractionTargetX
+        val dy = py - contentInteractionTargetY
+        val nearCachedPoint = dx * dx + dy * dy <= CONTENT_INTERACTION_CACHE_RADIUS_PX * CONTENT_INTERACTION_CACHE_RADIUS_PX
+        if (nearCachedPoint && now - lastContentInteractionQueryMs < CONTENT_INTERACTION_QUERY_INTERVAL_MS) {
+            return
+        }
+
+        lastContentInteractionQueryMs = now
+        val generation = ++contentInteractionQueryGeneration
+        val localX = (px - contentBounds.left).coerceIn(0f, activeWebView.width.toFloat().coerceAtLeast(1f) - 1f)
+        val localY = (py - (contentBounds.top + NAV_BAR_HEIGHT + TAB_BAR_HEIGHT))
+            .coerceIn(0f, activeWebView.height.toFloat().coerceAtLeast(1f) - 1f)
+        val cssScale = activeWebView.scale.coerceAtLeast(0.1f)
+        val cssX = localX / cssScale
+        val cssY = localY / cssScale
+
+        activeWebView.evaluateJavascript("""
+            (function() {
+                var el = document.elementFromPoint($cssX, $cssY);
+                var depth = 0;
+                while (el && depth++ < 8) {
+                    var tag = (el.tagName || '').toLowerCase();
+                    if (tag === 'html' || tag === 'body') return false;
+
+                    var role = (el.getAttribute('role') || '').toLowerCase();
+                    var cursor = '';
+                    try { cursor = (window.getComputedStyle(el).cursor || '').toLowerCase(); } catch (e) {}
+
+                    if (/^(a|button|input|textarea|select|option|label|summary|video|audio)$/.test(tag)) return true;
+                    if (el.isContentEditable || el.getAttribute('contenteditable') === 'true') return true;
+                    if (el.hasAttribute('href') || el.hasAttribute('onclick') || typeof el.onclick === 'function') return true;
+                    if (el.hasAttribute('draggable') || el.getAttribute('aria-valuenow') != null || el.getAttribute('aria-valuemax') != null) return true;
+                    if (el.tabIndex >= 0) return true;
+                    if (/(button|link|checkbox|radio|menuitem|option|slider|spinbutton|switch|tab|textbox|searchbox|combobox)/.test(role)) return true;
+                    if (/(pointer|grab|grabbing|move|resize|col-resize|row-resize|ew-resize|ns-resize)/.test(cursor)) return true;
+
+                    el = el.parentElement;
+                }
+                return false;
+            })()
+        """.trimIndent()) { result ->
+            if (generation != contentInteractionQueryGeneration) return@evaluateJavascript
+            isContentInteractionTarget = result == "true"
+            contentInteractionTargetX = px
+            contentInteractionTargetY = py
         }
     }
 
@@ -2151,6 +2244,7 @@ class BrowserWidget(
 
         // Use unified hover state from BaseWidget
         val baseResult = updateHoverState(px, py)
+        updateContentInteractionTarget(px, py)
 
         // Update nav button specific hovers (for visual feedback)
         if (navBarBounds.contains(px, py)) {

@@ -92,6 +92,9 @@ class MainActivity : AppCompatActivity() {
     private var requestedBrightness = 1.0f
     private var adaptiveBrightnessEnabled = true
     private var isMediaBrightnessCapActive = false
+    private var isBrowserMinimumBrightnessActive = false
+    private var isLayoutSwitchMinimumBrightnessActive = false
+    private var layoutSwitchBrightnessRestoreRunnable: Runnable? = null
     private var isGlassesCharging = false
     private var smoothedAmbientLux: Float? = null
     private var lastAdaptiveBrightnessTarget: Float? = null
@@ -193,6 +196,7 @@ class MainActivity : AppCompatActivity() {
         // Keep media dimming visible; the only intentional full black mask is DisplayState.OFF.
         private const val MEDIA_WIDGET_BRIGHTNESS_CAP = 0.18f
         private const val MIN_WINDOW_BRIGHTNESS = 0.01f
+        private const val LAYOUT_SWITCH_MIN_BRIGHTNESS_DURATION_MS = 1_000L
         private const val MIN_ADAPTIVE_BRIGHTNESS = 0.08f
         private const val AMBIENT_LUX_REFERENCE = 10000f
         private const val AMBIENT_LUX_SMOOTHING_ALPHA = 0.2f
@@ -813,6 +817,15 @@ class MainActivity : AppCompatActivity() {
             applyEffectiveWindowBrightness()
         }
 
+        widgetContainer.onBrowserMinimumBrightnessChanged = { active ->
+            isBrowserMinimumBrightnessActive = active
+            applyEffectiveWindowBrightness()
+        }
+
+        widgetContainer.onLayoutSwitchBrightnessRequested = {
+            beginLayoutSwitchMinimumBrightness()
+        }
+
         // Setup head-up wake settings callbacks
         widgetContainer.onHeadUpTimeChanged = { ms ->
             if (::headUpWakeManager.isInitialized) {
@@ -930,8 +943,8 @@ class MainActivity : AppCompatActivity() {
                 notifyTransientBinocularChange()
             }
         )
-        widgetContainer.onFinanceDataRequested = { config, force, reason ->
-            dataSyncCoordinator.onFinanceDataRequested(config, force, reason)
+        widgetContainer.onFinanceDataRequested = { visibleConfigs, refreshTileIds, force, reason ->
+            dataSyncCoordinator.onFinanceDataRequested(visibleConfigs, refreshTileIds, force, reason)
         }
         widgetContainer.onFinanceVisibilityChanged = { visible ->
             dataSyncCoordinator.onFinanceVisibilityChanged(visible)
@@ -997,7 +1010,39 @@ class MainActivity : AppCompatActivity() {
         } else {
             1f
         }
-        return minOf(requestedBrightness, adaptiveTarget, mediaWidgetCap).coerceIn(MIN_WINDOW_BRIGHTNESS, 1f)
+        val browserWidgetCap = if (isBrowserMinimumBrightnessActive && !isGlassesCharging) {
+            MIN_WINDOW_BRIGHTNESS
+        } else {
+            1f
+        }
+        val layoutSwitchCap = if (isLayoutSwitchMinimumBrightnessActive && !isGlassesCharging) {
+            MIN_WINDOW_BRIGHTNESS
+        } else {
+            1f
+        }
+        return minOf(
+            requestedBrightness,
+            adaptiveTarget,
+            mediaWidgetCap,
+            browserWidgetCap,
+            layoutSwitchCap
+        ).coerceIn(MIN_WINDOW_BRIGHTNESS, 1f)
+    }
+
+    private fun beginLayoutSwitchMinimumBrightness() {
+        if (isGlassesCharging) return
+
+        layoutSwitchBrightnessRestoreRunnable?.let(handler::removeCallbacks)
+        isLayoutSwitchMinimumBrightnessActive = true
+        applyEffectiveWindowBrightness()
+
+        val restoreRunnable = Runnable {
+            isLayoutSwitchMinimumBrightnessActive = false
+            layoutSwitchBrightnessRestoreRunnable = null
+            applyEffectiveWindowBrightness()
+        }
+        layoutSwitchBrightnessRestoreRunnable = restoreRunnable
+        handler.postDelayed(restoreRunnable, LAYOUT_SWITCH_MIN_BRIGHTNESS_DURATION_MS)
     }
 
     private fun applyEffectiveWindowBrightness() {
@@ -1020,7 +1065,7 @@ class MainActivity : AppCompatActivity() {
         Log.d(
             TAG,
             "Window brightness set to: $appliedWindowBrightness " +
-                "(requested=$requestedBrightness, adaptive=$adaptiveBrightnessEnabled, mediaCapActive=$isMediaBrightnessCapActive, charging=$isGlassesCharging, lux=${smoothedAmbientLux ?: -1f})"
+                "(requested=$requestedBrightness, adaptive=$adaptiveBrightnessEnabled, mediaCapActive=$isMediaBrightnessCapActive, browserMinActive=$isBrowserMinimumBrightnessActive, layoutSwitchMinActive=$isLayoutSwitchMinimumBrightnessActive, charging=$isGlassesCharging, lux=${smoothedAmbientLux ?: -1f})"
         )
     }
 
@@ -1056,6 +1101,7 @@ class MainActivity : AppCompatActivity() {
         requestedBrightness = prefs.getFloat(KEY_BRIGHTNESS, DEFAULT_BRIGHTNESS).coerceIn(0f, 1f)
         adaptiveBrightnessEnabled = prefs.getBoolean(KEY_ADAPTIVE_BRIGHTNESS, DEFAULT_ADAPTIVE_BRIGHTNESS)
         isMediaBrightnessCapActive = widgetContainer.shouldApplyMediaBrightnessCap()
+        isBrowserMinimumBrightnessActive = widgetContainer.shouldApplyBrowserMinimumBrightness()
         isGlassesCharging = isChargingFromIntent(registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)))
         binocularView.setChargingState(isGlassesCharging)
 
@@ -1066,7 +1112,7 @@ class MainActivity : AppCompatActivity() {
 
         Log.d(
             TAG,
-            "Restored brightness settings: requested=$requestedBrightness adaptive=$adaptiveBrightnessEnabled mediaCapActive=$isMediaBrightnessCapActive charging=$isGlassesCharging"
+            "Restored brightness settings: requested=$requestedBrightness adaptive=$adaptiveBrightnessEnabled mediaCapActive=$isMediaBrightnessCapActive browserMinActive=$isBrowserMinimumBrightnessActive charging=$isGlassesCharging"
         )
     }
 
@@ -1856,6 +1902,9 @@ class MainActivity : AppCompatActivity() {
         // Stop auto-save
         autoSaveRunnable?.let { handler.removeCallbacks(it) }
 
+        layoutSwitchBrightnessRestoreRunnable?.let { handler.removeCallbacks(it) }
+        layoutSwitchBrightnessRestoreRunnable = null
+
         // Stop local speed/location updates
         stopSpeedLocationUpdates()
         stopAmbientLightMonitoring()
@@ -2533,22 +2582,6 @@ class MainActivity : AppCompatActivity() {
      * Handle file selection from the file picker.
      * Extensible to support different file types (images, PDFs, etc.)
      */
-    private fun handleFileSelection(uri: android.net.Uri, fileType: FilePicker.FileType) {
-        Thread {
-            try {
-                when (fileType) {
-                    FilePicker.FileType.IMAGE -> handleImageFile(uri)
-                    FilePicker.FileType.PDF -> {
-                        // Future: handle PDF files
-                        Log.d(TAG, "PDF handling not yet implemented")
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error handling file selection", e)
-            }
-        }.start()
-    }
-
     /**
      * Process an image file from the given URI.
      * Copies URI content to persistent app storage to get a durable file path for BitmapFactory.

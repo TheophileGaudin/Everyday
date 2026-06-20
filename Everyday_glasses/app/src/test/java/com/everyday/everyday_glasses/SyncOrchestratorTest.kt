@@ -112,7 +112,8 @@ class SyncOrchestratorTest {
                 weather = allSnapshot.weather.takeIf { SyncChannel.WEATHER in channels },
                 calendar = allSnapshot.calendar.takeIf { SyncChannel.CALENDAR in channels },
                 news = allSnapshot.news.takeIf { SyncChannel.NEWS in channels },
-                finance = allSnapshot.finance.takeIf { SyncChannel.FINANCE in channels }
+                finance = allSnapshot.finance.takeIf { SyncChannel.FINANCE in channels },
+                notifications = allSnapshot.notifications.takeIf { SyncChannel.NOTIFICATIONS in channels }
             )
     }
 }

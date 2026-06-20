@@ -99,6 +99,15 @@ class WidgetLayoutPersistenceTest {
                 selectedIndex = 3,
                 fontScale = 0.9f
             ),
+            notifications = WidgetPersistence.NotificationsWidgetState(
+                x = 10f,
+                y = 11f,
+                width = 240f,
+                height = 160f,
+                widgetFontScale = 1.2f,
+                toastFontScale = 1.3f,
+                scrollIndex = 2
+            ),
             speedometer = WidgetPersistence.SpeedometerWidgetState(
                 x = 11f,
                 y = 12f,
@@ -171,6 +180,9 @@ class WidgetLayoutPersistenceTest {
         assertEquals("1M", restored.finance!!.selectedRange)
         assertEquals("GB", restored.news!!.countryCode)
         assertEquals(3, restored.news!!.selectedIndex)
+        assertEquals(1.2f, restored.notifications!!.widgetFontScale, 0.001f)
+        assertEquals(1.3f, restored.notifications!!.toastFontScale, 0.001f)
+        assertEquals(2, restored.notifications!!.scrollIndex)
         assertEquals(160f, restored.speedometer!!.width, 0.001f)
         assertFalse(restored.subtitle!!.phonePlaybackEnabled)
         assertTrue(restored.subtitle!!.microphoneEnabled)

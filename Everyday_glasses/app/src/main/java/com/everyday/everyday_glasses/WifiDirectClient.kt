@@ -174,13 +174,6 @@ class WifiDirectClient(private val context: Context) {
         })
     }
 
-    /**
-     * Check if an IP address is in the WiFi Direct range.
-     */
-    fun isWifiDirectIp(ip: String): Boolean {
-        return ip.startsWith("192.168.49.")
-    }
-
     @SuppressLint("MissingPermission")
     fun disconnect() {
         wifiP2pManager?.removeGroup(channel, null)

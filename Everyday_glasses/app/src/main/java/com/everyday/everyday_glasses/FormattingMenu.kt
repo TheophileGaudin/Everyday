@@ -175,12 +175,6 @@ class FormattingMenu(
         color = Color.parseColor("#222233")
     }
     
-    private val symbolPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        textSize = 18f
-        textAlign = Paint.Align.CENTER
-    }
-    
     private val xPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         strokeWidth = 2f
@@ -513,23 +507,6 @@ class FormattingMenu(
         return true  // Consume tap on menu area
     }
     
-    /**
-     * Update the current font size display (e.g., when changed externally).
-     */
-    fun setCurrentFontSize(size: Float) {
-        fontSize = size.coerceIn(MIN_FONT_SIZE, MAX_FONT_SIZE)
-    }
-    
-    /**
-     * Set the formatting state (called by widget to sync state).
-     */
-    fun setFormattingState(bold: Boolean, italic: Boolean, underline: Boolean, wrap: Boolean) {
-        isBold = bold
-        isItalic = italic
-        isUnderline = underline
-        isTextWrap = wrap
-    }
-
     private fun drawColumnButton(canvas: Canvas, rect: RectF, columns: Int, isActive: Boolean, isHovered: Boolean) {
         // Draw background
         val bgPaint = when {

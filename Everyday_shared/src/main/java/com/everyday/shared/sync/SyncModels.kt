@@ -4,7 +4,8 @@ enum class SyncChannel(val wireName: String) {
     WEATHER("weather"),
     CALENDAR("calendar"),
     NEWS("news"),
-    FINANCE("finance");
+    FINANCE("finance"),
+    NOTIFICATIONS("notifications");
 
     companion object {
         val ALL: Set<SyncChannel> = values().toSet()
@@ -20,6 +21,8 @@ data class SyncRequest(
     val reason: String = "manual",
     val requestedAtMs: Long = System.currentTimeMillis(),
     val countryCode: String? = null,
+    val financeTiles: List<FinanceDashboardTileConfig> = emptyList(),
+    val financeRefreshTileIds: List<String> = emptyList(),
     val financeSymbol: String? = null,
     val financeRange: String? = null,
     val financeAssetType: FinanceAssetType? = null,
@@ -198,14 +201,46 @@ data class FinanceSnapshot(
     val staleAfterMs: Long = SyncCachePolicy.FINANCE_STALE_AFTER_MS
 )
 
+data class PhoneNotificationItem(
+    val key: String,
+    val packageName: String,
+    val appLabel: String,
+    val title: String,
+    val text: String,
+    val subText: String,
+    val postTime: Long,
+    val importance: Int,
+    val isOngoing: Boolean,
+    val isClearable: Boolean,
+    val category: String?
+) {
+    val previewText: String
+        get() = listOf(title, text, subText)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .joinToString(" - ")
+}
+
+data class PhoneNotificationsSnapshot(
+    val items: List<PhoneNotificationItem>,
+    val listenerEnabled: Boolean,
+    val capturedAtMs: Long = System.currentTimeMillis()
+)
+
 data class SyncSnapshot(
     val weather: WeatherSnapshot? = null,
     val calendar: CalendarSnapshot? = null,
     val news: NewsSnapshot? = null,
-    val finance: FinanceSnapshot? = null
+    val finance: FinanceSnapshot? = null,
+    val notifications: PhoneNotificationsSnapshot? = null
 ) {
     val isEmpty: Boolean
-        get() = weather == null && calendar == null && news == null && finance == null
+        get() = weather == null &&
+            calendar == null &&
+            news == null &&
+            finance == null &&
+            notifications == null
 }
 
 data class SyncError(

@@ -576,13 +576,6 @@ class TextBoxWidget(
         return richText.subSequence(start, end).toString()
     }
     
-    fun getSelectedRichText(): SpannableStringBuilder {
-        if (!hasSelection()) return SpannableStringBuilder()
-        val start = minOf(selectionStart, selectionEnd).coerceIn(0, richText.length)
-        val end = maxOf(selectionStart, selectionEnd).coerceIn(0, richText.length)
-        return SpannableStringBuilder(richText.subSequence(start, end))
-    }
-    
     fun clearSelection() {
         selectionStart = cursorPosition
         selectionEnd = cursorPosition
@@ -617,27 +610,6 @@ class TextBoxWidget(
         selectionEnd = maxOf(selectionAnchor, cursorPosition)
     }
     
-    fun moveCursorByPixels(dx: Float, updateSelection: Boolean = false): Int {
-        if (richText.isEmpty()) return 0
-        
-        val avgCharWidth = textPaint.measureText("m") * 0.5f
-        pixelAccumulator += dx
-        
-        val charDelta = (pixelAccumulator / avgCharWidth).toInt()
-        val oldPos = cursorPosition
-        
-        if (charDelta != 0) {
-            pixelAccumulator -= charDelta * avgCharWidth
-            cursorPosition = (cursorPosition + charDelta).coerceIn(0, richText.length)
-        }
-        
-        if (updateSelection && isSelecting) {
-            updateSelectionToCursor()
-        }
-        
-        return cursorPosition - oldPos
-    }
-
     /**
      * Calculates the starting Y coordinate in the text for each column.
      * Snaps to line boundaries to prevent text from being sliced in half.

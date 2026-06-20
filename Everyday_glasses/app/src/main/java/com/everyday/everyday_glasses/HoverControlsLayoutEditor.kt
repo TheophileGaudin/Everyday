@@ -237,11 +237,6 @@ class HoverControlsLayoutEditor(
     private fun controlIdAt(cell: GridCell): String? =
         placements.entries.firstOrNull { it.value == cell }?.key
 
-    private fun controlAt(cell: GridCell): BaseHoverControl? {
-        val id = controlIdAt(cell) ?: return null
-        return controls.firstOrNull { it.id == id }
-    }
-
     fun containsPoint(x: Float, y: Float): Boolean = isVisible
 
     // ==================== Drawing ====================

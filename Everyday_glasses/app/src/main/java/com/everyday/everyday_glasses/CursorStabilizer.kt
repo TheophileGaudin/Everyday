@@ -129,9 +129,4 @@ class CursorStabilizer {
         out.set(finalDx, finalDy)
         return out
     }
-
-    /**
-     * Get the last recorded output speed (useful for debugging).
-     */
-    fun getLastOutputSpeed(): Float = lastOutputSpeed
 }

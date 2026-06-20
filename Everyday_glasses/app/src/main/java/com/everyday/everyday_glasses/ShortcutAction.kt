@@ -28,6 +28,10 @@ sealed class ShortcutAction {
         override val id = "toggle:news"
         override val label = "Toggle: News"
     }
+    object ToggleNotifications : ShortcutAction() {
+        override val id = "toggle:notifications"
+        override val label = "Toggle: Notifications"
+    }
     object ToggleSpeedometer : ShortcutAction() {
         override val id = "toggle:speedometer"
         override val label = "Toggle: Speedometer"
@@ -85,6 +89,7 @@ sealed class ShortcutAction {
             ToggleCalendar,
             ToggleFinance,
             ToggleNews,
+            ToggleNotifications,
             ToggleSpeedometer,
             ToggleSubtitle,
             ToggleMirror,
