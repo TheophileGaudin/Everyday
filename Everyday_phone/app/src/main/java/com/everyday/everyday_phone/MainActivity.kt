@@ -204,6 +204,12 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             onConnectionChanged = { connected ->
+                // Connection and location/sync startup must not wait for a
+                // potentially busy UI thread.  The foreground service is what
+                // keeps live phone location available behind the lock screen.
+                Thread {
+                    dataSyncCoordinator.onConnectionChanged(connected)
+                }.start()
                 runOnUiThread { 
                     isGlassesConnected = connected
                     if (!connected) {
@@ -214,7 +220,6 @@ class MainActivity : AppCompatActivity() {
                         sendCurrentClipboardToGlasses()
                         sendPendingSharedAddress()
                     }
-                    dataSyncCoordinator.onConnectionChanged(connected)
                     updateStatusDisplay()
                     trackpad.alpha = if (connected) 1.0f else 0.5f
                     updateMirrorButton()
@@ -277,9 +282,9 @@ class MainActivity : AppCompatActivity() {
             }
 
             onSyncRequested = { request ->
-                runOnUiThread {
+                Thread {
                     dataSyncCoordinator.onSyncRequest(request)
-                }
+                }.start()
             }
 
             onSubtitleControlRequested = { control ->

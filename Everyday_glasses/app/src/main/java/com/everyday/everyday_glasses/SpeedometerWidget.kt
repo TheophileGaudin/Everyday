@@ -39,8 +39,8 @@ class SpeedometerWidget(
     }
 
     override val minimizeLabel: String = "V"
-    override val minWidth: Float = 180f
-    override val minHeight: Float = 90f
+    override val minWidth: Float = MIN_WIDGET_SIZE
+    override val minHeight: Float = MIN_WIDGET_SIZE
 
     private var smoothedSpeedKmh = 0f
     private var hasReliableSpeed = false

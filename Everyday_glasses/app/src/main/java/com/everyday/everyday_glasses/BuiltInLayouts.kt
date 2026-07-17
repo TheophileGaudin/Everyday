@@ -44,6 +44,7 @@ object BuiltInLayouts {
         image = emptyList(),
         status = null,
         location = null,
+        map = null,
         calendar = null,
         finance = null,
         news = null,
@@ -64,74 +65,51 @@ object BuiltInLayouts {
     //   bottom: news (bottom-left) | finance (bottom-right)
     // -----------------------------------------------------------------------------------
     private fun standardLayout(w: Float, h: Float): PersistedState {
-        val margin = w * 0.025f
-
-        val rowHeight = (h * 0.18f).coerceAtLeast(110f)
-        val colWidth = (w - 4f * margin) / 3f
-
+        val sx = w / 640f
+        val sy = h / 480f
         val status = WidgetPersistence.StatusBarState(
-            x = margin,
-            y = margin,
+            x = 0f, y = 41f * sy,
             showTime = true,
             showDate = true,
             showPhoneBattery = true,
             showGlassesBattery = true,
             isPinned = true
         )
-
-        val speedW = colWidth.coerceAtMost(260f)
-        val speedH = rowHeight.coerceAtMost(140f)
+        val map = WidgetPersistence.MapWidgetState(
+            x = 405.5f * sx, y = 41f * sy,
+            width = 181.95f * sx, height = 160.05f * sy,
+            mode = MapViewMode.TOP_DOWN.name, zoom = MapZoom.MEDIUM.name,
+            showLocation = true, showCountry = true, isPinned = true
+        )
         val speedometer = WidgetPersistence.SpeedometerWidgetState(
-            x = (w - speedW) / 2f,
-            y = margin,
-            width = speedW,
-            height = speedH,
+            x = 229.9f * sx, y = 38f * sy,
+            width = 134.9f * sx, height = 92.7f * sy,
             isPinned = true
         )
-
-        val locW = colWidth.coerceAtMost(320f)
-        val locH = rowHeight.coerceAtMost(140f)
         val location = WidgetPersistence.LocationWidgetState(
-            x = w - locW - margin,
-            y = margin,
-            width = locW,
-            height = locH,
+            x = 392.55f * sx, y = 0f,
+            width = 194.9f * sx, height = 76f * sy,
             showWeather = true,
             showTemperature = true,
-            showLocation = true,
-            showCountry = true,
+            showLocation = false,
+            showCountry = false,
             isPinned = true
         )
-
-        val calW = (w - 2f * margin).coerceAtMost(520f)
-        val calH = (h * 0.33f).coerceAtMost(220f)
         val calendar = WidgetPersistence.CalendarWidgetState(
-            x = (w - calW) / 2f,
-            y = margin + rowHeight + margin,
-            width = calW,
-            height = calH,
+            x = 0f, y = 201.05f * sy,
+            width = 612f * sx, height = 90.9f * sy,
             fontScale = 1f,
             isPinned = true
         )
-
-        val bottomY = h - margin - (h * 0.28f).coerceAtMost(260f)
-        val bottomH = h - bottomY - margin
-
-        val newsW = (w * 0.48f).coerceAtMost(NewsWidget.DEFAULT_WIDTH * 1.2f)
         val news = WidgetPersistence.NewsWidgetState(
-            x = margin,
-            y = bottomY,
-            width = newsW,
-            height = bottomH.coerceAtMost(NewsWidget.DEFAULT_HEIGHT * 1.2f),
+            x = 0f, y = 301.95f * sy,
+            width = 352.2f * sx, height = 134.4f * sy,
+            fontScale = 0.75f,
             isPinned = true
         )
-
-        val finW = (w * 0.48f).coerceAtMost(FinanceWidget.DEFAULT_WIDTH * 1.2f)
         val finance = WidgetPersistence.FinanceWidgetState(
-            x = w - finW - margin,
-            y = bottomY,
-            width = finW,
-            height = bottomH.coerceAtMost(FinanceWidget.DEFAULT_HEIGHT * 1.2f),
+            x = 364.8f * sx, y = 301.95f * sy,
+            width = 202.2f * sx, height = 134.4f * sy,
             isPinned = true
         )
 
@@ -139,6 +117,7 @@ object BuiltInLayouts {
             status = status,
             speedometer = speedometer,
             location = location,
+            map = map,
             calendar = calendar,
             news = news,
             finance = finance

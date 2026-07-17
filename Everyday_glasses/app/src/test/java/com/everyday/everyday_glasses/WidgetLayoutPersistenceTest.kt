@@ -8,6 +8,22 @@ import org.junit.Test
 
 class WidgetLayoutPersistenceTest {
     @Test
+    fun `standard layout includes compact weather map and speedometer cluster`() {
+        val state = BuiltInLayouts.build(WidgetPersistence.DEFAULT_LAYOUT_NAME, 640f, 480f)!!
+        val map = state.map!!
+        val weather = state.location!!
+        val speed = state.speedometer!!
+        assertTrue(map.x > 400f)
+        assertTrue(weather.width < 200f)
+        assertEquals(134.9f, speed.width, 0.1f)
+        assertEquals(0.75f, state.news!!.fontScale, 0.001f)
+        assertFalse(state.location!!.showLocation)
+        assertFalse(state.location!!.showCountry)
+        assertTrue(map.showLocation)
+        assertTrue(map.showCountry)
+    }
+
+    @Test
     fun `default layout name is reserved case-insensitively`() {
         assertTrue(WidgetPersistence.isDefaultLayoutName("Standard"))
         assertTrue(WidgetPersistence.isDefaultLayoutName(" standard "))
@@ -74,6 +90,13 @@ class WidgetLayoutPersistenceTest {
                 showTemperature = true,
                 showLocation = false,
                 showCountry = true
+            ),
+            map = WidgetPersistence.MapWidgetState(
+                x = 410f, y = 12f, width = 176f, height = 176f,
+                mode = MapViewMode.PROJECTED.name,
+                zoom = MapZoom.FAR.name,
+                isFullscreen = true,
+                isPinned = true
             ),
             calendar = WidgetPersistence.CalendarWidgetState(
                 x = 5f,
@@ -144,6 +167,11 @@ class WidgetLayoutPersistenceTest {
                     width = 210f,
                     height = 130f,
                     url = "https://closed.example"
+                ),
+                map = WidgetPersistence.MapWidgetState(
+                    x = 420f, y = 20f, width = 150f, height = 150f,
+                    mode = MapViewMode.TOP_DOWN.name,
+                    zoom = MapZoom.NEAR.name
                 )
             ),
             hoverControls = listOf(
@@ -175,6 +203,9 @@ class WidgetLayoutPersistenceTest {
         assertEquals("/tmp/image.png", restored.image.single().imagePath)
         assertFalse(restored.status!!.showDate)
         assertFalse(restored.location!!.showWeather)
+        assertEquals(MapViewMode.PROJECTED.name, restored.map!!.mode)
+        assertEquals(MapZoom.FAR.name, restored.map!!.zoom)
+        assertTrue(restored.map!!.isFullscreen)
         assertEquals(1.25f, restored.calendar!!.fontScale, 0.001f)
         assertEquals("AAPL", restored.finance!!.selectedSymbol)
         assertEquals("1M", restored.finance!!.selectedRange)
@@ -189,6 +220,7 @@ class WidgetLayoutPersistenceTest {
         assertTrue(restored.mirror!!.isPinned)
         assertEquals("closed", restored.closedTemplates.text!!.text)
         assertEquals("https://closed.example", restored.closedTemplates.browser!!.url)
+        assertEquals(MapZoom.NEAR.name, restored.closedTemplates.map!!.zoom)
         assertEquals(2, restored.hoverControls!!.size)
         assertEquals(CloseAppHoverControl.ID, restored.hoverControls!![0].controlId)
         assertEquals(2, restored.hoverControls!![0].col)

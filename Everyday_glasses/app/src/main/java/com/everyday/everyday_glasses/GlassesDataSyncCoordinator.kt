@@ -54,6 +54,9 @@ class GlassesDataSyncCoordinator(
     private val localCalendarInFlight = AtomicBoolean(false)
     private val mainHandler = Handler(Looper.getMainLooper())
     private var phoneConnected = false
+    private var lastAppliedMapLatitude = Double.NaN
+    private var lastAppliedMapLongitude = Double.NaN
+    private var lastAppliedMapTimestampMs = Long.MIN_VALUE
 
     fun restoreCachedSnapshots() {
         syncOrchestrator.restoreCachedSnapshots(notify = false)
@@ -70,6 +73,9 @@ class GlassesDataSyncCoordinator(
     fun onPhoneConnectionChanged(connected: Boolean) {
         phoneConnected = connected
         if (connected) {
+            // The map can have been created before RFCOMM completed.  Retry its
+            // latest location now that the phone proxy is actually reachable.
+            widgetContainer.requestPhoneMapRefresh()
             syncOrchestrator.refresh(
                 channels = SyncChannel.ALL,
                 force = false,
@@ -142,6 +148,18 @@ class GlassesDataSyncCoordinator(
         )
     }
 
+    fun onMapDataRequested(point: MapGeoPoint) {
+        if (!phoneConnected) {
+            Log.d(TAG, "Map proxy skipped: phone is not connected")
+            return
+        }
+        Log.d(TAG, "Requesting phone map proxy for ${point.lat},${point.lon}")
+        requestPhoneSync(SyncRequest(
+            channels = setOf(SyncChannel.MAP), force = true, reason = "map_proxy",
+            mapLat = point.lat, mapLon = point.lon
+        ))
+    }
+
     fun requestPhoneCalendarSnapshot() {
         syncOrchestrator.refresh(
             channels = setOf(SyncChannel.CALENDAR),
@@ -210,7 +228,9 @@ class GlassesDataSyncCoordinator(
                 financeAssetType = request.financeAssetType ?: financeSelection?.assetType,
                 financeChartType = request.financeChartType ?: financeSelection?.chartType,
                 financeTileId = request.financeTileId ?: financeSelection?.id,
-                financeLiveEnabled = financeLiveEnabled
+                financeLiveEnabled = financeLiveEnabled,
+                mapLat = request.mapLat,
+                mapLon = request.mapLon
             )
         )
     }
@@ -253,6 +273,10 @@ class GlassesDataSyncCoordinator(
                         countryCode = locationName?.countryCode ?: cached?.countryCode ?: "Unknown",
                         weather = weather ?: cached?.weather,
                         timestampMs = System.currentTimeMillis(),
+                        lat = location.latitude,
+                        lon = location.longitude,
+                        accuracyM = if (location.hasAccuracy()) location.accuracy else null,
+                        bearingDeg = if (location.hasBearing()) location.bearing else null,
                         speedMps = null
                     )
                     snapshotStore.saveWeather(snapshot)
@@ -410,12 +434,39 @@ class GlassesDataSyncCoordinator(
             snapshot.news?.let(::applyNews)
             snapshot.finance?.let { applyFinance(it, notify = false) }
             snapshot.notifications?.let(widgetContainer::applyNotificationsSnapshot)
+            snapshot.map?.let {
+                Log.d(TAG, "Applying phone map snapshot: roads=${it.roads.size} pois=${it.pois.size}")
+                widgetContainer.applyMapSnapshot(it)
+            }
             if (notify) notifyContentChanged()
         }
     }
 
     private fun applyWeather(snapshot: WeatherSnapshot) {
-        postUi { widgetContainer.applyWeatherSnapshot(snapshot) }
+        postUi {
+            widgetContainer.applyWeatherSnapshot(snapshot)
+            val lat = snapshot.lat
+            val lon = snapshot.lon
+            if (lat != null && lon != null && lat.isFinite() && lon.isFinite()) {
+                if (lat == lastAppliedMapLatitude && lon == lastAppliedMapLongitude &&
+                    snapshot.timestampMs == lastAppliedMapTimestampMs) {
+                    return@postUi
+                }
+                lastAppliedMapLatitude = lat
+                lastAppliedMapLongitude = lon
+                lastAppliedMapTimestampMs = snapshot.timestampMs
+                val phoneFix = Location("everyday_phone").apply {
+                    latitude = lat
+                    longitude = lon
+                    time = snapshot.timestampMs
+                    snapshot.accuracyM?.let { accuracy = it }
+                    snapshot.bearingDeg?.let { bearing = it }
+                    snapshot.speedMps?.let { speed = it }
+                }
+                Log.d(TAG, "Forwarding phone location to map: $lat,$lon accuracy=${snapshot.accuracyM}")
+                widgetContainer.updateMapLocation(phoneFix)
+            }
+        }
     }
 
     private fun applyNews(snapshot: NewsSnapshot) {

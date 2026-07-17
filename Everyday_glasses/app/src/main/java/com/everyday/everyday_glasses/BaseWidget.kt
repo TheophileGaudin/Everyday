@@ -41,6 +41,7 @@ abstract class BaseWidget(
         const val RESIZE_HANDLE_SIZE = WidgetTheme.Size.RESIZE_HANDLE
         const val BORDER_HIT_AREA = WidgetTheme.Size.BORDER_HIT_AREA
         const val BUTTON_SPACING = WidgetTheme.Size.BUTTON_SPACING
+        const val MIN_WIDGET_SIZE = 24f
     }
     
     // Properties with reactive setters to ensure bounds are always in sync
@@ -150,8 +151,8 @@ abstract class BaseWidget(
     // Label for minimized state
     open val minimizeLabel: String = "?"
 
-    open val minWidth = 64f
-    open val minHeight = 64f
+    open val minWidth = MIN_WIDGET_SIZE
+    open val minHeight = MIN_WIDGET_SIZE
     
     // Saved position for fullscreen restore
     protected var savedX = 0f
@@ -179,7 +180,7 @@ abstract class BaseWidget(
     // ==================== Paints ====================
     
     protected val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.BLACK
+        color = Color.TRANSPARENT
     }
     
     protected val hoverBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {

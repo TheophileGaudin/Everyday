@@ -51,8 +51,8 @@ class NotificationsWidget(
     private enum class FontAction { WIDGET_DECREASE, WIDGET_INCREASE, TOAST_DECREASE, TOAST_INCREASE }
 
     override val minimizeLabel: String = "!"
-    override val minWidth: Float = 260f
-    override val minHeight: Float = 120f
+    override val minWidth: Float = MIN_WIDGET_SIZE
+    override val minHeight: Float = MIN_WIDGET_SIZE
 
     private val notifications = mutableListOf<PhoneNotificationItem>()
     private var phoneNotificationAccessEnabled = false

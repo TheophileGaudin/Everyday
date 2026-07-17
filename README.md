@@ -14,11 +14,12 @@ Everyday also includes a configurable hover shortcut control, "the lemon", for q
 | Widget                | Description                                                                                                                                                                                                                                                                                                  |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Time / Date / Battery | Time, date, and phone / glasses battery. Double-tap to configure what's shown.                                                                                                                                                                                                                               |
+| Minimap               | Minimap that follows compass orientation and shows your current position as well as surrounding Points of Interest.                                                                                                                                                                                                                                           |
 | Location / Weather    | Current city and weather with an icon. Double-tap to configure.                                                                                                                                                                                                                                              |
 | Screen mirror         | Mirrors your phone screen over Wi-Fi.                                                                                                                                                                                                                                                                        |
 | Web browser           | Supports tabs, full-screen video, Google services, cookies / multi-window authentication flows, and direct link or search launch from the phone companion app.                                                                                                                                               |
 | Text editor           | Text can be formatted and arranged in columns. Paste directly from your phone clipboard.                                                                                                                                                                                                                     |
-| Image display         | Open an image from phone or glasses storage.                                                                                                                                                                                                                                                                 |
+| File browser          | Open an image from phone or glasses storage. On the glasses, also open pdfs and videos.                                                                                                                                                                                                                                                                |
 | News                  | RSS feed for your country. Titles auto-update and can be expanded.                                                                                                                                                                                                                                           |
 | Finance               | Follow stocks, currencies, cryptocurrencies, and multiple charts, including candle charts. Double-tap to open full screen and configure / order charts. Finance data are experimental and indicative only. Do not rely on them for financial decisions. The app developer does not provide financial advice. |
 | Speedometer           | Shows your current speed. Has an adjustable threshold below which it disappears.                                                                                                                                                                                                                             |
@@ -63,11 +64,11 @@ Then:
 1. Plug glasses to computer
 2. Open a terminal
 3. Navigate to where the APK is
-4. Run `adb install everyday0.8_glasses.apk`
+4. Run `adb install everyday0.9_glasses.apk`
 
 **On phone**
 
-Install `everyday0.8_phone.apk` via sideloading on your Android phone.
+Install `everyday0.9_phone.apk` via sideloading on your Android phone.
 
 See the [InformalTech tutorial](https://www.youtube.com/watch?v=l3wu7x14LKY) for a full walkthrough.
 

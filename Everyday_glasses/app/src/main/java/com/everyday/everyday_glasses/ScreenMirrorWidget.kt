@@ -32,8 +32,8 @@ class ScreenMirrorWidget(
     companion object {
         private const val TAG = "ScreenMirrorWidget"
         
-        private const val MIN_WIDTH = 120f
-        private const val MIN_HEIGHT = 80f
+        private const val MIN_WIDTH = MIN_WIDGET_SIZE
+        private const val MIN_HEIGHT = MIN_WIDGET_SIZE
         private const val STREAM_PORT = 5050
         private const val RECONNECT_DELAY_MS = 1000L
         

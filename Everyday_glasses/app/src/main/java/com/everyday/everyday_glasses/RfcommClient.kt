@@ -192,7 +192,9 @@ class RfcommClient(private val context: Context) {
         financeAssetType: FinanceAssetType? = null,
         financeChartType: FinanceChartType? = null,
         financeTileId: String? = null,
-        financeLiveEnabled: Boolean? = null
+        financeLiveEnabled: Boolean? = null,
+        mapLat: Double? = null,
+        mapLon: Double? = null
     ) {
         val message = SyncProtocol.encodeRequest(
             SyncRequest(
@@ -207,7 +209,9 @@ class RfcommClient(private val context: Context) {
                 financeAssetType = financeAssetType,
                 financeChartType = financeChartType,
                 financeTileId = financeTileId,
-                financeLiveEnabled = financeLiveEnabled
+                financeLiveEnabled = financeLiveEnabled,
+                mapLat = mapLat,
+                mapLon = mapLon
             )
         ) + "\n"
 

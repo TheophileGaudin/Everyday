@@ -133,8 +133,8 @@ class LocationWidget(
 
     private var showWeather = true
     private var showTemperature = true
-    private var showLocation = true
-    private var showCountry = true
+    private var showLocation = false
+    private var showCountry = false
     private var showToggleMenu = false
     private var hoveredToggleElement: LocationElement? = null
 

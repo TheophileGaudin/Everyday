@@ -26,11 +26,14 @@ class WidgetRegistry {
     val textWidgets = mutableListOf<TextBoxWidget>()
     val browserWidgets = mutableListOf<BrowserWidget>()
     val imageWidgets = mutableListOf<ImageWidget>()
+    val videoWidgets = mutableListOf<VideoWidget>()
+    val pdfWidgets = mutableListOf<PdfWidget>()
     val fileBrowserWidgets = mutableListOf<FileBrowserWidget>()
     
     // Special widgets (managed separately, always present)
     var statusBarWidget: StatusBarWidget? = null
     var locationWidget: LocationWidget? = null
+    var mapWidget: MapWidget? = null
     var calendarWidget: CalendarWidget? = null
     var screenMirrorWidget: ScreenMirrorWidget? = null
     var financeWidget: FinanceWidget? = null
@@ -108,6 +111,7 @@ class WidgetRegistry {
         val result = mutableListOf<BaseWidget>()
         statusBarWidget?.let { result.add(it) }
         locationWidget?.let { result.add(it) }
+        mapWidget?.let { result.add(it) }
         calendarWidget?.let { result.add(it) }
         financeWidget?.let { result.add(it) }
         newsWidget?.let { result.add(it) }
@@ -118,6 +122,8 @@ class WidgetRegistry {
         result.addAll(browserWidgets)
         result.addAll(textWidgets)
         result.addAll(imageWidgets)
+        result.addAll(videoWidgets)
+        result.addAll(pdfWidgets)
         result.addAll(fileBrowserWidgets)
         return result
     }
@@ -211,6 +217,24 @@ class WidgetRegistry {
         imageWidgets.remove(widget)
     }
 
+    fun addVideoWidget(widget: VideoWidget) {
+        videoWidgets.add(widget)
+        widget.zOrder = nextZOrder++
+    }
+
+    fun removeVideoWidget(widget: VideoWidget) {
+        videoWidgets.remove(widget)
+    }
+
+    fun addPdfWidget(widget: PdfWidget) {
+        pdfWidgets.add(widget)
+        widget.zOrder = nextZOrder++
+    }
+
+    fun removePdfWidget(widget: PdfWidget) {
+        pdfWidgets.remove(widget)
+    }
+
     /**
      * Add a file browser widget to the registry.
      */
@@ -233,6 +257,8 @@ class WidgetRegistry {
         textWidgets.clear()
         browserWidgets.clear()
         imageWidgets.clear()
+        videoWidgets.clear()
+        pdfWidgets.clear()
         fileBrowserWidgets.clear()
         nextZOrder = 0
     }

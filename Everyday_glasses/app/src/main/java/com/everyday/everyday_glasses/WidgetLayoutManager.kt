@@ -29,30 +29,21 @@ class WidgetLayoutManager(
             ContextMenu.SubMenuItem("layout_save_as", "Save As...")
         )
         val savedLayouts = persistenceManager.listLayouts()
-            .filterNot { WidgetPersistence.isDefaultLayoutName(it.name) }
+            .filterNot { BuiltInLayouts.isDelivered(it.name) }
             .map { layout ->
                 ContextMenu.SubMenuItem("layout_load:${layout.name}", layout.name)
             }
-        val savedNames = savedLayouts.map { it.label }
         val deliveredLayouts = BuiltInLayouts.DELIVERED_LAYOUTS
-            .filterNot { deliveredName ->
-                savedNames.any { it.equals(deliveredName, ignoreCase = true) }
-            }
             .map { name -> ContextMenu.SubMenuItem("layout_load:$name", name) }
         val loadItems = deliveredLayouts + savedLayouts
         return actions + ContextMenu.SubMenuItem("layout_load_menu", "Load", submenu = loadItems)
     }
 
     private fun loadLayoutByNameOrDelivered(name: String): WidgetPersistence.PersistedState? {
-        val saved = persistenceManager.loadLayout(name)
-        if (saved != null) return saved
-        return buildDeliveredLayout(name)
+        return buildDeliveredLayout(name) ?: persistenceManager.loadLayout(name)
     }
 
-    private fun isDeliveredWithoutSavedOverride(name: String): Boolean {
-        if (!BuiltInLayouts.isDelivered(name)) return false
-        return persistenceManager.loadLayout(name) == null
-    }
+    private fun isDeliveredWithoutSavedOverride(name: String): Boolean = BuiltInLayouts.isDelivered(name)
 
     private fun canonicalLoadName(name: String): String {
         val trimmed = name.trim()
@@ -98,8 +89,8 @@ class WidgetLayoutManager(
             notifyContentChanged()
             return
         }
-        if (WidgetPersistence.isDefaultLayoutName(trimmedName)) {
-            showNameError("${WidgetPersistence.DEFAULT_LAYOUT_NAME} is protected")
+        if (BuiltInLayouts.isDelivered(trimmedName)) {
+            showNameError("Delivered layout names are protected")
             notifyContentChanged()
             return
         }
@@ -126,7 +117,7 @@ class WidgetLayoutManager(
 
     private fun saveCurrentLayout() {
         val layoutName = activeLayoutName?.trim().orEmpty()
-        if (layoutName.isBlank() || WidgetPersistence.isDefaultLayoutName(layoutName)) {
+        if (layoutName.isBlank() || BuiltInLayouts.isDelivered(layoutName)) {
             showSaveLayoutAsPrompt(initialName = "")
             return
         }
@@ -136,7 +127,7 @@ class WidgetLayoutManager(
     private fun showSaveLayoutAsPrompt(initialName: String? = null) {
         val suggestedName = initialName
             ?: activeLayoutName
-                ?.takeUnless { WidgetPersistence.isDefaultLayoutName(it) }
+                ?.takeUnless { BuiltInLayouts.isDelivered(it) }
                 .orEmpty()
         showNamePrompt(suggestedName)
         notifyContentChanged()

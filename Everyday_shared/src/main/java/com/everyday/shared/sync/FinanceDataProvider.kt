@@ -273,6 +273,120 @@ object FinanceDataProvider {
     private fun fetchFxChart(config: FinanceDashboardTileConfig): Result<FinanceTileSnapshot> = runCatching {
         val range = FinanceTimeRange.fromRange(config.range)
         val instrument = instrumentFor(FinanceAssetType.FX, config.symbol)
+        if (config.chartType == FinanceChartType.CANDLE) {
+            fetchFxYahooChart(config, instrument, range).getOrNull()
+                ?: fetchFxFrankfurterChart(config, instrument, range, includeDerivedCandles = true)
+        } else {
+            fetchFxFrankfurterChart(config, instrument, range, includeDerivedCandles = false)
+        }
+    }
+
+    private fun fetchFxYahooChart(
+        config: FinanceDashboardTileConfig,
+        instrument: FinanceInstrument,
+        range: FinanceTimeRange
+    ): Result<FinanceTileSnapshot> = runCatching {
+        val urlStr = buildChartUrl("${instrument.symbol}=X", range)
+        val connection = URL(urlStr).openConnection() as HttpURLConnection
+        connection.connectTimeout = 8000
+        connection.readTimeout = 8000
+        connection.setRequestProperty("User-Agent", "Mozilla/5.0")
+        try {
+            val responseCode = connection.responseCode
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                throw IllegalStateException("FX Yahoo HTTP $responseCode")
+            }
+
+            val json = connection.inputStream.bufferedReader().use { it.readText() }
+            val root = JSONObject(json)
+            val result = root.getJSONObject("chart")
+                .getJSONArray("result").getJSONObject(0)
+            val meta = result.optJSONObject("meta")
+            val timestamps = result.optJSONArray("timestamp")
+            val quote = result.getJSONObject("indicators")
+                .getJSONArray("quote").getJSONObject(0)
+            val openPrices = quote.optJSONArray("open")
+            val highPrices = quote.optJSONArray("high")
+            val lowPrices = quote.optJSONArray("low")
+            val closePrices = quote.getJSONArray("close")
+
+            val rawPrices = mutableListOf<Float>()
+            val timedPrices = mutableListOf<TimedPrice>()
+            val rawCandles = mutableListOf<FinanceCandle>()
+            val timedCandles = mutableListOf<TimedCandle>()
+            for (i in 0 until closePrices.length()) {
+                if (!closePrices.isNull(i)) {
+                    val price = closePrices.getDouble(i).toFloat()
+                    rawPrices.add(price)
+                    if (timestamps != null && i < timestamps.length() && !timestamps.isNull(i)) {
+                        val timestampSeconds = timestamps.getLong(i)
+                        timedPrices.add(TimedPrice(timestampSeconds, price))
+                        val candle = buildYahooCandle(
+                            timestampSeconds = timestampSeconds,
+                            openPrices = openPrices,
+                            highPrices = highPrices,
+                            lowPrices = lowPrices,
+                            closePrices = closePrices,
+                            index = i
+                        )
+                        if (candle != null) {
+                            rawCandles.add(candle.candle)
+                            timedCandles.add(candle)
+                        }
+                    }
+                }
+            }
+
+            val chart = buildChartSnapshot(
+                requestRange = range,
+                rawPrices = rawPrices,
+                rawCandles = rawCandles,
+                timedPrices = timedPrices,
+                timedCandles = timedCandles,
+                exchangeTimeZoneId = meta?.optString("exchangeTimezoneName")
+                    ?.takeIf { it.isNotBlank() }
+                    ?: meta?.optString("timezone")?.takeIf { it.isNotBlank() },
+                fallbackPreviousClose = meta?.let {
+                    listOf("previousClose", "regularMarketPreviousClose", "chartPreviousClose")
+                        .asSequence()
+                        .mapNotNull { keyName ->
+                            if (it.has(keyName) && !it.isNull(keyName)) {
+                                it.optDouble(keyName, Double.NaN)
+                                    .takeIf { value -> value.isFinite() && value > 0.0 }
+                                    ?.toFloat()
+                            } else {
+                                null
+                            }
+                        }
+                        .firstOrNull()
+                }
+            )
+
+            FinanceTileSnapshot(
+                id = config.id,
+                assetType = FinanceAssetType.FX,
+                symbol = instrument.symbol,
+                displayName = instrument.displayName,
+                country = instrument.country,
+                range = range.range,
+                rangeLabel = range.label,
+                chartType = config.chartType,
+                points = chart.points,
+                candles = chart.candles,
+                percentChange = chart.percentChange,
+                source = "YAHOO"
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun fetchFxFrankfurterChart(
+        config: FinanceDashboardTileConfig,
+        instrument: FinanceInstrument,
+        range: FinanceTimeRange,
+        includeDerivedCandles: Boolean
+    ): FinanceTileSnapshot {
         val base = instrument.symbol.take(3)
         val quote = instrument.symbol.takeLast(3)
         val daysBack = when (range) {
@@ -308,7 +422,7 @@ object FinanceDataProvider {
             if (prices.isEmpty()) throw IllegalStateException("Insufficient FX data")
             val renderable = if (prices.size == 1) listOf(prices.first(), prices.first()) else prices
             val baseline = renderable.first().takeIf { it != 0f } ?: renderable.last()
-            FinanceTileSnapshot(
+            return FinanceTileSnapshot(
                 id = config.id,
                 assetType = FinanceAssetType.FX,
                 symbol = instrument.symbol,
@@ -316,13 +430,31 @@ object FinanceDataProvider {
                 country = instrument.country,
                 range = range.range,
                 rangeLabel = range.label,
-                chartType = FinanceChartType.LINE,
+                chartType = config.chartType,
                 points = renderable,
+                candles = if (includeDerivedCandles) buildDerivedFxCandles(renderable) else emptyList(),
                 percentChange = ((renderable.last() - baseline) / baseline) * 100f,
                 source = "FRANKFURTER"
             )
         } finally {
             connection.disconnect()
+        }
+    }
+
+    private fun buildDerivedFxCandles(prices: List<Float>): List<FinanceCandle> {
+        if (prices.isEmpty()) return emptyList()
+        val now = System.currentTimeMillis()
+        val intervalMs = 24L * 60L * 60L * 1000L
+        return prices.mapIndexed { index, close ->
+            val open = prices.getOrNull(index - 1) ?: close
+            FinanceCandle(
+                openTimeMs = now - (prices.lastIndex - index) * intervalMs,
+                open = open,
+                high = maxOf(open, close),
+                low = minOf(open, close),
+                close = close,
+                isClosed = true
+            )
         }
     }
 

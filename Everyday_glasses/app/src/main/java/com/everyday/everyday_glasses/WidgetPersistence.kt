@@ -32,8 +32,11 @@ object WidgetPersistence {
     private const val KEY_TEXT_WIDGETS = "text_widgets"
     private const val KEY_BROWSER_WIDGETS = "browser_widgets"
     private const val KEY_IMAGE_WIDGETS = "image_widgets"
+    private const val KEY_VIDEO_WIDGETS = "video_widgets"
+    private const val KEY_PDF_WIDGETS = "pdf_widgets"
     private const val KEY_STATUS_BAR = "status_bar"
     private const val KEY_LOCATION_WIDGET = "location_widget"
+    private const val KEY_MAP_WIDGET = "map_widget"
     private const val KEY_CALENDAR_WIDGET = "calendar_widget"
     private const val KEY_MIRROR_WIDGET = "mirror_widget"
     private const val KEY_FINANCE_WIDGET = "finance_widget"
@@ -46,6 +49,7 @@ object WidgetPersistence {
     private const val KEY_CLOSED_BROWSER_WIDGET = "browser_widget"
     private const val KEY_CLOSED_STATUS_BAR = "status_bar"
     private const val KEY_CLOSED_LOCATION_WIDGET = "location_widget"
+    private const val KEY_CLOSED_MAP_WIDGET = "map_widget"
     private const val KEY_CLOSED_CALENDAR_WIDGET = "calendar_widget"
     private const val KEY_CLOSED_MIRROR_WIDGET = "mirror_widget"
     private const val KEY_CLOSED_FINANCE_WIDGET = "finance_widget"
@@ -147,6 +151,7 @@ object WidgetPersistence {
         val image: List<ImageWidgetState>,
         val status: StatusBarState?,
         val location: LocationWidgetState?,
+        val map: MapWidgetState? = null,
         val calendar: CalendarWidgetState?,
         val finance: FinanceWidgetState?,
         val news: NewsWidgetState?,
@@ -154,6 +159,8 @@ object WidgetPersistence {
         val speedometer: SpeedometerWidgetState?,
         val subtitle: SubtitleWidgetState?,
         val mirror: MirrorWidgetState?,
+        val video: List<VideoWidgetState> = emptyList(),
+        val pdf: List<PdfWidgetState> = emptyList(),
         val closedTemplates: ClosedWidgetTemplates = ClosedWidgetTemplates(),
         val hoverControls: List<HoverControlPlacementState>? = null,
         val isFirstRun: Boolean = true,  // True if no saved state exists (create default widgets)
@@ -173,6 +180,7 @@ object WidgetPersistence {
         val browser: BrowserWidgetState? = null,
         val status: StatusBarState? = null,
         val location: LocationWidgetState? = null,
+        val map: MapWidgetState? = null,
         val calendar: CalendarWidgetState? = null,
         val finance: FinanceWidgetState? = null,
         val news: NewsWidgetState? = null,
@@ -262,6 +270,58 @@ object WidgetPersistence {
         override val height: Float,
         val showWeather: Boolean = true,
         val showTemperature: Boolean = true,
+        val showLocation: Boolean = false,
+        val showCountry: Boolean = false,
+        override val isMinimized: Boolean = false,
+        override val isFullscreen: Boolean = false,
+        override val savedMinX: Float = 0f,
+        override val savedMinY: Float = 0f,
+        override val savedMinWidth: Float = 0f,
+        override val savedMinHeight: Float = 0f,
+        override val isPinned: Boolean = false
+    ) : SizedWidgetFields
+
+    data class VideoWidgetState(
+        override val x: Float,
+        override val y: Float,
+        override val width: Float,
+        override val height: Float,
+        val uri: String,
+        val displayName: String,
+        override val isMinimized: Boolean = false,
+        override val isFullscreen: Boolean = false,
+        override val savedMinX: Float = 0f,
+        override val savedMinY: Float = 0f,
+        override val savedMinWidth: Float = 0f,
+        override val savedMinHeight: Float = 0f,
+        override val isPinned: Boolean = false,
+    ) : SizedWidgetFields
+
+    data class PdfWidgetState(
+        override val x: Float,
+        override val y: Float,
+        override val width: Float,
+        override val height: Float,
+        val uri: String,
+        val displayName: String,
+        val page: Int = 0,
+        val zoom: Float = 1f,
+        override val isMinimized: Boolean = false,
+        override val isFullscreen: Boolean = false,
+        override val savedMinX: Float = 0f,
+        override val savedMinY: Float = 0f,
+        override val savedMinWidth: Float = 0f,
+        override val savedMinHeight: Float = 0f,
+        override val isPinned: Boolean = false,
+    ) : SizedWidgetFields
+
+    data class MapWidgetState(
+        override val x: Float,
+        override val y: Float,
+        override val width: Float,
+        override val height: Float,
+        val mode: String = MapViewMode.TOP_DOWN.name,
+        val zoom: String = MapZoom.MEDIUM.name,
         val showLocation: Boolean = true,
         val showCountry: Boolean = true,
         override val isMinimized: Boolean = false,
@@ -406,6 +466,7 @@ object WidgetPersistence {
         imageWidgets: List<ImageWidgetState>,
         statusBarState: StatusBarState?,
         locationWidgetState: LocationWidgetState? = null,
+        mapWidgetState: MapWidgetState? = null,
         calendarWidgetState: CalendarWidgetState? = null,
         mirrorWidgetState: MirrorWidgetState? = null,
         financeWidgetState: FinanceWidgetState? = null,
@@ -413,6 +474,8 @@ object WidgetPersistence {
         notificationsWidgetState: NotificationsWidgetState? = null,
         speedometerWidgetState: SpeedometerWidgetState? = null,
         subtitleWidgetState: SubtitleWidgetState? = null,
+        videoWidgets: List<VideoWidgetState> = emptyList(),
+        pdfWidgets: List<PdfWidgetState> = emptyList(),
         closedTemplates: ClosedWidgetTemplates = ClosedWidgetTemplates(),
         hoverControls: List<HoverControlPlacementState>? = null,
         isFirstRun: Boolean = false,
@@ -424,6 +487,7 @@ object WidgetPersistence {
         image = imageWidgets,
         status = statusBarState,
         location = locationWidgetState,
+        map = mapWidgetState,
         calendar = calendarWidgetState,
         finance = financeWidgetState,
         news = newsWidgetState,
@@ -431,6 +495,8 @@ object WidgetPersistence {
         speedometer = speedometerWidgetState,
         subtitle = subtitleWidgetState,
         mirror = mirrorWidgetState,
+        video = videoWidgets,
+        pdf = pdfWidgets,
         closedTemplates = closedTemplates,
         hoverControls = hoverControls,
         isFirstRun = isFirstRun,
@@ -455,9 +521,30 @@ object WidgetPersistence {
                 })
             }
         })
+        rootJson.put(KEY_VIDEO_WIDGETS, JSONArray().apply {
+            state.video.forEach {
+                put(JSONObject().apply {
+                    putCommonFields(it)
+                    put("uri", it.uri)
+                    put("displayName", it.displayName)
+                })
+            }
+        })
+        rootJson.put(KEY_PDF_WIDGETS, JSONArray().apply {
+            state.pdf.forEach {
+                put(JSONObject().apply {
+                    putCommonFields(it)
+                    put("uri", it.uri)
+                    put("displayName", it.displayName)
+                    put("page", it.page)
+                    put("zoom", it.zoom)
+                })
+            }
+        })
 
         state.status?.let { rootJson.put(KEY_STATUS_BAR, statusBarToJson(it)) }
         state.location?.let { rootJson.put(KEY_LOCATION_WIDGET, locationWidgetToJson(it)) }
+        state.map?.let { rootJson.put(KEY_MAP_WIDGET, mapWidgetToJson(it)) }
         state.calendar?.let { rootJson.put(KEY_CALENDAR_WIDGET, calendarWidgetToJson(it)) }
         state.mirror?.let { rootJson.put(KEY_MIRROR_WIDGET, mirrorWidgetToJson(it)) }
         state.finance?.let { rootJson.put(KEY_FINANCE_WIDGET, financeWidgetToJson(it)) }
@@ -471,6 +558,7 @@ object WidgetPersistence {
         state.closedTemplates.browser?.let { closedTemplatesJson.put(KEY_CLOSED_BROWSER_WIDGET, browserWidgetToJson(it)) }
         state.closedTemplates.status?.let { closedTemplatesJson.put(KEY_CLOSED_STATUS_BAR, statusBarToJson(it)) }
         state.closedTemplates.location?.let { closedTemplatesJson.put(KEY_CLOSED_LOCATION_WIDGET, locationWidgetToJson(it)) }
+        state.closedTemplates.map?.let { closedTemplatesJson.put(KEY_CLOSED_MAP_WIDGET, mapWidgetToJson(it)) }
         state.closedTemplates.calendar?.let { closedTemplatesJson.put(KEY_CLOSED_CALENDAR_WIDGET, calendarWidgetToJson(it)) }
         state.closedTemplates.mirror?.let { closedTemplatesJson.put(KEY_CLOSED_MIRROR_WIDGET, mirrorWidgetToJson(it)) }
         state.closedTemplates.finance?.let { closedTemplatesJson.put(KEY_CLOSED_FINANCE_WIDGET, financeWidgetToJson(it)) }
@@ -507,6 +595,7 @@ object WidgetPersistence {
             image = parseImageWidgets(rootJson),
             status = parseStatusBar(rootJson),
             location = parseLocation(rootJson),
+            map = parseMap(rootJson),
             calendar = parseCalendar(rootJson),
             finance = parseFinance(rootJson),
             news = parseNews(rootJson),
@@ -514,6 +603,8 @@ object WidgetPersistence {
             speedometer = parseSpeedometer(rootJson),
             subtitle = parseSubtitle(rootJson),
             mirror = parseMirror(rootJson),
+            video = parseVideoWidgets(rootJson),
+            pdf = parsePdfWidgets(rootJson),
             closedTemplates = parseClosedTemplates(rootJson),
             hoverControls = parseHoverControls(rootJson),
             isFirstRun = isFirstRun,
@@ -769,6 +860,15 @@ object WidgetPersistence {
             put("showCountry", state.showCountry)
         }
 
+    private fun mapWidgetToJson(state: MapWidgetState): JSONObject =
+        JSONObject().apply {
+            putCommonFields(state)
+            put("mode", state.mode)
+            put("zoom", state.zoom)
+            put("showLocation", state.showLocation)
+            put("showCountry", state.showCountry)
+        }
+
     private fun calendarWidgetToJson(state: CalendarWidgetState): JSONObject =
         JSONObject().apply {
             putCommonFields(state)
@@ -924,10 +1024,25 @@ object WidgetPersistence {
                         x = c.x, y = c.y, width = w, height = h,
                         showWeather = item.optBoolean("showWeather", true),
                         showTemperature = item.optBoolean("showTemperature", true),
-                        showLocation = item.optBoolean("showLocation", true),
-                        showCountry = item.optBoolean("showCountry", true),
+                        showLocation = item.optBoolean("showLocation", false),
+                        showCountry = item.optBoolean("showCountry", false),
                         isMinimized = c.isMinimized,
                         isFullscreen = c.isFullscreen,
+                        savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                        savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                        isPinned = c.isPinned
+                    )
+                }
+            },
+            map = obj.optJSONObject(KEY_CLOSED_MAP_WIDGET)?.let {
+                parseSizedWidgetObject(it) { item, c, w, h ->
+                    MapWidgetState(
+                        x = c.x, y = c.y, width = w, height = h,
+                        mode = item.optString("mode", MapViewMode.TOP_DOWN.name),
+                        zoom = item.optString("zoom", MapZoom.MEDIUM.name),
+                        showLocation = item.optBoolean("showLocation", true),
+                        showCountry = item.optBoolean("showCountry", true),
+                        isMinimized = c.isMinimized, isFullscreen = c.isFullscreen,
                         savedMinX = c.savedMinX, savedMinY = c.savedMinY,
                         savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
                         isPinned = c.isPinned
@@ -1100,6 +1215,66 @@ object WidgetPersistence {
         return widgets
     }
 
+    private fun parseVideoWidgets(rootJson: JSONObject): List<VideoWidgetState> {
+        val jsonArray = rootJson.optJSONArray(KEY_VIDEO_WIDGETS) ?: return emptyList()
+        val widgets = mutableListOf<VideoWidgetState>()
+        for (i in 0 until jsonArray.length()) {
+            val obj = jsonArray.optJSONObject(i) ?: continue
+            runCatching {
+                val c = parseCommonFields(obj)
+                val uri = obj.optString("uri", "")
+                if (uri.isBlank()) return@runCatching
+                widgets += VideoWidgetState(
+                    x = c.x,
+                    y = c.y,
+                    width = obj.getDouble("width").toFloat(),
+                    height = obj.getDouble("height").toFloat(),
+                    uri = uri,
+                    displayName = obj.optString("displayName", "Video"),
+                    isMinimized = c.isMinimized,
+                    isFullscreen = c.isFullscreen,
+                    savedMinX = c.savedMinX,
+                    savedMinY = c.savedMinY,
+                    savedMinWidth = c.savedMinWidth,
+                    savedMinHeight = c.savedMinHeight,
+                    isPinned = c.isPinned,
+                )
+            }
+        }
+        return widgets
+    }
+
+    private fun parsePdfWidgets(rootJson: JSONObject): List<PdfWidgetState> {
+        val jsonArray = rootJson.optJSONArray(KEY_PDF_WIDGETS) ?: return emptyList()
+        val widgets = mutableListOf<PdfWidgetState>()
+        for (i in 0 until jsonArray.length()) {
+            val obj = jsonArray.optJSONObject(i) ?: continue
+            runCatching {
+                val c = parseCommonFields(obj)
+                val uri = obj.optString("uri", "")
+                if (uri.isBlank()) return@runCatching
+                widgets += PdfWidgetState(
+                    x = c.x,
+                    y = c.y,
+                    width = obj.getDouble("width").toFloat(),
+                    height = obj.getDouble("height").toFloat(),
+                    uri = uri,
+                    displayName = obj.optString("displayName", "PDF"),
+                    page = obj.optInt("page", 0).coerceAtLeast(0),
+                    zoom = obj.optDouble("zoom", 1.0).toFloat(),
+                    isMinimized = c.isMinimized,
+                    isFullscreen = c.isFullscreen,
+                    savedMinX = c.savedMinX,
+                    savedMinY = c.savedMinY,
+                    savedMinWidth = c.savedMinWidth,
+                    savedMinHeight = c.savedMinHeight,
+                    isPinned = c.isPinned,
+                )
+            }
+        }
+        return widgets
+    }
+
     private fun parseBrowserWidgets(rootJson: JSONObject): List<BrowserWidgetState> {
         val jsonArray = rootJson.optJSONArray(KEY_BROWSER_WIDGETS) ?: return emptyList()
         val widgets = mutableListOf<BrowserWidgetState>()
@@ -1133,10 +1308,25 @@ object WidgetPersistence {
                 x = c.x, y = c.y, width = w, height = h,
                 showWeather = obj.optBoolean("showWeather", true),
                 showTemperature = obj.optBoolean("showTemperature", true),
-                showLocation = obj.optBoolean("showLocation", true),
-                showCountry = obj.optBoolean("showCountry", true),
+                showLocation = obj.optBoolean("showLocation", false),
+                showCountry = obj.optBoolean("showCountry", false),
                 isMinimized = c.isMinimized,
                 isFullscreen = c.isFullscreen,
+                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                isPinned = c.isPinned
+            )
+        }
+
+    private fun parseMap(rootJson: JSONObject): MapWidgetState? =
+        parseSizedWidget(rootJson, KEY_MAP_WIDGET) { obj, c, w, h ->
+            MapWidgetState(
+                x = c.x, y = c.y, width = w, height = h,
+                mode = obj.optString("mode", MapViewMode.TOP_DOWN.name),
+                zoom = obj.optString("zoom", MapZoom.MEDIUM.name),
+                showLocation = obj.optBoolean("showLocation", true),
+                showCountry = obj.optBoolean("showCountry", true),
+                isMinimized = c.isMinimized, isFullscreen = c.isFullscreen,
                 savedMinX = c.savedMinX, savedMinY = c.savedMinY,
                 savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
                 isPinned = c.isPinned

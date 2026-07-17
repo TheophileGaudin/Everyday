@@ -34,3 +34,10 @@
 - Charging: 5 V, max 735 mA
 - Myopia options: snap-on lenses, full-fit lenses
 - Operating system: RayNeo AI OS 2.0
+
+## Absolute North / Compass Conventions
+- For a north-aligned top-down map, prefer Android `TYPE_GEOMAGNETIC_ROTATION_VECTOR`. On this device it preserves absolute magnetic orientation across display off/on sessions; the standard rotation vector was observed re-anchoring yaw between sessions. `TYPE_GAME_ROTATION_VECTOR` is smoother for relative head motion but cannot determine north.
+- In the verified RayNeo sensor frame, local `+Y` is vertical and optical forward is local `-Z`. After converting the quaternion to Android's row-major rotation matrix, optical-forward east/north are `-matrix[2]` and `-matrix[5]`; compute magnetic heading with `atan2(east, north)`, convert to degrees, and normalize to `[0, 360)`.
+- Add location-based `GeomagneticField.declination` only when true/geographic north is required. Do not use a fixed heading bias.
+- The geomagnetic result is naturally noisier but was found to agree closely with a phone compass in a clean magnetic environment. Headphones near the glasses caused large, direction-dependent offsets and asymmetric rotation because of magnetic distortion. When diagnosing heading, first remove headphones and other magnets/metal, move away from computers, and compare both devices toward the same direction. A changing offset indicates interference/calibration, not an axis bias.
+- Keep immediate visual smoothing separate from the absolute north measurement. If smoother motion is needed, use game-vector motion with slow geomagnetic north correction rather than redefining north at startup.

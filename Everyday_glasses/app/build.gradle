@@ -26,14 +26,14 @@ android {
     }
 
     namespace 'com.everyday.everyday_glasses'
-    compileSdk 34
+    compileSdk 35
 
     defaultConfig {
         applicationId "com.everyday.everyday_glasses"
         minSdk 24
         targetSdk 34
-        versionCode 8
-        versionName "0.8.0"
+        versionCode 9
+        versionName "0.9.0"
     }
 
     buildTypes {
@@ -72,6 +72,8 @@ dependencies {
     implementation 'androidx.security:security-crypto:1.0.0'
     implementation 'com.google.android.libraries.identity.googleid:googleid:1.1.1'
     implementation 'com.google.android.gms:play-services-auth:21.5.1'
+    implementation 'androidx.media3:media3-exoplayer:1.9.4'
+    implementation 'androidx.media3:media3-ui:1.9.4'
 
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.json:json:20240303'

@@ -24,10 +24,13 @@ import com.everyday.shared.sync.SyncSnapshot
 import com.everyday.shared.sync.SyncSnapshotStore
 import com.everyday.shared.sync.SpeedSnapshot
 import com.everyday.shared.sync.WeatherSnapshot
+import com.everyday.shared.sync.MapDataProvider
 import com.everyday.shared.sync.isStale
 import com.everyday.shared.transport.SyncMessenger
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 data class PhoneManualRefreshResult(
     val errors: List<String>
@@ -51,6 +54,9 @@ class PhoneDataSyncCoordinator(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val newsRefreshInFlight = AtomicBoolean(false)
     private val manualRefreshInFlight = AtomicBoolean(false)
+    // Bluetooth writes can block behind a large map packet.  Keep them off the
+    // phone UI thread and serialize them to preserve protocol framing/order.
+    private val outboundSyncExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val binanceStreamManager = BinanceFinanceStreamManager(
         onSnapshot = { snapshot ->
             snapshotStore.saveFinance(snapshot)
@@ -61,18 +67,18 @@ class PhoneDataSyncCoordinator(
     private val notificationObserver: (PhoneNotificationsSnapshot) -> Unit = { snapshot ->
         onNotificationsSnapshotChanged(snapshot)
     }
-    private var isGlassesConnected = false
+    @Volatile private var isGlassesConnected = false
     @Volatile private var visibleFinanceConfigs: List<FinanceDashboardTileConfig> = emptyList()
 
     init {
-        LocationWeatherService.onSnapshotChanged = ::onWeatherSnapshotChanged
+        LocationWeatherService.onLocationWeatherSnapshotChanged = ::onLocationWeatherSnapshotChanged
         LocationWeatherService.onSpeedSnapshotChanged = ::onSpeedSnapshotChanged
         PhoneNotificationRepository.addObserver(notificationObserver, appContext)
     }
 
     fun onForeground() {
         if (!isGlassesConnected) return
-        ensureLocationService(forceRefresh = true)
+        ensureLocationService()
         pushCachedSnapshots(pushGoogleState = true)
         syncOrchestrator.refresh(
             channels = SyncChannel.ALL,
@@ -90,7 +96,7 @@ class PhoneDataSyncCoordinator(
             return
         }
 
-        ensureLocationService(forceRefresh = true)
+        ensureLocationService()
         pushCachedSnapshots(pushGoogleState = true)
         syncOrchestrator.refresh(
             channels = SyncChannel.ALL,
@@ -177,10 +183,11 @@ class PhoneDataSyncCoordinator(
     }
 
     fun release() {
-        LocationWeatherService.onSnapshotChanged = null
+        LocationWeatherService.onLocationWeatherSnapshotChanged = null
         LocationWeatherService.onSpeedSnapshotChanged = null
         PhoneNotificationRepository.removeObserver(notificationObserver)
         binanceStreamManager.stopAll()
+        outboundSyncExecutor.shutdownNow()
     }
 
     fun pushCachedSnapshots(
@@ -237,17 +244,35 @@ class PhoneDataSyncCoordinator(
         if (SyncChannel.NOTIFICATIONS in request.channels) {
             send(SyncSnapshot(notifications = PhoneNotificationRepository.current(appContext)))
         }
+        if (SyncChannel.MAP in request.channels) {
+            val lat = request.mapLat
+            val lon = request.mapLon
+            if (lat != null && lon != null) {
+                Thread {
+                    fileLog("Fetching phone map proxy for $lat,$lon")
+                    runCatching { MapDataProvider.fetch(lat, lon) }
+                        .onSuccess {
+                            fileLog("Phone map proxy ready: roads=${it.roads.size} pois=${it.pois.size}")
+                            send(SyncSnapshot(map = it))
+                        }
+                        .onFailure {
+                            fileLog("Phone map proxy failed: ${it.message}")
+                            sendError(SyncChannel.MAP, "Map fetch failed: ${it.message}")
+                        }
+                }.start()
+            }
+        }
     }
 
     private fun refreshWeather(force: Boolean) {
-        ensureLocationService(forceRefresh = force)
+        ensureLocationService()
         val service = LocationWeatherService.instance
         if (service == null) {
             sendError(SyncChannel.WEATHER, "Location service is not ready")
             return
         }
         if (force || snapshotStore.loadWeather().isStale()) {
-            service.forceUpdate()
+            service.refreshLocationWeatherNow(forceWeatherFetch = force)
         }
     }
 
@@ -257,7 +282,7 @@ class PhoneDataSyncCoordinator(
             return
         }
 
-        ensureLocationService(forceRefresh = false)
+        ensureLocationService()
 
         fun refreshFromService() {
             val service = LocationWeatherService.instance
@@ -494,14 +519,14 @@ class PhoneDataSyncCoordinator(
         }.start()
     }
 
-    private fun ensureLocationService(forceRefresh: Boolean) {
+    private fun ensureLocationService() {
         if (!hasLocationPermission()) return
-        LocationWeatherService.onSnapshotChanged = ::onWeatherSnapshotChanged
+        LocationWeatherService.onLocationWeatherSnapshotChanged = ::onLocationWeatherSnapshotChanged
         LocationWeatherService.onSpeedSnapshotChanged = ::onSpeedSnapshotChanged
-        LocationWeatherService.start(appContext, forceRefresh = forceRefresh)
+        LocationWeatherService.start(appContext)
     }
 
-    private fun onWeatherSnapshotChanged(snapshot: WeatherSnapshot) {
+    private fun onLocationWeatherSnapshotChanged(snapshot: WeatherSnapshot) {
         snapshotStore.saveWeather(snapshot)
         send(SyncSnapshot(weather = snapshot))
     }
@@ -515,22 +540,30 @@ class PhoneDataSyncCoordinator(
     }
 
     private fun pushGoogleState(state: PhoneGoogleAuthState) {
-        googleAuthStateSender(state)
+        outboundSyncExecutor.execute {
+            if (isGlassesConnected) googleAuthStateSender(state)
+        }
     }
 
     private fun send(snapshot: SyncSnapshot) {
         if (!isGlassesConnected || snapshot.isEmpty) return
-        syncMessengerProvider()?.sendSyncSnapshot(snapshot)
+        outboundSyncExecutor.execute {
+            if (isGlassesConnected) syncMessengerProvider()?.sendSyncSnapshot(snapshot)
+        }
     }
 
     private fun sendSpeed(snapshot: SpeedSnapshot) {
         if (!isGlassesConnected) return
-        syncMessengerProvider()?.sendSpeedSnapshot(snapshot)
+        outboundSyncExecutor.execute {
+            if (isGlassesConnected) syncMessengerProvider()?.sendSpeedSnapshot(snapshot)
+        }
     }
 
     private fun sendError(channel: SyncChannel, message: String) {
         if (!isGlassesConnected) return
-        syncMessengerProvider()?.sendSyncError(SyncError(channel, message))
+        outboundSyncExecutor.execute {
+            if (isGlassesConnected) syncMessengerProvider()?.sendSyncError(SyncError(channel, message))
+        }
     }
 
     private fun PhoneGoogleCalendarSnapshot.toSharedCalendarSnapshot(): CalendarSnapshot {

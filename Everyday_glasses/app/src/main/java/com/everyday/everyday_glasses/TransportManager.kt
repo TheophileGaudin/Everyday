@@ -27,7 +27,9 @@ class TransportManager(
             financeAssetType = request.financeAssetType,
             financeChartType = request.financeChartType,
             financeTileId = request.financeTileId,
-            financeLiveEnabled = request.financeLiveEnabled
+            financeLiveEnabled = request.financeLiveEnabled,
+            mapLat = request.mapLat,
+            mapLon = request.mapLon
         )
         return true
     }

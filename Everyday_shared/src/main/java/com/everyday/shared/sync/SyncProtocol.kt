@@ -62,9 +62,18 @@ object SyncProtocol {
             override fun shouldPersist(value: PhoneNotificationsSnapshot): Boolean = false
         }
 
+    val MAP_CODEC: SyncChannelCodec<MapSnapshot> =
+        object : SyncChannelCodec<MapSnapshot>(SyncChannel.MAP) {
+            override fun extract(snapshot: SyncSnapshot) = snapshot.map
+            override fun place(into: SyncSnapshot, value: MapSnapshot?) = into.copy(map = value)
+            override fun toJson(value: MapSnapshot) = value.toJson()
+            override fun fromJson(json: JSONObject) = json.toMapSnapshot()
+            override fun shouldPersist(value: MapSnapshot): Boolean = false
+        }
+
     /** All channel codecs in a stable order. */
     val CHANNEL_CODECS: List<SyncChannelCodec<*>> =
-        listOf(WEATHER_CODEC, CALENDAR_CODEC, NEWS_CODEC, FINANCE_CODEC, NOTIFICATIONS_CODEC)
+        listOf(WEATHER_CODEC, CALENDAR_CODEC, NEWS_CODEC, FINANCE_CODEC, NOTIFICATIONS_CODEC, MAP_CODEC)
 
     // ==================== Request ====================
 
@@ -84,6 +93,8 @@ object SyncProtocol {
             .putNullable("financeChartType", request.financeChartType?.name)
             .putNullable("financeTileId", request.financeTileId)
             .putNullable("financeLiveEnabled", request.financeLiveEnabled)
+            .putNullable("mapLat", request.mapLat)
+            .putNullable("mapLon", request.mapLon)
             .toString()
     }
 
@@ -115,7 +126,9 @@ object SyncProtocol {
                 root.optBoolean("financeLiveEnabled")
             } else {
                 null
-            }
+            },
+            mapLat = root.optDoubleOrNull("mapLat"),
+            mapLon = root.optDoubleOrNull("mapLon")
         )
     }
 
@@ -195,6 +208,10 @@ object SyncProtocol {
             .put("countryCode", countryCode)
             .put("timestampMs", timestampMs)
             .put("staleAfterMs", staleAfterMs)
+            .putNullable("lat", lat)
+            .putNullable("lon", lon)
+            .putNullable("accuracyM", accuracyM)
+            .putNullable("bearingDeg", bearingDeg)
             .putNullable("speedMps", speedMps)
             .putNullable("weather", weather?.toJson())
     }
@@ -205,10 +222,41 @@ object SyncProtocol {
             countryCode = optString("countryCode", "Unknown"),
             weather = optJSONObject("weather")?.toWeatherData(),
             timestampMs = optLong("timestampMs", 0L),
+            lat = optDoubleOrNull("lat"),
+            lon = optDoubleOrNull("lon"),
+            accuracyM = optDoubleOrNull("accuracyM")?.toFloat(),
+            bearingDeg = optDoubleOrNull("bearingDeg")?.toFloat(),
             speedMps = if (has("speedMps") && !isNull("speedMps")) optDouble("speedMps").toFloat() else null,
             staleAfterMs = optLong("staleAfterMs", SyncCachePolicy.WEATHER_STALE_AFTER_MS)
         )
     }
+
+    private fun MapSnapshot.toJson(): JSONObject = JSONObject()
+        .put("center", center.toJson())
+        .put("timestampMs", timestampMs)
+        .put("roads", roads.toJsonArray { road -> JSONObject()
+            .put("id", road.id).put("highway", road.highway).putNullable("name", road.name)
+            .put("points", road.points.toJsonArray { it.toJson() }) })
+        .put("pois", pois.toJsonArray { poi -> JSONObject()
+            .put("id", poi.id).putNullable("name", poi.name).put("category", poi.category)
+            .put("important", poi.important).put("point", poi.point.toJson()) })
+
+    private fun MapPointSnapshot.toJson() = JSONObject().put("lat", lat).put("lon", lon)
+
+    private fun JSONObject.toMapSnapshot(): MapSnapshot = MapSnapshot(
+        center = optJSONObject("center").toMapPoint(),
+        roads = optJSONArray("roads").mapObjects { road -> MapRoadSnapshot(
+            id = road.optLong("id"), highway = road.optString("highway"), name = road.optStringOrNull("name"),
+            points = road.optJSONArray("points").mapObjects { it.toMapPoint() }
+        ) },
+        pois = optJSONArray("pois").mapObjects { poi -> MapPoiSnapshot(
+            id = poi.optLong("id"), name = poi.optStringOrNull("name"), category = poi.optString("category"),
+            important = poi.optBoolean("important"), point = poi.optJSONObject("point").toMapPoint()
+        ) },
+        timestampMs = optLong("timestampMs", System.currentTimeMillis())
+    )
+
+    private fun JSONObject?.toMapPoint() = MapPointSnapshot(this?.optDouble("lat") ?: 0.0, this?.optDouble("lon") ?: 0.0)
 
     private fun WeatherData.toJson(): JSONObject {
         return JSONObject()
@@ -534,4 +582,7 @@ object SyncProtocol {
 
     private fun JSONObject.optLongOrNull(name: String): Long? =
         if (has(name) && !isNull(name)) optLong(name) else null
+
+    private fun JSONObject.optDoubleOrNull(name: String): Double? =
+        if (has(name) && !isNull(name)) optDouble(name) else null
 }

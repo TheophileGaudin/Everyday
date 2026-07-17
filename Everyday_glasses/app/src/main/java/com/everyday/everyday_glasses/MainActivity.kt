@@ -22,6 +22,8 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
+import android.os.Environment
+import android.provider.Settings
 import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -163,6 +165,7 @@ class MainActivity : AppCompatActivity() {
 
     // File picker for opening images, PDFs, etc.
     private lateinit var filePicker: FilePicker
+    private var openFileBrowserAfterAllFilesGrant = false
 
     private lateinit var googleAuthCoordinator: GoogleAuthCoordinator
     private lateinit var googleCalendarClient: GoogleCalendarClient
@@ -203,7 +206,7 @@ class MainActivity : AppCompatActivity() {
         private const val ADAPTIVE_BRIGHTNESS_EPSILON = 0.03f
 
         // Speedometer behavior (source of truth in km/h)
-        private const val SPEED_THRESHOLD_KMH = 0.5f
+        private const val SPEED_THRESHOLD_KMH = 1f
         private const val SPEED_THRESHOLD_HYSTERESIS_KMH = 0.1f
         private const val SPEED_SMOOTHING_ALPHA = 0.35f
         private const val SPEED_RESUME_BOOTSTRAP_ALPHA = 0.85f
@@ -499,7 +502,6 @@ class MainActivity : AppCompatActivity() {
 
             onSyncSnapshotReceived = { snapshot ->
                 runOnUiThread {
-                    snapshot.weather?.let { maybeApplyPhoneSpeedFallback(it.speedMps) }
                     dataSyncCoordinator.onSyncSnapshotReceived(snapshot)
                 }
             }
@@ -744,8 +746,9 @@ class MainActivity : AppCompatActivity() {
 
         widgetContainer.onFilePickerRequest = {
             Log.d(TAG, "File picker requested")
-            // Check storage permission before opening file browser
-            if (hasStoragePermission()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
+                requestAllFilesAccessForBrowser()
+            } else if (hasStoragePermission()) {
                 openFileBrowser()
             } else {
                 requestStoragePermission()
@@ -952,6 +955,7 @@ class MainActivity : AppCompatActivity() {
         widgetContainer.onNewsDataRequested = { countryCode, force, reason ->
             dataSyncCoordinator.onNewsDataRequested(countryCode, force, reason)
         }
+        widgetContainer.onMapDataRequested = dataSyncCoordinator::onMapDataRequested
         dataSyncCoordinator.restoreCachedSnapshots()
     }
 
@@ -1551,7 +1555,10 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        widgetContainer.applyPersistedStateReplacingCurrent(state)
+        val delivered = state.activeLayoutName
+            ?.takeIf(BuiltInLayouts::isDelivered)
+            ?.let { BuiltInLayouts.build(it, widgetContainer.width.toFloat(), widgetContainer.height.toFloat()) }
+        widgetContainer.applyPersistedStateReplacingCurrent(delivered ?: state)
 
         refreshBinocularRenderingStrategy()
         notifyStructuralBinocularChange()
@@ -1730,6 +1737,13 @@ class MainActivity : AppCompatActivity() {
         // Also hide system keyboard
         hideSystemKeyboard()
         updateAmbientLightMonitoring()
+
+        if (openFileBrowserAfterAllFilesGrant &&
+            (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager())
+        ) {
+            openFileBrowserAfterAllFilesGrant = false
+            widgetContainer.post { openFileBrowser() }
+        }
 
         // Notify service that activity is in foreground
         // Service will disable its head-up detection (we handle it here)
@@ -2261,16 +2275,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun maybeApplyPhoneSpeedFallback(speedMps: Float?) {
-        applyPhoneSpeedSnapshot(
-            SpeedSnapshot(
-                speedMps = speedMps,
-                qualityOk = speedMps?.isFinite() == true,
-                timestampMs = System.currentTimeMillis()
-            )
-        )
-    }
-
     private fun applyPhoneSpeedSnapshot(snapshot: SpeedSnapshot) {
         val nowElapsed = android.os.SystemClock.elapsedRealtime()
         val localFresh = lastSpeedLocationUpdateElapsedMs != 0L &&
@@ -2347,6 +2351,7 @@ class MainActivity : AppCompatActivity() {
      * - triggering standalone weather refreshes when no phone is connected
      */
     private fun updateLocationWidget(location: Location) {
+        widgetContainer.updateMapLocation(location)
         lastSpeedLocationUpdateElapsedMs = android.os.SystemClock.elapsedRealtime()
 
         val now = System.currentTimeMillis()
@@ -2455,9 +2460,11 @@ class MainActivity : AppCompatActivity() {
      * Check if storage permission is granted for reading images.
      */
     private fun hasStoragePermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // Android 13+ uses READ_MEDIA_IMAGES
-            ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED &&
+                ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED
         } else {
             // Android 6-12 uses READ_EXTERNAL_STORAGE
             ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
@@ -2477,6 +2484,9 @@ class MainActivity : AppCompatActivity() {
             // Android 13+ uses granular media permissions
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
                 permissionsList.add(Manifest.permission.READ_MEDIA_IMAGES)
+            }
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
+                permissionsList.add(Manifest.permission.READ_MEDIA_VIDEO)
             }
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             // Android 6-12 uses READ_EXTERNAL_STORAGE
@@ -2500,17 +2510,52 @@ class MainActivity : AppCompatActivity() {
      */
     private fun openFileBrowser() {
         widgetContainer.createFileBrowserWidget(
-            filter = FileBrowserWidget.FileFilter.IMAGES,
+            filter = FileBrowserWidget.FileFilter.MEDIA,
             onFileSelected = { entry ->
                 Log.d(TAG, "File selected: ${entry.absolutePath}, uri: ${entry.uri}")
-                // Use URI if available (MediaStore), otherwise use file path
-                if (entry.uri != null) {
+                if (entry.extension == "pdf" || entry.mimeType == "application/pdf") {
+                    val uri = entry.uri ?: android.net.Uri.fromFile(java.io.File(entry.absolutePath))
+                    handlePdfFile(uri, entry.name)
+                } else if (entry.extension in FileBrowserWidget.FileFilter.VIDEOS.extensions || entry.mimeType?.startsWith("video/") == true) {
+                    val uri = entry.uri ?: android.net.Uri.fromFile(java.io.File(entry.absolutePath))
+                    handleVideoFile(uri, entry.name)
+                } else if (entry.uri != null) {
                     handleImageFile(entry.uri)
                 } else {
                     handleImageFile(java.io.File(entry.absolutePath))
                 }
             }
         )
+    }
+
+    private fun requestAllFilesAccessForBrowser() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            requestStoragePermission()
+            return
+        }
+        openFileBrowserAfterAllFilesGrant = true
+        val appSettingsIntent = Intent(
+            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+            android.net.Uri.parse("package:$packageName")
+        )
+        runCatching { startActivity(appSettingsIntent) }
+            .recoverCatching { startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
+            .onFailure {
+                openFileBrowserAfterAllFilesGrant = false
+                Log.e(TAG, "Unable to open all-files access settings", it)
+            }
+    }
+
+    private fun handleVideoFile(uri: android.net.Uri, displayName: String) {
+        runOnUiThread {
+            widgetContainer.createVideoWidget(uri, displayName)
+        }
+    }
+
+    private fun handlePdfFile(uri: android.net.Uri, displayName: String) {
+        runOnUiThread {
+            widgetContainer.createPdfWidget(uri, displayName)
+        }
     }
 
     private fun requestPermissions() {
@@ -2546,6 +2591,9 @@ class MainActivity : AppCompatActivity() {
             // Android 13+ uses granular media permissions
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
                 permissionsList.add(Manifest.permission.READ_MEDIA_IMAGES)
+            }
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
+                permissionsList.add(Manifest.permission.READ_MEDIA_VIDEO)
             }
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             // Android 6-12 uses READ_EXTERNAL_STORAGE
@@ -2743,6 +2791,7 @@ class MainActivity : AppCompatActivity() {
                 for (i in permissions.indices) {
                     val permission = permissions[i]
                     if (permission == Manifest.permission.READ_MEDIA_IMAGES ||
+                        permission == Manifest.permission.READ_MEDIA_VIDEO ||
                         permission == Manifest.permission.READ_EXTERNAL_STORAGE) {
                         if (grantResults[i] == PackageManager.PERMISSION_GRANTED) {
                             storageGranted = true

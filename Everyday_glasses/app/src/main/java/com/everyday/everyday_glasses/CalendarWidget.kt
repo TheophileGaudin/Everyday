@@ -98,8 +98,8 @@ class CalendarWidget(
     )
 
     override val minimizeLabel: String = "C"
-    override val minWidth: Float = 250f
-    override val minHeight: Float = 130f
+    override val minWidth: Float = MIN_WIDGET_SIZE
+    override val minHeight: Float = MIN_WIDGET_SIZE
 
     var onStateChanged: (() -> Unit)? = null
 

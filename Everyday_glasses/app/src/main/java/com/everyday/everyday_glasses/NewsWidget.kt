@@ -73,8 +73,8 @@ class NewsWidget(
     // ==================== Widget State ====================
 
     override val minimizeLabel: String = "N"
-    override val minWidth: Float = 260f
-    override val minHeight: Float = 140f
+    override val minWidth: Float = MIN_WIDGET_SIZE
+    override val minHeight: Float = MIN_WIDGET_SIZE
 
     private val newsItems = mutableListOf<NewsArticle>()
     private var currentIndex = 0

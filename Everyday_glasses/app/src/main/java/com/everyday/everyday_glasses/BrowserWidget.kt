@@ -102,8 +102,8 @@ class BrowserWidget(
     }
 
     override val minimizeLabel: String = "W"
-    override val minWidth = 250f
-    override val minHeight = 150f
+    override val minWidth = MIN_WIDGET_SIZE
+    override val minHeight = MIN_WIDGET_SIZE
 
     // Tab management
     private val tabs = mutableListOf<Tab>()

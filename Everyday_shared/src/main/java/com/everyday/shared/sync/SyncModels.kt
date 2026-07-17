@@ -5,7 +5,8 @@ enum class SyncChannel(val wireName: String) {
     CALENDAR("calendar"),
     NEWS("news"),
     FINANCE("finance"),
-    NOTIFICATIONS("notifications");
+    NOTIFICATIONS("notifications"),
+    MAP("map");
 
     companion object {
         val ALL: Set<SyncChannel> = values().toSet()
@@ -29,6 +30,8 @@ data class SyncRequest(
     val financeChartType: FinanceChartType? = null,
     val financeTileId: String? = null,
     val financeLiveEnabled: Boolean? = null
+    ,val mapLat: Double? = null
+    ,val mapLon: Double? = null
 )
 
 data class WeatherData(
@@ -52,6 +55,10 @@ data class WeatherSnapshot(
     val countryCode: String,
     val weather: WeatherData?,
     val timestampMs: Long = System.currentTimeMillis(),
+    val lat: Double? = null,
+    val lon: Double? = null,
+    val accuracyM: Float? = null,
+    val bearingDeg: Float? = null,
     val speedMps: Float? = null,
     val staleAfterMs: Long = SyncCachePolicy.WEATHER_STALE_AFTER_MS
 )
@@ -59,6 +66,16 @@ data class WeatherSnapshot(
 data class SpeedSnapshot(
     val speedMps: Float?,
     val qualityOk: Boolean,
+    val timestampMs: Long = System.currentTimeMillis()
+)
+
+data class MapPointSnapshot(val lat: Double, val lon: Double)
+data class MapRoadSnapshot(val id: Long, val highway: String, val name: String?, val points: List<MapPointSnapshot>)
+data class MapPoiSnapshot(val id: Long, val name: String?, val category: String, val important: Boolean, val point: MapPointSnapshot)
+data class MapSnapshot(
+    val center: MapPointSnapshot,
+    val roads: List<MapRoadSnapshot>,
+    val pois: List<MapPoiSnapshot>,
     val timestampMs: Long = System.currentTimeMillis()
 )
 
@@ -233,14 +250,16 @@ data class SyncSnapshot(
     val calendar: CalendarSnapshot? = null,
     val news: NewsSnapshot? = null,
     val finance: FinanceSnapshot? = null,
-    val notifications: PhoneNotificationsSnapshot? = null
+    val notifications: PhoneNotificationsSnapshot? = null,
+    val map: MapSnapshot? = null
 ) {
     val isEmpty: Boolean
         get() = weather == null &&
             calendar == null &&
             news == null &&
             finance == null &&
-            notifications == null
+            notifications == null &&
+            map == null
 }
 
 data class SyncError(

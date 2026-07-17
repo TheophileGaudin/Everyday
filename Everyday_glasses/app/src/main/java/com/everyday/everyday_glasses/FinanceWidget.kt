@@ -661,7 +661,11 @@ class FinanceWidget(
         tiles[tileIndex] = tiles[tileIndex].copy(
             assetType = instrument.assetType,
             symbol = instrument.symbol,
-            chartType = if (instrument.assetType == FinanceAssetType.CRYPTO) FinanceChartType.CANDLE else FinanceChartType.LINE
+            chartType = when {
+                instrument.assetType == FinanceAssetType.CRYPTO -> FinanceChartType.CANDLE
+                instrument.assetType == FinanceAssetType.FX && tiles[tileIndex].chartType == FinanceChartType.CANDLE -> FinanceChartType.CANDLE
+                else -> FinanceChartType.LINE
+            }
         )
         dropdownVisible = false
         updateLegacySelection()

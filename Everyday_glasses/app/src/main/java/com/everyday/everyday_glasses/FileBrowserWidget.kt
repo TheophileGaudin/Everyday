@@ -52,6 +52,8 @@ class FileBrowserWidget(
      */
     enum class FileFilter(val extensions: Set<String>, val mimePrefix: String) {
         IMAGES(setOf("jpg", "jpeg", "png", "gif", "webp", "bmp"), "image/"),
+        MEDIA(setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "mp4", "mkv", "webm", "mov", "avi", "m4v", "ts", "pdf"), "*/*"),
+        VIDEOS(setOf("mp4", "mkv", "webm", "mov", "avi", "m4v", "ts"), "video/"),
         PDF(setOf("pdf"), "application/pdf"),
         ALL(emptySet(), "*/*")
     }
@@ -66,7 +68,8 @@ class FileBrowserWidget(
         val name: String,
         val isDirectory: Boolean,
         val extension: String,
-        val absolutePath: String   // Full path for display and file operations
+        val absolutePath: String,  // Full path for display and file operations
+        val mimeType: String? = null
     )
 
     enum class State {
@@ -190,8 +193,8 @@ class FileBrowserWidget(
         style = Paint.Style.FILL
     }
 
-    override val minWidth = 300f
-    override val minHeight = 200f
+    override val minWidth = MIN_WIDGET_SIZE
+    override val minHeight = MIN_WIDGET_SIZE
     override val minimizeLabel = "F"
 
     init {
@@ -200,7 +203,15 @@ class FileBrowserWidget(
     }
 
     private fun getDefaultDirectory(): File {
-        // Try common image directories
+        if (fileFilter == FileFilter.VIDEOS) {
+            val movies = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+            if (movies.exists() && movies.canRead()) return movies
+        }
+        if (fileFilter == FileFilter.MEDIA) {
+            val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            if (downloads.exists() && downloads.canRead()) return downloads
+        }
+        // Try common media directories
         val dcim = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM)
         if (dcim.exists() && dcim.canRead()) return dcim
 
@@ -249,10 +260,19 @@ class FileBrowserWidget(
             }
 
             // For media files, use MediaStore on Android 10+ (Scoped Storage)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && fileFilter == FileFilter.IMAGES) {
-                val mediaFiles = queryMediaStoreForImages(directory.absolutePath)
-                resultEntries.addAll(mediaFiles)
-                Log.d(TAG, "MediaStore returned ${mediaFiles.size} images for ${directory.absolutePath}")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && fileFilter in setOf(FileFilter.IMAGES, FileFilter.VIDEOS, FileFilter.PDF, FileFilter.MEDIA)) {
+                val mediaFiles = buildList {
+                    if (fileFilter == FileFilter.IMAGES || fileFilter == FileFilter.MEDIA) addAll(queryMediaStoreForImages(directory.absolutePath))
+                    if (fileFilter == FileFilter.VIDEOS || fileFilter == FileFilter.MEDIA) addAll(queryMediaStoreForVideos(directory.absolutePath))
+                    if (fileFilter == FileFilter.PDF || fileFilter == FileFilter.MEDIA) addAll(queryMediaStoreForPdfs(directory.absolutePath))
+                }
+                val directPdfs = if (fileFilter == FileFilter.PDF || fileFilter == FileFilter.MEDIA) {
+                    files.orEmpty().filter { !it.isDirectory && it.extension.equals("pdf", ignoreCase = true) }.map { file ->
+                        FileEntry(file, Uri.fromFile(file), file.name, false, "pdf", file.absolutePath, "application/pdf")
+                    }
+                } else emptyList()
+                resultEntries.addAll((mediaFiles + directPdfs).distinctBy { it.absolutePath })
+                Log.d(TAG, "MediaStore returned ${mediaFiles.size} files for ${directory.absolutePath}")
             } else {
                 // Fallback for older Android or non-image files
                 files?.filter { file ->
@@ -288,8 +308,14 @@ class FileBrowserWidget(
      */
     private fun hasStoragePermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // Android 13+ uses READ_MEDIA_IMAGES
-            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED
+            val imagesGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED
+            val videosGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED
+            when (fileFilter) {
+                FileFilter.IMAGES -> imagesGranted
+                FileFilter.VIDEOS -> videosGranted
+                FileFilter.MEDIA -> imagesGranted && videosGranted
+                else -> true
+            }
         } else {
             // Android 6-12 uses READ_EXTERNAL_STORAGE
             ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
@@ -393,6 +419,91 @@ class FileBrowserWidget(
         }
 
         return images
+    }
+
+    private fun queryMediaStoreForVideos(directoryPath: String): List<FileEntry> {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED
+        ) return emptyList()
+
+        val videos = mutableListOf<FileEntry>()
+        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        } else {
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        }
+        val projection = arrayOf(
+            MediaStore.Video.Media._ID,
+            MediaStore.Video.Media.DISPLAY_NAME,
+            MediaStore.Video.Media.DATA,
+            MediaStore.Video.Media.MIME_TYPE,
+        )
+        runCatching {
+            context.contentResolver.query(
+                collection,
+                projection,
+                "${MediaStore.Video.Media.DATA} LIKE ?",
+                arrayOf("$directoryPath/%"),
+                "${MediaStore.Video.Media.DISPLAY_NAME} ASC",
+            )?.use { cursor ->
+                val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+                val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
+                val dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATA)
+                val mimeColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.MIME_TYPE)
+                while (cursor.moveToNext()) {
+                    val path = cursor.getString(dataColumn) ?: continue
+                    if (File(path).parent != directoryPath) continue
+                    val name = cursor.getString(nameColumn).orEmpty()
+                    videos += FileEntry(
+                        file = null,
+                        uri = ContentUris.withAppendedId(collection, cursor.getLong(idColumn)),
+                        name = name,
+                        isDirectory = false,
+                        extension = name.substringAfterLast('.', "").lowercase(),
+                        absolutePath = path,
+                        mimeType = cursor.getString(mimeColumn),
+                    )
+                }
+            }
+        }.onFailure { Log.e(TAG, "Error querying videos in $directoryPath", it) }
+        return videos
+    }
+
+    private fun queryMediaStoreForPdfs(directoryPath: String): List<FileEntry> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return emptyList()
+        val documents = mutableListOf<FileEntry>()
+        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        val projection = arrayOf(
+            MediaStore.Downloads._ID,
+            MediaStore.Downloads.DISPLAY_NAME,
+            MediaStore.Downloads.MIME_TYPE,
+            MediaStore.Downloads.RELATIVE_PATH,
+        )
+        val storageRoot = Environment.getExternalStorageDirectory().absolutePath.trimEnd('/')
+        val relativeDirectory = directoryPath
+            .removePrefix(storageRoot)
+            .trim('/')
+            .let { if (it.isBlank()) "" else "$it/" }
+        runCatching {
+            context.contentResolver.query(
+                collection,
+                projection,
+                "${MediaStore.Downloads.MIME_TYPE} = ? AND ${MediaStore.Downloads.RELATIVE_PATH} = ?",
+                arrayOf("application/pdf", relativeDirectory),
+                "${MediaStore.Downloads.DISPLAY_NAME} ASC",
+            )?.use { cursor ->
+                val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
+                val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME)
+                while (cursor.moveToNext()) {
+                    val uri = ContentUris.withAppendedId(collection, cursor.getLong(idColumn))
+                    val name = cursor.getString(nameColumn).orEmpty()
+                    val path = File(directoryPath, name).absolutePath
+                    documents += FileEntry(null, uri, name, false, "pdf", path, "application/pdf")
+                }
+            }
+            Log.d(TAG, "MediaStore PDF query returned ${documents.size} rows for $relativeDirectory")
+        }.onFailure { Log.w(TAG, "Unable to query PDFs in $directoryPath", it) }
+        return documents
     }
 
     private fun updateScrollBounds() {
@@ -637,8 +748,7 @@ class FileBrowserWidget(
                 close()
             }
             canvas.drawPath(path, folderIconPaint)
-        } else if (fileFilter == FileFilter.IMAGES ||
-                   fileFilter.extensions.contains(entry.extension)) {
+        } else if (entry.extension in FileFilter.IMAGES.extensions) {
             // Image icon (mountain/sun)
             val paint = imageIconPaint
 
@@ -669,6 +779,15 @@ class FileBrowserWidget(
             // Reset icon paint
             iconPaint.style = Paint.Style.STROKE
             iconPaint.color = Color.WHITE
+        } else if (entry.extension in FileFilter.VIDEOS.extensions) {
+            canvas.drawRoundRect(cx - size, cy - size * 0.8f, cx + size, cy + size * 0.8f, 3f, 3f, fileIconPaint)
+            val playPath = Path().apply {
+                moveTo(cx - size * 0.25f, cy - size * 0.45f)
+                lineTo(cx + size * 0.5f, cy)
+                lineTo(cx - size * 0.25f, cy + size * 0.45f)
+                close()
+            }
+            canvas.drawPath(playPath, imageIconPaint)
         } else {
             // Generic file icon
             val path = Path().apply {

@@ -38,8 +38,8 @@ class SubtitleWidget(
     }
 
     override val minimizeLabel: String = "S"
-    override val minWidth: Float = 260f
-    override val minHeight: Float = 84f
+    override val minWidth: Float = MIN_WIDGET_SIZE
+    override val minHeight: Float = MIN_WIDGET_SIZE
 
     private val toggleBounds = RectF()
     private val optionsPanelBounds = RectF()

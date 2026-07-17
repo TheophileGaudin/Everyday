@@ -44,8 +44,8 @@ class TextBoxWidget(
         private const val TAG = "TextBoxWidget"
 
         // Minimum sizes
-        private const val MIN_WIDTH = 80f
-        private const val MIN_HEIGHT = 40f
+        private const val MIN_WIDTH = MIN_WIDGET_SIZE
+        private const val MIN_HEIGHT = MIN_WIDGET_SIZE
 
         // Scrolling
         private const val SCROLL_SENSITIVITY = 0.5f
