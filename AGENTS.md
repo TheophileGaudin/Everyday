@@ -11,6 +11,7 @@
 - If a shell build is needed and no repo `gradlew.bat` exists, use Android Studio's bundled JBR with the downloaded Gradle 8.7 distribution:
   - `$env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'; $env:Path="$env:JAVA_HOME\bin;$env:Path"; & "$env:USERPROFILE\.gradle\wrapper\dists\gradle-8.7-bin\bhs2wmbdwecv87pi65oeuq5iu\gradle-8.7\bin\gradle.bat" :app:assembleDebug`
   - Run that from `Everyday_glasses` or `Everyday_phone` as appropriate.
+- Allow at least 5 minutes for a cold `Everyday_glasses` build. In the 0.9.1 release session, the first test/release build exceeded a 124-second shell timeout; the cached rerun completed in about 13 seconds. Do not treat the two-minute timeout alone as a Gradle failure.
 
 ## Target Device (RayNeo X3 Pro)
 - Chip platform: Qualcomm Snapdragon AR1 Gen1

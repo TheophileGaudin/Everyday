@@ -34,6 +34,7 @@ class SpeedometerSettingsMenu(
     var onDismissed: (() -> Unit)? = null
 
     private var thresholdValue = DEFAULT_THRESHOLD
+    private var speedUnit = SpeedometerWidget.SpeedUnit.KMH
     private var sliderDragging = false
 
     private val menuRect = RectF()
@@ -120,6 +121,10 @@ class SpeedometerSettingsMenu(
         if (thresholdValue == clamped) return
         thresholdValue = clamped
         if (notify) onThresholdChanged?.invoke(thresholdValue)
+    }
+
+    fun setSpeedUnit(unit: SpeedometerWidget.SpeedUnit) {
+        speedUnit = unit
     }
 
     fun draw(canvas: Canvas) {
@@ -237,7 +242,7 @@ class SpeedometerSettingsMenu(
         return if (thresholdValue <= 0f) {
             "Always visible"
         } else {
-            String.format(Locale.ENGLISH, "%.2f km/h", thresholdValue)
+            UnitDisplayFormatter.formatSpeedThreshold(thresholdValue, speedUnit)
         }
     }
 }

@@ -1,7 +1,7 @@
 package com.everyday.shared.sync
 
 enum class SyncChannel(val wireName: String) {
-    WEATHER("weather"),
+    LOCATION_WEATHER("weather"),
     CALENDAR("calendar"),
     NEWS("news"),
     FINANCE("finance"),
@@ -50,7 +50,7 @@ data class LocationName(
     val countryCode: String
 )
 
-data class WeatherSnapshot(
+data class LocationWeatherSnapshot(
     val town: String,
     val countryCode: String,
     val weather: WeatherData?,
@@ -246,7 +246,7 @@ data class PhoneNotificationsSnapshot(
 )
 
 data class SyncSnapshot(
-    val weather: WeatherSnapshot? = null,
+    val locationWeather: LocationWeatherSnapshot? = null,
     val calendar: CalendarSnapshot? = null,
     val news: NewsSnapshot? = null,
     val finance: FinanceSnapshot? = null,
@@ -254,7 +254,7 @@ data class SyncSnapshot(
     val map: MapSnapshot? = null
 ) {
     val isEmpty: Boolean
-        get() = weather == null &&
+        get() = locationWeather == null &&
             calendar == null &&
             news == null &&
             finance == null &&

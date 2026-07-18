@@ -190,7 +190,6 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_WAKE_DURATION = "wake_duration_ms"
         private const val KEY_ANGLE_THRESHOLD = "angle_threshold_degrees"
         private const val KEY_HEADSUP_ENABLED = "headsup_enabled"
-        private const val KEY_SPEED_UNIT = "speed_unit"
         private const val KEY_SPEED_VISIBILITY_THRESHOLD = "speed_visibility_threshold_kmh"
         private const val KEY_SMART_ALIGNMENT = "smart_alignment_enabled"
         private const val DEFAULT_BRIGHTNESS = 1.0f  // Maximum brightness (no dimming) by default
@@ -774,11 +773,6 @@ class MainActivity : AppCompatActivity() {
             notifyTransientBinocularChange()
         }
 
-        widgetContainer.onSpeedUnitChanged = { unit ->
-            saveSpeedUnit(unit)
-            speedLog { "Unit changed to ${unit.label}" }
-        }
-
         widgetContainer.onSpeedVisibilityThresholdChanged = { threshold ->
             speedVisibilityThresholdKmh = threshold.coerceIn(0f, 1f)
             saveSpeedVisibilityThreshold(speedVisibilityThresholdKmh)
@@ -866,11 +860,8 @@ class MainActivity : AppCompatActivity() {
         restoreBrightness()
         restoreHeadUpSettings()
         restoreSmartAlignmentSetting()
-        val savedSpeedUnit = loadSpeedUnit()
         speedVisibilityThresholdKmh = loadSpeedVisibilityThreshold()
-        widgetContainer.setSpeedUnit(savedSpeedUnit)
         widgetContainer.setSpeedVisibilityThreshold(speedVisibilityThresholdKmh)
-        speedLog { "Loaded saved unit ${savedSpeedUnit.label}" }
         speedLog { "Loaded speed visibility threshold ${formatSpeedThresholdForLog()}" }
     }
 
@@ -1162,19 +1153,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         Log.d(TAG, "Restored head-up settings: headUpTime=${savedHeadUpTime}ms, wakeDuration=${savedWakeDuration}ms, angle=${savedAngleThreshold}°, enabled=$savedHeadsUpEnabled")
-    }
-
-    private fun saveSpeedUnit(unit: SpeedometerWidget.SpeedUnit) {
-        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_SPEED_UNIT, unit.code)
-            .apply()
-    }
-
-    private fun loadSpeedUnit(): SpeedometerWidget.SpeedUnit {
-        val raw = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getString(KEY_SPEED_UNIT, SpeedometerWidget.SpeedUnit.KMH.code)
-        return SpeedometerWidget.SpeedUnit.fromCode(raw)
     }
 
     private fun saveSpeedVisibilityThreshold(thresholdKmh: Float) {

@@ -23,10 +23,6 @@ class SpeedometerWidget(
     height: Float
 ) : BaseWidget(x, y, width, height) {
 
-    companion object {
-        private const val KMH_TO_MPH = 0.621371f
-    }
-
     enum class SpeedUnit(val code: String, val label: String) {
         KMH("kmh", "km/h"),
         MPH("mph", "mph");
@@ -159,7 +155,7 @@ class SpeedometerWidget(
         }
 
         val baseSpeedKmh = if (hasReliableSpeed) smoothedSpeedKmh else 0f
-        val displaySpeed = if (speedUnit == SpeedUnit.KMH) baseSpeedKmh else baseSpeedKmh * KMH_TO_MPH
+        val displaySpeed = UnitDisplayFormatter.speedFromKmh(baseSpeedKmh, speedUnit)
         val speedText = if (displaySpeed >= 10f) {
             String.format(Locale.ENGLISH, "%.0f", displaySpeed)
         } else {

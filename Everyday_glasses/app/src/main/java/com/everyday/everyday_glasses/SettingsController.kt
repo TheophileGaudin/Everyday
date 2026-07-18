@@ -20,6 +20,7 @@ class SettingsController(
     private val notifyHeadsUpEnabledChanged: (Boolean) -> Unit,
     private val notifySmartAlignmentChanged: (Boolean) -> Unit,
     private val notifySpeedVisibilityThresholdChanged: (Float) -> Unit,
+    private val notifyUnitSystemModeChanged: (UnitSystemMode) -> Unit,
     private val connectGoogle: () -> Unit,
     private val grantCalendarAccess: () -> Unit,
     private val disconnectGoogle: () -> Unit,
@@ -49,6 +50,8 @@ class SettingsController(
     private var headsUpEnabled = true
     private var googleAuthState = GoogleAuthState.signedOut()
     private var speedVisibilityThresholdKmh = defaultSpeedVisibilityThresholdKmh
+    private var unitSystemMode = UnitSystemMode.AUTO
+    private var speedUnit = SpeedometerWidget.SpeedUnit.KMH
 
     fun createHoverControlsLayoutEditor(
         screenWidth: Float,
@@ -150,6 +153,7 @@ class SettingsController(
         lastScreenHeight = screenHeight
         speedometerSettingsMenu = SpeedometerSettingsMenu(screenWidth, screenHeight).apply {
             setThreshold(speedVisibilityThresholdKmh, notify = false)
+            setSpeedUnit(speedUnit)
             onThresholdChanged = { threshold ->
                 if (speedVisibilityThresholdKmh != threshold) {
                     speedVisibilityThresholdKmh = threshold
@@ -338,6 +342,16 @@ class SettingsController(
 
     fun getSpeedVisibilityThreshold(): Float = speedVisibilityThresholdKmh
 
+    fun setUnitSystemMode(mode: UnitSystemMode) {
+        unitSystemMode = mode
+        dashboardSettings?.setUnitSystemMode(mode, notify = false)
+    }
+
+    fun setSpeedUnit(unit: SpeedometerWidget.SpeedUnit) {
+        speedUnit = unit
+        speedometerSettingsMenu?.setSpeedUnit(unit)
+    }
+
     fun setBrightness(value: Float) {
         brightnessValue = value.coerceIn(0f, 1f)
         notifyBrightnessChanged(brightnessValue)
@@ -406,11 +420,18 @@ class SettingsController(
             headsUpEnabled = this@SettingsController.headsUpEnabled
             smartAlignmentEnabled = isSmartAlignmentEnabled()
             googleAuthState = this@SettingsController.googleAuthState
+            setUnitSystemMode(this@SettingsController.unitSystemMode, notify = false)
 
             onBrightnessChanged = { value ->
                 this@SettingsController.brightnessValue = value
                 notifyBrightnessChanged(value)
                 invalidateView()
+            }
+
+            onUnitSystemModeChanged = { mode ->
+                notifyUnitSystemModeChanged(mode)
+                invalidateView()
+                notifyContentChanged()
             }
 
             onAdaptiveBrightnessChanged = { enabled ->

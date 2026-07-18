@@ -15,7 +15,7 @@ object SyncCachePolicy {
     }
 }
 
-fun WeatherSnapshot?.isStale(nowMs: Long = System.currentTimeMillis()): Boolean =
+fun LocationWeatherSnapshot?.isStale(nowMs: Long = System.currentTimeMillis()): Boolean =
     this == null || SyncCachePolicy.isStale(timestampMs, staleAfterMs, nowMs)
 
 fun CalendarSnapshot?.isStale(nowMs: Long = System.currentTimeMillis()): Boolean =

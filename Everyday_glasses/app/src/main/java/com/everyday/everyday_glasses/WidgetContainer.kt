@@ -18,7 +18,7 @@ import com.everyday.shared.sync.PhoneNotificationsSnapshot
 import com.everyday.shared.sync.SubtitleControl
 import com.everyday.shared.sync.SubtitleStatus
 import com.everyday.shared.sync.SubtitleTranscript
-import com.everyday.shared.sync.WeatherSnapshot
+import com.everyday.shared.sync.WeatherData
 import java.io.File
 
 /**
@@ -74,6 +74,7 @@ class WidgetContainer @JvmOverloads constructor(
     private val threeDofOverlay = ThreeDofOverlay()
     private val smartAlignment = SmartAlignmentHelper(registry)
     private val smartAlignmentRenderer = SmartAlignmentRenderer()
+    private val unitSettings = UnitSettings(context)
     private var closedWidgetTemplates = WidgetPersistence.ClosedWidgetTemplates()
 
     // ==================== 3DOF State ====================
@@ -153,6 +154,9 @@ class WidgetContainer @JvmOverloads constructor(
         private set(value) { registry.calendarWidget = value }
 
     // Pending data for location widget
+    private var pendingLocationTown: String? = null
+    private var pendingLocationCountryCode: String? = null
+    private var pendingWeatherData: WeatherData? = null
     private var pendingLocationAddress: String? = null
     private var pendingLocationWeather: String? = null
     private var pendingLocationSunriseEpochMs: Long? = null
@@ -196,7 +200,6 @@ class WidgetContainer @JvmOverloads constructor(
     private var pendingSpeedKmh = 0f
     private var pendingSpeedQualityOk = false
     private var pendingSpeedMoving = false
-    private var speedUnit: SpeedometerWidget.SpeedUnit = SpeedometerWidget.SpeedUnit.KMH
 
     // Screen mirror widget - delegated to registry
     var screenMirrorWidget: ScreenMirrorWidget?
@@ -222,6 +225,7 @@ class WidgetContainer @JvmOverloads constructor(
         notifyHeadsUpEnabledChanged = { enabled -> onHeadsUpEnabledChanged?.invoke(enabled) },
         notifySmartAlignmentChanged = { enabled -> onSmartAlignmentChanged?.invoke(enabled) },
         notifySpeedVisibilityThresholdChanged = { threshold -> onSpeedVisibilityThresholdChanged?.invoke(threshold) },
+        notifyUnitSystemModeChanged = { mode -> unitSettings.setGlobalMode(mode) },
         connectGoogle = { onConnectGoogle?.invoke() },
         grantCalendarAccess = { onGrantCalendarAccess?.invoke() },
         disconnectGoogle = { onDisconnectGoogle?.invoke() },
@@ -462,7 +466,6 @@ class WidgetContainer @JvmOverloads constructor(
     var onFilePickerRequest: (() -> Unit)? = null
     var onStoragePermissionRequest: (() -> Unit)? = null
     var onCursorCenterRequested: (() -> Unit)? = null
-    var onSpeedUnitChanged: ((SpeedometerWidget.SpeedUnit) -> Unit)? = null
     var onSpeedVisibilityThresholdChanged: ((Float) -> Unit)? = null
     var onFinanceDataRequested: ((visibleConfigs: List<FinanceDashboardTileConfig>, refreshTileIds: List<String>, force: Boolean, reason: String) -> Unit)? = null
     var onFinanceVisibilityChanged: ((visible: Boolean) -> Unit)? = null
@@ -485,6 +488,8 @@ class WidgetContainer @JvmOverloads constructor(
     init {
         setWillNotDraw(false)
         setupPersistenceHelperCallbacks()
+        unitSettings.onChanged = { applyEffectiveUnitSettings() }
+        applyEffectiveUnitSettings(notify = false)
     }
 
     override fun onDetachedFromWindow() {
@@ -965,17 +970,7 @@ class WidgetContainer @JvmOverloads constructor(
         notifyContentChanged()
     }
 
-    fun setSpeedUnit(unit: SpeedometerWidget.SpeedUnit) {
-        if (speedUnit == unit) {
-            speedometerWidget?.setUnit(unit)
-            return
-        }
-        speedUnit = unit
-        speedometerWidget?.setUnit(unit)
-        onSpeedUnitChanged?.invoke(unit)
-    }
-
-    fun getSpeedUnit(): SpeedometerWidget.SpeedUnit = speedUnit
+    fun getSpeedUnit(): SpeedometerWidget.SpeedUnit = unitSettings.effectiveSpeedUnit()
 
     fun setSpeedVisibilityThreshold(thresholdKmh: Float) {
         val forceVisibleChanged = settingsController.setSpeedVisibilityThreshold(thresholdKmh)
@@ -995,12 +990,10 @@ class WidgetContainer @JvmOverloads constructor(
         return SpeedometerWidget(startX, startY, widgetWidth, widgetHeight).apply {
             hookupSingleton(speedometerDesc)
             onCloseRequested = { toggleSpeedometerWidget() }
-            onUnitChanged = { newUnit ->
-                speedUnit = newUnit
-                onSpeedUnitChanged?.invoke(newUnit)
-                notifyContentChanged()
+            onUnitChanged = {
+                unitSettings.toggleSpeedOverride()
             }
-            setUnit(speedUnit)
+            setUnit(unitSettings.effectiveSpeedUnit())
             setForceVisibleWhenIdle(settingsController.getSpeedVisibilityThreshold() <= 0f)
             setSpeedData(pendingSpeedKmh, pendingSpeedQualityOk, pendingSpeedMoving)
         }
@@ -1196,10 +1189,39 @@ class WidgetContainer @JvmOverloads constructor(
         notifyContentChanged()
     }
 
-    fun applyWeatherSnapshot(snapshot: WeatherSnapshot) {
-        val weather = snapshot.weather ?: return
-        val addressText = "${snapshot.town}, ${snapshot.countryCode}"
-        val tempText = "${weather.tempCurrent}\u00B0C"
+    fun observeLiveLocationCountry(countryCode: String): Boolean =
+        UnitSettings.normalizeCountryCode(countryCode)?.let {
+            unitSettings.observeLiveCountry(it)
+            true
+        } ?: false
+
+    fun applyLocationMetadata(town: String, countryCode: String) {
+        pendingLocationTown = town
+        pendingLocationCountryCode = countryCode
+        updateMapMetadata(town, countryCode)
+        updateFinanceCountryCode(countryCode)
+        updateNewsCountryCode(countryCode)
+        renderLocationWeather()
+    }
+
+    fun applyWeatherData(weather: WeatherData?) {
+        pendingWeatherData = weather
+        renderLocationWeather()
+    }
+
+    private fun renderLocationWeather() {
+        val town = pendingLocationTown ?: return
+        val countryCode = pendingLocationCountryCode.orEmpty()
+        val weather = pendingWeatherData
+        val addressText = if (countryCode.isNotEmpty()) "$town, $countryCode" else town
+        if (weather == null) {
+            updateLocationData(addressText, "Checking weather...")
+            return
+        }
+        val tempText = UnitDisplayFormatter.formatTemperature(
+            weather.tempCurrent,
+            unitSettings.effectiveTemperatureUnit()
+        )
         val weatherText = if (weather.weatherDescCurrent.isNotEmpty()) {
             "${weather.weatherDescCurrent} $tempText"
         } else {
@@ -1211,9 +1233,16 @@ class WidgetContainer @JvmOverloads constructor(
             weather.sunriseEpochMs,
             weather.sunsetEpochMs
         )
-        updateMapMetadata(snapshot.town, snapshot.countryCode)
-        updateFinanceCountryCode(snapshot.countryCode)
-        updateNewsCountryCode(snapshot.countryCode)
+    }
+
+    private fun applyEffectiveUnitSettings(notify: Boolean = true) {
+        val speedUnit = unitSettings.effectiveSpeedUnit()
+        speedometerWidget?.setUnit(speedUnit)
+        settingsController.setSpeedUnit(speedUnit)
+        settingsController.setUnitSystemMode(unitSettings.globalMode)
+        locationWidget?.setTemperatureUnit(unitSettings.effectiveTemperatureUnit())
+        renderLocationWeather()
+        if (notify) notifyContentChanged()
     }
 
     fun applyFinanceSnapshot(snapshot: FinanceSnapshot, notify: Boolean = true) {
@@ -2102,8 +2131,13 @@ class WidgetContainer @JvmOverloads constructor(
             if (mirror.hitTest(x, y) == ScreenMirrorWidget.HitArea.RUN_PAUSE_BUTTON) mirror.onTap(x, y) else true
         }
 
-    private fun handleLocationWidgetTap(loc: LocationWidget, x: Float, y: Float): Boolean =
-        handleBaseTap(loc, x, y)
+    private fun handleLocationWidgetTap(loc: LocationWidget, x: Float, y: Float): Boolean {
+        if (loc.onUnitTap(x, y)) {
+            notifyContentChanged()
+            return true
+        }
+        return handleBaseTap(loc, x, y)
+    }
 
     private fun handleMapWidgetTap(map: MapWidget, x: Float, y: Float): Boolean {
         if (map.onTap(x, y)) { notifyContentChanged(); return true }
@@ -2618,6 +2652,8 @@ class WidgetContainer @JvmOverloads constructor(
             locationWidget = LocationWidget(context, 20f, height - locHeight - 20f, locWidth, locHeight).apply {
                 hookupSingleton(locationDesc)
                 onCloseRequested = { toggleLocationWidget() }
+                onTemperatureUnitChanged = { unitSettings.toggleTemperatureOverride() }
+                setTemperatureUnit(unitSettings.effectiveTemperatureUnit())
                 if (pendingLocationAddress != null || pendingLocationWeather != null) {
                     setLocationData(pendingLocationAddress ?: "Loading...", pendingLocationWeather ?: "Checking weather...")
                 }
@@ -4176,6 +4212,8 @@ class WidgetContainer @JvmOverloads constructor(
             locationWidget = LocationWidget(context, state.x, state.y, state.width, state.height).apply {
                 hookupSingleton(locationDesc)
                 onCloseRequested = { toggleLocationWidget() }
+                onTemperatureUnitChanged = { unitSettings.toggleTemperatureOverride() }
+                setTemperatureUnit(unitSettings.effectiveTemperatureUnit())
                 if (pendingLocationAddress != null || pendingLocationWeather != null) {
                     setLocationData(pendingLocationAddress ?: "Loading...", pendingLocationWeather ?: "Checking weather...")
                 }

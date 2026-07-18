@@ -36,8 +36,9 @@ class SyncSnapshotStore(context: Context) : SyncSnapshotCache {
 
     // ==================== Typed accessors ====================
 
-    fun saveWeather(snapshot: WeatherSnapshot) = storeValue(SyncProtocol.WEATHER_CODEC, snapshot)
-    fun loadWeather(): WeatherSnapshot? = loadValue(SyncProtocol.WEATHER_CODEC) as WeatherSnapshot?
+    fun saveLocationWeather(snapshot: LocationWeatherSnapshot) = storeValue(SyncProtocol.LOCATION_WEATHER_CODEC, snapshot)
+    fun loadLocationWeather(): LocationWeatherSnapshot? =
+        loadValue(SyncProtocol.LOCATION_WEATHER_CODEC) as LocationWeatherSnapshot?
 
     fun saveCalendar(snapshot: CalendarSnapshot) = storeValue(SyncProtocol.CALENDAR_CODEC, snapshot)
     fun loadCalendar(): CalendarSnapshot? = loadValue(SyncProtocol.CALENDAR_CODEC) as CalendarSnapshot?

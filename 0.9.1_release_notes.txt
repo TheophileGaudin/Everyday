@@ -1,0 +1,9 @@
+**New feature**
+
+Auto-detection of system of units. Temperature and speed units are individually configurable, and app-wide unit system can be toggled to Metric or Imperial in settings (default is auto-detection).
+
+**Notes**
+
+_This app is provided for free as a hobby project. If you'd like to keep me motivated to work on this project, feel free to support me on BuyMeACoffee!_
+
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/Glxblt76)

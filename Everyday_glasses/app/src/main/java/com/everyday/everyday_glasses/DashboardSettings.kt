@@ -132,6 +132,7 @@ class DashboardSettings(
     var onAngleThresholdChanged: ((Float) -> Unit)? = null  // Callback with degrees
     var onHeadsUpEnabledChanged: ((Boolean) -> Unit)? = null
     var onSmartAlignmentChanged: ((Boolean) -> Unit)? = null
+    var onUnitSystemModeChanged: ((UnitSystemMode) -> Unit)? = null
     var onConnectGoogle: (() -> Unit)? = null
     var onGrantCalendarAccess: (() -> Unit)? = null
     var onDisconnectGoogle: (() -> Unit)? = null
@@ -139,6 +140,14 @@ class DashboardSettings(
     var onAppearanceRequested: (() -> Unit)? = null
     var onShortcutsRequested: (() -> Unit)? = null
     var onDismissed: (() -> Unit)? = null
+
+    var unitSystemMode: UnitSystemMode = UnitSystemMode.AUTO
+        private set
+
+    fun setUnitSystemMode(mode: UnitSystemMode, notify: Boolean = true) {
+        unitSystemMode = mode
+        if (notify) onUnitSystemModeChanged?.invoke(mode)
+    }
 
     // Backwards-compatible aliases for brightness
     var sliderValue: Float
@@ -216,6 +225,8 @@ class DashboardSettings(
 
     // Main menu elements
     private val brightnessTrackRect = RectF()
+    private val unitSystemRect = RectF()
+    private val unitSegmentRects = Array(UnitSystemMode.values().size) { RectF() }
     private val mainButtons = mutableListOf(
         MainButtonSpec(MainButton.HEADSUP),
         MainButtonSpec(MainButton.GOOGLE),
@@ -306,6 +317,23 @@ class DashboardSettings(
     private val secondaryButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#616161")
         style = Paint.Style.FILL
+    }
+
+    private val unitControlPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#454545")
+        style = Paint.Style.FILL
+    }
+
+    private val unitSelectedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#1F75B8")
+        style = Paint.Style.FILL
+    }
+
+    private val unitIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = 1.8f
+        strokeCap = Paint.Cap.ROUND
     }
 
     private val buttonTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -427,8 +455,21 @@ class DashboardSettings(
             // Main menu layout
             val firstSliderY = menuRect.top + 90f
 
-            // Brightness slider
-            brightnessTrackRect.set(trackLeft, firstSliderY - 10f, trackRight, firstSliderY + 10f)
+            // Brightness uses roughly two thirds of its former row; units occupy the right third.
+            val unitWidth = 96f
+            val rowGap = 14f
+            val unitLeft = trackRight - unitWidth
+            brightnessTrackRect.set(trackLeft, firstSliderY - 10f, unitLeft - rowGap, firstSliderY + 10f)
+            unitSystemRect.set(unitLeft, firstSliderY - 16f, trackRight, firstSliderY + 16f)
+            val segmentWidth = unitSystemRect.width() / unitSegmentRects.size
+            unitSegmentRects.forEachIndexed { index, rect ->
+                rect.set(
+                    unitSystemRect.left + index * segmentWidth,
+                    unitSystemRect.top,
+                    unitSystemRect.left + (index + 1) * segmentWidth,
+                    unitSystemRect.bottom
+                )
+            }
 
             layoutMainButtons(trackLeft, trackRight, firstSliderY + 34f)
         } else if (currentView == ViewMode.HEADSUP) {
@@ -617,9 +658,6 @@ class DashboardSettings(
         val titleY = menuRect.top + 45f
         canvas.drawText("Settings", menuRect.centerX(), titleY, titlePaint)
 
-        val trackLeft = menuRect.left + SLIDER_MARGIN_X
-        val trackRight = menuRect.right - SLIDER_MARGIN_X
-
         // Draw Brightness slider
         drawSlider(
             canvas,
@@ -627,11 +665,51 @@ class DashboardSettings(
             brightnessValue,
             if (adaptiveBrightnessEnabled) "Brightness Max" else "Brightness",
             "${(brightnessValue * 100).toInt()}%",
-            trackLeft,
-            trackRight
+            brightnessTrackRect.left,
+            brightnessTrackRect.right
         )
+        drawUnitSystemControl(canvas)
 
         mainButtons.forEach { drawMainButton(canvas, it) }
+    }
+
+    private fun drawUnitSystemControl(canvas: Canvas) {
+        canvas.drawText("Units", unitSystemRect.left, unitSystemRect.top + LABEL_OFFSET_Y + 16f, labelPaint)
+        canvas.drawRoundRect(unitSystemRect, 8f, 8f, unitControlPaint)
+        UnitSystemMode.values().forEachIndexed { index, mode ->
+            val rect = unitSegmentRects[index]
+            if (mode == unitSystemMode) canvas.drawRoundRect(rect, 7f, 7f, unitSelectedPaint)
+            if (index > 0) canvas.drawLine(rect.left, rect.top + 5f, rect.left, rect.bottom - 5f, borderPaint)
+            when (mode) {
+                UnitSystemMode.METRIC -> drawRulerIcon(canvas, rect, metric = true)
+                UnitSystemMode.AUTO -> drawGlobeIcon(canvas, rect)
+                UnitSystemMode.IMPERIAL -> drawRulerIcon(canvas, rect, metric = false)
+            }
+        }
+    }
+
+    private fun drawRulerIcon(canvas: Canvas, rect: RectF, metric: Boolean) {
+        val left = rect.left + 7f
+        val right = rect.right - 7f
+        val top = rect.centerY() - 6f
+        val bottom = rect.centerY() + 6f
+        canvas.drawRoundRect(RectF(left, top, right, bottom), 2f, 2f, unitIconPaint)
+        val tickCount = if (metric) 4 else 3
+        for (index in 1 until tickCount) {
+            val x = left + (right - left) * index / tickCount
+            val tickHeight = if (!metric && index % 2 == 1) 4f else 6f
+            canvas.drawLine(x, top, x, top + tickHeight, unitIconPaint)
+        }
+    }
+
+    private fun drawGlobeIcon(canvas: Canvas, rect: RectF) {
+        val radius = 8f
+        canvas.drawCircle(rect.centerX(), rect.centerY(), radius, unitIconPaint)
+        canvas.drawOval(
+            RectF(rect.centerX() - 4f, rect.centerY() - radius, rect.centerX() + 4f, rect.centerY() + radius),
+            unitIconPaint
+        )
+        canvas.drawLine(rect.centerX() - radius, rect.centerY(), rect.centerX() + radius, rect.centerY(), unitIconPaint)
     }
 
     private fun drawMainButton(canvas: Canvas, button: MainButtonSpec) {
@@ -1093,6 +1171,7 @@ class DashboardSettings(
             if (mainButtons.any { it.rect.contains(x, y) }) {
                 return true
             }
+            if (unitSystemRect.contains(x, y)) return true
 
             // Check brightness slider
             activeSlider = getSliderAt(x, y)
@@ -1193,6 +1272,11 @@ class DashboardSettings(
 
         // Check view-specific elements
         if (currentView == ViewMode.MAIN) {
+            unitSegmentRects.firstOrNull { it.contains(x, y) }?.let { tapped ->
+                val index = unitSegmentRects.indexOf(tapped)
+                setUnitSystemMode(UnitSystemMode.values()[index], notify = true)
+                return true
+            }
             mainButtons.firstOrNull { it.rect.contains(x, y) }?.let { button ->
                 when (button.id) {
                     MainButton.HEADSUP -> showHeadsUpSubmenu()
@@ -1299,7 +1383,7 @@ class DashboardSettings(
     private fun getSliderAt(x: Float, y: Float): ActiveSlider {
         if (currentView == ViewMode.MAIN) {
             // Main menu only has brightness slider
-            val expandedBrightness = expandRect(brightnessTrackRect, 20f)
+            val expandedBrightness = expandRect(brightnessTrackRect, 14f)
             if (expandedBrightness.contains(x, y)) return ActiveSlider.BRIGHTNESS
         } else if (currentView == ViewMode.HEADSUP) {
             // Heads-up submenu has three sliders
@@ -1318,7 +1402,7 @@ class DashboardSettings(
 
     private fun isTouchInsideSliderHitbox(x: Float, y: Float, slider: ActiveSlider): Boolean {
         return when (slider) {
-            ActiveSlider.BRIGHTNESS -> expandRect(brightnessTrackRect, 20f).contains(x, y)
+            ActiveSlider.BRIGHTNESS -> expandRect(brightnessTrackRect, 14f).contains(x, y)
             ActiveSlider.HEAD_UP_TIME -> expandRect(headUpTimeTrackRect, 20f).contains(x, y)
             ActiveSlider.WAKE_DURATION -> expandRect(wakeDurationTrackRect, 20f).contains(x, y)
             ActiveSlider.ANGLE_THRESHOLD -> expandRect(angleThresholdTrackRect, 20f).contains(x, y)
@@ -1342,8 +1426,8 @@ class DashboardSettings(
      * Update the appropriate slider value based on touch position.
      */
     private fun updateSliderFromTouch(touchX: Float, slider: ActiveSlider) {
-        val trackLeft = menuRect.left + SLIDER_MARGIN_X
-        val trackRight = menuRect.right - SLIDER_MARGIN_X
+        val trackLeft = if (slider == ActiveSlider.BRIGHTNESS) brightnessTrackRect.left else menuRect.left + SLIDER_MARGIN_X
+        val trackRight = if (slider == ActiveSlider.BRIGHTNESS) brightnessTrackRect.right else menuRect.right - SLIDER_MARGIN_X
         val trackWidth = trackRight - trackLeft
 
         if (trackWidth > 0) {

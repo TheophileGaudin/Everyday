@@ -21,7 +21,7 @@ import com.everyday.shared.sync.LocationName
 import com.everyday.shared.sync.SpeedSnapshot
 import com.everyday.shared.sync.WeatherData
 import com.everyday.shared.sync.WeatherDataProvider
-import com.everyday.shared.sync.WeatherSnapshot
+import com.everyday.shared.sync.LocationWeatherSnapshot
 import com.google.android.gms.location.*
 import com.google.android.gms.tasks.CancellationTokenSource
 import java.util.concurrent.atomic.AtomicBoolean
@@ -57,7 +57,7 @@ class LocationWeatherService : Service() {
             private set
 
         /** Live phone-location payload, including slower location-name/weather fields. */
-        var onLocationWeatherSnapshotChanged: ((WeatherSnapshot) -> Unit)? = null
+        var onLocationWeatherSnapshotChanged: ((LocationWeatherSnapshot) -> Unit)? = null
         var onSpeedSnapshotChanged: ((SpeedSnapshot) -> Unit)? = null
 
         fun start(context: Context) {
@@ -363,7 +363,7 @@ class LocationWeatherService : Service() {
         }
     }
 
-    fun forceUpdateDetailed(callback: (Result<WeatherSnapshot>) -> Unit) {
+    fun forceUpdateDetailed(callback: (Result<LocationWeatherSnapshot>) -> Unit) {
         fileLog("Detailed force update requested")
         val lat = cachedLat
         val lon = cachedLon
@@ -393,7 +393,7 @@ class LocationWeatherService : Service() {
             }
     }
 
-    private fun requestCurrentLocationForDetailedRefresh(callback: (Result<WeatherSnapshot>) -> Unit) {
+    private fun requestCurrentLocationForDetailedRefresh(callback: (Result<LocationWeatherSnapshot>) -> Unit) {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             != PackageManager.PERMISSION_GRANTED) {
             callback(Result.failure(SecurityException("Location permission is not granted")))
@@ -421,7 +421,7 @@ class LocationWeatherService : Service() {
             }
     }
 
-    private fun requestSingleLocationUpdateForDetailedRefresh(callback: (Result<WeatherSnapshot>) -> Unit) {
+    private fun requestSingleLocationUpdateForDetailedRefresh(callback: (Result<LocationWeatherSnapshot>) -> Unit) {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             != PackageManager.PERMISSION_GRANTED) {
             callback(Result.failure(SecurityException("Location permission is not granted")))
@@ -432,7 +432,7 @@ class LocationWeatherService : Service() {
         val completed = AtomicBoolean(false)
         lateinit var singleUpdateCallback: LocationCallback
 
-        fun finish(result: Result<WeatherSnapshot>) {
+        fun finish(result: Result<LocationWeatherSnapshot>) {
             if (!completed.compareAndSet(false, true)) return
             fusedLocationClient.removeLocationUpdates(singleUpdateCallback)
             callback(result)
@@ -484,7 +484,7 @@ class LocationWeatherService : Service() {
     private fun refreshCachedPayloadDetailed(
         lat: Double,
         lon: Double,
-        callback: (Result<WeatherSnapshot>) -> Unit
+        callback: (Result<LocationWeatherSnapshot>) -> Unit
     ) {
         Thread {
             val failures = mutableListOf<Throwable>()
@@ -542,7 +542,7 @@ class LocationWeatherService : Service() {
         if (town != null && countryCode != null && payloadTimestamp > 0) {
             // Send full weather data with description and timestamp for proper icon display
             onLocationWeatherSnapshotChanged?.invoke(
-                WeatherSnapshot(
+                LocationWeatherSnapshot(
                     town = town,
                     countryCode = countryCode,
                     weather = cachedWeatherData,
@@ -564,10 +564,10 @@ class LocationWeatherService : Service() {
      * Get current cached location data. Used by RfcommServer for immediate sends.
      * Returns town, countryCode, full WeatherData, and timestamp for proper display.
      */
-    fun getCurrentLocationData(): WeatherSnapshot? {
+    fun getCurrentLocationData(): LocationWeatherSnapshot? {
         val town = cachedTown ?: return null
         val countryCode = cachedCountryCode ?: return null
-        return WeatherSnapshot(
+        return LocationWeatherSnapshot(
             town = town,
             countryCode = countryCode,
             weather = cachedWeatherData,

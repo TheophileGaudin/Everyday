@@ -14,12 +14,12 @@ object SyncProtocol {
     // encodeSnapshot/decodeSnapshot and SyncSnapshotStore iterate CHANNEL_CODECS
     // instead of repeating one branch per channel.
 
-    val WEATHER_CODEC: SyncChannelCodec<WeatherSnapshot> =
-        object : SyncChannelCodec<WeatherSnapshot>(SyncChannel.WEATHER) {
-            override fun extract(snapshot: SyncSnapshot) = snapshot.weather
-            override fun place(into: SyncSnapshot, value: WeatherSnapshot?) = into.copy(weather = value)
-            override fun toJson(value: WeatherSnapshot) = value.toJson()
-            override fun fromJson(json: JSONObject) = json.toWeatherSnapshot()
+    val LOCATION_WEATHER_CODEC: SyncChannelCodec<LocationWeatherSnapshot> =
+        object : SyncChannelCodec<LocationWeatherSnapshot>(SyncChannel.LOCATION_WEATHER) {
+            override fun extract(snapshot: SyncSnapshot) = snapshot.locationWeather
+            override fun place(into: SyncSnapshot, value: LocationWeatherSnapshot?) = into.copy(locationWeather = value)
+            override fun toJson(value: LocationWeatherSnapshot) = value.toJson()
+            override fun fromJson(json: JSONObject) = json.toLocationWeatherSnapshot()
         }
 
     val CALENDAR_CODEC: SyncChannelCodec<CalendarSnapshot> =
@@ -73,7 +73,7 @@ object SyncProtocol {
 
     /** All channel codecs in a stable order. */
     val CHANNEL_CODECS: List<SyncChannelCodec<*>> =
-        listOf(WEATHER_CODEC, CALENDAR_CODEC, NEWS_CODEC, FINANCE_CODEC, NOTIFICATIONS_CODEC, MAP_CODEC)
+        listOf(LOCATION_WEATHER_CODEC, CALENDAR_CODEC, NEWS_CODEC, FINANCE_CODEC, NOTIFICATIONS_CODEC, MAP_CODEC)
 
     // ==================== Request ====================
 
@@ -202,7 +202,7 @@ object SyncProtocol {
 
     // ==================== Per-type (de)serialization ====================
 
-    private fun WeatherSnapshot.toJson(): JSONObject {
+    private fun LocationWeatherSnapshot.toJson(): JSONObject {
         return JSONObject()
             .put("town", town)
             .put("countryCode", countryCode)
@@ -216,8 +216,8 @@ object SyncProtocol {
             .putNullable("weather", weather?.toJson())
     }
 
-    private fun JSONObject.toWeatherSnapshot(): WeatherSnapshot {
-        return WeatherSnapshot(
+    private fun JSONObject.toLocationWeatherSnapshot(): LocationWeatherSnapshot {
+        return LocationWeatherSnapshot(
             town = optString("town", "Unknown"),
             countryCode = optString("countryCode", "Unknown"),
             weather = optJSONObject("weather")?.toWeatherData(),

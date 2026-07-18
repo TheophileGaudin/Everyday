@@ -101,6 +101,23 @@ class LocationWidget(
         style = Paint.Style.FILL
     }
 
+    private val unitChipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#335060")
+        style = Paint.Style.FILL
+    }
+
+    private val unitChipHoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#4480A0")
+        style = Paint.Style.FILL
+    }
+
+    private val unitChipTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 18f
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
+
     private val toggleRowHoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#5578A7D5")
         style = Paint.Style.FILL
@@ -137,6 +154,11 @@ class LocationWidget(
     private var showCountry = false
     private var showToggleMenu = false
     private var hoveredToggleElement: LocationElement? = null
+    private var temperatureUnit = TemperatureUnit.CELSIUS
+    private val unitChipBounds = RectF()
+    private var unitChipHovered = false
+
+    var onTemperatureUnitChanged: (() -> Unit)? = null
 
     override val minimizeLabel: String = "L"
 
@@ -273,6 +295,16 @@ class LocationWidget(
     fun isLocationVisible(): Boolean = showLocation
     fun isCountryVisible(): Boolean = showCountry
 
+    fun setTemperatureUnit(unit: TemperatureUnit) {
+        temperatureUnit = unit
+    }
+
+    fun onUnitTap(px: Float, py: Float): Boolean {
+        if (!unitChipBounds.contains(px, py)) return false
+        onTemperatureUnitChanged?.invoke()
+        return true
+    }
+
     fun handleToggleMenuTapOrDismiss(px: Float, py: Float): Boolean {
         if (!showToggleMenu) return false
 
@@ -348,6 +380,7 @@ class LocationWidget(
         } else {
             null
         }
+        unitChipHovered = unitChipBounds.contains(px, py)
     }
 
     private fun calculateOptimalFontSize(): Float {
@@ -483,6 +516,29 @@ class LocationWidget(
 
         if (showToggleMenu) {
             drawToggleMenu(canvas)
+        }
+
+        if (isHovering() && showTemperature && !showToggleMenu) {
+            val chipWidth = 58f
+            val chipHeight = 32f
+            unitChipBounds.set(
+                widgetBounds.right - 20f - chipWidth,
+                widgetBounds.top + 14f,
+                widgetBounds.right - 20f,
+                widgetBounds.top + 14f + chipHeight
+            )
+            canvas.drawRoundRect(
+                unitChipBounds,
+                10f,
+                10f,
+                if (unitChipHovered) unitChipHoverPaint else unitChipPaint
+            )
+            val baseline = unitChipBounds.centerY() -
+                (unitChipTextPaint.descent() + unitChipTextPaint.ascent()) * 0.5f
+            canvas.drawText(temperatureUnit.label, unitChipBounds.centerX(), baseline, unitChipTextPaint)
+        } else {
+            unitChipBounds.setEmpty()
+            unitChipHovered = false
         }
     }
 

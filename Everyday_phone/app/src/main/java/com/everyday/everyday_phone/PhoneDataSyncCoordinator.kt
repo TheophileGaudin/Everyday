@@ -23,7 +23,7 @@ import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot
 import com.everyday.shared.sync.SyncSnapshotStore
 import com.everyday.shared.sync.SpeedSnapshot
-import com.everyday.shared.sync.WeatherSnapshot
+import com.everyday.shared.sync.LocationWeatherSnapshot
 import com.everyday.shared.sync.MapDataProvider
 import com.everyday.shared.sync.isStale
 import com.everyday.shared.transport.SyncMessenger
@@ -202,7 +202,7 @@ class PhoneDataSyncCoordinator(
         val serviceSnapshot = LocationWeatherService.instance?.getCurrentLocationData()
         val speedSnapshot = LocationWeatherService.instance?.getCurrentSpeedSnapshot()
         if (serviceSnapshot != null) {
-            snapshotStore.saveWeather(serviceSnapshot)
+            snapshotStore.saveLocationWeather(serviceSnapshot)
         }
         if (speedSnapshot != null) {
             sendSpeed(speedSnapshot)
@@ -212,14 +212,14 @@ class PhoneDataSyncCoordinator(
             ?.toSharedCalendarSnapshot()
             ?.takeIf { SyncChannel.CALENDAR in channels }
         val cachedChannels = channels.toMutableSet()
-        if (serviceSnapshot != null) cachedChannels -= SyncChannel.WEATHER
+        if (serviceSnapshot != null) cachedChannels -= SyncChannel.LOCATION_WEATHER
         if (sharedCalendarSnapshot != null) cachedChannels -= SyncChannel.CALENDAR
         val cachedSnapshot = syncOrchestrator.cachedSnapshot(cachedChannels)
         val notificationSnapshot = PhoneNotificationRepository.current(appContext)
             .takeIf { SyncChannel.NOTIFICATIONS in channels }
         val snapshot = SyncSnapshot(
-            weather = serviceSnapshot?.takeIf { SyncChannel.WEATHER in channels }
-                ?: cachedSnapshot.weather,
+            locationWeather = serviceSnapshot?.takeIf { SyncChannel.LOCATION_WEATHER in channels }
+                ?: cachedSnapshot.locationWeather,
             calendar = sharedCalendarSnapshot ?: cachedSnapshot.calendar,
             news = cachedSnapshot.news,
             finance = cachedSnapshot.finance,
@@ -229,7 +229,7 @@ class PhoneDataSyncCoordinator(
     }
 
     private fun refreshChannels(request: SyncRequest) {
-        if (SyncChannel.WEATHER in request.channels) {
+        if (SyncChannel.LOCATION_WEATHER in request.channels) {
             refreshWeather(request.force)
         }
         if (SyncChannel.CALENDAR in request.channels) {
@@ -268,15 +268,15 @@ class PhoneDataSyncCoordinator(
         ensureLocationService()
         val service = LocationWeatherService.instance
         if (service == null) {
-            sendError(SyncChannel.WEATHER, "Location service is not ready")
+            sendError(SyncChannel.LOCATION_WEATHER, "Location service is not ready")
             return
         }
-        if (force || snapshotStore.loadWeather().isStale()) {
+        if (force || snapshotStore.loadLocationWeather().isStale()) {
             service.refreshLocationWeatherNow(forceWeatherFetch = force)
         }
     }
 
-    private fun refreshWeatherForManual(callback: (Result<WeatherSnapshot>) -> Unit) {
+    private fun refreshWeatherForManual(callback: (Result<LocationWeatherSnapshot>) -> Unit) {
         if (!hasLocationPermission()) {
             callback(Result.failure(SecurityException("Location permission is not granted")))
             return
@@ -350,7 +350,7 @@ class PhoneDataSyncCoordinator(
 
     private fun refreshNews(request: SyncRequest) {
         val countryCode = request.countryCode
-            ?: snapshotStore.loadWeather()?.countryCode
+            ?: snapshotStore.loadLocationWeather()?.countryCode
             ?: snapshotStore.loadNews()?.countryCode
             ?: NewsDataProvider.defaultCountryCode()
         val cached = snapshotStore.loadNews()
@@ -375,7 +375,7 @@ class PhoneDataSyncCoordinator(
     }
 
     private fun refreshNewsForManual(callback: (Result<Unit>) -> Unit) {
-        val countryCode = snapshotStore.loadWeather()?.countryCode
+        val countryCode = snapshotStore.loadLocationWeather()?.countryCode
             ?: snapshotStore.loadNews()?.countryCode
             ?: NewsDataProvider.defaultCountryCode()
 
@@ -526,9 +526,9 @@ class PhoneDataSyncCoordinator(
         LocationWeatherService.start(appContext)
     }
 
-    private fun onLocationWeatherSnapshotChanged(snapshot: WeatherSnapshot) {
-        snapshotStore.saveWeather(snapshot)
-        send(SyncSnapshot(weather = snapshot))
+    private fun onLocationWeatherSnapshotChanged(snapshot: LocationWeatherSnapshot) {
+        snapshotStore.saveLocationWeather(snapshot)
+        send(SyncSnapshot(locationWeather = snapshot))
     }
 
     private fun onSpeedSnapshotChanged(snapshot: SpeedSnapshot) {

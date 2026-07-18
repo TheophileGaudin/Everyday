@@ -39,7 +39,7 @@ Everyday also includes a configurable hover shortcut control, "the lemon", for q
 | 3dof mode           | Pins the dashboard relative to head rotation.                                                                                                                                                                             |
 | Google OAuth        | Authenticate with your Google account via your phone. Opt-in via settings. Required for the Calendar widget.                                                                                                              |
 | Alignment guides    | Helps to align widgets relative to each other and to the screen.                                                                                                                                                          |
-
+| System of units     | Auto-detects the default system of units based on your location. Temperature and speed can be configured individually, or the app can be forced to Metric or Imperial.                                              |
 
 ## Phone companion app
 

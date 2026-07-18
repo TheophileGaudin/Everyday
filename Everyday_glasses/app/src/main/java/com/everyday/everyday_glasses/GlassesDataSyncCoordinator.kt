@@ -22,7 +22,7 @@ import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot
 import com.everyday.shared.sync.SyncSnapshotStore
 import com.everyday.shared.sync.WeatherDataProvider
-import com.everyday.shared.sync.WeatherSnapshot
+import com.everyday.shared.sync.LocationWeatherSnapshot
 import com.everyday.shared.sync.isStale
 import com.everyday.shared.transport.SyncMessenger
 import java.util.concurrent.atomic.AtomicBoolean
@@ -41,6 +41,7 @@ class GlassesDataSyncCoordinator(
     companion object {
         private const val TAG = "GlassesDataSync"
         private const val GEOCODE_MAPS_CO_API_KEY = "6974a768992ec642181119eby0e50e7"
+        private const val UNIT_COUNTRY_RETRY_MS = 60_000L
     }
 
     private val snapshotStore = SyncSnapshotStore(context.applicationContext)
@@ -50,6 +51,7 @@ class GlassesDataSyncCoordinator(
         snapshotApplier = ::applySnapshot
     )
     private val localWeatherInFlight = AtomicBoolean(false)
+    private val localLocationContextInFlight = AtomicBoolean(false)
     private val localNewsInFlight = AtomicBoolean(false)
     private val localCalendarInFlight = AtomicBoolean(false)
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -57,6 +59,8 @@ class GlassesDataSyncCoordinator(
     private var lastAppliedMapLatitude = Double.NaN
     private var lastAppliedMapLongitude = Double.NaN
     private var lastAppliedMapTimestampMs = Long.MIN_VALUE
+    private var hasSessionLocationCountry = false
+    private var lastUnitCountryRefreshAttemptMs = 0L
 
     fun restoreCachedSnapshots() {
         syncOrchestrator.restoreCachedSnapshots(notify = false)
@@ -107,9 +111,44 @@ class GlassesDataSyncCoordinator(
     }
 
     fun onLocalLocationChanged() {
-        if (!phoneConnected && networkStatusProvider.isConnected() && snapshotStore.loadWeather().isStale()) {
-            refreshWeatherLocally(force = false)
+        val now = System.currentTimeMillis()
+        val needsInitialCountry = !hasSessionLocationCountry &&
+            now - lastUnitCountryRefreshAttemptMs >= UNIT_COUNTRY_RETRY_MS
+        if (phoneConnected || !networkStatusProvider.isConnected()) return
+        val weatherIsStale = snapshotStore.loadLocationWeather().isStale()
+        when {
+            needsInitialCountry && weatherIsStale -> {
+                lastUnitCountryRefreshAttemptMs = now
+                refreshWeatherLocally(force = true)
+            }
+            needsInitialCountry -> {
+                lastUnitCountryRefreshAttemptMs = now
+                refreshLocalLocationContext()
+            }
+            weatherIsStale -> refreshWeatherLocally(force = false)
         }
+    }
+
+    private fun refreshLocalLocationContext() {
+        val location = localLocationProvider() ?: return
+        if (!localLocationContextInFlight.compareAndSet(false, true)) return
+        Thread {
+            try {
+                WeatherDataProvider
+                    .resolveLocationName(location.latitude, location.longitude, GEOCODE_MAPS_CO_API_KEY)
+                    .onSuccess { locationName ->
+                        postUi {
+                            if (widgetContainer.observeLiveLocationCountry(locationName.countryCode)) {
+                                hasSessionLocationCountry = true
+                            }
+                            widgetContainer.applyLocationMetadata(locationName.town, locationName.countryCode)
+                        }
+                    }
+                    .onFailure { error -> Log.w(TAG, "Local location context refresh failed", error) }
+            } finally {
+                localLocationContextInFlight.set(false)
+            }
+        }.start()
     }
 
     fun onFinanceDataRequested(
@@ -169,8 +208,15 @@ class GlassesDataSyncCoordinator(
     }
 
     fun onSyncSnapshotReceived(snapshot: SyncSnapshot) {
+        snapshot.locationWeather?.let { locationWeather ->
+            postUi {
+                if (widgetContainer.observeLiveLocationCountry(locationWeather.countryCode)) {
+                    hasSessionLocationCountry = true
+                }
+            }
+        }
         val financeOnly = snapshot.finance != null &&
-            snapshot.weather == null &&
+            snapshot.locationWeather == null &&
             snapshot.calendar == null &&
             snapshot.news == null &&
             snapshot.notifications == null
@@ -208,7 +254,7 @@ class GlassesDataSyncCoordinator(
         val financeSelection = visibleFinanceConfigs.firstOrNull()
         val requestCountry = request.countryCode
             ?: widgetContainer.currentNewsCountryCode()
-            ?: snapshotStore.loadWeather()?.countryCode
+            ?: snapshotStore.loadLocationWeather()?.countryCode
             ?: snapshotStore.loadNews()?.countryCode
         val financeLiveEnabled = if (SyncChannel.FINANCE in request.channels) {
             request.financeLiveEnabled ?: visibleFinanceConfigs.isNotEmpty()
@@ -243,7 +289,7 @@ class GlassesDataSyncCoordinator(
         if (request.financeLiveEnabled == false && SyncChannel.FINANCE in request.channels) {
             return
         }
-        if (SyncChannel.WEATHER in request.channels) refreshWeatherLocally(request.force)
+        if (SyncChannel.LOCATION_WEATHER in request.channels) refreshWeatherLocally(request.force)
         if (SyncChannel.CALENDAR in request.channels) refreshCalendarLocally(request.force)
         if (SyncChannel.NEWS in request.channels) {
             refreshNewsLocally(request.force, request.reason, request.countryCode)
@@ -254,7 +300,7 @@ class GlassesDataSyncCoordinator(
     }
 
     private fun refreshWeatherLocally(force: Boolean) {
-        val cached = snapshotStore.loadWeather()
+        val cached = snapshotStore.loadLocationWeather()
         if (!force && !cached.isStale()) return
         val location = localLocationProvider() ?: return
         if (!localWeatherInFlight.compareAndSet(false, true)) return
@@ -268,7 +314,7 @@ class GlassesDataSyncCoordinator(
                     .fetchWeather(location.latitude, location.longitude)
                     .getOrNull()
                 if (locationName != null || weather != null) {
-                    val snapshot = WeatherSnapshot(
+                    val snapshot = LocationWeatherSnapshot(
                         town = locationName?.town ?: cached?.town ?: "Current location",
                         countryCode = locationName?.countryCode ?: cached?.countryCode ?: "Unknown",
                         weather = weather ?: cached?.weather,
@@ -279,8 +325,8 @@ class GlassesDataSyncCoordinator(
                         bearingDeg = if (location.hasBearing()) location.bearing else null,
                         speedMps = null
                     )
-                    snapshotStore.saveWeather(snapshot)
-                    applyWeather(snapshot)
+                    snapshotStore.saveLocationWeather(snapshot)
+                    applyLocationWeather(snapshot, updateUnitCountry = true)
                 }
             } catch (error: Throwable) {
                 Log.w(TAG, "Local weather refresh failed", error)
@@ -293,7 +339,7 @@ class GlassesDataSyncCoordinator(
     private fun refreshNewsLocally(force: Boolean, reason: String, countryCode: String?) {
         val resolvedCountry = countryCode
             ?: widgetContainer.currentNewsCountryCode()
-            ?: snapshotStore.loadWeather()?.countryCode
+            ?: snapshotStore.loadLocationWeather()?.countryCode
             ?: NewsDataProvider.defaultCountryCode()
         val cached = snapshotStore.loadNews()
         if (!force && cached != null && !cached.isStale() && cached.countryCode == resolvedCountry) {
@@ -429,7 +475,7 @@ class GlassesDataSyncCoordinator(
 
     private fun applySnapshot(snapshot: SyncSnapshot, notify: Boolean) {
         postUi {
-            snapshot.weather?.let(::applyWeather)
+            snapshot.locationWeather?.let { applyLocationWeather(it, updateUnitCountry = false) }
             snapshot.calendar?.let(::applyCalendar)
             snapshot.news?.let(::applyNews)
             snapshot.finance?.let { applyFinance(it, notify = false) }
@@ -442,9 +488,13 @@ class GlassesDataSyncCoordinator(
         }
     }
 
-    private fun applyWeather(snapshot: WeatherSnapshot) {
+    private fun applyLocationWeather(snapshot: LocationWeatherSnapshot, updateUnitCountry: Boolean) {
         postUi {
-            widgetContainer.applyWeatherSnapshot(snapshot)
+            if (updateUnitCountry && widgetContainer.observeLiveLocationCountry(snapshot.countryCode)) {
+                hasSessionLocationCountry = true
+            }
+            widgetContainer.applyLocationMetadata(snapshot.town, snapshot.countryCode)
+            widgetContainer.applyWeatherData(snapshot.weather)
             val lat = snapshot.lat
             val lon = snapshot.lon
             if (lat != null && lon != null && lat.isFinite() && lon.isFinite()) {

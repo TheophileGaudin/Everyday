@@ -3,10 +3,11 @@ package com.everyday.everyday_glasses
 import com.everyday.shared.sync.SyncCachePolicy
 import com.everyday.shared.sync.SyncChannel
 import com.everyday.shared.sync.SyncOrchestrator
+import com.everyday.shared.sync.SyncProtocol
 import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot
 import com.everyday.shared.sync.SyncSnapshotCache
-import com.everyday.shared.sync.WeatherSnapshot
+import com.everyday.shared.sync.LocationWeatherSnapshot
 import com.everyday.shared.sync.isStale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -16,6 +17,23 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SyncOrchestratorTest {
+    @Test
+    fun `location weather rename preserves weather wire name`() {
+        val source = LocationWeatherSnapshot(
+            town = "London",
+            countryCode = "GB",
+            weather = null,
+            timestampMs = 100L
+        )
+
+        val encoded = SyncProtocol.encodeSnapshot(SyncSnapshot(locationWeather = source))
+        val decoded = SyncProtocol.decodeSnapshot(encoded)
+
+        assertTrue(encoded.contains("\"weather\""))
+        assertFalse(encoded.contains("locationWeather"))
+        assertEquals(source, decoded?.locationWeather)
+    }
+
     @Test
     fun `refresh builds and dispatches sync request`() {
         val dispatched = mutableListOf<SyncRequest>()
@@ -42,13 +60,13 @@ class SyncOrchestratorTest {
     fun `cache and apply snapshot saves before notifying applier`() {
         val cache = FakeSnapshotCache()
         val applied = mutableListOf<SyncSnapshot>()
-        val weather = WeatherSnapshot(
+        val weather = LocationWeatherSnapshot(
             town = "London",
             countryCode = "GB",
             weather = null,
             timestampMs = 100L
         )
-        val snapshot = SyncSnapshot(weather = weather)
+        val snapshot = SyncSnapshot(locationWeather = weather)
         val orchestrator = SyncOrchestrator(
             snapshotCache = cache,
             requestDispatcher = {},
@@ -65,26 +83,26 @@ class SyncOrchestratorTest {
 
     @Test
     fun `cached snapshot only loads requested channels`() {
-        val weather = WeatherSnapshot(
+        val weather = LocationWeatherSnapshot(
             town = "London",
             countryCode = "GB",
             weather = null,
             timestampMs = 100L
         )
         val orchestrator = SyncOrchestrator(
-            snapshotCache = FakeSnapshotCache(allSnapshot = SyncSnapshot(weather = weather)),
+            snapshotCache = FakeSnapshotCache(allSnapshot = SyncSnapshot(locationWeather = weather)),
             requestDispatcher = {}
         )
 
         val snapshot = orchestrator.cachedSnapshot(setOf(SyncChannel.NEWS))
 
-        assertNull(snapshot.weather)
+        assertNull(snapshot.locationWeather)
         assertTrue(snapshot.isEmpty)
     }
 
     @Test
     fun `shared stale policy preserves existing ttl boundary`() {
-        val weather = WeatherSnapshot(
+        val weather = LocationWeatherSnapshot(
             town = "London",
             countryCode = "GB",
             weather = null,
@@ -109,7 +127,7 @@ class SyncOrchestratorTest {
 
         override fun load(channels: Set<SyncChannel>): SyncSnapshot =
             SyncSnapshot(
-                weather = allSnapshot.weather.takeIf { SyncChannel.WEATHER in channels },
+                locationWeather = allSnapshot.locationWeather.takeIf { SyncChannel.LOCATION_WEATHER in channels },
                 calendar = allSnapshot.calendar.takeIf { SyncChannel.CALENDAR in channels },
                 news = allSnapshot.news.takeIf { SyncChannel.NEWS in channels },
                 finance = allSnapshot.finance.takeIf { SyncChannel.FINANCE in channels },
