@@ -33,7 +33,7 @@ class VideoWidget(
     width: Float = 360f,
     height: Float = 220f,
     queueItems: List<VideoItem> = emptyList(),
-) : BaseWidget(x, y, width, height) {
+) : BaseWidget(WidgetTypeId.VIDEO, x, y, width, height) {
 
     private val host = FrameLayout(context).apply {
         setBackgroundColor(Color.BLACK)

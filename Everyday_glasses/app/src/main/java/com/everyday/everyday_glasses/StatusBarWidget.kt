@@ -25,7 +25,7 @@ class StatusBarWidget(
     y: Float,
     widgetWidth: Float,
     widgetHeight: Float
-) : BaseWidget(x, y, widgetWidth, widgetHeight) {
+) : BaseWidget(WidgetTypeId.STATUS, x, y, widgetWidth, widgetHeight) {
     companion object {
         private const val TAG = "StatusBarWidget"
         
@@ -349,6 +349,12 @@ class StatusBarWidget(
         if (expandedBounds.contains(px, py)) return HitArea.BORDER
 
         return HitArea.NONE
+    }
+
+    override fun dragHitTest(px: Float, py: Float): DragHit = when (hitTest(px, py)) {
+        HitArea.BORDER, HitArea.CONTENT -> DragHit.DRAG
+        HitArea.RESIZE_HANDLE -> DragHit.RESIZE
+        else -> DragHit.NONE
     }
     
     override fun updateHover(px: Float, py: Float) {

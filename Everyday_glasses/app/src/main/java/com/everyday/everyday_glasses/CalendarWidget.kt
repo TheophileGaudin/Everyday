@@ -23,7 +23,7 @@ class CalendarWidget(
     y: Float,
     width: Float,
     height: Float
-) : BaseWidget(x, y, width, height) {
+) : BaseWidget(WidgetTypeId.CALENDAR, x, y, width, height) {
 
     companion object {
         const val DEFAULT_WIDTH = 320f

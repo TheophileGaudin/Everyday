@@ -75,11 +75,11 @@ class PhoneDataSyncCoordinator(
     }
     private val locationWeatherObserver = object : LocationWeatherService.Observer {
         override fun onLocationFixChanged(locationFix: LocationFix) {
-            onLocationFixChanged(locationFix)
+            this@PhoneDataSyncCoordinator.onLocationFixChanged(locationFix)
         }
 
         override fun onWeatherSnapshotChanged(weatherSnapshot: WeatherSnapshot) {
-            onWeatherSnapshotChanged(weatherSnapshot)
+            this@PhoneDataSyncCoordinator.onWeatherSnapshotChanged(weatherSnapshot)
         }
     }
     @Volatile private var isGlassesConnected = false

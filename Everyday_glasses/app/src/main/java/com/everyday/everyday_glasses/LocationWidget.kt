@@ -16,7 +16,7 @@ class LocationWidget(
     y: Float,
     width: Float,
     height: Float
-) : BaseWidget(x, y, width, height) {
+) : BaseWidget(WidgetTypeId.LOCATION, x, y, width, height) {
 
     companion object {
         private const val TAG = "LocationWidget"

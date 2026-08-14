@@ -45,7 +45,7 @@ class BrowserWidget(
     y: Float,
     widgetWidth: Float,
     widgetHeight: Float
-) : BaseWidget(x, y, widgetWidth, widgetHeight) {
+) : BaseWidget(WidgetTypeId.BROWSER, x, y, widgetWidth, widgetHeight) {
 
     companion object {
         private const val TAG = "BrowserWidget"

@@ -21,7 +21,7 @@ class NotificationsWidget(
     width: Float,
     height: Float,
     private var screenHeight: Float
-) : BaseWidget(x, y, width, height) {
+) : BaseWidget(WidgetTypeId.NOTIFICATIONS, x, y, width, height) {
 
     companion object {
         const val DEFAULT_WIDTH = 420f

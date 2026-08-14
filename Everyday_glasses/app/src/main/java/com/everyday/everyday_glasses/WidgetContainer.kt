@@ -35,11 +35,11 @@ import com.everyday.shared.command.CommandScrollDirection
 import com.everyday.shared.command.CommandWidgetId
 import com.everyday.shared.transport.AssistantStatus
 import java.io.File
-import java.util.IdentityHashMap
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.Locale
+import kotlin.reflect.KClass
 import kotlin.math.roundToInt
 import com.everyday.everyday_glasses.video.VideoItem
 
@@ -92,18 +92,20 @@ class WidgetContainer @JvmOverloads constructor(
     private val cursorStabilizer = CursorStabilizer()
     private val stabilizedCursorDelta = PointF()
     private val registry = WidgetRegistry()
-    private val assistantWidgetIds = IdentityHashMap<BaseWidget, String>()
-    private val assistantWidgetSequence = mutableMapOf<WidgetTypeId, Int>()
     private val persistenceHelper = WidgetPersistenceHelper(context)
     private val lifecycleController = WidgetLifecycleController(
         runOnUiThread = { action -> post(action) },
-        onChanged = ::notifyContentChanged
+        onChanged = ::notifyContentChanged,
+        registry = registry,
+        onMutationStarted = { lifecycleMutationInProgress = true },
+        onMutationFinished = { lifecycleMutationInProgress = false }
     )
     private val threeDofOverlay = ThreeDofOverlay()
     private val smartAlignment = SmartAlignmentHelper(registry)
     private val smartAlignmentRenderer = SmartAlignmentRenderer()
     private val unitSettings = UnitSettings(context)
-    private var closedWidgetTemplates = WidgetPersistence.ClosedWidgetTemplates()
+    /** Runtime source of truth for reopenable widget templates. */
+    private val closedTemplateRecords = LinkedHashMap<WidgetTypeId, WidgetPersistenceV2.PersistedWidgetRecord>()
 
     // ==================== 3DOF State ====================
 
@@ -229,22 +231,18 @@ class WidgetContainer @JvmOverloads constructor(
     // ==================== Widget References ====================
     
     // Status bar widget - delegated to registry
-    var statusBarWidget: StatusBarWidget?
+    val statusBarWidget: StatusBarWidget?
         get() = registry.statusBarWidget
-        private set(value) { registry.statusBarWidget = value }
 
     // Location widget - delegated to registry
-    var locationWidget: LocationWidget?
+    val locationWidget: LocationWidget?
         get() = registry.locationWidget
-        private set(value) { registry.locationWidget = value }
 
-    var mapWidget: MapWidget?
+    val mapWidget: MapWidget?
         get() = registry.mapWidget
-        private set(value) { registry.mapWidget = value }
 
-    var calendarWidget: CalendarWidget?
+    val calendarWidget: CalendarWidget?
         get() = registry.calendarWidget
-        private set(value) { registry.calendarWidget = value }
 
     // Pending data for location widget
     private var pendingLocationTown: String? = null
@@ -260,34 +258,29 @@ class WidgetContainer @JvmOverloads constructor(
     private var pendingCalendarSnapshot: com.everyday.shared.sync.CalendarSnapshot? = null
 
     // Finance widget - delegated to registry
-    var financeWidget: FinanceWidget?
+    val financeWidget: FinanceWidget?
         get() = registry.financeWidget
-        private set(value) { registry.financeWidget = value }
 
     // Pending country code for finance widget
     private var pendingFinanceCountryCode: String? = null
 
     // News widget - delegated to registry
-    var newsWidget: NewsWidget?
+    val newsWidget: NewsWidget?
         get() = registry.newsWidget
-        private set(value) { registry.newsWidget = value }
 
     // Pending country code for news widget
     private var pendingNewsCountryCode: String? = null
 
-    var notificationsWidget: NotificationsWidget?
+    val notificationsWidget: NotificationsWidget?
         get() = registry.notificationsWidget
-        private set(value) { registry.notificationsWidget = value }
 
     // Speedometer widget - delegated to registry
-    var speedometerWidget: SpeedometerWidget?
+    val speedometerWidget: SpeedometerWidget?
         get() = registry.speedometerWidget
-        private set(value) { registry.speedometerWidget = value }
 
     // Subtitle widget - delegated to registry
-    var subtitleWidget: SubtitleWidget?
+    val subtitleWidget: SubtitleWidget?
         get() = registry.subtitleWidget
-        private set(value) { registry.subtitleWidget = value }
 
     // Pending speed data for speedometer widget
     private var pendingSpeedKmh = 0f
@@ -295,9 +288,8 @@ class WidgetContainer @JvmOverloads constructor(
     private var pendingSpeedMoving = false
 
     // Screen mirror widget - delegated to registry
-    var screenMirrorWidget: ScreenMirrorWidget?
+    val screenMirrorWidget: ScreenMirrorWidget?
         get() = registry.screenMirrorWidget
-        private set(value) { registry.screenMirrorWidget = value }
 
     // Settings overlays and persisted app-level settings
     private val settingsController = SettingsController(
@@ -334,15 +326,17 @@ class WidgetContainer @JvmOverloads constructor(
     private val stateStore = WidgetStateStore(
         context = context,
         handler = Handler(Looper.getMainLooper()),
-        captureState = ::captureWidgetStateWithoutLayoutName
+        captureDashboard = ::captureWidgetDashboardWithoutLayoutName
     )
     private val layoutManager = WidgetLayoutManager(
         context = context,
         stateStore = stateStore,
         canApplyLayout = ::isReady,
-        captureState = ::captureWidgetStateWithoutLayoutName,
-        applyState = ::applyPersistedStateReplacingCurrent,
-        buildDeliveredLayout = { name -> BuiltInLayouts.build(name, width.toFloat(), height.toFloat()) },
+        captureDashboard = ::captureWidgetDashboardWithoutLayoutName,
+        applyDashboard = ::applyPersistedDashboardReplacingCurrent,
+        buildDeliveredLayout = { name ->
+            BuiltInLayouts.build(name, width.toFloat(), height.toFloat())?.let(WidgetPersistenceV2::fromLegacy)
+        },
         showNamePrompt = { suggestedName ->
             dismissMenu()
             layoutNamePrompt?.show(suggestedName)
@@ -359,22 +353,22 @@ class WidgetContainer @JvmOverloads constructor(
     var googleAccountHandler: GoogleAccountHandler? = null
 
     // Access to widget lists via registry
-    private val widgets: MutableList<TextBoxWidget>
+    private val widgets: List<TextBoxWidget>
         get() = registry.textWidgets
     
-    private val browserWidgets: MutableList<BrowserWidget>
+    private val browserWidgets: List<BrowserWidget>
         get() = registry.browserWidgets
 
-    private val imageWidgets: MutableList<ImageWidget>
+    private val imageWidgets: List<ImageWidget>
         get() = registry.imageWidgets
 
-    private val videoWidgets: MutableList<VideoWidget>
+    private val videoWidgets: List<VideoWidget>
         get() = registry.videoWidgets
 
-    private val pdfWidgets: MutableList<PdfWidget>
+    private val pdfWidgets: List<PdfWidget>
         get() = registry.pdfWidgets
 
-    private val fileBrowserWidgets: MutableList<FileBrowserWidget>
+    private val fileBrowserWidgets: List<FileBrowserWidget>
         get() = registry.fileBrowserWidgets
 
     // Currently focused widget
@@ -390,9 +384,7 @@ class WidgetContainer @JvmOverloads constructor(
     // already hovered under the cursor. See resolveHoveredWidget for the selection rules.
     private var hoveredWidget: BaseWidget? = null
 
-    // Drag state flags.
-    // Per-singleton-widget drag state lives on each SingletonDesc (desc.dragging);
-    // the finance dashboard's per-tile drag is a separate, widget-internal gesture.
+    // Drag state flags. All widgets share activeWidget; finance tile drag remains internal.
     private var financeTileDragging = false
     private var cursorPressed = false
     private var activeBrowserTouchWidget: BrowserWidget? = null
@@ -459,7 +451,6 @@ class WidgetContainer @JvmOverloads constructor(
     private var longPressStartX = 0f
     private var longPressStartY = 0f
     private var pendingDragWidget: BaseWidget? = null
-    // Per-singleton pending-drag state lives on each SingletonDesc (desc.pendingDrag).
     private var pendingDragFinanceTile = false
     private var pendingDragIsResize = false
     private var pendingTextSelection = false
@@ -468,182 +459,171 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Fullscreen Tracking ====================
     
-    private var fullscreenTextWidget: TextBoxWidget? = null
-    private var fullscreenBrowserWidget: BrowserWidget? = null
-    private var fullscreenImageWidget: ImageWidget? = null
-    private var fullscreenVideoWidget: VideoWidget? = null
-    private var fullscreenPdfWidget: PdfWidget? = null
-    private var fullscreenFileBrowserWidget: FileBrowserWidget? = null
+    // Transitional typed views over the registry's single fullscreen owner. These carry no
+    // state; they keep the specialized input handlers readable while fullscreen ownership is
+    // centralized in WidgetRegistry.
+    private val fullscreenTextWidget: TextBoxWidget?
+        get() = registry.fullscreenWidget as? TextBoxWidget
+    private val fullscreenBrowserWidget: BrowserWidget?
+        get() = registry.fullscreenWidget as? BrowserWidget
+    private val fullscreenImageWidget: ImageWidget?
+        get() = registry.fullscreenWidget as? ImageWidget
+    private val fullscreenVideoWidget: VideoWidget?
+        get() = registry.fullscreenWidget as? VideoWidget
+    private val fullscreenPdfWidget: PdfWidget?
+        get() = registry.fullscreenWidget as? PdfWidget
+    private val fullscreenFileBrowserWidget: FileBrowserWidget?
+        get() = registry.fullscreenWidget as? FileBrowserWidget
     private var googleAuthBrowserWidget: BrowserWidget? = null
     private var browserRoutingCoordinator: BrowserRoutingCoordinator? = null
     private val webSearchHandler = WebSearchSemanticToolHandler(DuckDuckGoWebSearchProvider())
-    private var isStatusBarFullscreen = false
-    private var isLocationWidgetFullscreen = false
-    private var isMapWidgetFullscreen = false
-    private var isCalendarWidgetFullscreen = false
-    private var isFinanceWidgetFullscreen = false
-    private var isNewsWidgetFullscreen = false
-    private var isNotificationsWidgetFullscreen = false
-    private var isSpeedometerWidgetFullscreen = false
-    private var isSubtitleWidgetFullscreen = false
-    private var isMirrorWidgetFullscreen = false
-
-    // ==================== Singleton Widget Descriptors ====================
-    // Each descriptor binds a singleton widget's fullscreen flag and widget reference to the
-    // shared lifecycle helpers (teardownSingleton / hookupSingleton / handleSingletonXxx).
-
-    /** Outcome of hit-testing a singleton widget for drag/resize purposes. */
-    private enum class DragHit { NONE, DRAG, RESIZE }
-
-    private inner class SingletonDesc(
-        val isFullscreen: () -> Boolean,
-        val setFullscreen: (Boolean) -> Unit,
-        val widget: () -> BaseWidget?,
-        // Normalizes each widget's bespoke hit-test enum to a shared DragHit.
-        // Defaults to BaseWidget.baseHitTest; widgets with their own HitArea enum
-        // (status bar, screen mirror) supply a custom mapping.
-        val dragHit: (Float, Float) -> DragHit = { px, py -> baseDragHit(widget(), px, py) }
-    ) {
-        // Live drag state, previously held in parallel per-widget boolean fields.
-        var dragging = false
-        var pendingDrag = false
-    }
-
-    private fun baseDragHit(widget: BaseWidget?, px: Float, py: Float): DragHit {
-        widget ?: return DragHit.NONE
-        return when (widget.baseHitTest(px, py)) {
-            BaseWidget.BaseHitArea.BORDER, BaseWidget.BaseHitArea.CONTENT -> DragHit.DRAG
-            BaseWidget.BaseHitArea.RESIZE_HANDLE -> DragHit.RESIZE
-            else -> DragHit.NONE
-        }
-    }
-
-    private val statusBarDesc   = SingletonDesc({ isStatusBarFullscreen },        { isStatusBarFullscreen = it },        { statusBarWidget }, { px, py ->
-        when (statusBarWidget?.hitTest(px, py)) {
-            StatusBarWidget.HitArea.BORDER, StatusBarWidget.HitArea.CONTENT -> DragHit.DRAG
-            StatusBarWidget.HitArea.RESIZE_HANDLE -> DragHit.RESIZE
-            else -> DragHit.NONE
-        }
-    })
-    private val locationDesc    = SingletonDesc({ isLocationWidgetFullscreen },    { isLocationWidgetFullscreen = it },    { locationWidget })
-    private val mapDesc         = SingletonDesc({ isMapWidgetFullscreen }, { value -> isMapWidgetFullscreen = value; if (!value) mapWidget?.enforceWindowedMode() }, { mapWidget })
-    private val calendarDesc    = SingletonDesc({ isCalendarWidgetFullscreen },    { isCalendarWidgetFullscreen = it },    { calendarWidget })
-    private val financeDesc     = SingletonDesc({ isFinanceWidgetFullscreen },     { isFinanceWidgetFullscreen = it },     { financeWidget })
-    private val newsDesc        = SingletonDesc({ isNewsWidgetFullscreen },        { isNewsWidgetFullscreen = it },        { newsWidget })
-    private val notificationsDesc = SingletonDesc({ isNotificationsWidgetFullscreen }, { isNotificationsWidgetFullscreen = it }, { notificationsWidget })
-    private val speedometerDesc = SingletonDesc({ isSpeedometerWidgetFullscreen }, { isSpeedometerWidgetFullscreen = it }, { speedometerWidget })
-    private val subtitleDesc    = SingletonDesc({ isSubtitleWidgetFullscreen },    { isSubtitleWidgetFullscreen = it },    { subtitleWidget })
-    private val mirrorDesc      = SingletonDesc({ isMirrorWidgetFullscreen },      { isMirrorWidgetFullscreen = it },      { screenMirrorWidget }, { px, py ->
-        val mirror = screenMirrorWidget
-        when {
-            mirror == null || !mirror.containsPoint(px, py) -> DragHit.NONE
-            else -> when (mirror.hitTest(px, py)) {
-                ScreenMirrorWidget.HitArea.BORDER, ScreenMirrorWidget.HitArea.CONTENT -> DragHit.DRAG
-                ScreenMirrorWidget.HitArea.RESIZE_HANDLE -> DragHit.RESIZE
-                else -> DragHit.NONE
-            }
-        }
-    })
-
-    // Canonical singleton list in hit-priority order (screen mirror first, matching
-    // the original pointer-down precedence). Drag handling, fullscreen and minimize
-    // all iterate this single list. Built once to avoid per-frame allocation while
-    // dragging.
-    private val singletonDescs: List<SingletonDesc> =
-        listOf(mirrorDesc, statusBarDesc, mapDesc, locationDesc, calendarDesc, financeDesc, newsDesc, notificationsDesc, speedometerDesc, subtitleDesc)
+    private val isStatusBarFullscreen: Boolean
+        get() = registry.fullscreenWidget === statusBarWidget
+    private val isLocationWidgetFullscreen: Boolean
+        get() = registry.fullscreenWidget === locationWidget
+    private val isMapWidgetFullscreen: Boolean
+        get() = registry.fullscreenWidget === mapWidget
+    private val isCalendarWidgetFullscreen: Boolean
+        get() = registry.fullscreenWidget === calendarWidget
+    private val isFinanceWidgetFullscreen: Boolean
+        get() = registry.fullscreenWidget === financeWidget
+    private val isNewsWidgetFullscreen: Boolean
+        get() = registry.fullscreenWidget === newsWidget
+    private val isNotificationsWidgetFullscreen: Boolean
+        get() = registry.fullscreenWidget === notificationsWidget
+    private val isSpeedometerWidgetFullscreen: Boolean
+        get() = registry.fullscreenWidget === speedometerWidget
+    private val isSubtitleWidgetFullscreen: Boolean
+        get() = registry.fullscreenWidget === subtitleWidget
+    private val isMirrorWidgetFullscreen: Boolean
+        get() = registry.fullscreenWidget === screenMirrorWidget
 
     private val browserLifecycle by lazy {
-        MultiWidgetLifecycle(
-            WidgetDescriptors[WidgetTypeId.BROWSER],
-            register = registry::addBrowserWidget,
+        WidgetLifecycleRegistration(
+            descriptor = WidgetDescriptors[WidgetTypeId.BROWSER],
+            widgetType = BrowserWidget::class,
+            stateType = WidgetPersistence.BrowserWidgetState::class,
+            stateCodec = WidgetPersistenceV2.codecs[WidgetTypeId.BROWSER],
+            capture = persistenceHelper::getBrowserWidgetState,
+            restore = ::restoreBrowserWidget,
+            configure = ::configureBrowserWidget,
+            register = { registry.add(it) },
             unregister = { widget ->
                 persistenceHelper.getBrowserWidgetState(widget)?.let {
-                    closedWidgetTemplates = closedWidgetTemplates.copy(browser = it)
+                    storeClosedTemplate(WidgetTypeId.BROWSER, it)
                 }
-                if (fullscreenBrowserWidget === widget) fullscreenBrowserWidget = null
                 if (focusedBrowserWidget === widget) setFocusedWidget(null)
                 if (activeWidget === widget) activeWidget = null
                 if (googleAuthBrowserWidget === widget) googleAuthBrowserWidget = null
                 notifyPresentationTargetRemoved(widget)
-                registry.removeBrowserWidget(widget)
+                registry.remove(widget)
                 notifyMediaBrightnessCapChanged()
                 notifyBrowserMinimumBrightnessChanged()
                 updateMinimizedWidgetPositions()
             },
-            teardown = ::destroyWidget
+            teardown = ::destroyWidget,
+            onFullscreenChanged = ::handleBrowserWidgetFullscreenSideEffects,
+            onMinimizeChanged = ::handleBrowserWidgetMinimizeSideEffects
         )
     }
     private val textLifecycle by lazy {
-        MultiWidgetLifecycle(
-            WidgetDescriptors[WidgetTypeId.TEXT],
-            register = registry::addTextWidget,
+        WidgetLifecycleRegistration(
+            descriptor = WidgetDescriptors[WidgetTypeId.TEXT],
+            widgetType = TextBoxWidget::class,
+            stateType = WidgetPersistence.TextWidgetState::class,
+            stateCodec = WidgetPersistenceV2.codecs[WidgetTypeId.TEXT],
+            capture = persistenceHelper::getTextWidgetState,
+            restore = ::restoreTextWidget,
+            register = { registry.add(it) },
             unregister = { widget ->
-                closedWidgetTemplates = closedWidgetTemplates.copy(text = persistenceHelper.getTextWidgetState(widget))
-                if (fullscreenTextWidget === widget) fullscreenTextWidget = null
+                storeClosedTemplate(WidgetTypeId.TEXT, persistenceHelper.getTextWidgetState(widget))
                 if (focusedWidget === widget) setFocusedWidget(null)
                 if (activeWidget === widget) activeWidget = null
                 notifyPresentationTargetRemoved(widget)
-                registry.removeTextWidget(widget)
+                registry.remove(widget)
                 updateMinimizedWidgetPositions()
-            }
+            },
+            onFullscreenChanged = ::handleGenericFullscreenSideEffects,
+            onMinimizeChanged = ::handleGenericMinimizeSideEffects
         )
     }
     private val imageLifecycle by lazy {
-        MultiWidgetLifecycle(
-            WidgetDescriptors[WidgetTypeId.IMAGE],
-            register = registry::addImageWidget,
+        WidgetLifecycleRegistration(
+            descriptor = WidgetDescriptors[WidgetTypeId.IMAGE],
+            widgetType = ImageWidget::class,
+            stateType = WidgetPersistence.ImageWidgetState::class,
+            stateCodec = WidgetPersistenceV2.codecs[WidgetTypeId.IMAGE],
+            capture = persistenceHelper::getImageWidgetState,
+            restore = ::restoreImageWidget,
+            register = { registry.add(it) },
             unregister = { widget ->
                 val path = widget.getImagePath()
                 val hasSibling = imageWidgets.any { it !== widget && it.getImagePath() == path }
-                if (fullscreenImageWidget === widget) fullscreenImageWidget = null
                 if (activeWidget === widget) activeWidget = null
                 notifyPresentationTargetRemoved(widget)
-                registry.removeImageWidget(widget)
+                registry.remove(widget)
                 if (!hasSibling) ImageWidgetStorage.deleteIfManaged(context, path)
                 updateMinimizedWidgetPositions()
-            }
+            },
+            onFullscreenChanged = ::handleGenericFullscreenSideEffects,
+            onMinimizeChanged = ::handleGenericMinimizeSideEffects
         )
     }
     private val videoLifecycle by lazy {
-        MultiWidgetLifecycle(
-            WidgetDescriptors[WidgetTypeId.VIDEO],
-            register = registry::addVideoWidget,
+        WidgetLifecycleRegistration(
+            descriptor = WidgetDescriptors[WidgetTypeId.VIDEO],
+            widgetType = VideoWidget::class,
+            stateType = WidgetPersistence.VideoWidgetState::class,
+            stateCodec = WidgetPersistenceV2.codecs[WidgetTypeId.VIDEO],
+            capture = persistenceHelper::getVideoWidgetState,
+            restore = ::restoreVideoWidget,
+            register = { registry.add(it) },
             unregister = { widget ->
-                if (fullscreenVideoWidget === widget) fullscreenVideoWidget = null
                 if (activeWidget === widget) activeWidget = null
                 notifyPresentationTargetRemoved(widget)
-                registry.removeVideoWidget(widget)
+                registry.remove(widget)
                 updateMinimizedWidgetPositions()
                 notifyMediaBrightnessCapChanged()
             },
-            teardown = ::destroyWidget
+            teardown = ::destroyWidget,
+            onFullscreenChanged = ::handleVideoWidgetFullscreenSideEffects,
+            onMinimizeChanged = ::handleGenericMinimizeSideEffects
         )
     }
     private val pdfLifecycle by lazy {
-        MultiWidgetLifecycle(
-            WidgetDescriptors[WidgetTypeId.PDF],
-            register = registry::addPdfWidget,
+        WidgetLifecycleRegistration(
+            descriptor = WidgetDescriptors[WidgetTypeId.PDF],
+            widgetType = PdfWidget::class,
+            stateType = WidgetPersistence.PdfWidgetState::class,
+            stateCodec = WidgetPersistenceV2.codecs[WidgetTypeId.PDF],
+            capture = persistenceHelper::getPdfWidgetState,
+            restore = ::restorePdfWidget,
+            register = { registry.add(it) },
             unregister = { widget ->
-                if (fullscreenPdfWidget === widget) fullscreenPdfWidget = null
                 if (activeWidget === widget) activeWidget = null
                 notifyPresentationTargetRemoved(widget)
-                registry.removePdfWidget(widget)
+                registry.remove(widget)
                 updateMinimizedWidgetPositions()
             },
-            teardown = ::destroyWidget
+            teardown = ::destroyWidget,
+            onFullscreenChanged = ::handleGenericFullscreenSideEffects,
+            onMinimizeChanged = ::handleGenericMinimizeSideEffects
         )
     }
     private val filesLifecycle by lazy {
-        MultiWidgetLifecycle(
-            WidgetDescriptors[WidgetTypeId.FILES],
-            register = registry::addFileBrowserWidget,
+        WidgetLifecycleRegistration(
+            descriptor = WidgetDescriptors[WidgetTypeId.FILES],
+            widgetType = FileBrowserWidget::class,
+            stateType = Unit::class,
+            register = { registry.add(it) },
             unregister = { widget ->
-                if (fullscreenFileBrowserWidget === widget) fullscreenFileBrowserWidget = null
                 if (activeWidget === widget) activeWidget = null
                 notifyPresentationTargetRemoved(widget)
-                registry.removeFileBrowserWidget(widget)
+                registry.remove(widget)
                 updateMinimizedWidgetPositions()
-            }
+            },
+            onFullscreenChanged = ::handleGenericFullscreenSideEffects,
+            onMinimizeChanged = ::handleGenericMinimizeSideEffects
         )
     }
 
@@ -688,10 +668,11 @@ class WidgetContainer @JvmOverloads constructor(
     // Set to false after restoring state on a returning user to prevent recreating closed widgets.
     private var shouldCreateDefaultSingletons = true
     private var suppressContentChangedCallback = false
+    private var lifecycleMutationInProgress = false
 
     init {
         setWillNotDraw(false)
-        registerSingletonLifecycles()
+        registerWidgetLifecycles()
         setupPersistenceHelperCallbacks()
         unitSettings.onChanged = { applyEffectiveUnitSettings() }
         applyEffectiveUnitSettings(notify = false)
@@ -702,54 +683,120 @@ class WidgetContainer @JvmOverloads constructor(
         super.onDetachedFromWindow()
     }
 
-    private fun registerSingletonLifecycles() {
-        fun bind(
+    private fun registerWidgetLifecycles() {
+        lifecycleController.register(browserLifecycle)
+        lifecycleController.register(textLifecycle)
+        lifecycleController.register(imageLifecycle)
+        lifecycleController.register(videoLifecycle)
+        lifecycleController.register(pdfLifecycle)
+        lifecycleController.register(filesLifecycle)
+
+        fun <W : BaseWidget, S : Any> bindSingleton(
             type: WidgetTypeId,
-            current: () -> BaseWidget?,
-            mutatePresence: () -> Unit,
-            hasClosedTemplate: () -> Boolean
+            widgetType: KClass<W>,
+            stateType: KClass<S>,
+            current: () -> W?,
+            createWidget: () -> W,
+            restoreWidget: (S) -> W,
+            captureState: (W) -> S?,
+            storeClosedState: (S) -> Unit,
+            beforeRemove: (W) -> Unit = {},
+            teardown: (W) -> Unit = ::destroyWidget,
+            onFullscreen: (W, Boolean) -> Unit = ::handleSingletonRegisteredFullscreen,
+            onMinimize: (W, Boolean) -> Unit = ::handleSingletonRegisteredMinimize
         ) {
             lifecycleController.register(
-                SingletonWidgetLifecycle(
+                WidgetLifecycleRegistration(
                     descriptor = WidgetDescriptors[type],
+                    widgetType = widgetType,
+                    stateType = stateType,
+                    stateCodec = WidgetPersistenceV2.codecs[type],
                     current = current,
-                    closeCurrent = { mutatePresence() },
-                    restoreClosedTemplate = {
-                        if (!hasClosedTemplate()) null else {
-                            mutatePresence()
-                            current()
-                        }
+                    createDefault = createWidget,
+                    restore = restoreWidget,
+                    capture = captureState,
+                    register = { registry.add(it) },
+                    unregister = { widget ->
+                        captureState(widget)?.let(storeClosedState)
+                        notifyPresentationTargetRemoved(widget)
+                        if (activeWidget === widget) activeWidget = null
+                        beforeRemove(widget)
+                        registry.remove(widget)
+                        updateMinimizedWidgetPositions()
                     },
-                    createDefault = {
-                        mutatePresence()
-                        current()
-                    }
+                    teardown = teardown,
+                    onFullscreenChanged = onFullscreen,
+                    onMinimizeChanged = onMinimize
                 )
             )
         }
 
-        bind(WidgetTypeId.STATUS, { statusBarWidget }, ::mutateStatusBarPresence) { closedWidgetTemplates.status != null }
-        bind(WidgetTypeId.LOCATION, { locationWidget }, ::mutateLocationPresence) { closedWidgetTemplates.location != null }
-        bind(WidgetTypeId.MAP, { mapWidget }, ::mutateMapPresence) { closedWidgetTemplates.map != null }
-        bind(WidgetTypeId.CALENDAR, { calendarWidget }, ::mutateCalendarPresence) { closedWidgetTemplates.calendar != null }
-        bind(WidgetTypeId.FINANCE, { financeWidget }, ::mutateFinancePresence) { closedWidgetTemplates.finance != null }
-        bind(WidgetTypeId.NEWS, { newsWidget }, ::mutateNewsPresence) { closedWidgetTemplates.news != null }
-        bind(WidgetTypeId.NOTIFICATIONS, { notificationsWidget }, ::mutateNotificationsPresence) { closedWidgetTemplates.notifications != null }
-        bind(WidgetTypeId.SPEEDOMETER, { speedometerWidget }, ::mutateSpeedometerPresence) { closedWidgetTemplates.speedometer != null }
-        bind(WidgetTypeId.SUBTITLE, { subtitleWidget }, ::mutateSubtitlePresence) { closedWidgetTemplates.subtitle != null }
-        bind(WidgetTypeId.MIRROR, { screenMirrorWidget }, ::mutateMirrorPresence) { closedWidgetTemplates.mirror != null }
+        bindSingleton(WidgetTypeId.STATUS, StatusBarWidget::class, WidgetPersistence.StatusBarState::class,
+            { statusBarWidget }, ::createStatusBarPresence, ::applyStatusBarState,
+            { persistenceHelper.getStatusBarState(it) },
+            { storeClosedTemplate(WidgetTypeId.STATUS, it) })
+        bindSingleton(WidgetTypeId.LOCATION, LocationWidget::class, WidgetPersistence.LocationWidgetState::class,
+            { locationWidget }, ::createLocationPresence, ::applyLocationState,
+            { persistenceHelper.getLocationWidgetState(it) },
+            { storeClosedTemplate(WidgetTypeId.LOCATION, it) })
+        bindSingleton(WidgetTypeId.MAP, MapWidget::class, WidgetPersistence.MapWidgetState::class,
+            { mapWidget }, ::createMapPresence, ::applyMapState,
+            { persistenceHelper.getMapWidgetState(it) },
+            { storeClosedTemplate(WidgetTypeId.MAP, it) },
+            beforeRemove = MapWidget::release)
+        bindSingleton(WidgetTypeId.CALENDAR, CalendarWidget::class, WidgetPersistence.CalendarWidgetState::class,
+            { calendarWidget }, ::createCalendarPresence, ::applyCalendarState,
+            { persistenceHelper.getCalendarWidgetState(it) },
+            { storeClosedTemplate(WidgetTypeId.CALENDAR, it) })
+        bindSingleton(WidgetTypeId.FINANCE, FinanceWidget::class, WidgetPersistence.FinanceWidgetState::class,
+            { financeWidget }, ::createFinancePresence, ::applyFinanceState,
+            { persistenceHelper.getFinanceWidgetState(it) },
+            { storeClosedTemplate(WidgetTypeId.FINANCE, it) },
+            onMinimize = { widget, minimized ->
+                handleSingletonRegisteredMinimize(widget, minimized)
+                dataProvider?.onFinanceVisibilityChanged(!minimized)
+                if (!minimized) widget.requestData(force = false, reason = "finance_unminimized")
+            })
+        bindSingleton(WidgetTypeId.NEWS, NewsWidget::class, WidgetPersistence.NewsWidgetState::class,
+            { newsWidget }, ::createNewsPresence, ::applyNewsState,
+            { persistenceHelper.getNewsWidgetState(it) },
+            { storeClosedTemplate(WidgetTypeId.NEWS, it) })
+        bindSingleton(WidgetTypeId.NOTIFICATIONS, NotificationsWidget::class, WidgetPersistence.NotificationsWidgetState::class,
+            { notificationsWidget }, ::createNotificationsPresence, ::applyNotificationsState,
+            { persistenceHelper.getNotificationsWidgetState(it) },
+            { storeClosedTemplate(WidgetTypeId.NOTIFICATIONS, it) })
+        bindSingleton(WidgetTypeId.SPEEDOMETER, SpeedometerWidget::class, WidgetPersistence.SpeedometerWidgetState::class,
+            { speedometerWidget }, ::createSpeedometerPresence, ::applySpeedometerState,
+            { persistenceHelper.getSpeedometerWidgetState(it) },
+            { storeClosedTemplate(WidgetTypeId.SPEEDOMETER, it) },
+            beforeRemove = { settingsController.dismissSpeedometerSettingsMenu() })
+        bindSingleton(WidgetTypeId.SUBTITLE, SubtitleWidget::class, WidgetPersistence.SubtitleWidgetState::class,
+            { subtitleWidget }, ::createSubtitlePresence, ::applySubtitleState,
+            { persistenceHelper.getSubtitleWidgetState(it) },
+            { storeClosedTemplate(WidgetTypeId.SUBTITLE, it) })
+        bindSingleton(WidgetTypeId.MIRROR, ScreenMirrorWidget::class, WidgetPersistence.MirrorWidgetState::class,
+            { screenMirrorWidget }, ::createMirrorPresence, ::applyMirrorState,
+            { persistenceHelper.getMirrorWidgetState(it) },
+            { storeClosedTemplate(WidgetTypeId.MIRROR, it) },
+            beforeRemove = { notifyMediaBrightnessCapChanged() })
 
-        lifecycleController.register(WidgetStateRestorer(WidgetDescriptors[WidgetTypeId.STATUS], WidgetPersistence.StatusBarState::class, ::applyStatusBarState))
-        lifecycleController.register(WidgetStateRestorer(WidgetDescriptors[WidgetTypeId.LOCATION], WidgetPersistence.LocationWidgetState::class, ::applyLocationState))
-        lifecycleController.register(WidgetStateRestorer(WidgetDescriptors[WidgetTypeId.MAP], WidgetPersistence.MapWidgetState::class, ::applyMapState))
-        lifecycleController.register(WidgetStateRestorer(WidgetDescriptors[WidgetTypeId.CALENDAR], WidgetPersistence.CalendarWidgetState::class, ::applyCalendarState))
-        lifecycleController.register(WidgetStateRestorer(WidgetDescriptors[WidgetTypeId.FINANCE], WidgetPersistence.FinanceWidgetState::class, ::applyFinanceState))
-        lifecycleController.register(WidgetStateRestorer(WidgetDescriptors[WidgetTypeId.NEWS], WidgetPersistence.NewsWidgetState::class, ::applyNewsState))
-        lifecycleController.register(WidgetStateRestorer(WidgetDescriptors[WidgetTypeId.NOTIFICATIONS], WidgetPersistence.NotificationsWidgetState::class, ::applyNotificationsState))
-        lifecycleController.register(WidgetStateRestorer(WidgetDescriptors[WidgetTypeId.SPEEDOMETER], WidgetPersistence.SpeedometerWidgetState::class, ::applySpeedometerState))
-        lifecycleController.register(WidgetStateRestorer(WidgetDescriptors[WidgetTypeId.SUBTITLE], WidgetPersistence.SubtitleWidgetState::class, ::applySubtitleState))
-        lifecycleController.register(WidgetStateRestorer(WidgetDescriptors[WidgetTypeId.MIRROR], WidgetPersistence.MirrorWidgetState::class, ::applyMirrorState))
         lifecycleController.verifyComplete()
+    }
+
+    private fun handleSingletonRegisteredFullscreen(widget: BaseWidget, fullscreen: Boolean) {
+        if (fullscreen) {
+            widget.setFullscreenBounds(width.toFloat(), height.toFloat())
+            notificationsWidget?.setScreenHeight(height.toFloat())
+        } else if (widget is MapWidget) {
+            widget.enforceWindowedMode()
+        }
+    }
+
+    private fun handleSingletonRegisteredMinimize(widget: BaseWidget, minimized: Boolean) {
+        if (!minimized && widget.isFullscreen) {
+            widget.setFullscreenBounds(width.toFloat(), height.toFloat())
+        }
+        updateMinimizedWidgetPositions()
     }
 
     private fun setupPersistenceHelperCallbacks() {
@@ -766,17 +813,7 @@ class WidgetContainer @JvmOverloads constructor(
                 }
             }
 
-            override fun onTextWidgetDeleted(widget: TextBoxWidget) = removeWidget(widget)
-            override fun onBrowserWidgetClosed(widget: BrowserWidget) = removeBrowserWidget(widget)
             override fun onWidgetStateChanged() = notifyContentChanged()
-            override fun onTextWidgetFullscreenToggled(widget: TextBoxWidget, isFullscreen: Boolean) =
-                handleTextWidgetFullscreenToggle(widget, isFullscreen)
-            override fun onTextWidgetMinimizeToggled(widget: TextBoxWidget, isMinimized: Boolean) =
-                handleTextWidgetMinimizeToggle(widget, isMinimized)
-            override fun onBrowserWidgetFullscreenToggled(widget: BrowserWidget, isFullscreen: Boolean) =
-                handleBrowserWidgetFullscreenToggle(widget, isFullscreen)
-            override fun onBrowserWidgetMinimizeToggled(widget: BrowserWidget, isMinimized: Boolean) =
-                handleBrowserWidgetMinimizeToggle(widget, isMinimized)
             override fun onBrowserKeyboardRequested(show: Boolean) {
                 host?.requestBrowserKeyboard(show)
             }
@@ -785,22 +822,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Public State Queries ====================
 
-    fun hasFullscreenWidget(): Boolean = fullscreenTextWidget != null ||
-            fullscreenBrowserWidget != null ||
-            fullscreenImageWidget != null ||
-            fullscreenVideoWidget != null ||
-            fullscreenPdfWidget != null ||
-            fullscreenFileBrowserWidget != null ||
-            isStatusBarFullscreen ||
-            isLocationWidgetFullscreen ||
-            isMapWidgetFullscreen ||
-            isCalendarWidgetFullscreen ||
-            isFinanceWidgetFullscreen ||
-            isNewsWidgetFullscreen ||
-            isNotificationsWidgetFullscreen ||
-            isSpeedometerWidgetFullscreen ||
-            isSubtitleWidgetFullscreen ||
-            isMirrorWidgetFullscreen
+    fun hasFullscreenWidget(): Boolean = registry.fullscreenWidget != null
 
     fun setDisplayState(state: WakeSleepManager.DisplayState) {
         if (displayState != state) {
@@ -981,53 +1003,17 @@ class WidgetContainer @JvmOverloads constructor(
         (fullscreenBrowserWidget ?: browserWidgets.firstOrNull { it.isInVideoFullscreen() })
             ?.let(::stableWidgetId)
 
-    private fun descriptorForWidget(widget: BaseWidget): WidgetDescriptor? =
-        WidgetDescriptors.all.firstOrNull { descriptor ->
-            registry.widgets(descriptor.type).any { candidate -> candidate === widget }
-        }
-
-    private fun stableWidgetId(widget: BaseWidget): String {
-        val descriptor = requireNotNull(descriptorForWidget(widget)) {
-            "Widget is not registered and has no stable presentation ID"
-        }
-        if (descriptor.policy == WidgetInstancePolicy.SINGLETON) {
-            return descriptor.type.persistedId
-        }
-        return assistantWidgetIds[widget] ?: run {
-            val next = assistantWidgetSequence[descriptor.type] ?: 0
-            assistantWidgetSequence[descriptor.type] = next + 1
-            "${descriptor.type.persistedId}#$next".also { assistantWidgetIds[widget] = it }
-        }
-    }
+    private fun stableWidgetId(widget: BaseWidget): String = registry.stableId(widget)
 
     private fun bindStableWidgetId(widget: BaseWidget, requestedId: String) {
-        val descriptor = requireNotNull(descriptorForWidget(widget)) {
+        require(registry.isRegistered(widget)) {
             "Created presentation target must be registered before it is presented"
         }
-        if (descriptor.policy == WidgetInstancePolicy.SINGLETON) {
-            require(descriptor.type.persistedId == requestedId) {
-                "Stable ID $requestedId does not belong to ${descriptor.type.persistedId}"
-            }
-            return
-        }
-        val conflicting = assistantWidgetIds.entries.firstOrNull { entry ->
-            entry.key !== widget && entry.value == requestedId
-        }
-        require(conflicting == null) { "Stable widget ID $requestedId is already in use" }
-        assistantWidgetIds[widget] = requestedId
-        val suffix = requestedId.substringAfter("#", "").toIntOrNull()
-        if (suffix != null && requestedId.startsWith("${descriptor.type.persistedId}#")) {
-            assistantWidgetSequence[descriptor.type] = maxOf(
-                assistantWidgetSequence[descriptor.type] ?: 0,
-                suffix + 1
-            )
-        }
+        registry.rebindStableId(widget, requestedId)
     }
 
     private fun findWidgetByStableId(targetId: String): BaseWidget? =
-        registry.allWidgets().firstOrNull { widget ->
-            runCatching { stableWidgetId(widget) == targetId }.getOrDefault(false)
-        }
+        registry.findByStableId(targetId)
 
     private fun capturePresentationSnapshot(
         widget: BaseWidget,
@@ -1141,15 +1127,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun removePresentationTarget(widget: BaseWidget) {
-        when (widget) {
-            is BrowserWidget -> lifecycleController.close(browserLifecycle, widget)
-            is TextBoxWidget -> lifecycleController.close(textLifecycle, widget)
-            is ImageWidget -> lifecycleController.close(imageLifecycle, widget)
-            is VideoWidget -> lifecycleController.close(videoLifecycle, widget)
-            is PdfWidget -> lifecycleController.close(pdfLifecycle, widget)
-            is FileBrowserWidget -> lifecycleController.close(filesLifecycle, widget)
-            else -> descriptorForWidget(widget)?.let { lifecycleController.hide(it.type) }
-        }
+        lifecycleController.close(widget)
     }
 
     private fun notifyPresentationTargetRemoved(widget: BaseWidget) {
@@ -1157,6 +1135,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun notifyContentChanged() {
+        if (lifecycleMutationInProgress) return
         invalidate()
         postInvalidate()
         (parent as? View)?.invalidate()
@@ -1236,15 +1215,6 @@ class WidgetContainer @JvmOverloads constructor(
                 host?.requestBrowserKeyboard(show)
             }
         }
-        widget.configureLifecycleListener(
-            onClose = { removeBrowserWidget(widget) },
-            onFullscreen = { isFullscreen ->
-                handleBrowserWidgetFullscreenToggle(widget, isFullscreen)
-            },
-            onMinimize = { isMinimized ->
-                handleBrowserWidgetMinimizeToggle(widget, isMinimized)
-            }
-        )
         widget.onDisplayVisibilityChanged(isBrowserWidgetVisible(widget))
         notifyBrowserMinimumBrightnessChanged()
     }
@@ -1252,11 +1222,6 @@ class WidgetContainer @JvmOverloads constructor(
     private fun configureScreenMirrorWidget(widget: ScreenMirrorWidget) {
         widget.listener = object : MirrorWidgetListener {
             override fun onStateChanged(state: ScreenMirrorWidget.State) {
-                when (state) {
-                    ScreenMirrorWidget.State.MOVING -> mirrorDesc.dragging = true
-                    ScreenMirrorWidget.State.IDLE -> mirrorDesc.dragging = false
-                    else -> Unit
-                }
                 widget.onDisplayVisibilityChanged(isMirrorWidgetVisible(widget))
                 notifyTransientContentChanged()
             }
@@ -1278,10 +1243,6 @@ class WidgetContainer @JvmOverloads constructor(
                 host?.requestMirror(start)
             }
         }
-        widget.hookupSingleton(
-            mirrorDesc,
-            onClose = { executeDefinition(commandRegistry.toggleMirror) }
-        )
         widget.onDisplayVisibilityChanged(isMirrorWidgetVisible(widget))
         notifyMediaBrightnessCapChanged()
     }
@@ -1414,68 +1375,36 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Fullscreen Management ====================
 
-    /** Exits fullscreen for a singleton widget without destroying it (used during teardown). */
-    private fun teardownSingleton(desc: SingletonDesc) {
-        desc.widget()?.let(::notifyPresentationTargetRemoved)
-        if (desc.isFullscreen()) {
-            desc.widget()?.let { if (it.isFullscreen) it.toggleFullscreen() }
-            desc.setFullscreen(false)
-        }
+    private fun handleGenericFullscreenSideEffects(widget: BaseWidget, isFullscreen: Boolean) {
+        if (isFullscreen) widget.setFullscreenBounds(width.toFloat(), height.toFloat())
     }
 
-    /** Wires standard singleton behavior plus any widget-specific lifecycle handling. */
-    private fun BaseWidget.hookupSingleton(
-        desc: SingletonDesc,
-        onClose: () -> Unit = {},
-        onMinimize: (Boolean) -> Unit = {}
-    ) {
-        configureLifecycleListener(
-            onClose = onClose,
-            onFullscreen = { fs -> handleSingletonFullscreenToggle(desc, fs) },
-            onMinimize = { min ->
-                handleSingletonMinimizeToggle(desc, min)
-                onMinimize(min)
-            }
-        )
-    }
-
-    private fun BaseWidget.configureLifecycleListener(
-        onClose: () -> Unit = {},
-        onFullscreen: (Boolean) -> Unit = {},
-        onMinimize: (Boolean) -> Unit = {}
-    ) {
-        lifecycleListener = object : WidgetLifecycleListener {
-            override fun onCloseRequested(widget: BaseWidget) = onClose()
-            override fun onFullscreenToggled(widget: BaseWidget, isFullscreen: Boolean) = onFullscreen(isFullscreen)
-            override fun onMinimizeToggled(widget: BaseWidget, isMinimized: Boolean) = onMinimize(isMinimized)
-        }
-    }
-
-    private fun handleSingletonFullscreenToggle(desc: SingletonDesc, isFullscreen: Boolean) {
-        if (isFullscreen) {
-            exitAllFullscreen()
-            desc.setFullscreen(true)
-            desc.widget()?.setFullscreenBounds(width.toFloat(), height.toFloat())
-            notificationsWidget?.setScreenHeight(height.toFloat())
-        } else {
-            desc.setFullscreen(false)
-        }
-        notifyContentChanged()
-    }
-
-    private fun handleSingletonMinimizeToggle(desc: SingletonDesc, isMinimized: Boolean) {
-        if (isMinimized) {
-            if (desc.isFullscreen()) desc.setFullscreen(false)
-        } else {
-            val w = desc.widget()
-            if (w?.isFullscreen == true) {
-                exitAllFullscreen()
-                desc.setFullscreen(true)
-                w.setFullscreenBounds(width.toFloat(), height.toFloat())
-            }
+    private fun handleGenericMinimizeSideEffects(widget: BaseWidget, isMinimized: Boolean) {
+        if (!isMinimized && widget.isFullscreen) {
+            widget.setFullscreenBounds(width.toFloat(), height.toFloat())
         }
         updateMinimizedWidgetPositions()
-        notifyContentChanged()
+    }
+
+    private fun handleBrowserWidgetFullscreenSideEffects(widget: BrowserWidget, isFullscreen: Boolean) {
+        handleGenericFullscreenSideEffects(widget, isFullscreen)
+        widget.onDisplayVisibilityChanged(isBrowserWidgetVisible(widget))
+        notifyMediaBrightnessCapChanged()
+        notifyBrowserMinimumBrightnessChanged()
+    }
+
+    private fun handleBrowserWidgetMinimizeSideEffects(widget: BrowserWidget, isMinimized: Boolean) {
+        handleGenericMinimizeSideEffects(widget, isMinimized)
+        widget.onDisplayVisibilityChanged(isBrowserWidgetVisible(widget))
+        notifyMediaBrightnessCapChanged()
+        notifyBrowserMinimumBrightnessChanged()
+    }
+
+    private fun handleVideoWidgetFullscreenSideEffects(widget: VideoWidget, isFullscreen: Boolean) {
+        handleGenericFullscreenSideEffects(widget, isFullscreen)
+        if (isFullscreen) widget.startPlayback(autoPlay = true)
+        widget.setWindowedMode()
+        notifyMediaBrightnessCapChanged()
     }
 
     fun updateLocationData(
@@ -1565,7 +1494,6 @@ class WidgetContainer @JvmOverloads constructor(
         widgetHeight: Float
     ): SpeedometerWidget {
         return SpeedometerWidget(startX, startY, widgetWidth, widgetHeight).apply {
-            hookupSingleton(speedometerDesc, onClose = { executeDefinition(commandRegistry.toggleSpeedometer) })
             onUnitChanged = {
                 unitSettings.toggleSpeedOverride()
             }
@@ -1583,7 +1511,6 @@ class WidgetContainer @JvmOverloads constructor(
         autoStart: Boolean
     ): SubtitleWidget {
         return SubtitleWidget(startX, startY, widgetWidth, widgetHeight).apply {
-            hookupSingleton(subtitleDesc, onClose = { executeDefinition(commandRegistry.toggleSubtitle) })
             listener = object : SubtitleWidgetListener {
                 override fun onStateChanged() = notifyContentChanged()
                 override fun onSubtitleControlRequested(control: SubtitleControl) {
@@ -1596,152 +1523,16 @@ class WidgetContainer @JvmOverloads constructor(
         }
     }
 
-    private fun handleTextWidgetFullscreenToggle(widget: TextBoxWidget, isFullscreen: Boolean) {
-        if (isFullscreen) { exitAllFullscreen(); fullscreenTextWidget = widget; widget.setFullscreenBounds(width.toFloat(), height.toFloat()) }
-        else { fullscreenTextWidget = null }
-        notifyContentChanged()
-    }
-
-    private fun handleBrowserWidgetFullscreenToggle(widget: BrowserWidget, isFullscreen: Boolean) {
-        if (isFullscreen) { exitAllFullscreen(); fullscreenBrowserWidget = widget; widget.setFullscreenBounds(width.toFloat(), height.toFloat()) }
-        else { fullscreenBrowserWidget = null }
-        widget.onDisplayVisibilityChanged(isBrowserWidgetVisible(widget))
-        notifyMediaBrightnessCapChanged()
-        notifyContentChanged()
-    }
-
-    private fun handleImageWidgetFullscreenToggle(widget: ImageWidget, isFullscreen: Boolean) {
-        if (isFullscreen) { exitAllFullscreen(); fullscreenImageWidget = widget; widget.setFullscreenBounds(width.toFloat(), height.toFloat()) }
-        else { fullscreenImageWidget = null }
-        notifyContentChanged()
-    }
-
-    private fun handleVideoWidgetFullscreenToggle(widget: VideoWidget, isFullscreen: Boolean) {
-        if (isFullscreen) {
-            exitAllFullscreen()
-            fullscreenVideoWidget = widget
-            widget.setFullscreenBounds(width.toFloat(), height.toFloat())
-            widget.startPlayback(autoPlay = true)
-        } else {
-            if (fullscreenVideoWidget == widget) fullscreenVideoWidget = null
-        }
-        widget.setWindowedMode()
-        notifyMediaBrightnessCapChanged()
-        notifyContentChanged()
-    }
-
-    private fun handlePdfWidgetFullscreenToggle(widget: PdfWidget, isFullscreen: Boolean) {
-        if (isFullscreen) {
-            exitAllFullscreen()
-            fullscreenPdfWidget = widget
-            widget.setFullscreenBounds(width.toFloat(), height.toFloat())
-        } else if (fullscreenPdfWidget == widget) {
-            fullscreenPdfWidget = null
-        }
-        notifyContentChanged()
-    }
-
-    private fun handleTextWidgetMinimizeToggle(widget: TextBoxWidget, isMinimized: Boolean) {
-        if (isMinimized) {
-            if (fullscreenTextWidget == widget) {
-                fullscreenTextWidget = null
-            }
-        } else if (widget.isFullscreen) {
-            exitAllFullscreen()
-            fullscreenTextWidget = widget
-            widget.setFullscreenBounds(width.toFloat(), height.toFloat())
-        }
-        updateMinimizedWidgetPositions()
-        notifyContentChanged()
-    }
-
-    private fun handleBrowserWidgetMinimizeToggle(widget: BrowserWidget, isMinimized: Boolean) {
-        if (isMinimized) {
-            if (fullscreenBrowserWidget == widget) {
-                fullscreenBrowserWidget = null
-            }
-        } else if (widget.isFullscreen) {
-            exitAllFullscreen()
-            fullscreenBrowserWidget = widget
-            widget.setFullscreenBounds(width.toFloat(), height.toFloat())
-        }
-        widget.onDisplayVisibilityChanged(isBrowserWidgetVisible(widget))
-        notifyMediaBrightnessCapChanged()
-        notifyBrowserMinimumBrightnessChanged()
-        updateMinimizedWidgetPositions()
-        notifyContentChanged()
-    }
-
-    private fun handleImageWidgetMinimizeToggle(widget: ImageWidget, isMinimized: Boolean) {
-        if (isMinimized) {
-            if (fullscreenImageWidget == widget) {
-                fullscreenImageWidget = null
-            }
-        } else if (widget.isFullscreen) {
-            exitAllFullscreen()
-            fullscreenImageWidget = widget
-            widget.setFullscreenBounds(width.toFloat(), height.toFloat())
-        }
-        updateMinimizedWidgetPositions()
-        notifyContentChanged()
-    }
-
-    private fun handleVideoWidgetMinimizeToggle(widget: VideoWidget, isMinimized: Boolean) {
-        if (isMinimized && fullscreenVideoWidget == widget) {
-            fullscreenVideoWidget = null
-        } else if (!isMinimized && widget.isFullscreen) {
-            exitAllFullscreen()
-            fullscreenVideoWidget = widget
-            widget.setFullscreenBounds(width.toFloat(), height.toFloat())
-        }
-        updateMinimizedWidgetPositions()
-        notifyContentChanged()
-    }
-
-    private fun handlePdfWidgetMinimizeToggle(widget: PdfWidget, isMinimized: Boolean) {
-        if (isMinimized && fullscreenPdfWidget == widget) fullscreenPdfWidget = null
-        updateMinimizedWidgetPositions()
-        notifyContentChanged()
-    }
-
-    private fun handleFileBrowserWidgetMinimizeToggle(widget: FileBrowserWidget, isMinimized: Boolean) {
-        if (isMinimized) {
-            if (fullscreenFileBrowserWidget == widget) {
-                fullscreenFileBrowserWidget = null
-            }
-        } else if (widget.isFullscreen) {
-            exitAllFullscreen()
-            fullscreenFileBrowserWidget = widget
-            widget.setFullscreenBounds(width.toFloat(), height.toFloat())
-        }
-        updateMinimizedWidgetPositions()
-        notifyContentChanged()
-    }
-
     private fun exitAllFullscreen() {
-        fullscreenTextWidget?.let { if (it.isFullscreen) it.toggleFullscreen() }; fullscreenTextWidget = null
-        fullscreenBrowserWidget?.let { if (it.isFullscreen) it.toggleFullscreen() }; fullscreenBrowserWidget = null
-        fullscreenImageWidget?.let { if (it.isFullscreen) it.toggleFullscreen() }; fullscreenImageWidget = null
-        fullscreenVideoWidget?.let { if (it.isFullscreen) it.toggleFullscreen() }; fullscreenVideoWidget = null
-        fullscreenPdfWidget?.let { if (it.isFullscreen) it.toggleFullscreen() }; fullscreenPdfWidget = null
-        fullscreenFileBrowserWidget?.let { if (it.isFullscreen) it.toggleFullscreen() }; fullscreenFileBrowserWidget = null
-        for (desc in singletonDescs) {
-            if (desc.isFullscreen()) { desc.widget()?.let { if (it.isFullscreen) it.toggleFullscreen() }; desc.setFullscreen(false) }
-        }
+        val fullscreen = registry.fullscreenWidget ?: return
+        registry.clearFullscreen(fullscreen)
+        if (fullscreen.isFullscreen) fullscreen.toggleFullscreen()
     }
 
     private fun updateFullscreenBounds() {
         if (width <= 0 || height <= 0) return
         notificationsWidget?.setScreenHeight(height.toFloat())
-        fullscreenTextWidget?.setFullscreenBounds(width.toFloat(), height.toFloat())
-        fullscreenBrowserWidget?.setFullscreenBounds(width.toFloat(), height.toFloat())
-        fullscreenImageWidget?.setFullscreenBounds(width.toFloat(), height.toFloat())
-        fullscreenVideoWidget?.setFullscreenBounds(width.toFloat(), height.toFloat())
-        fullscreenPdfWidget?.setFullscreenBounds(width.toFloat(), height.toFloat())
-        fullscreenFileBrowserWidget?.setFullscreenBounds(width.toFloat(), height.toFloat())
-        for (desc in singletonDescs) {
-            if (desc.isFullscreen()) desc.widget()?.setFullscreenBounds(width.toFloat(), height.toFloat())
-        }
+        registry.fullscreenWidget?.setFullscreenBounds(width.toFloat(), height.toFloat())
     }
 
     fun updateStatusBar(isPhoneConnected: Boolean, phoneBattery: Int, glassesBattery: Int, time: String, date: String) {
@@ -2040,7 +1831,6 @@ class WidgetContainer @JvmOverloads constructor(
         longPressRunnable?.let { handler.removeCallbacks(it) }
         longPressRunnable = null
         pendingDragWidget = null; pendingDragFinanceTile = false; pendingDragIsResize = false; pendingTextSelection = false
-        singletonDescs.forEach { it.pendingDrag = false }
         pendingFormattingMenuDrag = false
         formattingMenu?.cancelLongPress()
     }
@@ -2140,17 +1930,6 @@ class WidgetContainer @JvmOverloads constructor(
     private fun dispatchCursorDownToWidget(widget: BaseWidget, cx: Float, cy: Float) {
         bringWidgetToFront(widget)
 
-        // Singleton widgets carry their own drag bookkeeping via SingletonDesc.
-        singletonDescs.firstOrNull { it.widget() === widget }?.let { desc ->
-            val hit = desc.dragHit(cx, cy)
-            if (hit != DragHit.NONE) {
-                desc.pendingDrag = true
-                pendingDragIsResize = hit == DragHit.RESIZE
-                scheduleLongPress()
-            }
-            return
-        }
-
         when (widget) {
             is BrowserWidget -> when (widget.hitTest(cx, cy)) {
                 BrowserWidget.HitArea.CONTENT -> handleBrowserContentDown(widget, cx, cy)
@@ -2169,10 +1948,10 @@ class WidgetContainer @JvmOverloads constructor(
                 else -> {}
             }
             // image / video / pdf share the base hit-test; border or content both start a move.
-            else -> when (widget.baseHitTest(cx, cy)) {
-                BaseWidget.BaseHitArea.BORDER, BaseWidget.BaseHitArea.CONTENT ->
+            else -> when (widget.dragHitTest(cx, cy)) {
+                BaseWidget.DragHit.DRAG ->
                     beginPendingWidgetDrag(widget, isResize = false)
-                BaseWidget.BaseHitArea.RESIZE_HANDLE ->
+                BaseWidget.DragHit.RESIZE ->
                     beginPendingWidgetDrag(widget, isResize = true)
                 else -> {}
             }
@@ -2206,11 +1985,6 @@ class WidgetContainer @JvmOverloads constructor(
                 notifyContentChanged()
                 return@Runnable
             }
-            for (desc in singletonDescs) {
-                if (!desc.pendingDrag) continue
-                desc.widget()?.let { it.startDrag(pendingDragIsResize); desc.dragging = true }
-                desc.pendingDrag = false; pendingDragIsResize = false; notifyContentChanged(); return@Runnable
-            }
             pendingDragWidget?.let { widget -> widget.startDrag(pendingDragIsResize); activeWidget = widget; notifyContentChanged() }
             pendingDragWidget = null; pendingDragIsResize = false; longPressRunnable = null
         }
@@ -2219,13 +1993,11 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun hasPendingWidgetDrag(): Boolean =
         pendingDragWidget != null ||
-                pendingDragFinanceTile ||
-                singletonDescs.any { it.pendingDrag }
+                pendingDragFinanceTile
 
     private fun clearPendingWidgetDrag() {
         pendingDragWidget = null
         pendingDragFinanceTile = false
-        singletonDescs.forEach { it.pendingDrag = false }
         pendingDragIsResize = false
         longPressRunnable = null
     }
@@ -2301,7 +2073,6 @@ class WidgetContainer @JvmOverloads constructor(
         formattingMenu?.let { if (it.isDragging()) it.onDragEnd() }
         if (isLongPressSelectionMode) { (focusedWidget ?: fullscreenTextWidget)?.endSelection(); isLongPressSelectionMode = false; isTextSelectionActive = false }
         if (financeTileDragging) { financeWidget?.endTileDrag(); financeTileDragging = false; notifyContentChanged() }
-        singletonDescs.forEach { desc -> if (desc.dragging) { desc.widget()?.onDragEnd(); desc.dragging = false; notifyContentChanged() } }
         if (activeWidget != null) { activeWidget?.onDragEnd(); activeWidget = null; notifyContentChanged() }
         isTwoFingerScrollMode = false; currentPointerCount = 1
     }
@@ -2540,7 +2311,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun handleDragOperations(x: Float, y: Float, dx: Float, dy: Float) {
         if (isLongPressSelectionMode || financeTileDragging ||
-            singletonDescs.any { it.dragging } || activeWidget != null || isScrollbarDragActive
+            activeWidget != null || isScrollbarDragActive
         ) {
             userInputActivity?.onUserInput(UserInputKind.DRAG)
         }
@@ -2565,9 +2336,6 @@ class WidgetContainer @JvmOverloads constructor(
             financeWidget?.onTileDrag(cx, cy)
             notifyContentChanged()
             return
-        }
-        for (desc in singletonDescs) {
-            if (desc.dragging) { desc.widget()?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
         }
         if (activeWidget != null) { activeWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
         if (isScrollbarDragActive && scrollbarDragWidget != null) { scrollbarDragWidget?.onScrollbarDrag(dy); notifyContentChanged(); return }
@@ -3251,7 +3019,6 @@ class WidgetContainer @JvmOverloads constructor(
     fun onDragEnd() {
         cancelLongPress()
         if (financeTileDragging) { financeWidget?.endTileDrag(); financeTileDragging = false; notifyContentChanged() }
-        singletonDescs.forEach { desc -> if (desc.dragging) { desc.widget()?.onDragEnd(); desc.dragging = false; notifyContentChanged() } }
         if (activeWidget != null) { activeWidget?.onDragEnd(); activeWidget = null; notifyContentChanged() }
     }
 
@@ -3388,97 +3155,44 @@ class WidgetContainer @JvmOverloads constructor(
         return layoutManager.requestDeleteLayout(name)
     }
 
-    /**
-     * Toggle StatusBarWidget: remove if present, create at default location if absent.
-     */
-    private fun mutateStatusBarPresence() {
-        if (statusBarWidget != null) {
-            statusBarWidget?.let {
-                closedWidgetTemplates = closedWidgetTemplates.copy(
-                    status = persistenceHelper.getStatusBarState(it)
-                )
+    private fun createStatusBarPresence(): StatusBarWidget {
+        closedTemplateState<WidgetPersistence.StatusBarState>(WidgetTypeId.STATUS)?.let {
+            return applyStatusBarState(it)
+        }
+        val statusWidth = 220f
+        val statusHeight = 110f
+        return StatusBarWidget(
+            context, (width - statusWidth) / 2f, height - statusHeight - height * 0.15f, statusWidth, statusHeight
+        ).apply { onStateChanged = { notifyContentChanged() } }
+    }
+
+    private fun createLocationPresence(): LocationWidget {
+        closedTemplateState<WidgetPersistence.LocationWidgetState>(WidgetTypeId.LOCATION)?.let {
+            return applyLocationState(it)
+        }
+        val locWidth = 300f
+        val locHeight = 120f
+        return LocationWidget(context, 20f, height - locHeight - 20f, locWidth, locHeight).apply {
+            onTemperatureUnitChanged = { unitSettings.toggleTemperatureOverride() }
+            setTemperatureUnit(unitSettings.effectiveTemperatureUnit())
+            if (pendingLocationAddress != null || pendingLocationWeather != null) {
+                setLocationData(pendingLocationAddress ?: "Loading...", pendingLocationWeather ?: "Checking weather...")
             }
-            teardownSingleton(statusBarDesc)
-            statusBarWidget = null
-            Log.d(TAG, "StatusBarWidget removed")
-        } else {
-            closedWidgetTemplates.status?.let {
-                applyStatusBarState(it)
-                Log.d(TAG, "StatusBarWidget restored from last closed state")
-                return
-            }
-            // Create at default location
-            val statusWidth = 220f
-            val statusHeight = 110f
-            statusBarWidget = StatusBarWidget(
-                context, (width - statusWidth) / 2f, height - statusHeight - height * 0.15f, statusWidth, statusHeight
-            ).apply {
-                onStateChanged = { state ->
-                    if (state == StatusBarWidget.State.MOVING) statusBarDesc.dragging = true
-                    else if (statusBarDesc.dragging && state == StatusBarWidget.State.IDLE) statusBarDesc.dragging = false
-                    notifyContentChanged()
-                }
-                hookupSingleton(statusBarDesc, onClose = { executeDefinition(commandRegistry.toggleStatus) })
-            }
-            Log.d(TAG, "StatusBarWidget created")
+            setSunTimes(pendingLocationSunriseEpochMs, pendingLocationSunsetEpochMs)
         }
     }
 
-    /**
-     * Toggle LocationWidget: remove if present, create at default location if absent.
-     */
-    private fun mutateLocationPresence() {
-        if (locationWidget != null) {
-            locationWidget?.let {
-                closedWidgetTemplates = closedWidgetTemplates.copy(
-                    location = persistenceHelper.getLocationWidgetState(it)
-                )
-            }
-            teardownSingleton(locationDesc)
-            locationWidget = null
-            Log.d(TAG, "LocationWidget removed")
-        } else {
-            closedWidgetTemplates.location?.let {
-                applyLocationState(it)
-                Log.d(TAG, "LocationWidget restored from last closed state")
-                return
-            }
-            // Create at default location
-            val locWidth = 300f
-            val locHeight = 120f
-            locationWidget = LocationWidget(context, 20f, height - locHeight - 20f, locWidth, locHeight).apply {
-                hookupSingleton(locationDesc, onClose = { executeDefinition(commandRegistry.toggleLocation) })
-                onTemperatureUnitChanged = { unitSettings.toggleTemperatureOverride() }
-                setTemperatureUnit(unitSettings.effectiveTemperatureUnit())
-                if (pendingLocationAddress != null || pendingLocationWeather != null) {
-                    setLocationData(pendingLocationAddress ?: "Loading...", pendingLocationWeather ?: "Checking weather...")
-                }
-                setSunTimes(pendingLocationSunriseEpochMs, pendingLocationSunsetEpochMs)
-            }
-            Log.d(TAG, "LocationWidget created")
+    private fun createMapPresence(): MapWidget {
+        closedTemplateState<WidgetPersistence.MapWidgetState>(WidgetTypeId.MAP)?.let { return applyMapState(it) }
+        val size = 210f
+        return MapWidget(context, width - size - 24f, 24f, size, size).apply {
+            invalidate = { notifyContentChanged() }
+            configurePhoneRouteTransport(phoneRouteTransport)
+            onPhoneRouteConnectionChanged(phoneRouteConnected)
+            bindMapNavigation(this)
+            pendingMapLocation?.let(::setLocation)
+            setLocationMetadata(pendingMapLocationLabel, pendingMapCountryCode)
         }
-    }
-
-    private fun mutateMapPresence() {
-        if (mapWidget != null) {
-            mapWidget?.let { closedWidgetTemplates = closedWidgetTemplates.copy(map = persistenceHelper.getMapWidgetState(it)) }
-            mapWidget?.release()
-            teardownSingleton(mapDesc)
-            mapWidget = null
-        } else {
-            closedWidgetTemplates.map?.let { applyMapState(it); return }
-            val size = 210f
-            mapWidget = MapWidget(context, width - size - 24f, 24f, size, size).apply {
-                invalidate = { notifyContentChanged() }
-                configurePhoneRouteTransport(phoneRouteTransport)
-                onPhoneRouteConnectionChanged(phoneRouteConnected)
-                bindMapNavigation(this)
-                hookupSingleton(mapDesc, onClose = { executeDefinition(commandRegistry.toggleMap) })
-                pendingMapLocation?.let(::setLocation)
-                setLocationMetadata(pendingMapLocationLabel, pendingMapCountryCode)
-            }
-        }
-        notifyContentChanged()
     }
 
     fun updateMapLocation(location: android.location.Location) {
@@ -3501,255 +3215,108 @@ class WidgetContainer @JvmOverloads constructor(
         mapWidget?.setLocationMetadata(location, countryCode)
     }
 
-    /**
-     * Toggle CalendarWidget: remove if present, create at default location if absent.
-     */
-    private fun mutateCalendarPresence() {
-        if (calendarWidget != null) {
-            calendarWidget?.let {
-                closedWidgetTemplates = closedWidgetTemplates.copy(
-                    calendar = persistenceHelper.getCalendarWidgetState(it)
-                )
-            }
-            teardownSingleton(calendarDesc)
-            calendarWidget = null
-            Log.d(TAG, "CalendarWidget removed")
-        } else {
-            closedWidgetTemplates.calendar?.let {
-                applyCalendarState(it)
-                Log.d(TAG, "CalendarWidget restored from last closed state")
-                return
-            }
-            val startX = (width - CalendarWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
-            val startY = (height - CalendarWidget.DEFAULT_HEIGHT - 160f).coerceAtLeast(20f)
-            calendarWidget = CalendarWidget(
-                startX,
-                startY,
-                CalendarWidget.DEFAULT_WIDTH,
-                CalendarWidget.DEFAULT_HEIGHT
-            ).apply {
-                hookupSingleton(calendarDesc, onClose = { executeDefinition(commandRegistry.toggleCalendar) })
-                onStateChanged = { notifyContentChanged() }
-                setSnapshot(pendingCalendarSnapshot)
-            }
-            Log.d(TAG, "CalendarWidget created")
+    private fun createCalendarPresence(): CalendarWidget {
+        closedTemplateState<WidgetPersistence.CalendarWidgetState>(WidgetTypeId.CALENDAR)?.let {
+            return applyCalendarState(it)
+        }
+        val startX = (width - CalendarWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
+        val startY = (height - CalendarWidget.DEFAULT_HEIGHT - 160f).coerceAtLeast(20f)
+        return CalendarWidget(
+            startX,
+            startY,
+            CalendarWidget.DEFAULT_WIDTH,
+            CalendarWidget.DEFAULT_HEIGHT
+        ).apply {
+            onStateChanged = { notifyContentChanged() }
+            setSnapshot(pendingCalendarSnapshot)
         }
     }
 
-    /**
-     * Toggle SpeedometerWidget: remove if present, create at default location if absent.
-     */
-    private fun mutateSpeedometerPresence() {
-        if (speedometerWidget != null) {
-            speedometerWidget?.let {
-                closedWidgetTemplates = closedWidgetTemplates.copy(
-                    speedometer = persistenceHelper.getSpeedometerWidgetState(it)
-                )
-            }
-            teardownSingleton(speedometerDesc)
-            settingsController.dismissSpeedometerSettingsMenu()
-            speedometerWidget = null
-            Log.d(TAG, "SpeedometerWidget removed")
-        } else {
-            closedWidgetTemplates.speedometer?.let {
-                applySpeedometerState(it)
-                Log.d(TAG, "SpeedometerWidget restored from last closed state")
-                return
-            }
-            val speedWidth = 220f
-            val speedHeight = 110f
-            val startX = (width - speedWidth - 20f).coerceAtLeast(20f)
-            val startY = (height - speedHeight - 20f).coerceAtLeast(20f)
-            speedometerWidget = createSpeedometerWidget(startX, startY, speedWidth, speedHeight)
-            Log.d(TAG, "SpeedometerWidget created")
+    private fun createSpeedometerPresence(): SpeedometerWidget {
+        closedTemplateState<WidgetPersistence.SpeedometerWidgetState>(WidgetTypeId.SPEEDOMETER)?.let {
+            return applySpeedometerState(it)
         }
+        val speedWidth = 220f
+        val speedHeight = 110f
+        val startX = (width - speedWidth - 20f).coerceAtLeast(20f)
+        val startY = (height - speedHeight - 20f).coerceAtLeast(20f)
+        return createSpeedometerWidget(startX, startY, speedWidth, speedHeight)
     }
 
-    /**
-     * Toggle FinanceWidget: remove if present, create at default location if absent.
-     */
-    private fun mutateFinancePresence() {
-        if (financeWidget != null) {
-            financeWidget?.let {
-                closedWidgetTemplates = closedWidgetTemplates.copy(
-                    finance = persistenceHelper.getFinanceWidgetState(it)
-                )
-            }
-            teardownSingleton(financeDesc)
-            dataProvider?.onFinanceVisibilityChanged(false)
-            financeWidget?.onDestroy()
-            financeWidget = null
-            Log.d(TAG, "FinanceWidget removed")
-        } else {
-            closedWidgetTemplates.finance?.let {
-                applyFinanceState(it)
-                Log.d(TAG, "FinanceWidget restored from last closed state")
-                return
-            }
-            val fWidth = FinanceWidget.DEFAULT_WIDTH
-            val fHeight = FinanceWidget.DEFAULT_HEIGHT
-            financeWidget = FinanceWidget(20f, 20f, fWidth, fHeight).apply {
-                hookupSingleton(
-                    financeDesc,
-                    onClose = { executeDefinition(commandRegistry.toggleFinance) },
-                    onMinimize = { isMinimized ->
-                        dataProvider?.onFinanceVisibilityChanged(!isMinimized)
-                        if (!isMinimized) requestData(force = false, reason = "finance_unminimized")
-                    }
-                )
-                listener = object : FinanceWidgetListener {
-                    override fun onStateChanged() = notifyContentChanged()
-                    override fun onDataRequested(
-                        visibleConfigs: List<FinanceDashboardTileConfig>,
-                        refreshTileIds: List<String>, force: Boolean, reason: String
-                    ) {
-                        dataProvider?.requestFinanceData(visibleConfigs, refreshTileIds, force, reason)
-                    }
+    private fun createFinancePresence(): FinanceWidget {
+        closedTemplateState<WidgetPersistence.FinanceWidgetState>(WidgetTypeId.FINANCE)?.let {
+            return applyFinanceState(it)
+        }
+        return FinanceWidget(20f, 20f, FinanceWidget.DEFAULT_WIDTH, FinanceWidget.DEFAULT_HEIGHT).apply {
+            listener = object : FinanceWidgetListener {
+                override fun onStateChanged() = notifyContentChanged()
+                override fun onDataRequested(
+                    visibleConfigs: List<FinanceDashboardTileConfig>,
+                    refreshTileIds: List<String>, force: Boolean, reason: String
+                ) {
+                    dataProvider?.requestFinanceData(visibleConfigs, refreshTileIds, force, reason)
                 }
-                pendingFinanceCountryCode?.let { setCountryCode(it) }
-                requestData(force = true, reason = "widget_toggled_on")
-                dataProvider?.onFinanceVisibilityChanged(true)
             }
-            Log.d(TAG, "FinanceWidget created")
+            pendingFinanceCountryCode?.let { setCountryCode(it) }
+            requestData(force = true, reason = "widget_toggled_on")
+            dataProvider?.onFinanceVisibilityChanged(true)
         }
     }
 
-    /**
-     * Toggle NewsWidget: remove if present, create at default location if absent.
-     */
-    private fun mutateNewsPresence() {
-        if (newsWidget != null) {
-            newsWidget?.let {
-                closedWidgetTemplates = closedWidgetTemplates.copy(
-                    news = persistenceHelper.getNewsWidgetState(it)
-                )
-            }
-            teardownSingleton(newsDesc)
-            newsWidget?.onDestroy()
-            newsWidget = null
-            Log.d(TAG, "NewsWidget removed")
-        } else {
-            closedWidgetTemplates.news?.let {
-                applyNewsState(it)
-                Log.d(TAG, "NewsWidget restored from last closed state")
-                return
-            }
-            val nWidth = NewsWidget.DEFAULT_WIDTH
-            val nHeight = NewsWidget.DEFAULT_HEIGHT
-            val startX = (width - nWidth - 20f).coerceAtLeast(20f)
-            val startY = 20f
-
-            newsWidget = NewsWidget(startX, startY, nWidth, nHeight).apply {
-                hookupSingleton(newsDesc, onClose = { executeDefinition(commandRegistry.toggleNews) })
-                listener = object : NewsWidgetListener {
-                    override fun onStateChanged() = notifyContentChanged()
-                    override fun onDataRequested(countryCode: String, force: Boolean, reason: String) {
-                        dataProvider?.requestNewsData(countryCode, force, reason)
-                    }
-                    override fun onSourceDataRequested(sourceSpec: NewsSourceSpec, countryCode: String, force: Boolean, reason: String, completion: (Result<NewsSnapshot>) -> Unit) {
-                        dataProvider?.requestNewsSourceData(sourceSpec, countryCode, force, reason, completion)
-                            ?: completion(Result.failure(IllegalStateException("News data service is unavailable")))
-                    }
-                    override fun onSourceInputFocusChanged(focused: Boolean) { contentObserver?.onFocusChanged(focused) }
+    private fun createNewsPresence(): NewsWidget {
+        closedTemplateState<WidgetPersistence.NewsWidgetState>(WidgetTypeId.NEWS)?.let {
+            return applyNewsState(it)
+        }
+        val startX = (width - NewsWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
+        return NewsWidget(startX, 20f, NewsWidget.DEFAULT_WIDTH, NewsWidget.DEFAULT_HEIGHT).apply {
+            listener = object : NewsWidgetListener {
+                override fun onStateChanged() = notifyContentChanged()
+                override fun onDataRequested(countryCode: String, force: Boolean, reason: String) {
+                    dataProvider?.requestNewsData(countryCode, force, reason)
                 }
-                pendingNewsCountryCode?.let { setCountryCode(it) }
-                requestData(force = true, reason = "widget_toggled_on")
+                override fun onSourceDataRequested(sourceSpec: NewsSourceSpec, countryCode: String, force: Boolean, reason: String, completion: (Result<NewsSnapshot>) -> Unit) {
+                    dataProvider?.requestNewsSourceData(sourceSpec, countryCode, force, reason, completion)
+                        ?: completion(Result.failure(IllegalStateException("News data service is unavailable")))
+                }
+                override fun onSourceInputFocusChanged(focused: Boolean) { contentObserver?.onFocusChanged(focused) }
             }
-            Log.d(TAG, "NewsWidget created")
+            pendingNewsCountryCode?.let { setCountryCode(it) }
+            requestData(force = true, reason = "widget_toggled_on")
         }
     }
 
-    private fun mutateNotificationsPresence() {
-        if (notificationsWidget != null) {
-            notificationsWidget?.let {
-                closedWidgetTemplates = closedWidgetTemplates.copy(
-                    notifications = persistenceHelper.getNotificationsWidgetState(it)
-                )
-            }
-            teardownSingleton(notificationsDesc)
-            notificationsWidget = null
-            Log.d(TAG, "NotificationsWidget removed")
-        } else {
-            closedWidgetTemplates.notifications?.let {
-                applyNotificationsState(it)
-                Log.d(TAG, "NotificationsWidget restored from last closed state")
-                return
-            }
-            val nWidth = NotificationsWidget.DEFAULT_WIDTH
-            val nHeight = NotificationsWidget.DEFAULT_HEIGHT
-            val startX = (width - nWidth - 20f).coerceAtLeast(20f)
-            val startY = 20f
-            notificationsWidget = NotificationsWidget(context, startX, startY, nWidth, nHeight, height.toFloat()).apply {
-                hookupSingleton(notificationsDesc, onClose = { executeDefinition(commandRegistry.toggleNotifications) })
-                onStateChanged = { notifyContentChanged() }
-                setNotificationsSnapshot(latestNotificationsSnapshot)
-            }
-            Log.d(TAG, "NotificationsWidget created")
+    private fun createNotificationsPresence(): NotificationsWidget {
+        closedTemplateState<WidgetPersistence.NotificationsWidgetState>(WidgetTypeId.NOTIFICATIONS)?.let {
+            return applyNotificationsState(it)
+        }
+        val startX = (width - NotificationsWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
+        return NotificationsWidget(
+            context, startX, 20f, NotificationsWidget.DEFAULT_WIDTH,
+            NotificationsWidget.DEFAULT_HEIGHT, height.toFloat()
+        ).apply {
+            onStateChanged = { notifyContentChanged() }
+            setNotificationsSnapshot(latestNotificationsSnapshot)
         }
     }
 
-    /**
-     * Toggle SubtitleWidget: remove if present, create at default location if absent.
-     */
-    private fun mutateSubtitlePresence() {
-        if (subtitleWidget != null) {
-            subtitleWidget?.let {
-                closedWidgetTemplates = closedWidgetTemplates.copy(
-                    subtitle = persistenceHelper.getSubtitleWidgetState(it)
-                )
-                it.onDestroy()
-            }
-            teardownSingleton(subtitleDesc)
-            subtitleWidget = null
-            Log.d(TAG, "SubtitleWidget removed")
-        } else {
-            closedWidgetTemplates.subtitle?.let {
-                applySubtitleState(it)
-                subtitleWidget?.setCaptureEnabled(true)
-                Log.d(TAG, "SubtitleWidget restored from last closed state")
-                return
-            }
-
-            val subtitleWidth = SubtitleWidget.DEFAULT_WIDTH.coerceAtMost(width * 0.82f)
-            val subtitleHeight = SubtitleWidget.DEFAULT_HEIGHT
-            val startX = ((width - subtitleWidth) / 2f).coerceAtLeast(20f)
-            val startY = (height - subtitleHeight - 72f).coerceAtLeast(20f)
-            subtitleWidget = createSubtitleWidget(startX, startY, subtitleWidth, subtitleHeight, autoStart = true)
-            Log.d(TAG, "SubtitleWidget created")
+    private fun createSubtitlePresence(): SubtitleWidget {
+        closedTemplateState<WidgetPersistence.SubtitleWidgetState>(WidgetTypeId.SUBTITLE)?.let {
+            return applySubtitleState(it).also { widget -> widget.setCaptureEnabled(true) }
         }
+        val subtitleWidth = SubtitleWidget.DEFAULT_WIDTH.coerceAtMost(width * 0.82f)
+        val subtitleHeight = SubtitleWidget.DEFAULT_HEIGHT
+        val startX = ((width - subtitleWidth) / 2f).coerceAtLeast(20f)
+        val startY = (height - subtitleHeight - 72f).coerceAtLeast(20f)
+        return createSubtitleWidget(startX, startY, subtitleWidth, subtitleHeight, autoStart = true)
     }
 
-    /**
-     * Toggle ScreenMirrorWidget: remove if present, create at default location if absent.
-     */
-    private fun mutateMirrorPresence() {
-        if (screenMirrorWidget != null) {
-            screenMirrorWidget?.let {
-                closedWidgetTemplates = closedWidgetTemplates.copy(
-                    mirror = persistenceHelper.getMirrorWidgetState(it)
-                )
-            }
-            teardownSingleton(mirrorDesc)
-            setBinocularMediaSourceActive(screenMirrorWidget!!.binocularSourceId, false)
-            screenMirrorWidget?.onDestroy()
-            screenMirrorWidget = null
-            notifyMediaBrightnessCapChanged()
-            Log.d(TAG, "ScreenMirrorWidget removed")
-        } else {
-            closedWidgetTemplates.mirror?.let {
-                applyMirrorState(it)
-                Log.d(TAG, "ScreenMirrorWidget restored from last closed state")
-                return
-            }
-            // Create at default location
-            val mirrorWidth = 180f
-            val mirrorHeight = 320f
-            screenMirrorWidget = ScreenMirrorWidget(context, 20f, 20f, mirrorWidth, mirrorHeight).apply {
-                configureScreenMirrorWidget(this)
-            }
-            notifyMediaBrightnessCapChanged()
-            Log.d(TAG, "ScreenMirrorWidget created")
+    private fun createMirrorPresence(): ScreenMirrorWidget {
+        closedTemplateState<WidgetPersistence.MirrorWidgetState>(WidgetTypeId.MIRROR)?.let {
+            return applyMirrorState(it)
         }
+        return ScreenMirrorWidget(context, 20f, 20f, 180f, 320f).apply {
+            configureScreenMirrorWidget(this)
+        }.also { notifyMediaBrightnessCapChanged() }
     }
 
     fun createBrowserWidget(x: Float, y: Float) {
@@ -3856,7 +3423,7 @@ class WidgetContainer @JvmOverloads constructor(
         val widgetId = stableWidgetId(opened)
         return BrowserWidgetPageAgentAdapter.bind(widgetId, opened)
             ?: run {
-                lifecycleController.close(browserLifecycle, opened)
+                lifecycleController.close(opened)
                 null
             }
     }
@@ -3896,7 +3463,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun removeBrowserWidget(widget: BrowserWidget) {
-        lifecycleController.close(browserLifecycle, widget)
+        lifecycleController.close(widget)
     }
 
     /**
@@ -3927,18 +3494,12 @@ class WidgetContainer @JvmOverloads constructor(
         val createX = if (x >= 0) x else pendingCreateX
         val createY = if (y >= 0) y else pendingCreateY
         
-        val widget = ImageWidget(createX, createY, path).apply {
-            configureLifecycleListener(
-                onClose = { removeImageWidget(this) },
-                onFullscreen = { isFullscreen -> handleImageWidgetFullscreenToggle(this, isFullscreen) },
-                onMinimize = { isMinimized -> handleImageWidgetMinimizeToggle(this, isMinimized) }
-            )
-        }
+        val widget = ImageWidget(createX, createY, path)
         lifecycleController.open(imageLifecycle) { widget }
     }
 
     private fun removeImageWidget(widget: ImageWidget) {
-        lifecycleController.close(imageLifecycle, widget)
+        lifecycleController.close(widget)
     }
 
     fun createVideoWidget(uri: android.net.Uri, displayName: String, x: Float = -1f, y: Float = -1f) {
@@ -3956,11 +3517,6 @@ class WidgetContainer @JvmOverloads constructor(
             y = createY,
             queueItems = buildVideoQueue(uri, displayName),
         ).apply {
-            configureLifecycleListener(
-                onClose = { removeVideoWidget(this) },
-                onFullscreen = { isFullscreen -> handleVideoWidgetFullscreenToggle(this, isFullscreen) },
-                onMinimize = { isMinimized -> handleVideoWidgetMinimizeToggle(this, isMinimized) }
-            )
             listener = object : VideoWidgetListener {
                 override fun onStateChanged() = notifyTransientContentChanged()
                 override fun onPlaybackVisibilityChanged(active: Boolean) {
@@ -4051,18 +3607,13 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun removeVideoWidget(widget: VideoWidget) {
-        lifecycleController.close(videoLifecycle, widget)
+        lifecycleController.close(widget)
     }
 
     fun createPdfWidget(uri: android.net.Uri, displayName: String, x: Float = -1f, y: Float = -1f) {
         val createX = if (x >= 0f) x else ((width - 360f) / 2f).coerceAtLeast(0f)
         val createY = if (y >= 0f) y else ((height - 260f) / 2f).coerceAtLeast(0f)
         val widget = PdfWidget(context, uri, displayName, createX, createY).apply {
-            configureLifecycleListener(
-                onClose = { removePdfWidget(this) },
-                onFullscreen = { isFullscreen -> handlePdfWidgetFullscreenToggle(this, isFullscreen) },
-                onMinimize = { isMinimized -> handlePdfWidgetMinimizeToggle(this, isMinimized) }
-            )
             onStateChanged = { notifyTransientContentChanged() }
         }
         lifecycleController.open(pdfLifecycle) { widget }
@@ -4071,7 +3622,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun removePdfWidget(widget: PdfWidget) {
-        lifecycleController.close(pdfLifecycle, widget)
+        lifecycleController.close(widget)
     }
 
     /**
@@ -4097,11 +3648,6 @@ class WidgetContainer @JvmOverloads constructor(
 
         val selectionHandler = onFileSelected
         val widget = FileBrowserWidget(context, createX, createY, browserWidth, browserHeight, filter).apply {
-            configureLifecycleListener(
-                onClose = { removeFileBrowserWidget(this) },
-                onFullscreen = { isFullscreen -> handleFileBrowserWidgetFullscreenToggle(this, isFullscreen) },
-                onMinimize = { isMinimized -> handleFileBrowserWidgetMinimizeToggle(this, isMinimized) }
-            )
             listener = object : FileBrowserWidgetListener {
                 override fun onStateChanged(state: FileBrowserWidget.State) = notifyContentChanged()
                 override fun onFileSelected(entry: FileBrowserWidget.FileEntry) {
@@ -4120,22 +3666,11 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun removeFileBrowserWidget(widget: FileBrowserWidget) {
-        lifecycleController.close(filesLifecycle, widget)
-    }
-
-    private fun handleFileBrowserWidgetFullscreenToggle(widget: FileBrowserWidget, isFullscreen: Boolean) {
-        if (isFullscreen) { exitAllFullscreen(); fullscreenFileBrowserWidget = widget; widget.setFullscreenBounds(width.toFloat(), height.toFloat()) }
-        else { fullscreenFileBrowserWidget = null }
-        notifyContentChanged()
+        lifecycleController.close(widget)
     }
 
     private fun buildTextBox(x: Float, y: Float, boxWidth: Float, boxHeight: Float): TextBoxWidget =
         TextBoxWidget(context, x, y, boxWidth, boxHeight).apply {
-            configureLifecycleListener(
-                onClose = { removeWidget(this) },
-                onFullscreen = { isFullscreen -> handleTextWidgetFullscreenToggle(this, isFullscreen) },
-                onMinimize = { isMinimized -> handleTextWidgetMinimizeToggle(this, isMinimized) }
-            )
             listener = object : TextBoxWidgetListener {
                 override fun onFocusChanged(focused: Boolean) {
                     if (focused) setFocusedWidget(this@apply)
@@ -4157,7 +3692,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun removeWidget(widget: TextBoxWidget) {
-        lifecycleController.close(textLifecycle, widget)
+        lifecycleController.close(widget)
     }
 
     private fun setFocusedWidget(widget: BaseWidget?) {
@@ -4341,7 +3876,6 @@ class WidgetContainer @JvmOverloads constructor(
     fun isDragging(): Boolean =
         activeWidget != null ||
         financeTileDragging ||
-        singletonDescs.any { it.dragging } ||
         formattingMenu?.isDragging() == true
     fun isLongPressPending(): Boolean = longPressRunnable != null || formattingMenu?.isLongPressPending() == true
 
@@ -4447,25 +3981,7 @@ class WidgetContainer @JvmOverloads constructor(
 
         if (displayState == WakeSleepManager.DisplayState.SLEEP) {
             // Check if there's a PINNED fullscreen widget - if so, only draw that one (it covers others)
-            val pinnedFullscreenWidget: BaseWidget? = when {
-                fullscreenTextWidget?.isPinned == true -> fullscreenTextWidget
-                fullscreenBrowserWidget?.isPinned == true -> fullscreenBrowserWidget
-                fullscreenImageWidget?.isPinned == true -> fullscreenImageWidget
-                fullscreenVideoWidget?.isPinned == true -> fullscreenVideoWidget
-                fullscreenPdfWidget?.isPinned == true -> fullscreenPdfWidget
-                fullscreenFileBrowserWidget?.isPinned == true -> fullscreenFileBrowserWidget
-                isStatusBarFullscreen && statusBarWidget?.isPinned == true -> statusBarWidget
-                isLocationWidgetFullscreen && locationWidget?.isPinned == true -> locationWidget
-                isMapWidgetFullscreen && mapWidget?.isPinned == true -> mapWidget
-                isCalendarWidgetFullscreen && calendarWidget?.isPinned == true -> calendarWidget
-                isFinanceWidgetFullscreen && financeWidget?.isPinned == true -> financeWidget
-                isNewsWidgetFullscreen && newsWidget?.isPinned == true -> newsWidget
-                isNotificationsWidgetFullscreen && notificationsWidget?.isPinned == true -> notificationsWidget
-                isSpeedometerWidgetFullscreen && speedometerWidget?.isPinned == true -> speedometerWidget
-                isSubtitleWidgetFullscreen && subtitleWidget?.isPinned == true -> subtitleWidget
-                isMirrorWidgetFullscreen && screenMirrorWidget?.isPinned == true -> screenMirrorWidget
-                else -> null
-            }
+            val pinnedFullscreenWidget = registry.fullscreenWidget?.takeIf(BaseWidget::isPinned)
 
             if (pinnedFullscreenWidget != null) {
                 // Only draw the pinned fullscreen widget - it covers everything else
@@ -4492,22 +4008,7 @@ class WidgetContainer @JvmOverloads constructor(
 
         // Handle fullscreen widgets (not affected by 3DOF transform)
         if (hasFullscreenWidget()) {
-            fullscreenTextWidget?.draw(canvas)
-            fullscreenBrowserWidget?.draw(canvas)
-            fullscreenImageWidget?.draw(canvas)
-            fullscreenVideoWidget?.draw(canvas)
-            fullscreenPdfWidget?.draw(canvas)
-            fullscreenFileBrowserWidget?.draw(canvas)
-            if (isStatusBarFullscreen) statusBarWidget?.draw(canvas)
-            if (isLocationWidgetFullscreen) locationWidget?.draw(canvas)
-            if (isMapWidgetFullscreen) mapWidget?.draw(canvas)
-            if (isCalendarWidgetFullscreen) calendarWidget?.draw(canvas)
-            if (isFinanceWidgetFullscreen) financeWidget?.draw(canvas)
-            if (isNewsWidgetFullscreen) newsWidget?.draw(canvas)
-            if (isNotificationsWidgetFullscreen) notificationsWidget?.draw(canvas)
-            if (isSpeedometerWidgetFullscreen) speedometerWidget?.draw(canvas)
-            if (isSubtitleWidgetFullscreen) subtitleWidget?.draw(canvas)
-            if (isMirrorWidgetFullscreen) screenMirrorWidget?.draw(canvas)
+            registry.fullscreenWidget?.draw(canvas)
             // Hover controls stay above fullscreen widgets so the user can always reach
             // them (Close, YouTube history, the lemon shortcuts, …).
             if (!settingsController.isHoverControlsLayoutEditorVisible()) {
@@ -4800,32 +4301,51 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Persistence ====================
 
+    /** Compatibility boundary retained for callers not yet moved to the v2 dashboard. */
     fun capturePersistedState(): WidgetPersistence.PersistedState =
-        layoutManager.capturePersistedState()
+        WidgetPersistenceV2.toLegacy(capturePersistedDashboard())
 
-    private fun captureWidgetStateWithoutLayoutName(): WidgetPersistence.PersistedState =
-        WidgetPersistence.createPersistedState(
-            textWidgets = persistenceHelper.getTextWidgetStates(widgets),
-            browserWidgets = persistenceHelper.getBrowserWidgetStates(browserWidgets),
-            imageWidgets = persistenceHelper.getImageWidgetStates(imageWidgets),
-            videoWidgets = persistenceHelper.getVideoWidgetStates(videoWidgets),
-            pdfWidgets = persistenceHelper.getPdfWidgetStates(pdfWidgets),
-            statusBarState = persistenceHelper.getStatusBarState(statusBarWidget),
-            locationWidgetState = persistenceHelper.getLocationWidgetState(locationWidget),
-            mapWidgetState = persistenceHelper.getMapWidgetState(mapWidget),
-            calendarWidgetState = persistenceHelper.getCalendarWidgetState(calendarWidget),
-            mirrorWidgetState = persistenceHelper.getMirrorWidgetState(screenMirrorWidget),
-            financeWidgetState = persistenceHelper.getFinanceWidgetState(financeWidget),
-            newsWidgetState = persistenceHelper.getNewsWidgetState(newsWidget),
-            notificationsWidgetState = persistenceHelper.getNotificationsWidgetState(notificationsWidget),
-            speedometerWidgetState = persistenceHelper.getSpeedometerWidgetState(speedometerWidget),
-            subtitleWidgetState = persistenceHelper.getSubtitleWidgetState(subtitleWidget),
-            closedTemplates = closedWidgetTemplates,
+    fun capturePersistedDashboard(): WidgetPersistenceV2.PersistedDashboard =
+        layoutManager.capturePersistedDashboard()
+
+    private fun captureWidgetDashboardWithoutLayoutName(): WidgetPersistenceV2.PersistedDashboard =
+        WidgetPersistenceV2.PersistedDashboard(
+            widgets = registry.allWidgets().mapNotNull { widget ->
+                lifecycleController.captureRecord(widget, registry.stableId(widget))
+            },
+            closedTemplates = closedTemplateRecords.values.toList(),
             hoverControls = settingsController.getHoverControlPlacements(),
             isFirstRun = false,
-            activeLayoutName = null,
             isLayoutLocked = isWidgetLayoutLocked
         )
+
+    private fun storeClosedTemplate(type: WidgetTypeId, state: Any?) {
+        val codec = WidgetPersistenceV2.codecs[type]
+        if (state == null || codec == null) {
+            closedTemplateRecords.remove(type)
+        } else {
+            closedTemplateRecords[type] = WidgetPersistenceV2.PersistedWidgetRecord(
+                type = type,
+                instanceId = "${type.persistedId}#template",
+                state = codec.encode(state)
+            )
+        }
+    }
+
+    private fun replaceClosedTemplates(records: List<WidgetPersistenceV2.PersistedWidgetRecord>) {
+        closedTemplateRecords.clear()
+        records.forEach { record ->
+            if (WidgetDescriptors[record.type].storesClosedTemplate) {
+                closedTemplateRecords.putIfAbsent(record.type, record)
+            }
+        }
+    }
+
+    private inline fun <reified S : Any> closedTemplateState(type: WidgetTypeId): S? {
+        val record = closedTemplateRecords[type] ?: return null
+        val codec = WidgetPersistenceV2.codecs[type] ?: return null
+        return codec.decode(record.state) as? S
+    }
 
     // ==================== Shortcuts ====================
 
@@ -5212,7 +4732,7 @@ class WidgetContainer @JvmOverloads constructor(
         }
         val saved = stateStore.loadLayout(name) ?: return false
         requestLayoutSwitchBrightness()
-        applyPersistedStateReplacingCurrent(saved)
+        applyPersistedDashboardReplacingCurrent(saved)
         layoutManager.activeLayoutName = name
         return true
     }
@@ -5221,21 +4741,26 @@ class WidgetContainer @JvmOverloads constructor(
         AppCommandInvocation(commandRegistry.openUrl.id, AppCommandArguments.Url(address))
     )
 
+    /** Compatibility boundary for delivered layouts and legacy callers. */
     fun applyPersistedStateReplacingCurrent(state: WidgetPersistence.PersistedState) {
+        applyPersistedDashboardReplacingCurrent(WidgetPersistenceV2.fromLegacy(state))
+    }
+
+    fun applyPersistedDashboardReplacingCurrent(dashboard: WidgetPersistenceV2.PersistedDashboard) {
         if (!isReady()) return
 
-        val previousState = captureWidgetStateWithoutLayoutName().copy(
+        val previousDashboard = captureWidgetDashboardWithoutLayoutName().copy(
             activeLayoutName = layoutManager.activeLayoutName
         )
         suppressContentChangedCallback = true
         try {
             dismissAllTransientOverlays()
             clearWidgetsForLayoutReplace()
-            applyPersistedContents(state)
+            applyPersistedContents(dashboard)
         } catch (failure: Throwable) {
             runCatching {
                 clearWidgetsForLayoutReplace()
-                applyPersistedContents(previousState)
+                applyPersistedContents(previousDashboard)
             }.exceptionOrNull()?.let(failure::addSuppressed)
             throw failure
         } finally {
@@ -5245,33 +4770,21 @@ class WidgetContainer @JvmOverloads constructor(
         notifyContentChanged()
     }
 
-    private fun applyPersistedContents(state: WidgetPersistence.PersistedState) {
+    private fun applyPersistedContents(dashboard: WidgetPersistenceV2.PersistedDashboard) {
         shouldCreateDefaultSingletons = false
-        closedWidgetTemplates = state.closedTemplates
+        replaceClosedTemplates(dashboard.closedTemplates)
 
-        if (state.text.isNotEmpty()) openTextStates(state.text)
-        if (state.browser.isNotEmpty()) openBrowserStates(state.browser)
-        if (state.image.isNotEmpty()) openImageStates(state.image)
-        if (state.video.isNotEmpty()) openVideoStates(state.video)
-        if (state.pdf.isNotEmpty()) openPdfStates(state.pdf)
-
-        state.status?.let { lifecycleController.restore(WidgetTypeId.STATUS, it) }
-        state.location?.let { lifecycleController.restore(WidgetTypeId.LOCATION, it) }
-        state.map?.let { lifecycleController.restore(WidgetTypeId.MAP, it) }
-        state.calendar?.let { lifecycleController.restore(WidgetTypeId.CALENDAR, it) }
-        state.mirror?.let { lifecycleController.restore(WidgetTypeId.MIRROR, it) }
-        state.finance?.let { lifecycleController.restore(WidgetTypeId.FINANCE, it) }
-        state.news?.let { lifecycleController.restore(WidgetTypeId.NEWS, it) }
-        state.notifications?.let { lifecycleController.restore(WidgetTypeId.NOTIFICATIONS, it) }
-        state.speedometer?.let { lifecycleController.restore(WidgetTypeId.SPEEDOMETER, it) }
-        state.subtitle?.let { lifecycleController.restore(WidgetTypeId.SUBTITLE, it) }
-        settingsController.applyHoverControlPlacements(state.hoverControls)
-        setWidgetLayoutLocked(state.isLayoutLocked, persist = false)
+        dashboard.widgets.forEach { record ->
+            runCatching { lifecycleController.restore(record) }
+                .onFailure { Log.w(TAG, "Skipping invalid persisted ${record.type.persistedId} widget", it) }
+        }
+        settingsController.applyHoverControlPlacements(dashboard.hoverControls)
+        setWidgetLayoutLocked(dashboard.isLayoutLocked, persist = false)
 
         updateMinimizedWidgetPositions()
         notifyMediaBrightnessCapChanged()
         notifyBrowserMinimumBrightnessChanged()
-        layoutManager.activeLayoutName = state.activeLayoutName
+        layoutManager.activeLayoutName = dashboard.activeLayoutName
     }
 
     private fun applyDefaultLayoutReplacingCurrent() {
@@ -5301,36 +4814,10 @@ class WidgetContainer @JvmOverloads constructor(
         registry.allWidgets().forEach(::notifyPresentationTargetRemoved)
         exitAllFullscreen()
 
-        lifecycleController.closeAll(
-            widgets = registry.allWidgets(),
-            teardown = ::destroyWidget,
-            clearRegistry = registry::clear
-        )
-
-        statusBarWidget = null
-        locationWidget = null
-        mapWidget = null
-        calendarWidget = null
-        financeWidget = null
-        newsWidget = null
-        notificationsWidget = null
-        speedometerWidget = null
-        subtitleWidget = null
-        screenMirrorWidget = null
+        lifecycleController.closeAll()
 
         activeWidget = null
         googleAuthBrowserWidget = null
-        fullscreenPdfWidget = null
-        isStatusBarFullscreen = false
-        isLocationWidgetFullscreen = false
-        isMapWidgetFullscreen = false
-        isCalendarWidgetFullscreen = false
-        isFinanceWidgetFullscreen = false
-        isNewsWidgetFullscreen = false
-        isNotificationsWidgetFullscreen = false
-        isSpeedometerWidgetFullscreen = false
-        isSubtitleWidgetFullscreen = false
-        isMirrorWidgetFullscreen = false
         notifyBrowserMinimumBrightnessChanged()
     }
 
@@ -5349,8 +4836,82 @@ class WidgetContainer @JvmOverloads constructor(
         widget.toggleFullscreen()
     }
 
+    private fun restoreTextWidget(state: WidgetPersistence.TextWidgetState): TextBoxWidget? =
+        persistenceHelper.restoreTextWidgets(listOf(state), width, height).firstOrNull()
+
+    private fun restoreBrowserWidget(state: WidgetPersistence.BrowserWidgetState): BrowserWidget? {
+        val rootView = parent as? ViewGroup ?: return null
+        return persistenceHelper.restoreBrowserWidgets(listOf(state), rootView, this, width, height).firstOrNull()
+    }
+
+    private fun restoreImageWidget(state: WidgetPersistence.ImageWidgetState): ImageWidget? =
+        persistenceHelper.restoreImageWidgets(listOf(state), width, height).firstOrNull()
+
+    private fun restoreVideoWidget(state: WidgetPersistence.VideoWidgetState): VideoWidget? {
+        val rootView = parent as? ViewGroup ?: return null
+        val uri = runCatching { android.net.Uri.parse(state.uri) }.getOrNull() ?: return null
+        val readable = runCatching {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
+        }.getOrDefault(false)
+        if (!readable) return null
+
+        val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, width.toFloat())
+        val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, height.toFloat())
+        val adjustedX = state.x.coerceIn(0f, (width - adjustedWidth).coerceAtLeast(0f))
+        val adjustedY = state.y.coerceIn(0f, (height - adjustedHeight).coerceAtLeast(0f))
+        val sourceId = "local-video-${uri.hashCode()}"
+        return VideoWidget(
+            context = context,
+            rootLayout = rootView,
+            containerView = this,
+            contentUri = uri,
+            displayName = state.displayName,
+            x = adjustedX,
+            y = adjustedY,
+            queueItems = buildVideoQueue(uri, state.displayName)
+        ).apply {
+            widgetWidth = adjustedWidth
+            widgetHeight = adjustedHeight
+            listener = object : VideoWidgetListener {
+                override fun onStateChanged() = notifyTransientContentChanged()
+                override fun onPlaybackVisibilityChanged(active: Boolean) {
+                    setBinocularMediaSourceActive(sourceId, active)
+                    notifyMediaBrightnessCapChanged()
+                }
+            }
+            persistenceHelper.restoreVideoWidgetState(this, state, adjustedX, adjustedY)
+        }
+    }
+
+    private fun restorePdfWidget(state: WidgetPersistence.PdfWidgetState): PdfWidget? {
+        val uri = runCatching { android.net.Uri.parse(state.uri) }.getOrNull() ?: return null
+        val readable = runCatching {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
+        }.getOrDefault(false)
+        if (!readable) return null
+
+        val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, width.toFloat())
+        val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, height.toFloat())
+        val adjustedX = state.x.coerceIn(0f, (width - adjustedWidth).coerceAtLeast(0f))
+        val adjustedY = state.y.coerceIn(0f, (height - adjustedHeight).coerceAtLeast(0f))
+        return PdfWidget(
+            context = context,
+            contentUri = uri,
+            displayName = state.displayName,
+            x = adjustedX,
+            y = adjustedY,
+            width = adjustedWidth,
+            height = adjustedHeight,
+            initialPage = state.page,
+            initialZoom = state.zoom
+        ).apply {
+            onStateChanged = { notifyTransientContentChanged() }
+            persistenceHelper.restorePdfWidgetState(this, state, adjustedX, adjustedY)
+        }
+    }
+
     private fun openClosedTextTemplate(): TextBoxWidget? {
-        val template = closedWidgetTemplates.text ?: return null
+        val template = closedTemplateState<WidgetPersistence.TextWidgetState>(WidgetTypeId.TEXT) ?: return null
         val widget = persistenceHelper.restoreTextWidgets(listOf(template), width, height).firstOrNull() ?: return null
         lifecycleController.open(textLifecycle) { widget }
         applyFullscreenState(widget, template.isFullscreen)
@@ -5362,7 +4923,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun openClosedBrowserTemplate(): BrowserWidget? {
-        val template = closedWidgetTemplates.browser ?: return null
+        val template = closedTemplateState<WidgetPersistence.BrowserWidgetState>(WidgetTypeId.BROWSER) ?: return null
         val rootView = (parent as? ViewGroup) ?: return null
         val widget = persistenceHelper
             .restoreBrowserWidgets(listOf(template), rootView, this, width, height)
@@ -5402,25 +4963,13 @@ class WidgetContainer @JvmOverloads constructor(
      * Restore or create status bar widget with the given state.
      * Creates the widget if it doesn't exist, then restores its state.
      */
-    private fun applyStatusBarState(state: WidgetPersistence.StatusBarState) {
-        // Create status bar if it doesn't exist
-        if (statusBarWidget == null) {
-            val statusWidth = 220f
-            val statusHeight = 110f
-            statusBarWidget = StatusBarWidget(
-                context, state.x, state.y, statusWidth, statusHeight
-            ).apply {
-                onStateChanged = { s ->
-                    if (s == StatusBarWidget.State.MOVING) statusBarDesc.dragging = true
-                    else if (statusBarDesc.dragging && s == StatusBarWidget.State.IDLE) statusBarDesc.dragging = false
-                    notifyContentChanged()
-                }
-                hookupSingleton(statusBarDesc, onClose = { executeDefinition(commandRegistry.toggleStatus) })
-            }
+    private fun applyStatusBarState(state: WidgetPersistence.StatusBarState): StatusBarWidget {
+        val widget = StatusBarWidget(context, state.x, state.y, 220f, 110f).apply {
+            onStateChanged = { notifyContentChanged() }
         }
-        persistenceHelper.restoreStatusBarPosition(statusBarWidget, state, width, height)
-        applyFullscreenState(statusBarWidget, state.isFullscreen)
-        notifyContentChanged()
+        persistenceHelper.restoreStatusBarPosition(widget, state, width, height)
+        applyFullscreenState(widget, state.isFullscreen)
+        return widget
     }
 
     private fun openBrowserStates(states: List<WidgetPersistence.BrowserWidgetState>) {
@@ -5448,11 +4997,6 @@ class WidgetContainer @JvmOverloads constructor(
         val restoredWidgets = persistenceHelper.restoreImageWidgets(states, width, height)
         val validStates = states.filter { File(it.imagePath).exists() }
         for ((index, widget) in restoredWidgets.withIndex()) {
-            widget.configureLifecycleListener(
-                onClose = { removeImageWidget(widget) },
-                onFullscreen = { isFullscreen -> handleImageWidgetFullscreenToggle(widget, isFullscreen) },
-                onMinimize = { isMinimized -> handleImageWidgetMinimizeToggle(widget, isMinimized) }
-            )
             lifecycleController.open(imageLifecycle) { widget }
             applyFullscreenState(widget, validStates.getOrNull(index)?.isFullscreen == true)
         }
@@ -5463,23 +5007,20 @@ class WidgetContainer @JvmOverloads constructor(
      * Restore or create location widget with the given state.
      * Creates the widget if it doesn't exist, then restores its state.
      */
-    private fun applyMapState(state: WidgetPersistence.MapWidgetState) {
-        if (mapWidget == null) {
-            mapWidget = MapWidget(context, state.x, state.y, state.width, state.height).apply {
-                invalidate = { notifyContentChanged() }
-                configurePhoneRouteTransport(phoneRouteTransport)
-                onPhoneRouteConnectionChanged(phoneRouteConnected)
-                bindMapNavigation(this)
-                hookupSingleton(mapDesc, onClose = { executeDefinition(commandRegistry.toggleMap) })
-                pendingMapLocation?.let(::setLocation)
-                setLocationMetadata(pendingMapLocationLabel, pendingMapCountryCode)
-            }
+    private fun applyMapState(state: WidgetPersistence.MapWidgetState): MapWidget {
+        val widget = MapWidget(context, state.x, state.y, state.width, state.height).apply {
+            invalidate = { notifyContentChanged() }
+            configurePhoneRouteTransport(phoneRouteTransport)
+            onPhoneRouteConnectionChanged(phoneRouteConnected)
+            bindMapNavigation(this)
+            pendingMapLocation?.let(::setLocation)
+            setLocationMetadata(pendingMapLocationLabel, pendingMapCountryCode)
         }
-        persistenceHelper.restoreMapWidgetPosition(mapWidget, state, width, height)
-        applyFullscreenState(mapWidget, state.isFullscreen)
+        persistenceHelper.restoreMapWidgetPosition(widget, state, width, height)
+        applyFullscreenState(widget, state.isFullscreen)
         // Restore the projected preference only after fullscreen bounds/state exist.
-        mapWidget?.restorePreferences(state.mode, state.zoom, state.showLocation, state.showCountry)
-        notifyContentChanged()
+        widget.restorePreferences(state.mode, state.zoom, state.showLocation, state.showCountry)
+        return widget
     }
 
     private fun openVideoStates(states: List<WidgetPersistence.VideoWidgetState>) {
@@ -5508,11 +5049,6 @@ class WidgetContainer @JvmOverloads constructor(
             ).apply {
                 widgetWidth = adjustedWidth
                 widgetHeight = adjustedHeight
-                configureLifecycleListener(
-                    onClose = { removeVideoWidget(this) },
-                    onFullscreen = { isFullscreen -> handleVideoWidgetFullscreenToggle(this, isFullscreen) },
-                    onMinimize = { isMinimized -> handleVideoWidgetMinimizeToggle(this, isMinimized) }
-                )
                 listener = object : VideoWidgetListener {
                     override fun onStateChanged() = notifyTransientContentChanged()
                     override fun onPlaybackVisibilityChanged(active: Boolean) {
@@ -5551,11 +5087,6 @@ class WidgetContainer @JvmOverloads constructor(
                 initialPage = state.page,
                 initialZoom = state.zoom,
             ).apply {
-                configureLifecycleListener(
-                    onClose = { removePdfWidget(this) },
-                    onFullscreen = { isFullscreen -> handlePdfWidgetFullscreenToggle(this, isFullscreen) },
-                    onMinimize = { isMinimized -> handlePdfWidgetMinimizeToggle(this, isMinimized) }
-                )
                 onStateChanged = { notifyTransientContentChanged() }
             }
             persistenceHelper.restorePdfWidgetState(widget, state, adjustedX, adjustedY)
@@ -5565,165 +5096,132 @@ class WidgetContainer @JvmOverloads constructor(
         notifyContentChanged()
     }
 
-    private fun applyLocationState(state: WidgetPersistence.LocationWidgetState) {
-        // Create location widget if it doesn't exist
-        if (locationWidget == null) {
-            locationWidget = LocationWidget(context, state.x, state.y, state.width, state.height).apply {
-                hookupSingleton(locationDesc, onClose = { executeDefinition(commandRegistry.toggleLocation) })
-                onTemperatureUnitChanged = { unitSettings.toggleTemperatureOverride() }
-                setTemperatureUnit(unitSettings.effectiveTemperatureUnit())
-                if (pendingLocationAddress != null || pendingLocationWeather != null) {
-                    setLocationData(pendingLocationAddress ?: "Loading...", pendingLocationWeather ?: "Checking weather...")
-                }
-                setSunTimes(pendingLocationSunriseEpochMs, pendingLocationSunsetEpochMs)
+    private fun applyLocationState(state: WidgetPersistence.LocationWidgetState): LocationWidget {
+        val widget = LocationWidget(context, state.x, state.y, state.width, state.height).apply {
+            onTemperatureUnitChanged = { unitSettings.toggleTemperatureOverride() }
+            setTemperatureUnit(unitSettings.effectiveTemperatureUnit())
+            if (pendingLocationAddress != null || pendingLocationWeather != null) {
+                setLocationData(pendingLocationAddress ?: "Loading...", pendingLocationWeather ?: "Checking weather...")
             }
+            setSunTimes(pendingLocationSunriseEpochMs, pendingLocationSunsetEpochMs)
         }
-        persistenceHelper.restoreLocationWidgetPosition(locationWidget, state, width, height)
-        applyFullscreenState(locationWidget, state.isFullscreen)
-        notifyContentChanged()
+        persistenceHelper.restoreLocationWidgetPosition(widget, state, width, height)
+        applyFullscreenState(widget, state.isFullscreen)
+        return widget
     }
 
     /**
      * Restore or create calendar widget with the given state.
      */
-    private fun applyCalendarState(state: WidgetPersistence.CalendarWidgetState) {
-        if (calendarWidget == null) {
-            calendarWidget = CalendarWidget(state.x, state.y, state.width, state.height)
-        }
-        calendarWidget?.apply {
-            hookupSingleton(calendarDesc, onClose = { executeDefinition(commandRegistry.toggleCalendar) })
+    private fun applyCalendarState(state: WidgetPersistence.CalendarWidgetState): CalendarWidget {
+        val widget = CalendarWidget(state.x, state.y, state.width, state.height).apply {
             onStateChanged = { notifyContentChanged() }
             setFontScale(state.fontScale)
             setSnapshot(pendingCalendarSnapshot)
         }
-        persistenceHelper.restoreCalendarWidgetPosition(calendarWidget, state, width, height)
-        applyFullscreenState(calendarWidget, state.isFullscreen)
-        notifyContentChanged()
+        persistenceHelper.restoreCalendarWidgetPosition(widget, state, width, height)
+        applyFullscreenState(widget, state.isFullscreen)
+        return widget
     }
 
     /**
      * Restore or create finance widget with the given state.
      */
-    private fun applyFinanceState(state: WidgetPersistence.FinanceWidgetState) {
-        if (financeWidget == null) {
-            financeWidget = FinanceWidget(state.x, state.y, state.width, state.height).apply {
-                hookupSingleton(
-                    financeDesc,
-                    onClose = { executeDefinition(commandRegistry.toggleFinance) },
-                    onMinimize = { isMinimized ->
-                        dataProvider?.onFinanceVisibilityChanged(!isMinimized)
-                        if (!isMinimized) requestData(force = false, reason = "finance_unminimized")
-                    }
-                )
-                listener = object : FinanceWidgetListener {
-                    override fun onStateChanged() = notifyContentChanged()
-                    override fun onDataRequested(visibleConfigs: List<FinanceDashboardTileConfig>, refreshTileIds: List<String>, force: Boolean, reason: String) {
-                        dataProvider?.requestFinanceData(visibleConfigs, refreshTileIds, force, reason)
-                    }
+    private fun applyFinanceState(state: WidgetPersistence.FinanceWidgetState): FinanceWidget {
+        val widget = FinanceWidget(state.x, state.y, state.width, state.height).apply {
+            listener = object : FinanceWidgetListener {
+                override fun onStateChanged() = notifyContentChanged()
+                override fun onDataRequested(visibleConfigs: List<FinanceDashboardTileConfig>, refreshTileIds: List<String>, force: Boolean, reason: String) {
+                    dataProvider?.requestFinanceData(visibleConfigs, refreshTileIds, force, reason)
                 }
-                pendingFinanceCountryCode?.let { setCountryCode(it) }
             }
+            pendingFinanceCountryCode?.let { setCountryCode(it) }
         }
-        persistenceHelper.restoreFinanceWidgetPosition(financeWidget, state, width, height)
-        applyFullscreenState(financeWidget, state.isFullscreen)
-        if (financeWidget?.isMinimized == true) {
+        persistenceHelper.restoreFinanceWidgetPosition(widget, state, width, height)
+        applyFullscreenState(widget, state.isFullscreen)
+        if (widget.isMinimized) {
             dataProvider?.onFinanceVisibilityChanged(false)
         } else {
-            financeWidget?.requestData(force = true, reason = "widget_restored")
+            widget.requestData(force = true, reason = "widget_restored")
             dataProvider?.onFinanceVisibilityChanged(true)
         }
-        notifyContentChanged()
+        return widget
     }
 
     /**
      * Restore or create news widget with the given state.
      */
-    private fun applyNewsState(state: WidgetPersistence.NewsWidgetState) {
-        if (newsWidget == null) {
-            newsWidget = NewsWidget(state.x, state.y, state.width, state.height).apply {
-                hookupSingleton(newsDesc, onClose = { executeDefinition(commandRegistry.toggleNews) })
-                listener = object : NewsWidgetListener {
-                    override fun onStateChanged() = notifyContentChanged()
-                    override fun onDataRequested(countryCode: String, force: Boolean, reason: String) {
-                        dataProvider?.requestNewsData(countryCode, force, reason)
-                    }
-                    override fun onSourceDataRequested(sourceSpec: NewsSourceSpec, countryCode: String, force: Boolean, reason: String, completion: (Result<NewsSnapshot>) -> Unit) {
-                        dataProvider?.requestNewsSourceData(sourceSpec, countryCode, force, reason, completion)
-                            ?: completion(Result.failure(IllegalStateException("News data service is unavailable")))
-                    }
-                    override fun onSourceInputFocusChanged(focused: Boolean) { contentObserver?.onFocusChanged(focused) }
+    private fun applyNewsState(state: WidgetPersistence.NewsWidgetState): NewsWidget {
+        val widget = NewsWidget(state.x, state.y, state.width, state.height).apply {
+            listener = object : NewsWidgetListener {
+                override fun onStateChanged() = notifyContentChanged()
+                override fun onDataRequested(countryCode: String, force: Boolean, reason: String) {
+                    dataProvider?.requestNewsData(countryCode, force, reason)
                 }
-                pendingNewsCountryCode?.let { setCountryCode(it) }
+                override fun onSourceDataRequested(sourceSpec: NewsSourceSpec, countryCode: String, force: Boolean, reason: String, completion: (Result<NewsSnapshot>) -> Unit) {
+                    dataProvider?.requestNewsSourceData(sourceSpec, countryCode, force, reason, completion)
+                        ?: completion(Result.failure(IllegalStateException("News data service is unavailable")))
+                }
+                override fun onSourceInputFocusChanged(focused: Boolean) { contentObserver?.onFocusChanged(focused) }
             }
+            pendingNewsCountryCode?.let { setCountryCode(it) }
         }
-        persistenceHelper.restoreNewsWidgetPosition(newsWidget, state, width, height)
-        applyFullscreenState(newsWidget, state.isFullscreen)
-        newsWidget?.requestData(force = true, reason = "widget_restored")
-        notifyContentChanged()
+        persistenceHelper.restoreNewsWidgetPosition(widget, state, width, height)
+        applyFullscreenState(widget, state.isFullscreen)
+        widget.requestData(force = true, reason = "widget_restored")
+        return widget
     }
 
-    private fun applyNotificationsState(state: WidgetPersistence.NotificationsWidgetState) {
-        if (notificationsWidget == null) {
-            notificationsWidget = NotificationsWidget(context, state.x, state.y, state.width, state.height, height.toFloat()).apply {
-                hookupSingleton(notificationsDesc, onClose = { executeDefinition(commandRegistry.toggleNotifications) })
-                onStateChanged = { notifyContentChanged() }
-            }
+    private fun applyNotificationsState(state: WidgetPersistence.NotificationsWidgetState): NotificationsWidget {
+        val widget = NotificationsWidget(context, state.x, state.y, state.width, state.height, height.toFloat()).apply {
+            onStateChanged = { notifyContentChanged() }
         }
-        persistenceHelper.restoreNotificationsWidgetPosition(notificationsWidget, state, width, height)
-        notificationsWidget?.setScreenHeight(height.toFloat())
-        notificationsWidget?.setNotificationsSnapshot(latestNotificationsSnapshot)
-        applyFullscreenState(notificationsWidget, state.isFullscreen)
-        notifyContentChanged()
+        persistenceHelper.restoreNotificationsWidgetPosition(widget, state, width, height)
+        widget.setScreenHeight(height.toFloat())
+        widget.setNotificationsSnapshot(latestNotificationsSnapshot)
+        applyFullscreenState(widget, state.isFullscreen)
+        return widget
     }
 
     /**
      * Restore or create speedometer widget with the given state.
      */
-    private fun applySpeedometerState(state: WidgetPersistence.SpeedometerWidgetState) {
-        if (speedometerWidget == null) {
-            speedometerWidget = createSpeedometerWidget(state.x, state.y, state.width, state.height)
-        }
-        persistenceHelper.restoreSpeedometerWidgetPosition(speedometerWidget, state, width, height)
-        applyFullscreenState(speedometerWidget, state.isFullscreen)
-        notifyContentChanged()
+    private fun applySpeedometerState(state: WidgetPersistence.SpeedometerWidgetState): SpeedometerWidget {
+        val widget = createSpeedometerWidget(state.x, state.y, state.width, state.height)
+        persistenceHelper.restoreSpeedometerWidgetPosition(widget, state, width, height)
+        applyFullscreenState(widget, state.isFullscreen)
+        return widget
     }
 
     /**
      * Restore or create subtitle widget with capture off.
      */
-    private fun applySubtitleState(state: WidgetPersistence.SubtitleWidgetState) {
-        if (subtitleWidget == null) {
-            subtitleWidget = createSubtitleWidget(state.x, state.y, state.width, state.height, autoStart = false)
-        }
-        subtitleWidget?.restoreOptions(
+    private fun applySubtitleState(state: WidgetPersistence.SubtitleWidgetState): SubtitleWidget {
+        val widget = createSubtitleWidget(state.x, state.y, state.width, state.height, autoStart = false)
+        widget.restoreOptions(
             phonePlaybackEnabled = state.phonePlaybackEnabled,
             microphoneEnabled = state.microphoneEnabled,
             translationEnabled = state.translationEnabled
         )
-        subtitleWidget?.setCaptureEnabled(false, notifyPhone = false)
-        persistenceHelper.restoreSubtitleWidgetPosition(subtitleWidget, state, width, height)
-        applyFullscreenState(subtitleWidget, state.isFullscreen)
-        notifyContentChanged()
+        widget.setCaptureEnabled(false, notifyPhone = false)
+        persistenceHelper.restoreSubtitleWidgetPosition(widget, state, width, height)
+        applyFullscreenState(widget, state.isFullscreen)
+        return widget
     }
 
     /**
      * Restore or create mirror widget with the given state.
      * Creates the widget if it doesn't exist, then restores its state.
      */
-    private fun applyMirrorState(state: WidgetPersistence.MirrorWidgetState) {
-        // Create mirror widget if it doesn't exist
-        if (screenMirrorWidget == null) {
-            screenMirrorWidget = ScreenMirrorWidget(context, state.x, state.y, state.width, state.height).apply {
-                configureScreenMirrorWidget(this)
-            }
+    private fun applyMirrorState(state: WidgetPersistence.MirrorWidgetState): ScreenMirrorWidget {
+        val widget = ScreenMirrorWidget(context, state.x, state.y, state.width, state.height).apply {
+            configureScreenMirrorWidget(this)
         }
-        persistenceHelper.restoreMirrorWidgetPosition(screenMirrorWidget, state, width, height)
-        applyFullscreenState(screenMirrorWidget, state.isFullscreen)
-        screenMirrorWidget?.onDisplayVisibilityChanged(
-            screenMirrorWidget?.let { isMirrorWidgetVisible(it) } ?: false
-        )
+        persistenceHelper.restoreMirrorWidgetPosition(widget, state, width, height)
+        applyFullscreenState(widget, state.isFullscreen)
+        widget.onDisplayVisibilityChanged(isMirrorWidgetVisible(widget))
         notifyMediaBrightnessCapChanged()
-        notifyContentChanged()
+        return widget
     }
 
     fun isReady(): Boolean = width > 0 && height > 0
@@ -5753,10 +5251,6 @@ class WidgetContainer @JvmOverloads constructor(
 
     fun release() {
         presentationController.dismiss()
-        lifecycleController.closeAll(
-            widgets = registry.allWidgets(),
-            teardown = ::destroyWidget,
-            clearRegistry = registry::clear
-        )
+        lifecycleController.closeAll()
     }
 }

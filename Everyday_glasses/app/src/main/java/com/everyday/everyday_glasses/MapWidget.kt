@@ -29,7 +29,7 @@ import kotlin.math.*
 class MapWidget(
     context: Context,
     x: Float, y: Float, width: Float = 210f, height: Float = 210f
-) : BaseWidget(x, y, width, height) {
+) : BaseWidget(WidgetTypeId.MAP, x, y, width, height) {
     override val minimizeLabel = "M"
     override val minWidth = MIN_WIDGET_SIZE
     override val minHeight = MIN_WIDGET_SIZE

@@ -8,7 +8,7 @@ import android.util.Log
 class WidgetStateStore(
     private val context: Context,
     private val handler: Handler,
-    private val captureState: () -> WidgetPersistence.PersistedState,
+    private val captureDashboard: () -> WidgetPersistenceV2.PersistedDashboard,
     private val debounceMs: Long = DEFAULT_DEBOUNCE_MS
 ) {
     companion object {
@@ -18,31 +18,31 @@ class WidgetStateStore(
 
     private var saveRunnable: Runnable? = null
 
-    fun loadState(): WidgetPersistence.PersistedState =
-        WidgetPersistence.loadAll(context)
+    fun loadDashboard(): WidgetPersistenceV2.PersistedDashboard =
+        WidgetPersistence.loadDashboard(context)
 
     fun saveNow(): Boolean {
         cancelPendingSave()
-        return saveState(captureState())
+        return saveDashboard(captureDashboard())
     }
 
     fun saveDebounced() {
         saveRunnable?.let { handler.removeCallbacks(it) }
         saveRunnable = Runnable {
             saveRunnable = null
-            saveState(captureState())
+            saveDashboard(captureDashboard())
         }
         handler.postDelayed(saveRunnable!!, debounceMs)
     }
 
-    fun listLayouts(): List<WidgetPersistence.WidgetLayoutRecord> =
-        WidgetPersistence.listLayouts(context)
+    fun listLayouts(): List<WidgetPersistence.PersistedDashboardLayoutRecord> =
+        WidgetPersistence.listDashboardLayouts(context)
 
-    fun saveLayout(name: String, state: WidgetPersistence.PersistedState): Boolean =
-        WidgetPersistence.saveLayout(context, name, state)
+    fun saveLayout(name: String, dashboard: WidgetPersistenceV2.PersistedDashboard): Boolean =
+        WidgetPersistence.saveDashboardLayout(context, name, dashboard)
 
-    fun loadLayout(name: String): WidgetPersistence.PersistedState? =
-        WidgetPersistence.loadLayout(context, name)
+    fun loadLayout(name: String): WidgetPersistenceV2.PersistedDashboard? =
+        WidgetPersistence.loadDashboardLayout(context, name)
 
     fun deleteLayout(name: String): Boolean =
         WidgetPersistence.deleteLayout(context, name)
@@ -52,21 +52,29 @@ class WidgetStateStore(
         saveRunnable = null
     }
 
-    private fun saveState(state: WidgetPersistence.PersistedState): Boolean {
-        val saved = WidgetPersistence.saveState(context, state)
+    private fun saveDashboard(dashboard: WidgetPersistenceV2.PersistedDashboard): Boolean {
+        val saved = WidgetPersistence.saveDashboard(context, dashboard)
         if (saved) {
-            pruneUnreferencedImages(state)
+            pruneUnreferencedImages(dashboard)
         }
         return saved
     }
 
-    private fun pruneUnreferencedImages(state: WidgetPersistence.PersistedState) {
+    private fun pruneUnreferencedImages(dashboard: WidgetPersistenceV2.PersistedDashboard) {
         val layoutImagePaths = listLayouts()
-            .flatMap { it.state.image.map { image -> image.imagePath } }
+            .flatMap { imagePaths(it.dashboard) }
         ImageWidgetStorage.pruneUnreferenced(
             context,
-            state.image.map { it.imagePath } + layoutImagePaths
+            imagePaths(dashboard) + layoutImagePaths
         )
         Log.d(TAG, "Persisted widget state")
     }
+
+    private fun imagePaths(dashboard: WidgetPersistenceV2.PersistedDashboard): List<String> =
+        dashboard.widgets.mapNotNull { record ->
+            if (record.type != WidgetTypeId.IMAGE) return@mapNotNull null
+            (WidgetPersistenceV2.codecs[WidgetTypeId.IMAGE]?.decode(record.state)
+                as? WidgetPersistence.ImageWidgetState)
+                ?.imagePath
+        }
 }

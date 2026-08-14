@@ -36,7 +36,7 @@ class NewsWidget(
     y: Float,
     width: Float,
     height: Float
-) : BaseWidget(x, y, width, height) {
+) : BaseWidget(WidgetTypeId.NEWS, x, y, width, height) {
 
     companion object {
         private const val TAG = "NewsWidget"

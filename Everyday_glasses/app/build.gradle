@@ -67,6 +67,12 @@ android {
     kotlinOptions {
         jvmTarget = '1.8'
     }
+
+    testOptions {
+        // Structural runtime tests instantiate widgets without an Android device. Their drawing
+        // APIs are not exercised, so Android framework stubs may safely return default values.
+        unitTests.returnDefaultValues = true
+    }
 }
 
 dependencies {

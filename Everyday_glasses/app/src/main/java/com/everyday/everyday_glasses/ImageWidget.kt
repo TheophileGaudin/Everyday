@@ -10,7 +10,7 @@ class ImageWidget(
     x: Float,
     y: Float,
     private val imagePath: String
-) : BaseWidget(x, y, 300f, 300f) { // Default size, will adjust to aspect ratio
+) : BaseWidget(WidgetTypeId.IMAGE, x, y, 300f, 300f) { // Default size, will adjust to aspect ratio
 
     private var bitmap: Bitmap? = null
     private val srcRect = android.graphics.Rect()

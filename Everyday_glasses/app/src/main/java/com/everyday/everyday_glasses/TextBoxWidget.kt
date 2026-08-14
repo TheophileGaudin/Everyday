@@ -38,7 +38,7 @@ class TextBoxWidget(
     y: Float,
     widgetWidth: Float,
     widgetHeight: Float
-) : BaseWidget(x, y, widgetWidth, widgetHeight) {
+) : BaseWidget(WidgetTypeId.TEXT, x, y, widgetWidth, widgetHeight) {
     
     companion object {
         private const val TAG = "TextBoxWidget"

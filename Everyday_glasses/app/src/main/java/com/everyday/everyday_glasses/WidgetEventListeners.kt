@@ -63,13 +63,7 @@ interface VideoWidgetListener {
 
 interface WidgetPersistenceListener {
     fun onWidgetFocusChanged(widget: BaseWidget?, focused: Boolean) = Unit
-    fun onTextWidgetDeleted(widget: TextBoxWidget) = Unit
-    fun onBrowserWidgetClosed(widget: BrowserWidget) = Unit
     fun onWidgetStateChanged() = Unit
-    fun onTextWidgetFullscreenToggled(widget: TextBoxWidget, isFullscreen: Boolean) = Unit
-    fun onTextWidgetMinimizeToggled(widget: TextBoxWidget, isMinimized: Boolean) = Unit
-    fun onBrowserWidgetFullscreenToggled(widget: BrowserWidget, isFullscreen: Boolean) = Unit
-    fun onBrowserWidgetMinimizeToggled(widget: BrowserWidget, isMinimized: Boolean) = Unit
     fun onBrowserKeyboardRequested(show: Boolean) = Unit
 }
 

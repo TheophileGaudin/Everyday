@@ -26,17 +26,7 @@ class WidgetPersistenceHelper(private val context: Context) {
     var listener: WidgetPersistenceListener? = null
     private val onWidgetFocusChanged: ((BaseWidget?, Boolean) -> Unit)?
         get() = listener?.let { value -> { widget, focused -> value.onWidgetFocusChanged(widget, focused) } }
-    private val onWidgetDeleted: ((TextBoxWidget) -> Unit)? get() = listener?.let { value -> { value.onTextWidgetDeleted(it) } }
-    private val onBrowserWidgetClosed: ((BrowserWidget) -> Unit)? get() = listener?.let { value -> { value.onBrowserWidgetClosed(it) } }
     private val onWidgetStateChanged: (() -> Unit)? get() = listener?.let { value -> { value.onWidgetStateChanged() } }
-    private val onTextWidgetFullscreenToggled: ((TextBoxWidget, Boolean) -> Unit)?
-        get() = listener?.let { value -> { widget, fullscreen -> value.onTextWidgetFullscreenToggled(widget, fullscreen) } }
-    private val onTextWidgetMinimizeToggled: ((TextBoxWidget, Boolean) -> Unit)?
-        get() = listener?.let { value -> { widget, minimized -> value.onTextWidgetMinimizeToggled(widget, minimized) } }
-    private val onBrowserWidgetFullscreenToggled: ((BrowserWidget, Boolean) -> Unit)?
-        get() = listener?.let { value -> { widget, fullscreen -> value.onBrowserWidgetFullscreenToggled(widget, fullscreen) } }
-    private val onMinimizeToggled: ((BrowserWidget, Boolean) -> Unit)?
-        get() = listener?.let { value -> { widget, minimized -> value.onBrowserWidgetMinimizeToggled(widget, minimized) } }
     private val onBrowserKeyboardRequest: ((Boolean) -> Unit)?
         get() = listener?.let { value -> { show -> value.onBrowserKeyboardRequested(show) } }
 
@@ -161,6 +151,9 @@ class WidgetPersistenceHelper(private val context: Context) {
         }
     }
 
+    fun getImageWidgetState(widget: ImageWidget): WidgetPersistence.ImageWidgetState? =
+        getImageWidgetStates(listOf(widget)).singleOrNull()
+
     fun getVideoWidgetStates(widgets: List<VideoWidget>): List<WidgetPersistence.VideoWidgetState> {
         return widgets.map { widget ->
             val c = extractCommonFields(widget)
@@ -181,6 +174,9 @@ class WidgetPersistenceHelper(private val context: Context) {
             )
         }
     }
+
+    fun getVideoWidgetState(widget: VideoWidget): WidgetPersistence.VideoWidgetState =
+        getVideoWidgetStates(listOf(widget)).single()
 
     fun restoreVideoWidgetState(
         widget: VideoWidget,
@@ -213,6 +209,9 @@ class WidgetPersistenceHelper(private val context: Context) {
             )
         }
     }
+
+    fun getPdfWidgetState(widget: PdfWidget): WidgetPersistence.PdfWidgetState =
+        getPdfWidgetStates(listOf(widget)).single()
 
     fun restorePdfWidgetState(
         widget: PdfWidget,
@@ -493,19 +492,6 @@ class WidgetPersistenceHelper(private val context: Context) {
                         onWidgetStateChanged?.invoke()
                     }
                 }
-                lifecycleListener = object : WidgetLifecycleListener {
-                    override fun onCloseRequested(widget: BaseWidget) {
-                        onWidgetDeleted?.invoke(this@apply)
-                    }
-
-                    override fun onFullscreenToggled(widget: BaseWidget, isFullscreen: Boolean) {
-                        onTextWidgetFullscreenToggled?.invoke(this@apply, isFullscreen)
-                    }
-
-                    override fun onMinimizeToggled(widget: BaseWidget, isMinimized: Boolean) {
-                        onTextWidgetMinimizeToggled?.invoke(this@apply, isMinimized)
-                    }
-                }
             }
         }
     }
@@ -631,20 +617,6 @@ class WidgetPersistenceHelper(private val context: Context) {
                         onBrowserKeyboardRequest?.invoke(show)
                     }
                 }
-                lifecycleListener = object : WidgetLifecycleListener {
-                    override fun onCloseRequested(widget: BaseWidget) {
-                        onBrowserWidgetClosed?.invoke(this@apply)
-                    }
-
-                    override fun onFullscreenToggled(widget: BaseWidget, isFullscreen: Boolean) {
-                        onBrowserWidgetFullscreenToggled?.invoke(this@apply, isFullscreen)
-                    }
-
-                    override fun onMinimizeToggled(widget: BaseWidget, isMinimized: Boolean) {
-                        this@WidgetPersistenceHelper.onMinimizeToggled?.invoke(this@apply, isMinimized)
-                    }
-                }
-
                 // Fix z-order
                 val containerIndex = rootView.indexOfChild(containerView)
                 val insertIndex = if (containerIndex >= 0) containerIndex else 0

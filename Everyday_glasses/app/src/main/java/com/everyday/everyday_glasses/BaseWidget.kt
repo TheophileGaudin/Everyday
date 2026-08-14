@@ -24,6 +24,8 @@ import android.util.Log
  * - ScreenMirrorWidget: video streaming, resize handle
  */
 abstract class BaseWidget(
+    /** Immutable catalog identity; runtime ownership never infers this from a class name. */
+    val type: WidgetTypeId,
     x: Float,
     y: Float,
     widgetWidth: Float,
@@ -100,6 +102,13 @@ abstract class BaseWidget(
         MINIMIZE_BUTTON,
         CLOSE_BUTTON,
         RESIZE_HANDLE
+    }
+
+    /** Normalized drag intent used by the container for every widget type. */
+    enum class DragHit {
+        NONE,
+        DRAG,
+        RESIZE
     }
     
     // Current base state
@@ -417,6 +426,16 @@ abstract class BaseWidget(
         }
 
         return BaseHitArea.NONE
+    }
+
+    /**
+     * Returns only the part of a hit that starts a window manipulation.
+     * Border/content preserve the existing long-press move gesture; chrome controls do not.
+     */
+    open fun dragHitTest(px: Float, py: Float): DragHit = when (baseHitTest(px, py)) {
+        BaseHitArea.BORDER, BaseHitArea.CONTENT -> DragHit.DRAG
+        BaseHitArea.RESIZE_HANDLE -> DragHit.RESIZE
+        else -> DragHit.NONE
     }
     
     /**

@@ -2,6 +2,7 @@ package com.everyday.everyday_glasses
 
 import android.content.Context
 import android.os.Environment
+import android.util.AtomicFile
 import android.util.Log
 import com.everyday.shared.sync.FinanceAssetType
 import com.everyday.shared.sync.FinanceChartType
@@ -11,7 +12,6 @@ import com.everyday.shared.sync.NewsSourceSpec
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.io.IOException
 
 /**
  * Handles persistence of widget state.
@@ -161,6 +161,8 @@ object WidgetPersistence {
         val mirror: MirrorWidgetState?,
         val video: List<VideoWidgetState> = emptyList(),
         val pdf: List<PdfWidgetState> = emptyList(),
+        /** Runtime IDs carried by v2 records; absent for an unversioned v1 document. */
+        val instanceIds: Map<WidgetTypeId, List<String>> = emptyMap(),
         val closedTemplates: ClosedWidgetTemplates = ClosedWidgetTemplates(),
         val hoverControls: List<HoverControlPlacementState>? = null,
         val isFirstRun: Boolean = true,  // True if no saved state exists (create default widgets)
@@ -173,6 +175,14 @@ object WidgetPersistence {
         val createdAt: Long,
         val updatedAt: Long,
         val state: PersistedState
+    )
+
+    /** Versioned layout record used by the current runtime persistence path. */
+    data class PersistedDashboardLayoutRecord(
+        val name: String,
+        val createdAt: Long,
+        val updatedAt: Long,
+        val dashboard: WidgetPersistenceV2.PersistedDashboard
     )
 
     data class ClosedWidgetTemplates(
@@ -478,6 +488,7 @@ object WidgetPersistence {
         subtitleWidgetState: SubtitleWidgetState? = null,
         videoWidgets: List<VideoWidgetState> = emptyList(),
         pdfWidgets: List<PdfWidgetState> = emptyList(),
+        instanceIds: Map<WidgetTypeId, List<String>> = emptyMap(),
         closedTemplates: ClosedWidgetTemplates = ClosedWidgetTemplates(),
         hoverControls: List<HoverControlPlacementState>? = null,
         isFirstRun: Boolean = false,
@@ -499,6 +510,7 @@ object WidgetPersistence {
         mirror = mirrorWidgetState,
         video = videoWidgets,
         pdf = pdfWidgets,
+        instanceIds = instanceIds,
         closedTemplates = closedTemplates,
         hoverControls = hoverControls,
         isFirstRun = isFirstRun,
@@ -614,9 +626,77 @@ object WidgetPersistence {
             isLayoutLocked = rootJson.optBoolean(KEY_LAYOUT_LOCKED, false)
         )
 
+    /**
+     * Encodes one state object using the established v1 field representation.
+     *
+     * The v2 envelope keeps these payloads deliberately unchanged.  Keeping the
+     * field-level codecs here means both schemas share one authoritative parser
+     * while the runtime migration is in progress.
+     */
+    internal fun encodeWidgetStatePayload(type: WidgetTypeId, state: Any): JSONObject = when (type) {
+        WidgetTypeId.TEXT -> textWidgetToJson(state as TextWidgetState)
+        WidgetTypeId.BROWSER -> browserWidgetToJson(state as BrowserWidgetState)
+        WidgetTypeId.IMAGE -> (state as ImageWidgetState).let { widget -> JSONObject().apply {
+            putCommonFields(widget)
+            put("imagePath", widget.imagePath)
+        } }
+        WidgetTypeId.VIDEO -> (state as VideoWidgetState).let { widget -> JSONObject().apply {
+            putCommonFields(widget)
+            put("uri", widget.uri)
+            put("displayName", widget.displayName)
+        } }
+        WidgetTypeId.PDF -> (state as PdfWidgetState).let { widget -> JSONObject().apply {
+            putCommonFields(widget)
+            put("uri", widget.uri)
+            put("displayName", widget.displayName)
+            put("page", widget.page)
+            put("zoom", widget.zoom)
+        } }
+        WidgetTypeId.STATUS -> statusBarToJson(state as StatusBarState)
+        WidgetTypeId.LOCATION -> locationWidgetToJson(state as LocationWidgetState)
+        WidgetTypeId.MAP -> mapWidgetToJson(state as MapWidgetState)
+        WidgetTypeId.CALENDAR -> calendarWidgetToJson(state as CalendarWidgetState)
+        WidgetTypeId.FINANCE -> financeWidgetToJson(state as FinanceWidgetState)
+        WidgetTypeId.NEWS -> newsWidgetToJson(state as NewsWidgetState)
+        WidgetTypeId.NOTIFICATIONS -> notificationsWidgetToJson(state as NotificationsWidgetState)
+        WidgetTypeId.SPEEDOMETER -> speedometerWidgetToJson(state as SpeedometerWidgetState)
+        WidgetTypeId.SUBTITLE -> subtitleWidgetToJson(state as SubtitleWidgetState)
+        WidgetTypeId.MIRROR -> mirrorWidgetToJson(state as MirrorWidgetState)
+        // File browser state has not been persisted by the v1 schema.
+        WidgetTypeId.FILES -> error("${type.persistedId} has no persisted state codec")
+    }
+
+    /** Decodes one v2 payload through the same field-level parser as v1. */
+    internal fun decodeWidgetStatePayload(type: WidgetTypeId, payload: JSONObject): Any? = when (type) {
+        WidgetTypeId.TEXT -> parseTextWidget(payload)
+        WidgetTypeId.BROWSER -> parseBrowserWidget(payload)
+        WidgetTypeId.IMAGE -> parseImageWidget(payload)
+        WidgetTypeId.VIDEO -> parseVideoWidget(payload)
+        WidgetTypeId.PDF -> parsePdfWidget(payload)
+        WidgetTypeId.STATUS -> parseStatusBarObject(payload)
+        WidgetTypeId.LOCATION -> parseLocationPayload(payload)
+        WidgetTypeId.MAP -> parseMapPayload(payload)
+        WidgetTypeId.CALENDAR -> parseCalendarPayload(payload)
+        WidgetTypeId.FINANCE -> parseFinancePayload(payload)
+        WidgetTypeId.NEWS -> parseNewsPayload(payload)
+        WidgetTypeId.NOTIFICATIONS -> parseNotificationsPayload(payload)
+        WidgetTypeId.SPEEDOMETER -> parseSpeedometerPayload(payload)
+        WidgetTypeId.SUBTITLE -> parseSubtitlePayload(payload)
+        WidgetTypeId.MIRROR -> parseMirrorPayload(payload)
+        WidgetTypeId.FILES -> null
+    }
+
     fun saveState(context: Context, state: PersistedState): Boolean {
+        return saveDashboard(context, WidgetPersistenceV2.fromLegacy(state))
+    }
+
+    /** Saves the runtime record envelope without first converting to fixed v1 fields. */
+    fun saveDashboard(context: Context, dashboard: WidgetPersistenceV2.PersistedDashboard): Boolean {
         try {
-            writeTextAtomic(getStorageFile(context), stateToJson(state.copy(isFirstRun = false)).toString(2))
+            writeTextAtomic(
+                getStorageFile(context),
+                WidgetPersistenceV2.dashboardToJson(dashboard.copy(isFirstRun = false)).toString(2)
+            )
             hasLoggedSaveError = false
             return true
         } catch (e: Exception) {
@@ -634,31 +714,46 @@ object WidgetPersistence {
      * isFirstRun=false if a save file was loaded (returning user).
      */
     fun loadAll(context: Context): PersistedState {
+        return WidgetPersistenceV2.toLegacy(loadDashboard(context))
+    }
+
+    /** Loads the v2 record envelope; unversioned documents are migrated once on read. */
+    fun loadDashboard(context: Context): WidgetPersistenceV2.PersistedDashboard {
         val rootJson = loadRootJson(context)
-            ?: return PersistedState(
-                text = emptyList(),
-                browser = emptyList(),
-                image = emptyList(),
-                status = null,
-                location = null,
-                calendar = null,
-                finance = null,
-                news = null,
-                notifications = null,
-                speedometer = null,
-                subtitle = null,
-                mirror = null,
-                closedTemplates = ClosedWidgetTemplates(),
-                hoverControls = null,
+            ?: return WidgetPersistenceV2.PersistedDashboard(
+                widgets = emptyList(),
                 isFirstRun = true,
-                activeLayoutName = DEFAULT_LAYOUT_NAME,
-                isLayoutLocked = false
+                activeLayoutName = DEFAULT_LAYOUT_NAME
             )
 
-        return stateFromJson(rootJson, isFirstRun = false)
+        return when {
+            WidgetPersistenceV2.isCurrentSchema(rootJson) ->
+                WidgetPersistenceV2.dashboardFromJson(rootJson).copy(isFirstRun = false)
+            WidgetPersistenceV2.isLegacySchema(rootJson) -> {
+                val migrated = LegacyWidgetStateV1Migrator.migrateDashboard(rootJson)
+                // Successful v1 loads are immediately committed as v2. A failed
+                // commit leaves the original file intact because writes are atomic.
+                saveDashboard(context, migrated)
+                migrated.copy(isFirstRun = false)
+            }
+            else -> {
+                Log.e(TAG, "Unsupported widget persistence schema; leaving file untouched")
+                WidgetPersistenceV2.PersistedDashboard(
+                    widgets = emptyList(),
+                    isFirstRun = false,
+                    activeLayoutName = DEFAULT_LAYOUT_NAME
+                )
+            }
+        }
     }
 
     fun listLayouts(context: Context): List<WidgetLayoutRecord> {
+        return listDashboardLayouts(context).map { record ->
+            WidgetLayoutRecord(record.name, record.createdAt, record.updatedAt, WidgetPersistenceV2.toLegacy(record.dashboard))
+        }
+    }
+
+    fun listDashboardLayouts(context: Context): List<PersistedDashboardLayoutRecord> {
         val file = getLayoutsStorageFile(context)
         if (!file.exists()) return emptyList()
 
@@ -666,7 +761,22 @@ object WidgetPersistence {
             val jsonText = file.readText()
             if (jsonText.isBlank()) return emptyList()
             val rootJson = JSONObject(jsonText)
-            parseLayoutRecords(rootJson)
+            when {
+                WidgetPersistenceV2.isCurrentSchema(rootJson) -> WidgetPersistenceV2.dashboardLayoutRecordsFromJson(rootJson).map {
+                    PersistedDashboardLayoutRecord(it.name, it.createdAt, it.updatedAt, it.dashboard)
+                }
+                WidgetPersistenceV2.isLegacySchema(rootJson) -> LegacyWidgetStateV1Migrator.migrateLayoutRecords(rootJson).map { legacy ->
+                    PersistedDashboardLayoutRecord(legacy.name, legacy.createdAt, legacy.updatedAt, WidgetPersistenceV2.fromLegacy(legacy.state))
+                }.also { migratedRecords ->
+                    // Named layouts follow the same one-time migration rule as the
+                    // active dashboard.
+                    writeDashboardLayoutRecords(context, migratedRecords)
+                }
+                else -> {
+                    Log.e(TAG, "Unsupported widget layout schema; leaving file untouched")
+                    emptyList()
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error reading widget layouts", e)
             emptyList()
@@ -674,19 +784,27 @@ object WidgetPersistence {
     }
 
     fun saveLayout(context: Context, name: String, state: PersistedState): Boolean {
+        return saveDashboardLayout(context, name, WidgetPersistenceV2.fromLegacy(state))
+    }
+
+    fun saveDashboardLayout(
+        context: Context,
+        name: String,
+        dashboard: WidgetPersistenceV2.PersistedDashboard
+    ): Boolean {
         val trimmedName = name.trim()
         if (trimmedName.isBlank() || isDefaultLayoutName(trimmedName)) return false
 
         return try {
             val now = System.currentTimeMillis()
-            val existing = listLayouts(context).toMutableList()
+            val existing = listDashboardLayouts(context).toMutableList()
             val existingIndex = existing.indexOfFirst { it.name.equals(trimmedName, ignoreCase = true) }
             val createdAt = existing.getOrNull(existingIndex)?.createdAt ?: now
-            val record = WidgetLayoutRecord(
+            val record = PersistedDashboardLayoutRecord(
                 name = trimmedName,
                 createdAt = createdAt,
                 updatedAt = now,
-                state = state.copy(isFirstRun = false, activeLayoutName = trimmedName)
+                dashboard = dashboard.copy(isFirstRun = false, activeLayoutName = trimmedName)
             )
 
             if (existingIndex >= 0) {
@@ -695,7 +813,7 @@ object WidgetPersistence {
                 existing.add(record)
             }
 
-            writeLayoutRecords(context, existing.sortedBy { it.createdAt })
+            writeDashboardLayoutRecords(context, existing.sortedBy { it.createdAt })
         } catch (e: Exception) {
             Log.e(TAG, "Error saving widget layout '$trimmedName'", e)
             false
@@ -703,11 +821,15 @@ object WidgetPersistence {
     }
 
     fun loadLayout(context: Context, name: String): PersistedState? {
+        return loadDashboardLayout(context, name)?.let(WidgetPersistenceV2::toLegacy)
+    }
+
+    fun loadDashboardLayout(context: Context, name: String): WidgetPersistenceV2.PersistedDashboard? {
         val trimmedName = name.trim()
         if (trimmedName.isBlank()) return null
-        return listLayouts(context)
+        return listDashboardLayouts(context)
             .firstOrNull { it.name.equals(trimmedName, ignoreCase = true) }
-            ?.state
+            ?.dashboard
             ?.copy(isFirstRun = false, activeLayoutName = trimmedName)
     }
 
@@ -716,9 +838,9 @@ object WidgetPersistence {
         if (trimmedName.isBlank() || isDefaultLayoutName(trimmedName)) return false
 
         return try {
-            val remaining = listLayouts(context)
+            val remaining = listDashboardLayouts(context)
                 .filterNot { it.name.equals(trimmedName, ignoreCase = true) }
-            writeLayoutRecords(context, remaining)
+            writeDashboardLayoutRecords(context, remaining)
         } catch (e: Exception) {
             Log.e(TAG, "Error deleting widget layout '$trimmedName'", e)
             false
@@ -759,20 +881,28 @@ object WidgetPersistence {
         return records.sortedBy { it.createdAt }
     }
 
+    internal fun legacyLayoutRecordsFromJson(rootJson: JSONObject): List<WidgetLayoutRecord> =
+        parseLayoutRecords(rootJson)
+
     private fun writeLayoutRecords(context: Context, records: List<WidgetLayoutRecord>): Boolean {
+        return writeDashboardLayoutRecords(context, records.map { record ->
+            PersistedDashboardLayoutRecord(record.name, record.createdAt, record.updatedAt, WidgetPersistenceV2.fromLegacy(record.state))
+        })
+    }
+
+    private fun writeDashboardLayoutRecords(
+        context: Context,
+        records: List<PersistedDashboardLayoutRecord>
+    ): Boolean {
         return try {
-            val rootJson = JSONObject().apply {
-                put(KEY_LAYOUTS, JSONArray().apply {
-                    records.forEach { record ->
-                        put(JSONObject().apply {
-                            put(KEY_LAYOUT_NAME, record.name)
-                            put(KEY_LAYOUT_CREATED_AT, record.createdAt)
-                            put(KEY_LAYOUT_UPDATED_AT, record.updatedAt)
-                            put(KEY_LAYOUT_STATE, stateToJson(record.state))
-                        })
-                    }
-                })
-            }
+            val rootJson = WidgetPersistenceV2.dashboardLayoutRecordsToJson(records.map { record ->
+                WidgetPersistenceV2.PersistedDashboardLayoutRecord(
+                    record.name,
+                    record.createdAt,
+                    record.updatedAt,
+                    record.dashboard
+                )
+            })
             writeTextAtomic(getLayoutsStorageFile(context), rootJson.toString(2))
             true
         } catch (e: Exception) {
@@ -813,17 +943,14 @@ object WidgetPersistence {
 
     private fun writeTextAtomic(file: File, text: String) {
         file.parentFile?.mkdirs()
-        val tempFile = File(file.parentFile, "${file.name}.tmp")
-        tempFile.writeText(text)
-        if (!tempFile.renameTo(file)) {
-            if (file.exists() && !file.delete()) {
-                tempFile.delete()
-                throw IOException("Failed to replace ${file.absolutePath}")
-            }
-            if (!tempFile.renameTo(file)) {
-                tempFile.delete()
-                throw IOException("Failed to commit ${file.absolutePath}")
-            }
+        val atomicFile = AtomicFile(file)
+        val stream = atomicFile.startWrite()
+        try {
+            stream.write(text.toByteArray(Charsets.UTF_8))
+            atomicFile.finishWrite(stream)
+        } catch (error: Exception) {
+            atomicFile.failWrite(stream)
+            throw error
         }
     }
 
@@ -1585,4 +1712,45 @@ object WidgetPersistence {
                 isPinned = c.isPinned
             )
         }
+
+    // Payload adapters keep the v2 record codecs on the exact parsing path used
+    // by the legacy document, without duplicating validation/default logic.
+    private fun payloadRoot(key: String, payload: JSONObject): JSONObject =
+        JSONObject().put(key, payload)
+
+    private fun parseImageWidget(payload: JSONObject): ImageWidgetState? =
+        parseImageWidgets(JSONObject().put(KEY_IMAGE_WIDGETS, JSONArray().put(payload))).singleOrNull()
+
+    private fun parseVideoWidget(payload: JSONObject): VideoWidgetState? =
+        parseVideoWidgets(JSONObject().put(KEY_VIDEO_WIDGETS, JSONArray().put(payload))).singleOrNull()
+
+    private fun parsePdfWidget(payload: JSONObject): PdfWidgetState? =
+        parsePdfWidgets(JSONObject().put(KEY_PDF_WIDGETS, JSONArray().put(payload))).singleOrNull()
+
+    private fun parseLocationPayload(payload: JSONObject): LocationWidgetState? =
+        parseLocation(payloadRoot(KEY_LOCATION_WIDGET, payload))
+
+    private fun parseMapPayload(payload: JSONObject): MapWidgetState? =
+        parseMap(payloadRoot(KEY_MAP_WIDGET, payload))
+
+    private fun parseCalendarPayload(payload: JSONObject): CalendarWidgetState? =
+        parseCalendar(payloadRoot(KEY_CALENDAR_WIDGET, payload))
+
+    private fun parseFinancePayload(payload: JSONObject): FinanceWidgetState? =
+        parseFinance(payloadRoot(KEY_FINANCE_WIDGET, payload))
+
+    private fun parseNewsPayload(payload: JSONObject): NewsWidgetState? =
+        parseNews(payloadRoot(KEY_NEWS_WIDGET, payload))
+
+    private fun parseNotificationsPayload(payload: JSONObject): NotificationsWidgetState? =
+        parseNotifications(payloadRoot(KEY_NOTIFICATIONS_WIDGET, payload))
+
+    private fun parseSpeedometerPayload(payload: JSONObject): SpeedometerWidgetState? =
+        parseSpeedometer(payloadRoot(KEY_SPEEDOMETER_WIDGET, payload))
+
+    private fun parseSubtitlePayload(payload: JSONObject): SubtitleWidgetState? =
+        parseSubtitle(payloadRoot(KEY_SUBTITLE_WIDGET, payload))
+
+    private fun parseMirrorPayload(payload: JSONObject): MirrorWidgetState? =
+        parseMirror(payloadRoot(KEY_MIRROR_WIDGET, payload))
 }

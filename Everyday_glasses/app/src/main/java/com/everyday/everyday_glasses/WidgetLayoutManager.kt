@@ -7,9 +7,9 @@ class WidgetLayoutManager(
     private val context: Context,
     private val stateStore: WidgetStateStore,
     private val canApplyLayout: () -> Boolean,
-    private val captureState: () -> WidgetPersistence.PersistedState,
-    private val applyState: (WidgetPersistence.PersistedState) -> Unit,
-    private val buildDeliveredLayout: (String) -> WidgetPersistence.PersistedState?,
+    private val captureDashboard: () -> WidgetPersistenceV2.PersistedDashboard,
+    private val applyDashboard: (WidgetPersistenceV2.PersistedDashboard) -> Unit,
+    private val buildDeliveredLayout: (String) -> WidgetPersistenceV2.PersistedDashboard?,
     private val showNamePrompt: (String) -> Unit,
     private val showNameError: (String) -> Unit,
     private val dismissNamePrompt: () -> Unit,
@@ -23,7 +23,7 @@ class WidgetLayoutManager(
 
     var activeLayoutName: String? = null
 
-    private fun loadLayoutByNameOrDelivered(name: String): WidgetPersistence.PersistedState? {
+    private fun loadLayoutByNameOrDelivered(name: String): WidgetPersistenceV2.PersistedDashboard? {
         return buildDeliveredLayout(name) ?: stateStore.loadLayout(name)
     }
 
@@ -44,8 +44,8 @@ class WidgetLayoutManager(
         return true
     }
 
-    fun capturePersistedState(): WidgetPersistence.PersistedState =
-        captureState().copy(activeLayoutName = activeLayoutName?.trim()?.takeIf { it.isNotBlank() })
+    fun capturePersistedDashboard(): WidgetPersistenceV2.PersistedDashboard =
+        captureDashboard().copy(activeLayoutName = activeLayoutName?.trim()?.takeIf { it.isNotBlank() })
 
     fun saveLayoutWithName(name: String) {
         val trimmedName = name.trim()
@@ -59,7 +59,7 @@ class WidgetLayoutManager(
             notifyContentChanged()
             return
         }
-        val saved = stateStore.saveLayout(trimmedName, capturePersistedState())
+        val saved = stateStore.saveLayout(trimmedName, capturePersistedDashboard())
         if (saved) {
             activeLayoutName = trimmedName
             dismissNamePrompt()
@@ -104,7 +104,7 @@ class WidgetLayoutManager(
         val loadedName = canonicalLoadName(name)
         Log.d(TAG, "Loading widget layout '$loadedName'")
         beforeApplyLayout()
-        applyState(state)
+        applyDashboard(state)
         activeLayoutName = loadedName
     }
 }

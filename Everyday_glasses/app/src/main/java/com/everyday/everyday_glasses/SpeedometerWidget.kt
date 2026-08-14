@@ -21,7 +21,7 @@ class SpeedometerWidget(
     y: Float,
     width: Float,
     height: Float
-) : BaseWidget(x, y, width, height) {
+) : BaseWidget(WidgetTypeId.SPEEDOMETER, x, y, width, height) {
 
     enum class SpeedUnit(val code: String, val label: String) {
         KMH("kmh", "km/h"),

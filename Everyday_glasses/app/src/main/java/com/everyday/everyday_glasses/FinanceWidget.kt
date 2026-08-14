@@ -26,7 +26,7 @@ class FinanceWidget(
     y: Float,
     width: Float,
     height: Float
-) : BaseWidget(x, y, width, height) {
+) : BaseWidget(WidgetTypeId.FINANCE, x, y, width, height) {
 
     companion object {
         private const val TAG = "FinanceWidget"

@@ -33,7 +33,7 @@ class FileBrowserWidget(
     width: Float = 400f,
     height: Float = 500f,
     private val fileFilter: FileFilter = FileFilter.IMAGES
-) : BaseWidget(x, y, width, height) {
+) : BaseWidget(WidgetTypeId.FILES, x, y, width, height) {
 
     companion object {
         private const val TAG = "FileBrowserWidget"

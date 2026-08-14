@@ -372,7 +372,7 @@ class MainActivity : AppCompatActivity() {
         persistenceManager = WidgetStateStore(
             context = this,
             handler = handler,
-            captureState = { widgetContainer.capturePersistedState() }
+            captureDashboard = { widgetContainer.capturePersistedDashboard() }
         )
         inputCoordinator = InputCoordinator(
             cursorView = cursorView,
@@ -707,7 +707,7 @@ class MainActivity : AppCompatActivity() {
         // Check if this is a returning user BEFORE layout happens.
         // This prevents onSizeChanged() from creating default singleton widgets
         // that the user has previously closed.
-        val persistedState = persistenceManager.loadState()
+        val persistedState = persistenceManager.loadDashboard()
         if (!persistedState.isFirstRun) {
             Log.d(TAG, "Returning user detected - preventing default singleton widget creation")
             widgetContainer.setIsReturningUser()
@@ -1677,10 +1677,8 @@ class MainActivity : AppCompatActivity() {
      *
      * @param state The pre-loaded persisted state (loaded before layout to set isReturningUser flag)
      */
-    private fun restoreWidgetState(state: WidgetPersistence.PersistedState) {
-        Log.d(TAG, "Restoring widget state: isFirstRun=${state.isFirstRun}, " +
-                "text=${state.text.size}, browser=${state.browser.size}, image=${state.image.size}, " +
-                "status=${state.status != null}, location=${state.location != null}, calendar=${state.calendar != null}, mirror=${state.mirror != null}, finance=${state.finance != null}, news=${state.news != null}, speedometer=${state.speedometer != null}, subtitle=${state.subtitle != null}")
+    private fun restoreWidgetState(state: WidgetPersistenceV2.PersistedDashboard) {
+        Log.d(TAG, "Restoring widget dashboard: isFirstRun=${state.isFirstRun}, widgets=${state.widgets.size}, templates=${state.closedTemplates.size}")
 
         if (state.isFirstRun) {
             refreshBinocularRenderingStrategy()
@@ -1691,7 +1689,8 @@ class MainActivity : AppCompatActivity() {
         val delivered = state.activeLayoutName
             ?.takeIf(BuiltInLayouts::isDelivered)
             ?.let { BuiltInLayouts.build(it, widgetContainer.width.toFloat(), widgetContainer.height.toFloat()) }
-        widgetContainer.applyPersistedStateReplacingCurrent(delivered ?: state)
+            ?.let(WidgetPersistenceV2::fromLegacy)
+        widgetContainer.applyPersistedDashboardReplacingCurrent(delivered ?: state)
 
         refreshBinocularRenderingStrategy()
         notifyStructuralBinocularChange()

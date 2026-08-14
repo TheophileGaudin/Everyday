@@ -22,7 +22,7 @@ class SubtitleWidget(
     y: Float,
     width: Float,
     height: Float
-) : BaseWidget(x, y, width, height) {
+) : BaseWidget(WidgetTypeId.SUBTITLE, x, y, width, height) {
 
     companion object {
         const val DEFAULT_WIDTH = 520f

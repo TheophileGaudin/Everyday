@@ -29,7 +29,7 @@ class PdfWidget(
     height: Float = 260f,
     initialPage: Int = 0,
     initialZoom: Float = 1f,
-) : BaseWidget(x, y, width, height) {
+) : BaseWidget(WidgetTypeId.PDF, x, y, width, height) {
 
     companion object {
         private const val CONTROL_WIDTH = 82f
