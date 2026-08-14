@@ -42,7 +42,8 @@ class WidgetLifecycleControllerTest {
     @Test
     fun `record restore and capture use codec and preserve stable id`() {
         val registry = WidgetRegistry()
-        val controller = controller(registry) {}
+        var changes = 0
+        val controller = controller(registry) { changes++ }
         val codec = StringCodec(WidgetTypeId.TEXT)
         controller.register(
             WidgetLifecycleRegistration(
@@ -65,6 +66,7 @@ class WidgetLifecycleControllerTest {
         val widget = controller.restore(record) as FakeWidget
 
         assertEquals("restored", widget.value)
+        assertEquals(1, changes)
         assertEquals("text#12", registry.stableId(widget))
         assertEquals(record.instanceId, controller.captureRecord(widget, registry.stableId(widget))?.instanceId)
         assertEquals("restored", controller.captureRecord(widget, registry.stableId(widget))?.state?.getString("value"))
@@ -100,7 +102,8 @@ class WidgetLifecycleControllerTest {
     @Test
     fun `fullscreen and minimize ownership remain coherent`() {
         val registry = WidgetRegistry()
-        val controller = controller(registry) {}
+        var changes = 0
+        val controller = controller(registry) { changes++ }
         controller.register(
             WidgetLifecycleRegistration(
                 descriptor = WidgetDescriptors[WidgetTypeId.TEXT],
@@ -112,20 +115,28 @@ class WidgetLifecycleControllerTest {
         )
         val first = controller.open(WidgetTypeId.TEXT) { FakeWidget(WidgetTypeId.TEXT) }!!
         val second = controller.open(WidgetTypeId.TEXT) { FakeWidget(WidgetTypeId.TEXT) }!!
+        assertEquals(2, changes)
 
         controller.enterFullscreen(first)
+        assertEquals(3, changes)
         assertSame(first, registry.fullscreenWidget)
         controller.enterFullscreen(second)
+        assertEquals(4, changes)
         assertFalse(first.isFullscreen)
         assertSame(second, registry.fullscreenWidget)
 
         second.minimize()
+        assertEquals(5, changes)
         assertTrue(second.isMinimized)
         assertNull(registry.fullscreenWidget)
         second.toggleMinimize()
+        assertEquals(6, changes)
         assertFalse(second.isMinimized)
         assertTrue(second.isFullscreen)
         assertSame(second, registry.fullscreenWidget)
+
+        controller.closeAll()
+        assertEquals(7, changes)
     }
 
     private fun controller(registry: WidgetRegistry, onChanged: () -> Unit) =

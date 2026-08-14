@@ -95,7 +95,7 @@ class WidgetContainer @JvmOverloads constructor(
     private val persistenceHelper = WidgetPersistenceHelper(context)
     private val lifecycleController = WidgetLifecycleController(
         runOnUiThread = { action -> post(action) },
-        onChanged = ::notifyContentChanged,
+        onChanged = ::notifyPersistentContentChanged,
         registry = registry,
         onMutationStarted = { lifecycleMutationInProgress = true },
         onMutationFinished = { lifecycleMutationInProgress = false }
@@ -120,13 +120,15 @@ class WidgetContainer @JvmOverloads constructor(
     // ==================== Menus & Overlays ====================
     
     private var contextMenu: ContextMenu? = null
+    private var contextMenuDispatchDepth = 0
     private var textEditMenu: TextEditContextMenu? = null
+    private var textEditMenuDispatchDepth = 0
     private enum class TextEditMenuTarget { TEXT_WIDGET, BROWSER_ADDRESS }
     private var textEditMenuTarget: TextEditMenuTarget = TextEditMenuTarget.TEXT_WIDGET
     private var formattingMenu: FormattingMenu? = null
     private var closeConfirmationPopup: CloseConfirmationPopup? = null
     private var layoutDeleteConfirmationPopup: WidgetLayoutDeleteConfirmationPopup? = null
-    private val pageAgentApprovalOverlay = PageAgentApprovalOverlay(::notifyContentChanged)
+    private val pageAgentApprovalOverlay = PageAgentApprovalOverlay(::notifyPersistentContentChanged)
 
     private val commandRegistry by lazy {
         AppCommandRegistry { stateStore.listLayouts().map { it.name } }
@@ -173,12 +175,17 @@ class WidgetContainer @JvmOverloads constructor(
         override fun openFilePicker() { host?.requestFilePicker() }
         override fun openSettings() = settingsController.toggleDashboardSettings(width.toFloat(), height.toFloat())
         override fun requestClose() = triggerCloseAppConfirmation()
-        override fun setBrightness(value: Float) = settingsController.setBrightness(value)
+        override fun setBrightness(value: Float) {
+            settingsController.setBrightness(value)
+            notifyTransientContentChanged()
+        }
         override fun scroll(direction: CommandScrollDirection, amount: Float) =
             scrollWidgetAtCursor(cursorX, cursorY, if (direction == CommandScrollDirection.UP) -amount else amount)
         override fun openUrl(url: String) = openBrowserAddress(url)
         override fun enterText(text: String) = onKeyPress(text)
-        override fun commandFinished() = notifyContentChanged()
+        // Each mutation owns its classified notification; a generic command completion hook
+        // would duplicate lifecycle, widget, and transient signals.
+        override fun commandFinished() = Unit
     }
 
     private val closeAppHoverControl = CloseAppHoverControl {
@@ -295,8 +302,8 @@ class WidgetContainer @JvmOverloads constructor(
     private val settingsController = SettingsController(
         resources = resources,
         defaultSpeedVisibilityThresholdKmh = DEFAULT_SPEED_VISIBILITY_THRESHOLD_KMH,
-        invalidateView = { invalidate() },
-        notifyContentChanged = ::notifyContentChanged,
+        notifyTransientContentChanged = ::notifyTransientContentChanged,
+        notifyPersistentContentChanged = ::notifyPersistentContentChanged,
         setSpeedometerForceVisibleWhenIdle = { forceVisible ->
             speedometerWidget?.setForceVisibleWhenIdle(forceVisible) == true
         },
@@ -323,6 +330,9 @@ class WidgetContainer @JvmOverloads constructor(
         onShortcutsChanged = { updated -> applyShortcuts(updated) }
     )
     private var layoutNamePrompt: WidgetLayoutNamePrompt? = null
+    private var layoutOverlayNotificationEmitted = false
+    private var layoutNameSaveInProgress = false
+    private var layoutDeleteInProgress = false
     private val stateStore = WidgetStateStore(
         context = context,
         handler = Handler(Looper.getMainLooper()),
@@ -340,13 +350,20 @@ class WidgetContainer @JvmOverloads constructor(
         showNamePrompt = { suggestedName ->
             dismissMenu()
             layoutNamePrompt?.show(suggestedName)
-            contentObserver?.onFocusChanged(true)
+            notifyFocusChanged(true)
         },
         showNameError = { error -> layoutNamePrompt?.showError(error) },
         dismissNamePrompt = { layoutNamePrompt?.dismiss() },
         showDeleteConfirmation = { name -> layoutDeleteConfirmationPopup?.show(name) },
         beforeApplyLayout = ::requestLayoutSwitchBrightness,
-        notifyContentChanged = ::notifyContentChanged
+        notifyTransientContentChanged = {
+            layoutOverlayNotificationEmitted = true
+            notifyTransientContentChanged()
+        },
+        notifyPersistentContentChanged = {
+            layoutOverlayNotificationEmitted = true
+            notifyPersistentContentChanged()
+        }
     )
 
     var displaySettingsHandler: DisplaySettingsHandler? = null
@@ -374,6 +391,7 @@ class WidgetContainer @JvmOverloads constructor(
     // Currently focused widget
     private var focusedWidget: TextBoxWidget? = null
     private var focusedBrowserWidget: BrowserWidget? = null
+    private var suppressNestedFocusCallbacks = false
 
     // Widget being dragged
     private var activeWidget: BaseWidget? = null
@@ -453,6 +471,8 @@ class WidgetContainer @JvmOverloads constructor(
     private var pendingDragWidget: BaseWidget? = null
     private var pendingDragFinanceTile = false
     private var pendingDragIsResize = false
+    private var interactionZOrderChanged = false
+    private var interactionPersistentNotified = false
     private var pendingTextSelection = false
     private var pendingCreateX = 0f
     private var pendingCreateY = 0f
@@ -669,12 +689,19 @@ class WidgetContainer @JvmOverloads constructor(
     private var shouldCreateDefaultSingletons = true
     private var suppressContentChangedCallback = false
     private var lifecycleMutationInProgress = false
+    private var transientNotificationDepth = 0
+    private var transientNotificationPending = false
+    private var persistentNotificationDepth = 0
+    private var persistentNotificationPending = false
+    private var contentNotificationGeneration = 0L
 
     init {
         setWillNotDraw(false)
         registerWidgetLifecycles()
         setupPersistenceHelperCallbacks()
-        unitSettings.onChanged = { applyEffectiveUnitSettings() }
+        // Callers own the classified notification for unit changes; applying the derived
+        // widget presentation here must not emit a second transient callback.
+        unitSettings.onChanged = { applyEffectiveUnitSettings(notify = false) }
         applyEffectiveUnitSettings(notify = false)
     }
 
@@ -813,7 +840,7 @@ class WidgetContainer @JvmOverloads constructor(
                 }
             }
 
-            override fun onWidgetStateChanged() = notifyContentChanged()
+            override fun onWidgetStateChanged() = notifyTransientContentChanged()
             override fun onBrowserKeyboardRequested(show: Boolean) {
                 host?.requestBrowserKeyboard(show)
             }
@@ -826,49 +853,51 @@ class WidgetContainer @JvmOverloads constructor(
 
     fun setDisplayState(state: WakeSleepManager.DisplayState) {
         if (displayState != state) {
-            // Set transition flag to prevent aggressive invalidation cascades
-            // which can cause power spikes and display flashes on battery power
-            isTransitioningDisplayState = true
+            withTransientChangeBatch {
+                // Set transition flag to prevent aggressive invalidation cascades
+                // which can cause power spikes and display flashes on battery power
+                isTransitioningDisplayState = true
 
-            displayState = state
-            Log.d(TAG, "Display state set to: $state")
+                displayState = state
+                Log.d(TAG, "Display state set to: $state")
 
-            for (browser in browserWidgets) {
-                val view = browser.getWebView()
-                if (view != null) {
-                    // Always keep WebView hidden when video is in fullscreen mode
-                    // (the fullscreen video view is a separate view on top)
-                    if (browser.isInVideoFullscreen()) {
-                        view.visibility = View.GONE
-                    } else {
-                        view.visibility = when (state) {
-                            WakeSleepManager.DisplayState.OFF -> View.GONE
-                            WakeSleepManager.DisplayState.SLEEP -> if (browser.isPinned) View.VISIBLE else View.GONE
-                            else -> if (browser.isMinimized) View.GONE else View.VISIBLE
+                for (browser in browserWidgets) {
+                    val view = browser.getWebView()
+                    if (view != null) {
+                        // Always keep WebView hidden when video is in fullscreen mode
+                        // (the fullscreen video view is a separate view on top)
+                        if (browser.isInVideoFullscreen()) {
+                            view.visibility = View.GONE
+                        } else {
+                            view.visibility = when (state) {
+                                WakeSleepManager.DisplayState.OFF -> View.GONE
+                                WakeSleepManager.DisplayState.SLEEP -> if (browser.isPinned) View.VISIBLE else View.GONE
+                                else -> if (browser.isMinimized) View.GONE else View.VISIBLE
+                            }
                         }
                     }
+                    browser.onDisplayVisibilityChanged(isBrowserWidgetVisible(browser))
                 }
-                browser.onDisplayVisibilityChanged(isBrowserWidgetVisible(browser))
-            }
-            for (video in videoWidgets) {
-                video.onDisplayVisibilityChanged(
-                    state == WakeSleepManager.DisplayState.WAKE && !video.isMinimized
-                )
-            }
-            notifyMediaBrightnessCapChanged()
-            notifyBrowserMinimumBrightnessChanged()
+                for (video in videoWidgets) {
+                    video.onDisplayVisibilityChanged(
+                        state == WakeSleepManager.DisplayState.WAKE && !video.isMinimized
+                    )
+                }
+                notifyMediaBrightnessCapChanged()
+                notifyBrowserMinimumBrightnessChanged()
 
-            screenMirrorWidget?.let { mirror ->
-                mirror.onDisplayVisibilityChanged(isMirrorWidgetVisible(mirror))
+                screenMirrorWidget?.let { mirror ->
+                    mirror.onDisplayVisibilityChanged(isMirrorWidgetVisible(mirror))
+                }
+                syncWidgetLifecycleForDisplayState()
+
+                // Clear transition flag and do a single, controlled invalidation
+                isTransitioningDisplayState = false
+
+                // Display visibility and wake/sleep transitions are transient state: repaint once
+                // and let the host refresh the binocular output without touching the dashboard file.
+                notifyTransientContentChanged()
             }
-            syncWidgetLifecycleForDisplayState()
-
-            // Clear transition flag and do a single, controlled invalidation
-            isTransitioningDisplayState = false
-
-            // Use a single invalidate() instead of the aggressive notifyContentChanged()
-            // to prevent power spike from rapid redraw cascade
-            invalidate()
         }
     }
 
@@ -896,7 +925,17 @@ class WidgetContainer @JvmOverloads constructor(
 
     fun onHeadUpWake() {
         Log.d(TAG, "Head-up wake -> advance news item")
-        newsWidget?.showNextItemOnHeadUpWake()
+        newsWidget?.let { news ->
+            val beforeIndex = news.getSelectedIndex()
+            val persistedChange = runPersistentMutation(
+                action = {
+                    news.showNextItemOnHeadUpWake()
+                    news.getSelectedIndex() != beforeIndex
+                },
+                changed = { it }
+            )
+            if (!persistedChange) notifyTransientContentChanged()
+        }
     }
 
     fun hasPinnedWidgets(): Boolean = registry.hasPinnedWidgets()
@@ -1050,13 +1089,16 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun applyPresentation(session: PresentationSession) {
         val widget = findWidgetByStableId(session.targetId) ?: return
-        if (widget.isMinimized) widget.toggleMinimize()
-        when (session.spec.mode) {
-            PresentationMode.FULLSCREEN -> if (!widget.isFullscreen) widget.toggleFullscreen()
-            PresentationMode.WINDOWED -> if (widget.isFullscreen) widget.toggleFullscreen()
+        withContentChangeSuppressed {
+            if (widget.isMinimized) widget.toggleMinimize()
+            when (session.spec.mode) {
+                PresentationMode.FULLSCREEN -> if (!widget.isFullscreen) widget.toggleFullscreen()
+                PresentationMode.WINDOWED -> if (widget.isFullscreen) widget.toggleFullscreen()
+            }
+            // Presentation z-order is temporary and must not rewrite the dashboard layout.
+            bringWidgetToFront(widget, notify = false)
         }
-        bringWidgetToFront(widget)
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     private fun normalizePresentationWidget(widget: BaseWidget) {
@@ -1076,79 +1118,182 @@ class WidgetContainer @JvmOverloads constructor(
     private fun restorePresentationPrevious(session: PresentationSession) {
         val target = findWidgetByStableId(session.targetId)
         if (!session.snapshot.existedBeforePresentation) {
-            target?.let(::removePresentationTarget)
+            target?.let {
+                removePresentationTarget(it)
+                notifyTransientContentChanged()
+            }
             return
         }
         target ?: return
 
-        normalizePresentationWidget(target)
-        target.isPinned = session.snapshot.pinned
-        if (session.snapshot.minimized) {
-            setWidgetBounds(target, session.snapshot.windowedBounds)
-            if (session.snapshot.wasFullscreenBeforeMinimize) {
+        withContentChangeSuppressed {
+            normalizePresentationWidget(target)
+            target.isPinned = session.snapshot.pinned
+            if (session.snapshot.minimized) {
+                setWidgetBounds(target, session.snapshot.windowedBounds)
+                if (session.snapshot.wasFullscreenBeforeMinimize) {
+                    target.toggleFullscreen()
+                    target.toggleMinimize()
+                } else {
+                    target.toggleMinimize()
+                }
+                setWidgetBounds(target, session.snapshot.bounds)
+            } else if (session.snapshot.fullscreen) {
+                setWidgetBounds(target, session.snapshot.windowedBounds)
                 target.toggleFullscreen()
-                target.toggleMinimize()
             } else {
-                target.toggleMinimize()
+                setWidgetBounds(target, session.snapshot.bounds)
+                if (!session.snapshot.visible && !target.isMinimized) target.toggleMinimize()
             }
-            setWidgetBounds(target, session.snapshot.bounds)
-        } else if (session.snapshot.fullscreen) {
-            setWidgetBounds(target, session.snapshot.windowedBounds)
-            target.toggleFullscreen()
-        } else {
-            setWidgetBounds(target, session.snapshot.bounds)
-            if (!session.snapshot.visible && !target.isMinimized) target.toggleMinimize()
-        }
 
-        if (session.snapshot.focused) {
-            setFocusedWidget(target)
-        } else if (focusedWidget === target || focusedBrowserWidget === target) {
-            setFocusedWidget(null)
+            if (session.snapshot.focused) {
+                setFocusedWidget(target)
+            } else if (focusedWidget === target || focusedBrowserWidget === target) {
+                setFocusedWidget(null)
+            }
+            registry.restoreZOrder(target, session.snapshot.zOrder, parent as? ViewGroup, this)
+            updateMinimizedWidgetPositions()
         }
-        registry.restoreZOrder(target, session.snapshot.zOrder, parent as? ViewGroup, this)
-        updateMinimizedWidgetPositions()
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     private fun leavePresentationWindowed(session: PresentationSession) {
         val target = findWidgetByStableId(session.targetId) ?: return
-        normalizePresentationWidget(target)
-        target.isPinned = session.snapshot.pinned
-        setWidgetBounds(target, session.snapshot.windowedBounds)
-        if (!session.snapshot.focused && (focusedWidget === target || focusedBrowserWidget === target)) {
-            setFocusedWidget(null)
+        withContentChangeSuppressed {
+            normalizePresentationWidget(target)
+            target.isPinned = session.snapshot.pinned
+            setWidgetBounds(target, session.snapshot.windowedBounds)
+            if (!session.snapshot.focused && (focusedWidget === target || focusedBrowserWidget === target)) {
+                setFocusedWidget(null)
+            }
+            updateMinimizedWidgetPositions()
         }
-        updateMinimizedWidgetPositions()
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     private fun closePresentationTarget(targetId: String) {
-        findWidgetByStableId(targetId)?.let(::removePresentationTarget)
+        findWidgetByStableId(targetId)?.let {
+            removePresentationTarget(it)
+            notifyTransientContentChanged()
+        }
     }
 
     private fun removePresentationTarget(widget: BaseWidget) {
-        lifecycleController.close(widget)
+        withContentChangeSuppressed { lifecycleController.close(widget) }
     }
 
     private fun notifyPresentationTargetRemoved(widget: BaseWidget) {
         presentationController.onTargetRemoved(runCatching { stableWidgetId(widget) }.getOrNull() ?: return)
     }
 
-    private fun notifyContentChanged() {
-        if (lifecycleMutationInProgress) return
-        invalidate()
-        postInvalidate()
-        (parent as? View)?.invalidate()
-        if (!suppressContentChangedCallback) {
-            contentObserver?.onContentChanged()
+    /** Requests one local redraw for pixel-only visual state. */
+    private fun requestRepaint() {
+        if (Looper.myLooper() == Looper.getMainLooper()) invalidate() else postInvalidate()
+    }
+
+    /** Suppresses intermediate widget/lifecycle callbacks for a temporary compound mutation. */
+    private inline fun <T> withContentChangeSuppressed(action: () -> T): T {
+        val previous = suppressContentChangedCallback
+        suppressContentChangedCallback = true
+        return try {
+            action()
+        } finally {
+            suppressContentChangedCallback = previous
         }
     }
 
+    /** Reports focus to the host and emits the one classified visual change for that mutation. */
+    private fun notifyFocusChanged(focused: Boolean, persistent: Boolean = false) {
+        if (suppressContentChangedCallback) return
+        contentObserver?.onFocusChanged(focused)
+        if (persistent) notifyPersistentContentChanged() else notifyTransientContentChanged()
+    }
+
+    /** Emits a visible runtime change without scheduling persistence. */
     private fun notifyTransientContentChanged() {
-        invalidate()
-        postInvalidate()
-        (parent as? View)?.invalidate()
+        if (lifecycleMutationInProgress) return
+        if (suppressContentChangedCallback) return
+        if (transientNotificationDepth > 0) {
+            transientNotificationPending = true
+            return
+        }
+        requestRepaint()
+        contentNotificationGeneration++
         contentObserver?.onTransientContentChanged()
+    }
+
+    /**
+     * Returns the mutation notification generation for input routing. Cursor-only movement
+     * still needs a binocular refresh, but widget-owned transient/persistent callbacks already
+     * provide one and must not be followed by a second caller-side refresh.
+     */
+    fun contentNotificationGeneration(): Long = contentNotificationGeneration
+
+    /** Coalesces several related runtime updates into one transient notification. */
+    fun <T> withTransientChangeBatch(action: () -> T): T {
+        transientNotificationDepth++
+        try {
+            return action()
+        } finally {
+            transientNotificationDepth--
+            if (transientNotificationDepth == 0 && transientNotificationPending) {
+                transientNotificationPending = false
+                notifyTransientContentChanged()
+            }
+        }
+    }
+
+    /** Runs a synchronous widget mutation while upgrading any callback it emits to persistent. */
+    private fun <T> runPersistentMutation(
+        action: () -> T,
+        changed: (T) -> Boolean = { true }
+    ): T {
+        transientNotificationDepth++
+        persistentNotificationDepth++
+        val result = try {
+            action()
+        } finally {
+            transientNotificationDepth--
+            transientNotificationPending = false
+            persistentNotificationDepth--
+            persistentNotificationPending = false
+        }
+        if (changed(result)) notifyPersistentContentChanged()
+        return result
+    }
+
+    private fun <T> runPersistentMutation(action: () -> T): T =
+        runPersistentMutation(action = action, changed = { true })
+
+    /** Upgrades a widget callback to persistent only when it changed a persisted field. */
+    private fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean): Boolean {
+        var persistedChange = false
+        val handled = runPersistentMutation(
+            action = { action().also { persistedChange = changed() } },
+            changed = { it && persistedChange }
+        )
+        if (handled && !persistedChange) notifyTransientContentChanged()
+        return handled
+    }
+
+    /** Emits a dashboard mutation; the host owns binocular refresh and debounced persistence. */
+    private fun notifyPersistentContentChanged() {
+        if (lifecycleMutationInProgress) return
+        if (suppressContentChangedCallback) return
+        if (cursorPressed) interactionPersistentNotified = true
+        if (persistentNotificationDepth > 0) {
+            persistentNotificationPending = true
+            return
+        }
+        requestRepaint()
+        contentNotificationGeneration++
+        contentObserver?.onPersistentContentChanged()
+    }
+
+    /** Completes a state restore without turning the loaded state into a new save request. */
+    private fun notifyDashboardRestored() {
+        requestRepaint()
+        contentObserver?.onDashboardRestored()
     }
 
     /**
@@ -1156,16 +1301,12 @@ class WidgetContainer @JvmOverloads constructor(
      * They should repaint immediately without being treated as structural widget changes.
      */
     private fun invalidateHoverVisuals() {
-        invalidate()
-        postInvalidate()
-        (parent as? View)?.invalidate()
+        requestRepaint()
     }
 
     private fun notifyMediaFrame(sourceId: String) {
         if (displayState == WakeSleepManager.DisplayState.OFF) return
-        invalidate()
-        postInvalidate()
-        (parent as? View)?.invalidate()
+        requestRepaint()
         contentObserver?.onMediaFrame(sourceId)
     }
 
@@ -1211,6 +1352,7 @@ class WidgetContainer @JvmOverloads constructor(
                 widget.onDisplayVisibilityChanged(isBrowserWidgetVisible(widget))
                 notifyTransientContentChanged()
             }
+            override fun onPersistentStateChanged() = notifyPersistentContentChanged()
             override fun onKeyboardRequested(show: Boolean) {
                 host?.requestBrowserKeyboard(show)
             }
@@ -1228,7 +1370,7 @@ class WidgetContainer @JvmOverloads constructor(
 
             override fun onStreamStateChanged(state: ScreenMirrorWidget.StreamState) {
                 notifyMediaBrightnessCapChanged()
-                notifyContentChanged()
+                notifyTransientContentChanged()
             }
 
             override fun onFrameReady() {
@@ -1271,7 +1413,9 @@ class WidgetContainer @JvmOverloads constructor(
                     parent: ContextMenu.MenuItem,
                     item: ContextMenu.SubMenuItem
                 ) = handleSubmenuItemDoubleTapped(item)
-                override fun onMenuDismissed() = notifyContentChanged()
+                override fun onMenuDismissed() {
+                    if (contextMenuDispatchDepth == 0) notifyTransientContentChanged()
+                }
             }
         }
 
@@ -1282,7 +1426,9 @@ class WidgetContainer @JvmOverloads constructor(
                 override fun paste(content: String) = handlePaste(content)
                 override fun selectAll() = handleSelectAll()
                 override fun showFormatting() = showFormattingMenu()
-                override fun onMenuDismissed() = notifyContentChanged()
+                override fun onMenuDismissed() {
+                    if (textEditMenuDispatchDepth == 0) notifyTransientContentChanged()
+                }
             }
         }
 
@@ -1296,24 +1442,35 @@ class WidgetContainer @JvmOverloads constructor(
                 override fun setBulletList(enabled: Boolean) = handleBulletListToggled()
                 override fun setNumberedList(enabled: Boolean) = handleNumberedListToggled()
                 override fun setColumns(columns: Int) {
-                    focusedWidget?.setColumns(columns)
-                    notifyContentChanged()
+                    runPersistentMutation { focusedWidget?.setColumns(columns) }
                 }
-                override fun onMenuDismissed() = notifyContentChanged()
+                override fun onMenuDismissed() = notifyTransientContentChanged()
             }
         }
 
         closeConfirmationPopup = CloseConfirmationPopup(w.toFloat(), h.toFloat()).apply {
             handler = object : CloseConfirmationHandler {
                 override fun confirmClose() { host?.requestClose() }
-                override fun onPopupDismissed() = notifyContentChanged()
+                override fun onPopupDismissed() = notifyTransientContentChanged()
             }
         }
 
         layoutDeleteConfirmationPopup = WidgetLayoutDeleteConfirmationPopup(w.toFloat(), h.toFloat()).apply {
             handler = object : LayoutDeletionHandler {
-                override fun deleteLayout(name: String) = layoutManager.deleteLayoutByName(name)
-                override fun onPopupDismissed() = notifyContentChanged()
+                override fun deleteLayout(name: String) {
+                    layoutDeleteInProgress = true
+                    try {
+                        layoutManager.deleteLayoutByName(name)
+                    } finally {
+                        layoutDeleteInProgress = false
+                    }
+                }
+                override fun onPopupDismissed() {
+                    if (!layoutDeleteInProgress) {
+                        layoutOverlayNotificationEmitted = true
+                        notifyTransientContentChanged()
+                    }
+                }
             }
         }
 
@@ -1329,10 +1486,23 @@ class WidgetContainer @JvmOverloads constructor(
 
         layoutNamePrompt = WidgetLayoutNamePrompt(w.toFloat(), h.toFloat()).apply {
             handler = object : LayoutNameHandler {
-                override fun submitLayoutName(name: String) = layoutManager.saveLayoutWithName(name)
+                override fun submitLayoutName(name: String) {
+                    layoutNameSaveInProgress = true
+                    try {
+                        layoutManager.saveLayoutWithName(name)
+                    } finally {
+                        layoutNameSaveInProgress = false
+                    }
+                }
                 override fun onPromptDismissed() {
-                    contentObserver?.onFocusChanged(hasFocusedWidget())
-                    notifyContentChanged()
+                    if (layoutNameSaveInProgress) {
+                        // The save callback below owns the cumulative visual update. Keep the
+                        // host focus state current without emitting a second transient signal.
+                        contentObserver?.onFocusChanged(hasFocusedWidget())
+                    } else {
+                        layoutOverlayNotificationEmitted = true
+                        notifyFocusChanged(hasFocusedWidget())
+                    }
                 }
             }
         }
@@ -1370,7 +1540,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun triggerCloseAppConfirmation() {
         closeConfirmationPopup?.show()
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     // ==================== Fullscreen Management ====================
@@ -1419,7 +1589,7 @@ class WidgetContainer @JvmOverloads constructor(
         pendingLocationSunsetEpochMs = sunsetEpochMs
         locationWidget?.setLocationData(address, weather)
         locationWidget?.setSunTimes(sunriseEpochMs, sunsetEpochMs)
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     fun updateFinanceCountryCode(countryCode: String) {
@@ -1438,7 +1608,7 @@ class WidgetContainer @JvmOverloads constructor(
         pendingLocationSunriseEpochMs = null
         pendingLocationSunsetEpochMs = null
         locationWidget?.setPermissionDenied()
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     fun updateSpeedData(speedKmh: Float, qualityOk: Boolean, isMoving: Boolean) {
@@ -1447,7 +1617,7 @@ class WidgetContainer @JvmOverloads constructor(
         pendingSpeedMoving = isMoving
         val changed = speedometerWidget?.setSpeedData(speedKmh, qualityOk, isMoving) ?: false
         if (changed && displayState != WakeSleepManager.DisplayState.OFF) {
-            notifyContentChanged()
+            notifyTransientContentChanged()
         }
     }
 
@@ -1457,23 +1627,29 @@ class WidgetContainer @JvmOverloads constructor(
         pendingSpeedMoving = false
         speedometerWidget?.setPermissionDenied()
         if (displayState != WakeSleepManager.DisplayState.OFF) {
-            notifyContentChanged()
+            notifyTransientContentChanged()
         }
     }
 
     fun applySubtitleStatus(status: SubtitleStatus) {
-        subtitleWidget?.applyStatus(status)
-        notifyContentChanged()
+        withTransientChangeBatch {
+            subtitleWidget?.applyStatus(status)
+            notifyTransientContentChanged()
+        }
     }
 
     fun applySubtitleTranscript(transcript: SubtitleTranscript) {
-        subtitleWidget?.applyTranscript(transcript)
-        notifyTransientContentChanged()
+        withTransientChangeBatch {
+            subtitleWidget?.applyTranscript(transcript)
+            notifyTransientContentChanged()
+        }
     }
 
     fun onSubtitlePhoneDisconnected() {
-        subtitleWidget?.onPhoneDisconnected()
-        notifyContentChanged()
+        withTransientChangeBatch {
+            subtitleWidget?.onPhoneDisconnected()
+            notifyTransientContentChanged()
+        }
     }
 
     fun getSpeedUnit(): SpeedometerWidget.SpeedUnit = unitSettings.effectiveSpeedUnit()
@@ -1481,7 +1657,7 @@ class WidgetContainer @JvmOverloads constructor(
     fun setSpeedVisibilityThreshold(thresholdKmh: Float) {
         val forceVisibleChanged = settingsController.setSpeedVisibilityThreshold(thresholdKmh)
         if (forceVisibleChanged && displayState != WakeSleepManager.DisplayState.OFF) {
-            notifyContentChanged()
+            notifyTransientContentChanged()
         }
     }
 
@@ -1512,7 +1688,7 @@ class WidgetContainer @JvmOverloads constructor(
     ): SubtitleWidget {
         return SubtitleWidget(startX, startY, widgetWidth, widgetHeight).apply {
             listener = object : SubtitleWidgetListener {
-                override fun onStateChanged() = notifyContentChanged()
+                override fun onStateChanged() = notifyTransientContentChanged()
                 override fun onSubtitleControlRequested(control: SubtitleControl) {
                     host?.requestSubtitleControl(control)
                 }
@@ -1558,8 +1734,10 @@ class WidgetContainer @JvmOverloads constructor(
 
     fun setCalendarSnapshot(snapshot: com.everyday.shared.sync.CalendarSnapshot?) {
         pendingCalendarSnapshot = snapshot
-        calendarWidget?.setSnapshot(snapshot)
-        notifyContentChanged()
+        withTransientChangeBatch {
+            calendarWidget?.setSnapshot(snapshot)
+            notifyTransientContentChanged()
+        }
     }
 
     fun observeLiveLocationCountry(countryCode: String): Boolean =
@@ -1615,33 +1793,49 @@ class WidgetContainer @JvmOverloads constructor(
         settingsController.setUnitSystemMode(unitSettings.globalMode)
         locationWidget?.setTemperatureUnit(unitSettings.effectiveTemperatureUnit())
         renderLocationWeather()
-        if (notify) notifyContentChanged()
+        if (notify) notifyTransientContentChanged()
     }
 
     fun applyFinanceSnapshot(snapshot: FinanceSnapshot, notify: Boolean = true) {
-        financeWidget?.applySnapshot(snapshot)
-        if (notify) notifyContentChanged()
+        financeWidget?.let {
+            it.applySnapshot(snapshot)
+            if (notify) notifyTransientContentChanged()
+        }
     }
 
     fun applyFinanceError(message: String) {
-        financeWidget?.applyError(message)
-        notifyContentChanged()
+        financeWidget?.let {
+            it.applyError(message)
+            notifyTransientContentChanged()
+        }
     }
 
     fun applyNewsSnapshot(snapshot: NewsSnapshot) {
-        newsWidget?.applySnapshot(snapshot)
-        notifyContentChanged()
+        val widget = newsWidget ?: return
+        // A pending source switch owns the matching snapshot's persistent callback; until the
+        // source is committed, applying it would only produce a redundant transient refresh.
+        if (widget.getSourceSpec() != snapshot.sourceSpec || widget.getCountryCode() != snapshot.countryCode) {
+            return
+        }
+        withTransientChangeBatch {
+            widget.applySnapshot(snapshot)
+            notifyTransientContentChanged()
+        }
     }
 
     fun applyNotificationsSnapshot(snapshot: PhoneNotificationsSnapshot) {
         latestNotificationsSnapshot = snapshot
-        notificationsWidget?.setNotificationsSnapshot(snapshot)
-        notifyContentChanged()
+        withTransientChangeBatch {
+            notificationsWidget?.setNotificationsSnapshot(snapshot)
+            notifyTransientContentChanged()
+        }
     }
 
     fun applyNewsError(message: String) {
-        newsWidget?.applyError(message)
-        notifyContentChanged()
+        withTransientChangeBatch {
+            newsWidget?.applyError(message)
+            notifyTransientContentChanged()
+        }
     }
 
     fun currentNewsCountryCode(): String? = newsWidget?.getCountryCode() ?: pendingNewsCountryCode
@@ -1672,7 +1866,6 @@ class WidgetContainer @JvmOverloads constructor(
                                 sourceSpec = sourceSpec
                             )
                         )
-                        notifyContentChanged()
                     },
                     onFailure = { failure ->
                         result.complete(
@@ -1681,7 +1874,6 @@ class WidgetContainer @JvmOverloads constructor(
                                 message = failure.message ?: "News source could not be loaded"
                             )
                         )
-                        notifyContentChanged()
                     }
                 )
             }
@@ -1732,22 +1924,28 @@ class WidgetContainer @JvmOverloads constructor(
                 return@Runnable
             }
 
-            val update = runCatching {
-                widget.updateTileInstrument(
-                    target = request.target,
-                    instrument = request.instrument,
-                    range = request.range,
-                    chartType = request.chartType,
-                    slot = request.slot
-                )
-            }.getOrElse { failure ->
-                Result.failure(failure)
-            }
+            val update = runPersistentMutation(
+                action = {
+                    runCatching {
+                        widget.updateTileInstrument(
+                            target = request.target,
+                            instrument = request.instrument,
+                            range = request.range,
+                            chartType = request.chartType,
+                            slot = request.slot
+                        )
+                    }.getOrElse { failure ->
+                        Result.failure(failure)
+                    }.also { result ->
+                        if (result.isSuccess && request.fullscreen != null && request.fullscreen != widget.isFullscreen) {
+                            widget.toggleFullscreen()
+                        }
+                    }
+                },
+                changed = { it.isSuccess }
+            )
             update.fold(
                 onSuccess = { config ->
-                    if (request.fullscreen != null && request.fullscreen != widget.isFullscreen) {
-                        widget.toggleFullscreen()
-                    }
                     val state = widget.semanticState(widgetStableId(widget))
                     result.complete(
                         FinanceTileUpdateResult(
@@ -1784,9 +1982,15 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Z-Order Management ====================
 
-    private fun bringWidgetToFront(widget: BaseWidget) {
+    private fun bringWidgetToFront(widget: BaseWidget, notify: Boolean = true) {
         registry.bringToFront(widget, parent as? ViewGroup, this)
-        notifyContentChanged()
+        if (notify) notifyPersistentContentChanged()
+    }
+
+    private fun bringWidgetToFrontForInteraction(widget: BaseWidget) {
+        val before = widget.zOrder
+        bringWidgetToFront(widget, notify = false)
+        if (widget.zOrder != before) interactionZOrderChanged = true
     }
 
     /**
@@ -1837,6 +2041,8 @@ class WidgetContainer @JvmOverloads constructor(
 
     fun onCursorDown(x: Float, y: Float, pointerCount: Int = 1) {
         cursorPressed = true; currentPointerCount = pointerCount; isTwoFingerScrollMode = pointerCount >= 2
+        interactionZOrderChanged = false
+        interactionPersistentNotified = false
         cursorX = x; cursorY = y; lastCursorX = x; lastCursorY = y
         cursorStabilizer.reset()
         longPressStartX = x; longPressStartY = y; selectionStartX = x; accumulatedSelectionDx = 0f
@@ -1847,7 +2053,7 @@ class WidgetContainer @JvmOverloads constructor(
 
         layoutNamePrompt?.let { prompt ->
             if (prompt.isVisible) {
-                notifyContentChanged()
+                notifyTransientContentChanged()
                 return
             }
         }
@@ -1870,7 +2076,7 @@ class WidgetContainer @JvmOverloads constructor(
         if (isVisibleKeyboardAt(cx, cy)) {
             cancelHoverControlInteractions()
             updateKeyboardHoverAt(cx, cy)
-            notifyContentChanged()
+            notifyTransientContentChanged()
             return
         }
 
@@ -1890,7 +2096,7 @@ class WidgetContainer @JvmOverloads constructor(
         if (mapWidget?.isPoiConfigVisible() == true && mapWidget?.onDown(cx, cy) == true) return
         
         // Widgets use content-space coordinates
-        focusedWidget?.let { widget -> if (widget.isFocused() && widget.containsPoint(cx, cy)) { bringWidgetToFront(widget); if (widget.hitTest(cx, cy) == TextBoxWidget.HitArea.CONTENT) { pendingTextSelection = true; scheduleLongPress(); return } } }
+        focusedWidget?.let { widget -> if (widget.isFocused() && widget.containsPoint(cx, cy)) { bringWidgetToFrontForInteraction(widget); if (widget.hitTest(cx, cy) == TextBoxWidget.HitArea.CONTENT) { pendingTextSelection = true; scheduleLongPress(); return } } }
         fullscreenTextWidget?.let { widget -> if (widget.isFocused() && widget.containsPoint(cx, cy)) { if (widget.hitTest(cx, cy) == TextBoxWidget.HitArea.CONTENT) { pendingTextSelection = true; scheduleLongPress(); return } } }
         
         if (isFinanceWidgetFullscreen) {
@@ -1928,7 +2134,9 @@ class WidgetContainer @JvmOverloads constructor(
      * but for exactly one widget so overlapping widgets can't compete for the press.
      */
     private fun dispatchCursorDownToWidget(widget: BaseWidget, cx: Float, cy: Float) {
-        bringWidgetToFront(widget)
+        // Z-order is part of the persisted dashboard, but a long-press drag must not save
+        // its initial frame.  The drag completion below emits the single persistent signal.
+        bringWidgetToFrontForInteraction(widget)
 
         when (widget) {
             is BrowserWidget -> when (widget.hitTest(cx, cy)) {
@@ -1969,11 +2177,11 @@ class WidgetContainer @JvmOverloads constructor(
             if (!cursorPressed) return@Runnable
             userInputActivity?.onUserInput(UserInputKind.LONG_PRESS)
             registry.forEachWidget { it.snapProvider = smartAlignment }
-            if (pendingFormattingMenuDrag) { formattingMenu?.let { if (it.onLongPressTriggered()) { } }; pendingFormattingMenuDrag = false; notifyContentChanged(); return@Runnable }
-            if (pendingTextSelection) { val widget = focusedWidget ?: fullscreenTextWidget; widget?.let { if (it.isFocused()) { val (cx, cy) = screenToContentCoordinates(longPressStartX, longPressStartY); it.setCursorFromScreenPosition(cx, cy); it.resetPixelAccumulator(); it.startSelection(); isLongPressSelectionMode = true; isTextSelectionActive = false } }; pendingTextSelection = false; notifyContentChanged(); return@Runnable }
+            if (pendingFormattingMenuDrag) { formattingMenu?.let { if (it.onLongPressTriggered()) { } }; pendingFormattingMenuDrag = false; notifyTransientContentChanged(); return@Runnable }
+            if (pendingTextSelection) { val widget = focusedWidget ?: fullscreenTextWidget; widget?.let { if (it.isFocused()) { val (cx, cy) = screenToContentCoordinates(longPressStartX, longPressStartY); it.setCursorFromScreenPosition(cx, cy); it.resetPixelAccumulator(); it.startSelection(); isLongPressSelectionMode = true; isTextSelectionActive = false } }; pendingTextSelection = false; notifyTransientContentChanged(); return@Runnable }
             if (isWidgetLayoutLocked && hasPendingWidgetDrag()) {
                 clearPendingWidgetDrag()
-                notifyContentChanged()
+                notifyTransientContentChanged()
                 return@Runnable
             }
             if (pendingDragFinanceTile) {
@@ -1982,10 +2190,16 @@ class WidgetContainer @JvmOverloads constructor(
                     if (it.startTileDrag(cx, cy)) financeTileDragging = true
                 }
                 pendingDragFinanceTile = false
-                notifyContentChanged()
+                notifyTransientContentChanged()
                 return@Runnable
             }
-            pendingDragWidget?.let { widget -> widget.startDrag(pendingDragIsResize); activeWidget = widget; notifyContentChanged() }
+            pendingDragWidget?.let { widget ->
+                withTransientChangeBatch {
+                    widget.startDrag(pendingDragIsResize)
+                    activeWidget = widget
+                    notifyTransientContentChanged()
+                }
+            }
             pendingDragWidget = null; pendingDragIsResize = false; longPressRunnable = null
         }
         handler.postDelayed(longPressRunnable!!, LONG_PRESS_DELAY_MS)
@@ -2072,8 +2286,30 @@ class WidgetContainer @JvmOverloads constructor(
         if (isScrollbarDragActive) { isScrollbarDragActive = false; scrollbarDragWidget = null }
         formattingMenu?.let { if (it.isDragging()) it.onDragEnd() }
         if (isLongPressSelectionMode) { (focusedWidget ?: fullscreenTextWidget)?.endSelection(); isLongPressSelectionMode = false; isTextSelectionActive = false }
-        if (financeTileDragging) { financeWidget?.endTileDrag(); financeTileDragging = false; notifyContentChanged() }
-        if (activeWidget != null) { activeWidget?.onDragEnd(); activeWidget = null; notifyContentChanged() }
+        var dragEnded = false
+        if (financeTileDragging) {
+            dragEnded = true
+            if (financeWidget != null) {
+                runPersistentMutation(
+                    action = { financeWidget?.endTileDrag() == true },
+                    changed = { it }
+                )
+            }
+            financeTileDragging = false
+        }
+        if (activeWidget != null) {
+            dragEnded = true
+            val widget = activeWidget
+            activeWidget = null
+            runPersistentMutation {
+                widget?.onDragEnd()
+            }
+        }
+        if (!dragEnded && interactionZOrderChanged && !interactionPersistentNotified) {
+            notifyPersistentContentChanged()
+        }
+        interactionZOrderChanged = false
+        interactionPersistentNotified = false
         isTwoFingerScrollMode = false; currentPointerCount = 1
     }
     
@@ -2323,22 +2559,22 @@ class WidgetContainer @JvmOverloads constructor(
                 widget.setCursorFromScreenPosition(cx, cy)
                 widget.updateSelectionToCursor()
                 isTextSelectionActive = true
-                notifyContentChanged() 
+                notifyTransientContentChanged()
             } 
         }
         // Menus use screen-space (head-locked)
-        formattingMenu?.let { menu -> if (menu.isDragging()) { menu.onDrag(x, y); notifyContentChanged(); return }; if (menu.checkLongPressCancellation(x, y, LONG_PRESS_MAX_MOVEMENT)) { } }
+        formattingMenu?.let { menu -> if (menu.isDragging()) { menu.onDrag(x, y); notifyTransientContentChanged(); return }; if (menu.checkLongPressCancellation(x, y, LONG_PRESS_MAX_MOVEMENT)) { } }
         // Long-press cancellation uses screen-space (cursor movement)
         if (longPressRunnable != null) { val totalMovement = kotlin.math.sqrt((x - longPressStartX) * (x - longPressStartX) + (y - longPressStartY) * (y - longPressStartY)); if (totalMovement > LONG_PRESS_MAX_MOVEMENT) cancelLongPress() }
         // Widget dragging uses delta values (works in both spaces)
         if (financeTileDragging) {
             val (cx, cy) = toContentSpace(x, y)
             financeWidget?.onTileDrag(cx, cy)
-            notifyContentChanged()
+            notifyTransientContentChanged()
             return
         }
-        if (activeWidget != null) { activeWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyContentChanged(); return }
-        if (isScrollbarDragActive && scrollbarDragWidget != null) { scrollbarDragWidget?.onScrollbarDrag(dy); notifyContentChanged(); return }
+        if (activeWidget != null) { activeWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyTransientContentChanged(); return }
+        if (isScrollbarDragActive && scrollbarDragWidget != null) { scrollbarDragWidget?.onScrollbarDrag(dy); notifyTransientContentChanged(); return }
     }
 
     fun getScrollbarHoveredWidget(x: Float, y: Float): TextBoxWidget? {
@@ -2354,8 +2590,8 @@ class WidgetContainer @JvmOverloads constructor(
     fun getScrollbarDragWidget(): TextBoxWidget? = scrollbarDragWidget
 
     fun onScroll(dy: Float) {
-        for (widget in widgets) { if (widget.state == TextBoxWidget.State.HOVER_CONTENT || widget.state == TextBoxWidget.State.EDITING) { widget.onScroll(dy); notifyContentChanged(); break } }
-        fullscreenTextWidget?.let { widget -> if (widget.state == TextBoxWidget.State.HOVER_CONTENT || widget.state == TextBoxWidget.State.EDITING) { widget.onScroll(dy); notifyContentChanged() } }
+        for (widget in widgets) { if (widget.state == TextBoxWidget.State.HOVER_CONTENT || widget.state == TextBoxWidget.State.EDITING) { widget.onScroll(dy); notifyTransientContentChanged(); break } }
+        fullscreenTextWidget?.let { widget -> if (widget.state == TextBoxWidget.State.HOVER_CONTENT || widget.state == TextBoxWidget.State.EDITING) { widget.onScroll(dy); notifyTransientContentChanged() } }
     }
 
     fun scrollWidgetAtCursor(cursorX: Float, cursorY: Float, dy: Float, userInitiated: Boolean = false) {
@@ -2363,7 +2599,7 @@ class WidgetContainer @JvmOverloads constructor(
         contextMenu?.let {
             if (it.isVisible) {
                 it.onScroll(dy)
-                notifyContentChanged()
+                notifyTransientContentChanged()
                 return
             }
         }
@@ -2377,26 +2613,76 @@ class WidgetContainer @JvmOverloads constructor(
         mapWidget?.let {
             if ((it.isPoiConfigVisible() || it.navigationState.choices.isNotEmpty()) && it.containsPoint(cx, cy) && !it.isMinimized) {
                 it.onScroll(dy)
-                notifyContentChanged()
+                notifyTransientContentChanged()
                 return
             }
         }
-        calendarWidget?.let { if (it.containsPoint(cx, cy) && !it.isMinimized) { it.onScroll(dy); notifyContentChanged(); return } }
-        financeWidget?.let { if (it.containsPoint(cx, cy) && !it.isMinimized) { it.onScroll(dy); notifyContentChanged(); return } }
-        newsWidget?.let { if (it.containsPoint(cx, cy) && !it.isMinimized) { it.onScroll(dy); notifyContentChanged(); return } }
-        notificationsWidget?.let { if (it.containsPoint(cx, cy) && !it.isMinimized) { it.onScroll(dy); notifyContentChanged(); return } }
+        calendarWidget?.let {
+            if (it.containsPoint(cx, cy) && !it.isMinimized) {
+                withTransientChangeBatch {
+                    it.onScroll(dy)
+                    notifyTransientContentChanged()
+                }
+                return
+            }
+        }
+        financeWidget?.let {
+            if (it.containsPoint(cx, cy) && !it.isMinimized) {
+                val beforeIndex = it.getNavigationIndex()
+                it.onScroll(dy)
+                if (it.getNavigationIndex() != beforeIndex) notifyPersistentContentChanged()
+                else notifyTransientContentChanged()
+                return
+            }
+        }
+        newsWidget?.let {
+            if (it.containsPoint(cx, cy) && !it.isMinimized) {
+                val beforeIndex = it.getSelectedIndex()
+                runClassifiedInput(
+                    action = { it.onScroll(dy); true },
+                    changed = { it.getSelectedIndex() != beforeIndex }
+                )
+                return
+            }
+        }
+        notificationsWidget?.let {
+            if (it.containsPoint(cx, cy) && !it.isMinimized) {
+                val beforeIndex = it.getScrollIndex()
+                runClassifiedInput(
+                    action = { it.onScroll(dy); true },
+                    changed = { it.getScrollIndex() != beforeIndex }
+                )
+                return
+            }
+        }
         for (widget in browserWidgets.reversed()) {
             val hit = widget.hitTest(cx, cy)
             if (!widget.isMinimized && (hit == BrowserWidget.HitArea.CONTENT || hit == BrowserWidget.HitArea.NAV_URL)) {
                 widget.onScroll(dy)
-                notifyContentChanged()
+                notifyTransientContentChanged()
                 return
             }
         }
-        for (widget in imageWidgets.reversed()) { if (widget.containsPoint(cx, cy) && !widget.isMinimized) { widget.onScroll(dy); notifyContentChanged(); return } }
-        for (widget in pdfWidgets.reversed()) { if (widget.containsPoint(cx, cy) && !widget.isMinimized) { widget.onScroll(dy); notifyContentChanged(); return } }
-        for (widget in fileBrowserWidgets.reversed()) { if (widget.containsPoint(cx, cy) && !widget.isMinimized) { widget.onScroll(dy); notifyContentChanged(); return } }
-        for (widget in widgets.reversed()) { if (widget.containsPoint(cx, cy) && !widget.isMinimized) { widget.onScroll(dy); notifyContentChanged(); return } }
+        for (widget in imageWidgets.reversed()) { if (widget.containsPoint(cx, cy) && !widget.isMinimized) { widget.onScroll(dy); notifyTransientContentChanged(); return } }
+        for (widget in pdfWidgets.reversed()) {
+            if (widget.containsPoint(cx, cy) && !widget.isMinimized) {
+                withTransientChangeBatch {
+                    widget.onScroll(dy)
+                    notifyTransientContentChanged()
+                }
+                return
+            }
+        }
+        for (widget in fileBrowserWidgets.reversed()) {
+            if (widget.containsPoint(cx, cy) && !widget.isMinimized) {
+                withTransientChangeBatch {
+                    widget.onScroll(dy)
+                    notifyTransientContentChanged()
+                }
+                return
+            }
+        }
+        for (widget in widgets.reversed()) { if (widget.containsPoint(cx, cy) && !widget.isMinimized) { widget.onScroll(dy); notifyTransientContentChanged(); return } }
     }
 
     private fun scrollFullscreenWidgetAt(cx: Float, cy: Float, dy: Float): Boolean {
@@ -2404,7 +2690,7 @@ class WidgetContainer @JvmOverloads constructor(
             mapWidget?.let {
                 if ((it.isPoiConfigVisible() || it.navigationState.choices.isNotEmpty()) && it.containsPoint(cx, cy)) {
                     it.onScroll(dy)
-                    notifyContentChanged()
+                    notifyTransientContentChanged()
                     return true
                 }
             }
@@ -2412,7 +2698,7 @@ class WidgetContainer @JvmOverloads constructor(
         fullscreenTextWidget?.let {
             if (it.containsPoint(cx, cy)) {
                 it.onScroll(dy)
-                notifyContentChanged()
+                notifyTransientContentChanged()
                 return true
             }
         }
@@ -2420,29 +2706,35 @@ class WidgetContainer @JvmOverloads constructor(
             val hit = it.hitTest(cx, cy)
             if (hit == BrowserWidget.HitArea.CONTENT || hit == BrowserWidget.HitArea.NAV_URL) {
                 it.onScroll(dy)
-                notifyContentChanged()
+                notifyTransientContentChanged()
                 return true
             }
         }
         fullscreenPdfWidget?.let {
             if (it.containsPoint(cx, cy)) {
-                it.onScroll(dy)
-                notifyContentChanged()
+                withTransientChangeBatch {
+                    it.onScroll(dy)
+                    notifyTransientContentChanged()
+                }
                 return true
             }
         }
         fullscreenFileBrowserWidget?.let {
             if (it.containsPoint(cx, cy)) {
-                it.onScroll(dy)
-                notifyContentChanged()
+                withTransientChangeBatch {
+                    it.onScroll(dy)
+                    notifyTransientContentChanged()
+                }
                 return true
             }
         }
         if (isCalendarWidgetFullscreen) {
             calendarWidget?.let {
                 if (it.containsPoint(cx, cy)) {
-                    it.onScroll(dy)
-                    notifyContentChanged()
+                    withTransientChangeBatch {
+                        it.onScroll(dy)
+                        notifyTransientContentChanged()
+                    }
                     return true
                 }
             }
@@ -2450,7 +2742,11 @@ class WidgetContainer @JvmOverloads constructor(
         if (isFinanceWidgetFullscreen) {
             financeWidget?.let {
                 if (it.containsPoint(cx, cy)) {
-                    if (it.onScrollAt(cx, cy, dy)) notifyContentChanged()
+                    val beforeIndex = it.getNavigationIndex()
+                    if (it.onScrollAt(cx, cy, dy)) {
+                        if (it.getNavigationIndex() != beforeIndex) notifyPersistentContentChanged()
+                        else notifyTransientContentChanged()
+                    }
                     return true
                 }
             }
@@ -2458,8 +2754,23 @@ class WidgetContainer @JvmOverloads constructor(
         if (isNewsWidgetFullscreen) {
             newsWidget?.let {
                 if (it.containsPoint(cx, cy)) {
-                    it.onScroll(dy)
-                    notifyContentChanged()
+                    val beforeIndex = it.getSelectedIndex()
+                    runClassifiedInput(
+                        action = { it.onScroll(dy); true },
+                        changed = { it.getSelectedIndex() != beforeIndex }
+                    )
+                    return true
+                }
+            }
+        }
+        if (isNotificationsWidgetFullscreen) {
+            notificationsWidget?.let {
+                if (it.containsPoint(cx, cy)) {
+                    val beforeIndex = it.getScrollIndex()
+                    runClassifiedInput(
+                        action = { it.onScroll(dy); true },
+                        changed = { it.getScrollIndex() != beforeIndex }
+                    )
                     return true
                 }
             }
@@ -2479,21 +2790,34 @@ class WidgetContainer @JvmOverloads constructor(
             return pageAgentApprovalOverlay.onTap(x, y)
         }
         if (layoutNamePrompt?.isVisible == true) {
+            layoutOverlayNotificationEmitted = false
             val handled = layoutNamePrompt?.onTap(x, y) ?: false
-            notifyContentChanged()
+            if (handled && !layoutOverlayNotificationEmitted) notifyTransientContentChanged()
+            layoutOverlayNotificationEmitted = false
             return handled
         }
         if (layoutDeleteConfirmationPopup?.isVisible == true) {
-            val handled = layoutDeleteConfirmationPopup?.onTap(x, y) ?: false
-            notifyContentChanged()
+            layoutOverlayNotificationEmitted = false
+            layoutDeleteInProgress = true
+            val handled = try {
+                layoutDeleteConfirmationPopup?.onTap(x, y) ?: false
+            } finally {
+                layoutDeleteInProgress = false
+            }
+            if (handled && !layoutOverlayNotificationEmitted) notifyTransientContentChanged()
+            layoutOverlayNotificationEmitted = false
             return handled
         }
         if (closeConfirmationPopup?.isVisible == true) return closeConfirmationPopup?.onTap(x, y) ?: false
         settingsController.handleHoverControlsLayoutEditorTap(x, y)?.let { return it }
         settingsController.handleShortcutsSettingsMenuTap(x, y)?.let { return it }
         if (formattingMenu?.isVisible == true) return formattingMenu?.onTap(x, y) ?: false
-        if (textEditMenu?.isVisible == true) return textEditMenu?.onTap(x, y) ?: false
-        if (contextMenu?.isVisible == true) return contextMenu?.onTap(x, y) ?: false
+        if (textEditMenu?.isVisible == true) {
+            return dispatchTextEditMenuAction { textEditMenu?.onTap(x, y) ?: false }
+        }
+        if (contextMenu?.isVisible == true) {
+            return dispatchContextMenuAction { contextMenu?.onTap(x, y) ?: false }
+        }
         settingsController.handleSpeedometerTap(x, y)?.let { return it }
 
         // Transform to content space for widget hit testing
@@ -2509,51 +2833,73 @@ class WidgetContainer @JvmOverloads constructor(
         // when the map itself is windowed. Route them before ordinary widget hit testing so a
         // large centered prompt cannot be obscured by another dashboard widget.
         if (mapWidget?.isAddressEntryVisible() == true || mapWidget?.navigationState?.choices?.isNotEmpty() == true) {
-            if (mapWidget?.onTap(cx, cy) == true) {
-                notifyContentChanged()
+            val map = mapWidget
+            if (map != null) {
+                val before = mapPersistentSignature(map)
+                if (runClassifiedInput({ map.onTap(cx, cy) }, { mapPersistentSignature(map) != before })) {
                 return true
+                }
             }
         }
 
         // POI settings are a screen-level modal when open, including in fullscreen map mode.
         if (mapWidget?.isPoiConfigVisible() == true) {
-            if (mapWidget?.onTap(cx, cy) == true) {
-                notifyContentChanged()
+            val map = mapWidget
+            if (map != null) {
+                val before = mapPersistentSignature(map)
+                if (runClassifiedInput({ map.onTap(cx, cy) }, { mapPersistentSignature(map) != before })) {
                 return true
+                }
             }
         }
 
         statusBarWidget?.let {
+            val before = listOf(
+                it.isTimeVisible(), it.isDateVisible(),
+                it.isPhoneBatteryVisible(), it.isGlassesBatteryVisible()
+            )
             if (it.handleToggleMenuTapOrDismiss(cx, cy)) {
-                notifyContentChanged()
+                val after = listOf(
+                    it.isTimeVisible(), it.isDateVisible(),
+                    it.isPhoneBatteryVisible(), it.isGlassesBatteryVisible()
+                )
+                if (before != after) notifyPersistentContentChanged()
+                else notifyTransientContentChanged()
                 return true
             }
         }
 
         locationWidget?.let {
+            val before = listOf(it.isWeatherVisible(), it.isTemperatureVisible(), it.isLocationVisible(), it.isCountryVisible())
             if (it.handleToggleMenuTapOrDismiss(cx, cy)) {
-                notifyContentChanged()
+                val after = listOf(it.isWeatherVisible(), it.isTemperatureVisible(), it.isLocationVisible(), it.isCountryVisible())
+                if (before != after) notifyPersistentContentChanged()
+                else notifyTransientContentChanged()
                 return true
             }
         }
 
         calendarWidget?.let {
-            if (it.handleFontMenuTapOrDismiss(cx, cy)) {
-                notifyContentChanged()
+            val before = it.getFontScale()
+            if (runClassifiedInput({ it.handleFontMenuTapOrDismiss(cx, cy) }, { it.getFontScale() != before })) {
                 return true
             }
         }
 
         newsWidget?.let {
-            if (it.handleFontMenuTapOrDismiss(cx, cy)) {
-                notifyContentChanged()
+            val before = it.getFontScale()
+            if (runClassifiedInput({ it.handleFontMenuTapOrDismiss(cx, cy) }, { it.getFontScale() != before })) {
                 return true
             }
         }
 
         notificationsWidget?.let {
-            if (it.handleFontMenuTapOrDismiss(cx, cy)) {
-                notifyContentChanged()
+            val before = it.getWidgetFontScale() to it.getToastFontScale()
+            if (runClassifiedInput(
+                    { it.handleFontMenuTapOrDismiss(cx, cy) },
+                    { it.getWidgetFontScale() != before.first || it.getToastFontScale() != before.second }
+                )
+            ) {
                 return true
             }
         }
@@ -2565,9 +2911,7 @@ class WidgetContainer @JvmOverloads constructor(
                     if (it.hitTest(cx, cy) == BrowserWidget.HitArea.CONTENT && shouldSuppressBrowserContentTap(it)) {
                         return true
                     }
-                    val result = it.onTap(cx, cy)
-                    if (it.isEditingAddress()) ensureDrawnAboveNativeOverlays()
-                    return result
+                    return handleBrowserWidgetTap(it, cx, cy)
                 }
                 return false
             }
@@ -2593,11 +2937,11 @@ class WidgetContainer @JvmOverloads constructor(
         // Route the tap to the single top-most widget under the cursor — the same widget
         // that owns hover — so an overlapping widget can't consume a tap meant for it.
         interactionTargetAt(cx, cy)?.let { target ->
-            if (target.isMinimized) { target.toggleMinimize(); notifyContentChanged(); return true }
+            if (target.isMinimized) { target.toggleMinimize(); return true }
             return dispatchTapToWidget(target, cx, cy)
         }
 
-        if (hasFocusedWidget()) { unfocusAll(); notifyContentChanged(); return true }
+        if (hasFocusedWidget()) { unfocusAll(); notifyTransientContentChanged(); return true }
         return false
     }
 
@@ -2617,9 +2961,7 @@ class WidgetContainer @JvmOverloads constructor(
             if (widget.hitTest(cx, cy) == BrowserWidget.HitArea.CONTENT && shouldSuppressBrowserContentTap(widget)) {
                 true
             } else {
-                val result = widget.onTap(cx, cy)
-                if (widget.isEditingAddress()) ensureDrawnAboveNativeOverlays()
-                result
+                handleBrowserWidgetTap(widget, cx, cy)
             }
         }
         is ImageWidget -> handleImageWidgetTap(widget, cx, cy)
@@ -2643,22 +2985,46 @@ class WidgetContainer @JvmOverloads constructor(
         y: Float,
         onElse: ((BaseWidget.BaseHitArea) -> Boolean)? = null
     ): Boolean = when (val hit = widget.baseHitTest(x, y)) {
-        BaseWidget.BaseHitArea.CLOSE_BUTTON      -> { widget.lifecycleListener?.onCloseRequested(widget); notifyContentChanged(); true }
-        BaseWidget.BaseHitArea.FULLSCREEN_BUTTON -> { widget.toggleFullscreen(); notifyContentChanged(); true }
-        BaseWidget.BaseHitArea.MINIMIZE_BUTTON   -> { widget.toggleMinimize(); notifyContentChanged(); true }
-        BaseWidget.BaseHitArea.PIN_BUTTON        -> { widget.isPinned = !widget.isPinned; notifyContentChanged(); true }
+        BaseWidget.BaseHitArea.CLOSE_BUTTON      -> {
+            runPersistentMutation { widget.lifecycleListener?.onCloseRequested(widget) }
+            true
+        }
+        BaseWidget.BaseHitArea.FULLSCREEN_BUTTON -> {
+            runPersistentMutation { widget.toggleFullscreen() }
+            true
+        }
+        BaseWidget.BaseHitArea.MINIMIZE_BUTTON   -> {
+            runPersistentMutation { widget.toggleMinimize() }
+            true
+        }
+        BaseWidget.BaseHitArea.PIN_BUTTON        -> { widget.isPinned = !widget.isPinned; notifyPersistentContentChanged(); true }
         else                                     -> onElse?.invoke(hit) ?: true
     }
 
     private fun handleTextWidgetTap(widget: TextBoxWidget, x: Float, y: Float): Boolean =
         when (widget.hitTest(x, y)) {
-            TextBoxWidget.HitArea.KEYBOARD_BUTTON -> { widget.toggleKeyboard(); notifyContentChanged(); true }
-            TextBoxWidget.HitArea.KEYBOARD_KEY    -> { widget.getKeyboard()?.onTap(x, y); notifyContentChanged(); true }
+            TextBoxWidget.HitArea.KEYBOARD_BUTTON -> {
+                withTransientChangeBatch {
+                    widget.toggleKeyboard()
+                    notifyTransientContentChanged()
+                }
+                true
+            }
+            TextBoxWidget.HitArea.KEYBOARD_KEY    -> {
+                val before = textPersistentSignature(widget)
+                runClassifiedInput(
+                    action = { widget.getKeyboard()?.onTap(x, y) == true },
+                    changed = { textPersistentSignature(widget) != before }
+                )
+                true
+            }
             else -> handleBaseTap(widget, x, y) { hit ->
                 if (hit == BaseWidget.BaseHitArea.CONTENT) {
-                    widget.setFocused(true); setFocusedWidget(widget)
-                    widget.setCursorFromScreenPosition(x, y); widget.clearSelection()
-                    notifyContentChanged()
+                    withTransientChangeBatch {
+                        widget.setFocused(true); setFocusedWidget(widget)
+                        widget.setCursorFromScreenPosition(x, y); widget.clearSelection()
+                        notifyTransientContentChanged()
+                    }
                 }
                 true
             }
@@ -2672,16 +3038,68 @@ class WidgetContainer @JvmOverloads constructor(
             if (hit == BaseWidget.BaseHitArea.CONTENT) widget.handleContentTap(x, y) else true
         }
 
+    private fun handleBrowserWidgetTap(widget: BrowserWidget, x: Float, y: Float): Boolean {
+        val hit = widget.hitTest(x, y)
+        val persistentNavigation = hit == BrowserWidget.HitArea.NAV_HOME ||
+            hit == BrowserWidget.HitArea.NEW_TAB ||
+            hit == BrowserWidget.HitArea.TAB_CLOSE ||
+            hit == BrowserWidget.HitArea.TAB ||
+            widget.baseHitTest(x, y) == BaseWidget.BaseHitArea.CLOSE_BUTTON
+        val handled = if (persistentNavigation) {
+            runPersistentMutation { widget.onTap(x, y) }
+        } else {
+            val before = browserPersistentSignature(widget)
+            runClassifiedInput(
+                action = { widget.onTap(x, y) },
+                changed = { browserPersistentSignature(widget) != before }
+            )
+        }
+        if (widget.isEditingAddress()) ensureDrawnAboveNativeOverlays()
+        return handled
+    }
+
+    private fun browserPersistentSignature(widget: BrowserWidget): List<Any?> = listOf(
+        widget.getUrl(), widget.isFullscreen, widget.isMinimized, widget.isPinned
+    )
+
+    private fun textPersistentSignature(widget: TextBoxWidget): List<Any?> = listOf(
+        widget.text,
+        widget.getHtmlContent(),
+        widget.textFontSize,
+        widget.isTextWrap,
+        widget.getColumnCount()
+    )
+
     private fun handlePdfWidgetTap(widget: PdfWidget, x: Float, y: Float): Boolean =
         handleBaseTap(widget, x, y) { hit ->
-            if (hit == BaseWidget.BaseHitArea.CONTENT) widget.handleContentTap(x, y) else true
+            if (hit == BaseWidget.BaseHitArea.CONTENT) {
+                val before = widget.currentPage to widget.zoom
+                runClassifiedInput(
+                    action = { widget.handleContentTap(x, y) },
+                    changed = { (widget.currentPage to widget.zoom) != before }
+                )
+            } else {
+                true
+            }
         }
 
     private fun handleFileBrowserWidgetTap(widget: FileBrowserWidget, x: Float, y: Float): Boolean {
-        bringWidgetToFront(widget)
-        val result = widget.onTap(x, y)
-        notifyContentChanged()
-        return result
+        val beforeZOrder = widget.zOrder
+        val result = runPersistentMutation(
+            action = {
+                bringWidgetToFront(widget, notify = false)
+                val handled = widget.onTap(x, y)
+                // Selecting a file closes the picker through its callback, which is also a
+                // persistent widget removal even when the picker was already front-most.
+                handled to (
+                    widget.zOrder != beforeZOrder ||
+                        registry.allWidgets().none { it === widget }
+                    )
+            },
+            changed = { it.second }
+        )
+        if (!result.second) notifyTransientContentChanged()
+        return result.first
     }
 
     private fun handleStatusBarTap(statusBar: StatusBarWidget, x: Float, y: Float): Boolean =
@@ -2694,46 +3112,78 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun handleLocationWidgetTap(loc: LocationWidget, x: Float, y: Float): Boolean {
         if (loc.onUnitTap(x, y)) {
-            notifyContentChanged()
+            notifyTransientContentChanged()
             return true
         }
         return handleBaseTap(loc, x, y)
     }
 
     private fun handleMapWidgetTap(map: MapWidget, x: Float, y: Float): Boolean {
-        if (map.onTap(x, y)) { notifyContentChanged(); return true }
+        val before = mapPersistentSignature(map)
+        if (runClassifiedInput({ map.onTap(x, y) }, { mapPersistentSignature(map) != before })) return true
         return handleBaseTap(map, x, y)
     }
 
+    private fun mapPersistentSignature(map: MapWidget): List<Any?> = listOf(
+        map.zOrder,
+        map.isFullscreen,
+        map.mode,
+        map.zoom,
+        map.isLocationVisible(),
+        map.isCountryVisible(),
+        map.poiDisplayConfig
+    )
+
     private fun handleCalendarWidgetTap(widget: CalendarWidget, x: Float, y: Float): Boolean {
-        if (widget.onTap(x, y)) { notifyContentChanged(); return true }
+        val before = widget.isFullscreen to widget.getFontScale()
+        if (runClassifiedInput({ widget.onTap(x, y) }, { (widget.isFullscreen to widget.getFontScale()) != before })) return true
         return handleBaseTap(widget, x, y)
     }
 
     private fun handleFinanceWidgetTap(fw: FinanceWidget, x: Float, y: Float): Boolean {
         // Let the finance widget handle internal taps first (dropdown, time range)
-        if (fw.onTap(x, y)) { notifyContentChanged(); return true }
+        val before = listOf(fw.isFullscreen, fw.getTileConfigs(), fw.getNavigationIndex(), fw.getTilingSpan(), fw.getSelectedTileConfig())
+        if (runClassifiedInput({ fw.onTap(x, y) }, {
+                listOf(fw.isFullscreen, fw.getTileConfigs(), fw.getNavigationIndex(), fw.getTilingSpan(), fw.getSelectedTileConfig()) != before
+            })
+        ) return true
         return handleBaseTap(fw, x, y)
     }
 
     private fun handleNewsWidgetTap(nw: NewsWidget, x: Float, y: Float): Boolean {
         // Let the news widget handle arrows/content tap first.
-        if (nw.onTap(x, y)) { notifyContentChanged(); return true }
+        val before = listOf(nw.isFullscreen, nw.getSourceSpec(), nw.getSelectedIndex(), nw.getFontScale())
+        if (runClassifiedInput({ nw.onTap(x, y) }, {
+                listOf(nw.isFullscreen, nw.getSourceSpec(), nw.getSelectedIndex(), nw.getFontScale()) != before
+            })
+        ) return true
         return handleBaseTap(nw, x, y)
     }
 
     private fun handleNotificationsWidgetTap(widget: NotificationsWidget, x: Float, y: Float): Boolean {
-        if (widget.onTap(x, y)) { notifyContentChanged(); return true }
+        val before = listOf(widget.isFullscreen, widget.getWidgetFontScale(), widget.getToastFontScale(), widget.getScrollIndex())
+        if (runClassifiedInput({ widget.onTap(x, y) }, {
+                listOf(widget.isFullscreen, widget.getWidgetFontScale(), widget.getToastFontScale(), widget.getScrollIndex()) != before
+            })
+        ) return true
         return handleBaseTap(widget, x, y)
     }
 
     private fun handleSpeedometerWidgetTap(sw: SpeedometerWidget, x: Float, y: Float): Boolean {
-        if (sw.onTap(x, y)) { notifyContentChanged(); return true }
+        if (sw.onTap(x, y)) {
+            notifyTransientContentChanged()
+            return true
+        }
         return handleBaseTap(sw, x, y)
     }
 
     private fun handleSubtitleWidgetTap(widget: SubtitleWidget, x: Float, y: Float): Boolean {
-        if (widget.onTap(x, y)) { notifyContentChanged(); return true }
+        val before = widget.isFullscreen to widget.options
+        if (runClassifiedInput(
+                action = { widget.onTap(x, y) },
+                changed = { (widget.isFullscreen to widget.options) != before }
+            )
+        ) return true
         return handleBaseTap(widget, x, y)
     }
 
@@ -2743,9 +3193,7 @@ class WidgetContainer @JvmOverloads constructor(
         }
 
         if (contextMenu?.isVisible == true) {
-            val handled = contextMenu?.onDoubleTap(x, y) ?: false
-            if (handled) notifyContentChanged()
-            return handled
+            return dispatchContextMenuAction { contextMenu?.onDoubleTap(x, y) ?: false }
         }
 
         // Fix: Check for browser video fullscreen mode (e.g. YouTube) and exit it
@@ -2765,16 +3213,20 @@ class WidgetContainer @JvmOverloads constructor(
         if (hoverControlsConsumeDoubleTap(cx, cy)) return true
 
         if (mapWidget?.isAddressEntryVisible() == true || mapWidget?.navigationState?.choices?.isNotEmpty() == true) {
-            if (mapWidget?.onDoubleTap(cx, cy) == true) {
-                notifyContentChanged()
-                return true
+            mapWidget?.let { map ->
+                val before = mapPersistentSignature(map)
+                if (runClassifiedInput({ map.onDoubleTap(cx, cy) }, { mapPersistentSignature(map) != before })) {
+                    return true
+                }
             }
         }
 
         fullscreenVideoWidget?.let { widget ->
             if (widget.containsPoint(cx, cy)) {
-                widget.handleContentDoubleTap(cx, cy)
-                notifyContentChanged()
+                withTransientChangeBatch {
+                    widget.handleContentDoubleTap(cx, cy)
+                    notifyTransientContentChanged()
+                }
                 return true
             }
             return false
@@ -2788,7 +3240,7 @@ class WidgetContainer @JvmOverloads constructor(
         if (isStatusBarFullscreen) {
             statusBarWidget?.let {
                 if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    notifyContentChanged()
+                    withTransientChangeBatch { notifyTransientContentChanged() }
                     return true
                 }
             }
@@ -2798,7 +3250,7 @@ class WidgetContainer @JvmOverloads constructor(
         if (isLocationWidgetFullscreen) {
             locationWidget?.let {
                 if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    notifyContentChanged()
+                    withTransientChangeBatch { notifyTransientContentChanged() }
                     return true
                 }
             }
@@ -2807,8 +3259,8 @@ class WidgetContainer @JvmOverloads constructor(
 
         if (isMapWidgetFullscreen) {
             mapWidget?.let {
-                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    notifyContentChanged()
+                val before = mapPersistentSignature(it)
+                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, { mapPersistentSignature(it) != before })) {
                     return true
                 }
             }
@@ -2817,8 +3269,8 @@ class WidgetContainer @JvmOverloads constructor(
 
         if (isCalendarWidgetFullscreen) {
             calendarWidget?.let {
-                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    notifyContentChanged()
+                val before = it.isFullscreen to it.getFontScale()
+                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, { (it.isFullscreen to it.getFontScale()) != before })) {
                     return true
                 }
             }
@@ -2827,8 +3279,10 @@ class WidgetContainer @JvmOverloads constructor(
 
         if (isFinanceWidgetFullscreen) {
             financeWidget?.let {
-                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    notifyContentChanged()
+                val before = listOf(it.isFullscreen, it.getTileConfigs(), it.getNavigationIndex(), it.getTilingSpan(), it.getSelectedTileConfig())
+                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, {
+                        listOf(it.isFullscreen, it.getTileConfigs(), it.getNavigationIndex(), it.getTilingSpan(), it.getSelectedTileConfig()) != before
+                    })) {
                     return true
                 }
             }
@@ -2837,8 +3291,10 @@ class WidgetContainer @JvmOverloads constructor(
 
         if (isNewsWidgetFullscreen) {
             newsWidget?.let {
-                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    notifyContentChanged()
+                val before = listOf(it.isFullscreen, it.getSourceSpec(), it.getSelectedIndex(), it.getFontScale())
+                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, {
+                        listOf(it.isFullscreen, it.getSourceSpec(), it.getSelectedIndex(), it.getFontScale()) != before
+                    })) {
                     return true
                 }
             }
@@ -2847,8 +3303,10 @@ class WidgetContainer @JvmOverloads constructor(
 
         if (isNotificationsWidgetFullscreen) {
             notificationsWidget?.let {
-                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    notifyContentChanged()
+                val before = listOf(it.isFullscreen, it.getWidgetFontScale(), it.getToastFontScale(), it.getScrollIndex())
+                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, {
+                        listOf(it.isFullscreen, it.getWidgetFontScale(), it.getToastFontScale(), it.getScrollIndex()) != before
+                    })) {
                     return true
                 }
             }
@@ -2857,8 +3315,8 @@ class WidgetContainer @JvmOverloads constructor(
 
         if (isSubtitleWidgetFullscreen) {
             subtitleWidget?.let {
-                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    notifyContentChanged()
+                val before = it.isFullscreen to it.options
+                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, { (it.isFullscreen to it.options) != before })) {
                     return true
                 }
             }
@@ -2868,56 +3326,62 @@ class WidgetContainer @JvmOverloads constructor(
         if (!hasFullscreenWidget()) {
             statusBarWidget?.let {
                 if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    notifyContentChanged()
+                    withTransientChangeBatch { notifyTransientContentChanged() }
                     return true
                 }
             }
 
             locationWidget?.let {
                 if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    notifyContentChanged()
+                    withTransientChangeBatch { notifyTransientContentChanged() }
                     return true
                 }
             }
 
             mapWidget?.let {
-                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    notifyContentChanged()
+                val before = mapPersistentSignature(it)
+                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, { mapPersistentSignature(it) != before })) {
                     return true
                 }
             }
 
             calendarWidget?.let {
-                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    notifyContentChanged()
+                val before = it.isFullscreen to it.getFontScale()
+                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, { (it.isFullscreen to it.getFontScale()) != before })) {
                     return true
                 }
             }
 
             newsWidget?.let {
-                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    notifyContentChanged()
+                val before = listOf(it.isFullscreen, it.getSourceSpec(), it.getSelectedIndex(), it.getFontScale())
+                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, {
+                        listOf(it.isFullscreen, it.getSourceSpec(), it.getSelectedIndex(), it.getFontScale()) != before
+                    })) {
                     return true
                 }
             }
 
             notificationsWidget?.let {
-                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    notifyContentChanged()
+                val before = listOf(it.isFullscreen, it.getWidgetFontScale(), it.getToastFontScale(), it.getScrollIndex())
+                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, {
+                        listOf(it.isFullscreen, it.getWidgetFontScale(), it.getToastFontScale(), it.getScrollIndex()) != before
+                    })) {
                     return true
                 }
             }
 
             financeWidget?.let {
-                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    notifyContentChanged()
+                val before = listOf(it.isFullscreen, it.getTileConfigs(), it.getNavigationIndex(), it.getTilingSpan(), it.getSelectedTileConfig())
+                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, {
+                        listOf(it.isFullscreen, it.getTileConfigs(), it.getNavigationIndex(), it.getTilingSpan(), it.getSelectedTileConfig()) != before
+                    })) {
                     return true
                 }
             }
 
             subtitleWidget?.let {
-                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    notifyContentChanged()
+                val before = it.isFullscreen to it.options
+                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, { (it.isFullscreen to it.options) != before })) {
                     return true
                 }
             }
@@ -2925,8 +3389,10 @@ class WidgetContainer @JvmOverloads constructor(
             for (widget in videoWidgets.asReversed()) {
                 if (!widget.containsPoint(cx, cy)) continue
                 if (widget.baseHitTest(cx, cy) == BaseWidget.BaseHitArea.CONTENT) {
-                    widget.handleContentDoubleTap(cx, cy)
-                    notifyContentChanged()
+                    withTransientChangeBatch {
+                        widget.handleContentDoubleTap(cx, cy)
+                        notifyTransientContentChanged()
+                    }
                     return true
                 }
                 return false
@@ -2989,8 +3455,32 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     fun onContextMenuNavigationTap(x: Float, y: Float): Boolean {
-        val handled = contextMenu?.onNavigationTap(x, y) ?: false
-        if (handled) notifyContentChanged()
+        return dispatchContextMenuAction { contextMenu?.onNavigationTap(x, y) ?: false }
+    }
+
+    /** Lets a menu action own its classified notification while keeping navigation visual-only. */
+    private fun dispatchContextMenuAction(action: () -> Boolean): Boolean {
+        val before = contentNotificationGeneration
+        contextMenuDispatchDepth++
+        val handled = try {
+            action()
+        } finally {
+            contextMenuDispatchDepth--
+        }
+        if (handled && contentNotificationGeneration == before) notifyTransientContentChanged()
+        return handled
+    }
+
+    /** Coalesces a text-edit command with the menu dismissal it causes. */
+    private fun dispatchTextEditMenuAction(action: () -> Boolean): Boolean {
+        val before = contentNotificationGeneration
+        textEditMenuDispatchDepth++
+        val handled = try {
+            action()
+        } finally {
+            textEditMenuDispatchDepth--
+        }
+        if (handled && contentNotificationGeneration == before) notifyTransientContentChanged()
         return handled
     }
 
@@ -2999,7 +3489,7 @@ class WidgetContainer @JvmOverloads constructor(
         pendingCreateY = contentY
         contextMenu?.setLayoutLockState(isWidgetLayoutLocked)
         contextMenu?.show(screenX, screenY)
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     private fun isAppContextMenuBorderDoubleTap(cx: Float, cy: Float): Boolean {
@@ -3016,10 +3506,27 @@ class WidgetContainer @JvmOverloads constructor(
         }
     }
 
-    fun onDragEnd() {
+    fun onDragEnd(notify: Boolean = true) {
         cancelLongPress()
-        if (financeTileDragging) { financeWidget?.endTileDrag(); financeTileDragging = false; notifyContentChanged() }
-        if (activeWidget != null) { activeWidget?.onDragEnd(); activeWidget = null; notifyContentChanged() }
+        if (financeTileDragging) {
+            if (notify && financeWidget != null) {
+                runPersistentMutation(
+                    action = { financeWidget?.endTileDrag() == true },
+                    changed = { it }
+                )
+            } else {
+                financeWidget?.endTileDrag()
+            }
+            financeTileDragging = false
+        }
+        if (activeWidget != null) {
+            val widget = activeWidget
+            activeWidget = null
+            runPersistentMutation(
+                action = { widget?.onDragEnd(); true },
+                changed = { notify && it }
+            )
+        }
     }
 
     // ==================== Widget Creation ====================
@@ -3144,9 +3651,9 @@ class WidgetContainer @JvmOverloads constructor(
         contextMenu?.setLayoutLockState(isWidgetLayoutLocked)
         if (locked) {
             cancelLongPress()
-            onDragEnd()
+            onDragEnd(notify = false)
         }
-        if (persist) notifyContentChanged()
+        if (persist) notifyPersistentContentChanged()
     }
 
     private fun handleSubmenuItemDoubleTapped(subItem: ContextMenu.SubMenuItem): Boolean {
@@ -3163,7 +3670,7 @@ class WidgetContainer @JvmOverloads constructor(
         val statusHeight = 110f
         return StatusBarWidget(
             context, (width - statusWidth) / 2f, height - statusHeight - height * 0.15f, statusWidth, statusHeight
-        ).apply { onStateChanged = { notifyContentChanged() } }
+        ).apply { onStateChanged = { notifyTransientContentChanged() } }
     }
 
     private fun createLocationPresence(): LocationWidget {
@@ -3186,7 +3693,7 @@ class WidgetContainer @JvmOverloads constructor(
         closedTemplateState<WidgetPersistence.MapWidgetState>(WidgetTypeId.MAP)?.let { return applyMapState(it) }
         val size = 210f
         return MapWidget(context, width - size - 24f, 24f, size, size).apply {
-            invalidate = { notifyContentChanged() }
+            invalidate = ::requestRepaint
             configurePhoneRouteTransport(phoneRouteTransport)
             onPhoneRouteConnectionChanged(phoneRouteConnected)
             bindMapNavigation(this)
@@ -3198,6 +3705,7 @@ class WidgetContainer @JvmOverloads constructor(
     fun updateMapLocation(location: android.location.Location) {
         pendingMapLocation = android.location.Location(location)
         mapWidget?.setLocation(location)
+        notifyTransientContentChanged()
     }
 
     fun requestPhoneMapRefresh() {
@@ -3206,7 +3714,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     fun applyMapSnapshot(snapshot: com.everyday.shared.sync.MapSnapshot) {
         mapWidget?.applyProxyMap(snapshot)
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     private fun updateMapMetadata(location: String, countryCode: String) {
@@ -3227,7 +3735,7 @@ class WidgetContainer @JvmOverloads constructor(
             CalendarWidget.DEFAULT_WIDTH,
             CalendarWidget.DEFAULT_HEIGHT
         ).apply {
-            onStateChanged = { notifyContentChanged() }
+            onStateChanged = { notifyTransientContentChanged() }
             setSnapshot(pendingCalendarSnapshot)
         }
     }
@@ -3249,7 +3757,8 @@ class WidgetContainer @JvmOverloads constructor(
         }
         return FinanceWidget(20f, 20f, FinanceWidget.DEFAULT_WIDTH, FinanceWidget.DEFAULT_HEIGHT).apply {
             listener = object : FinanceWidgetListener {
-                override fun onStateChanged() = notifyContentChanged()
+                override fun onStateChanged() = notifyTransientContentChanged()
+                override fun onPersistentStateChanged() = notifyPersistentContentChanged()
                 override fun onDataRequested(
                     visibleConfigs: List<FinanceDashboardTileConfig>,
                     refreshTileIds: List<String>, force: Boolean, reason: String
@@ -3270,7 +3779,8 @@ class WidgetContainer @JvmOverloads constructor(
         val startX = (width - NewsWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
         return NewsWidget(startX, 20f, NewsWidget.DEFAULT_WIDTH, NewsWidget.DEFAULT_HEIGHT).apply {
             listener = object : NewsWidgetListener {
-                override fun onStateChanged() = notifyContentChanged()
+                override fun onStateChanged() = notifyTransientContentChanged()
+                override fun onPersistentStateChanged() = notifyPersistentContentChanged()
                 override fun onDataRequested(countryCode: String, force: Boolean, reason: String) {
                     dataProvider?.requestNewsData(countryCode, force, reason)
                 }
@@ -3278,7 +3788,7 @@ class WidgetContainer @JvmOverloads constructor(
                     dataProvider?.requestNewsSourceData(sourceSpec, countryCode, force, reason, completion)
                         ?: completion(Result.failure(IllegalStateException("News data service is unavailable")))
                 }
-                override fun onSourceInputFocusChanged(focused: Boolean) { contentObserver?.onFocusChanged(focused) }
+                override fun onSourceInputFocusChanged(focused: Boolean) { notifyFocusChanged(focused) }
             }
             pendingNewsCountryCode?.let { setCountryCode(it) }
             requestData(force = true, reason = "widget_toggled_on")
@@ -3294,7 +3804,7 @@ class WidgetContainer @JvmOverloads constructor(
             context, startX, 20f, NotificationsWidget.DEFAULT_WIDTH,
             NotificationsWidget.DEFAULT_HEIGHT, height.toFloat()
         ).apply {
-            onStateChanged = { notifyContentChanged() }
+            onStateChanged = { notifyTransientContentChanged() }
             setNotificationsSnapshot(latestNotificationsSnapshot)
         }
     }
@@ -3321,7 +3831,6 @@ class WidgetContainer @JvmOverloads constructor(
 
     fun createBrowserWidget(x: Float, y: Float) {
         if (openClosedBrowserTemplate() != null) {
-            notifyContentChanged()
             return
         }
         val boxWidth = width * 0.45f; val boxHeight = height * 0.5f
@@ -3332,13 +3841,14 @@ class WidgetContainer @JvmOverloads constructor(
         }
         val containerIndex = rootView.indexOfChild(this); val insertIndex = if (containerIndex >= 0) containerIndex else 0
         widget.getWebView()?.let { webView -> if (webView.parent == rootView) rootView.removeView(webView); rootView.addView(webView, insertIndex) }
-        lifecycleController.open(browserLifecycle) { widget }
-        notifyMediaBrightnessCapChanged()
-        notifyBrowserMinimumBrightnessChanged()
-        widget.toggleFullscreen()
-        widget.setFocused(true)
-        setFocusedWidget(widget)
-        notifyContentChanged()
+        runPersistentMutation {
+            lifecycleController.open(browserLifecycle) { widget }
+            notifyMediaBrightnessCapChanged()
+            notifyBrowserMinimumBrightnessChanged()
+            widget.toggleFullscreen()
+            widget.setFocused(true)
+            setFocusedWidget(widget)
+        }
     }
 
     private fun bindMapNavigation(map: MapWidget) {
@@ -3347,11 +3857,14 @@ class WidgetContainer @JvmOverloads constructor(
                 dataProvider?.requestMapData(point, config)
             }
             override fun onAddressFocusChanged(focused: Boolean) {
-                if (focused) bringWidgetToFront(map)
-                contentObserver?.onFocusChanged(focused)
-                notifyContentChanged()
+                val beforeZOrder = map.zOrder
+                if (focused) bringWidgetToFront(map, notify = false)
+                notifyFocusChanged(
+                    focused = focused,
+                    persistent = focused && map.zOrder != beforeZOrder
+                )
             }
-            override fun onNavigationResult(result: NavigationOperationResult) = notifyContentChanged()
+            override fun onNavigationResult(result: NavigationOperationResult) = notifyTransientContentChanged()
             override fun onStopNavigationRequested() = stopNavigationFromMap()
         }
     }
@@ -3385,9 +3898,11 @@ class WidgetContainer @JvmOverloads constructor(
     private fun stopNavigationFromMap() {
         // Explicit stop cancels the temporary voice presentation without restoring an older map
         // rectangle; the current map/POI/orientation state remains visible.
-        dismissMapPresentation()
-        mapWidget?.stopNavigation()
-        notifyContentChanged()
+        withTransientChangeBatch {
+            dismissMapPresentation()
+            mapWidget?.stopNavigation()
+            notifyTransientContentChanged()
+        }
     }
 
     private fun dismissMapPresentation() {
@@ -3414,18 +3929,22 @@ class WidgetContainer @JvmOverloads constructor(
             if (webView.parent == rootView) rootView.removeView(webView)
             rootView.addView(webView, insertIndex)
         }
-        val opened = lifecycleController.open(browserLifecycle) { widget } ?: return null
-        opened.setFocused(true)
-        setFocusedWidget(opened)
-        notifyMediaBrightnessCapChanged()
-        notifyBrowserMinimumBrightnessChanged()
-        notifyContentChanged()
-        val widgetId = stableWidgetId(opened)
-        return BrowserWidgetPageAgentAdapter.bind(widgetId, opened)
-            ?: run {
-                lifecycleController.close(opened)
-                null
-            }
+        return runPersistentMutation(
+            action = {
+                lifecycleController.open(browserLifecycle) { widget }?.let { opened ->
+                    opened.setFocused(true)
+                    setFocusedWidget(opened)
+                    notifyMediaBrightnessCapChanged()
+                    notifyBrowserMinimumBrightnessChanged()
+                    BrowserWidgetPageAgentAdapter.bind(stableWidgetId(opened), opened)
+                        ?: run {
+                            lifecycleController.close(opened)
+                            null
+                        }
+                }
+            },
+            changed = { true }
+        )
     }
 
     private fun openBrowserAddress(address: String) {
@@ -3434,14 +3953,13 @@ class WidgetContainer @JvmOverloads constructor(
             ?: createFullscreenBrowserWidget()
             ?: return
 
-        if (widget.isMinimized) {
-            widget.toggleMinimize()
+        runPersistentMutation {
+            if (widget.isMinimized) widget.toggleMinimize()
+            bringWidgetToFront(widget, notify = false)
+            widget.setFocused(true)
+            setFocusedWidget(widget)
+            widget.navigateToAddress(address, autoFullscreenVideo = true)
         }
-        bringWidgetToFront(widget)
-        widget.setFocused(true)
-        setFocusedWidget(widget)
-        widget.navigateToAddress(address, autoFullscreenVideo = true)
-        notifyContentChanged()
     }
 
     private fun createFullscreenBrowserWidget(): BrowserWidget? {
@@ -3455,11 +3973,13 @@ class WidgetContainer @JvmOverloads constructor(
             if (webView.parent == rootView) rootView.removeView(webView)
             rootView.addView(webView, insertIndex)
         }
-        lifecycleController.open(browserLifecycle) { widget }
-        notifyMediaBrightnessCapChanged()
-        notifyBrowserMinimumBrightnessChanged()
-        widget.toggleFullscreen()
-        return widget
+        return runPersistentMutation {
+            lifecycleController.open(browserLifecycle) { widget }
+            notifyMediaBrightnessCapChanged()
+            notifyBrowserMinimumBrightnessChanged()
+            widget.toggleFullscreen()
+            widget
+        }
     }
 
     private fun removeBrowserWidget(widget: BrowserWidget) {
@@ -3478,16 +3998,18 @@ class WidgetContainer @JvmOverloads constructor(
         }
         val containerIndex = rootView.indexOfChild(this); val insertIndex = if (containerIndex >= 0) containerIndex else 0
         widget.getWebView()?.let { webView -> if (webView.parent == rootView) rootView.removeView(webView); rootView.addView(webView, insertIndex) }
-        lifecycleController.open(browserLifecycle) { widget }
-        notifyBrowserMinimumBrightnessChanged()
+        runPersistentMutation {
+            lifecycleController.open(browserLifecycle) { widget }
+            notifyBrowserMinimumBrightnessChanged()
 
-        // Load YouTube history URL
-        widget.getWebView()?.loadUrl("https://www.youtube.com/feed/history")
+            // Load YouTube history URL
+            widget.getWebView()?.loadUrl("https://www.youtube.com/feed/history")
 
-        // Enter fullscreen mode immediately
-        widget.toggleFullscreen()
+            // Enter fullscreen mode immediately
+            widget.toggleFullscreen()
 
-        widget.setFocused(true); setFocusedWidget(widget); notifyContentChanged()
+            widget.setFocused(true); setFocusedWidget(widget)
+        }
     }
 
     fun createImageWidget(path: String, x: Float = -1f, y: Float = -1f) {
@@ -3525,9 +4047,10 @@ class WidgetContainer @JvmOverloads constructor(
                 }
             }
         }
-        lifecycleController.open(videoLifecycle) { widget }
-        widget.toggleFullscreen()
-        notifyContentChanged()
+        runPersistentMutation {
+            lifecycleController.open(videoLifecycle) { widget }
+            widget.toggleFullscreen()
+        }
     }
 
     /**
@@ -3616,9 +4139,10 @@ class WidgetContainer @JvmOverloads constructor(
         val widget = PdfWidget(context, uri, displayName, createX, createY).apply {
             onStateChanged = { notifyTransientContentChanged() }
         }
-        lifecycleController.open(pdfLifecycle) { widget }
-        widget.toggleFullscreen()
-        notifyContentChanged()
+        runPersistentMutation {
+            lifecycleController.open(pdfLifecycle) { widget }
+            widget.toggleFullscreen()
+        }
     }
 
     private fun removePdfWidget(widget: PdfWidget) {
@@ -3649,7 +4173,7 @@ class WidgetContainer @JvmOverloads constructor(
         val selectionHandler = onFileSelected
         val widget = FileBrowserWidget(context, createX, createY, browserWidth, browserHeight, filter).apply {
             listener = object : FileBrowserWidgetListener {
-                override fun onStateChanged(state: FileBrowserWidget.State) = notifyContentChanged()
+                override fun onStateChanged(state: FileBrowserWidget.State) = notifyTransientContentChanged()
                 override fun onFileSelected(entry: FileBrowserWidget.FileEntry) {
                     selectionHandler?.invoke(entry)
                     removeFileBrowserWidget(this@apply)
@@ -3657,8 +4181,6 @@ class WidgetContainer @JvmOverloads constructor(
             }
         }
         lifecycleController.open(filesLifecycle) { widget }
-        notifyContentChanged()
-        post { notifyContentChanged() }
         // Opening the picker may complete asynchronously after a runtime/all-files permission
         // screen. Re-center after the widget actually exists so hover chrome is visible at once
         // and two-finger scrolling is routed to the new browser without a priming drag.
@@ -3676,19 +4198,22 @@ class WidgetContainer @JvmOverloads constructor(
                     if (focused) setFocusedWidget(this@apply)
                     else if (focusedWidget == this@apply) setFocusedWidget(null)
                 }
-                override fun onStateChanged(state: TextBoxWidget.State) = notifyContentChanged()
+                override fun onStateChanged(state: TextBoxWidget.State) = notifyTransientContentChanged()
             }
         }
 
     fun createTextBox(x: Float, y: Float) {
         if (openClosedTextTemplate() != null) {
-            notifyContentChanged()
             return
         }
         val boxWidth = width * DEFAULT_TEXTBOX_WIDTH_PERCENT; val boxHeight = height * DEFAULT_TEXTBOX_HEIGHT_PERCENT
         val adjustedX = x.coerceIn(0f, width - boxWidth); val adjustedY = y.coerceIn(0f, height - boxHeight)
         val widget = buildTextBox(adjustedX, adjustedY, boxWidth, boxHeight)
-        lifecycleController.open(textLifecycle) { widget }; widget.setFocused(true); setFocusedWidget(widget)
+        runPersistentMutation {
+            lifecycleController.open(textLifecycle) { widget }
+            widget.setFocused(true)
+            setFocusedWidget(widget)
+        }
     }
 
     private fun removeWidget(widget: TextBoxWidget) {
@@ -3696,12 +4221,22 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun setFocusedWidget(widget: BaseWidget?) {
-        when (widget) {
-            is TextBoxWidget -> { if (focusedWidget == widget) return; focusedBrowserWidget?.setFocused(false); focusedBrowserWidget = null; focusedWidget?.clearSelection(); focusedWidget?.setFocused(false); focusedWidget = widget }
-            is BrowserWidget -> { if (focusedBrowserWidget == widget) return; focusedWidget?.clearSelection(); focusedWidget?.setFocused(false); focusedWidget = null; focusedBrowserWidget?.setFocused(false); focusedBrowserWidget = widget }
-            null -> { focusedWidget?.clearSelection(); focusedWidget?.setFocused(false); focusedWidget = null; focusedBrowserWidget?.setFocused(false); focusedBrowserWidget = null }
+        if (suppressNestedFocusCallbacks) return
+        if ((widget is TextBoxWidget && focusedWidget === widget) ||
+            (widget is BrowserWidget && focusedBrowserWidget === widget)
+        ) return
+        suppressNestedFocusCallbacks = true
+        try {
+            when (widget) {
+                is TextBoxWidget -> { focusedBrowserWidget?.setFocused(false); focusedBrowserWidget = null; focusedWidget?.clearSelection(); focusedWidget?.setFocused(false); focusedWidget = widget }
+                is BrowserWidget -> { focusedWidget?.clearSelection(); focusedWidget?.setFocused(false); focusedWidget = null; focusedBrowserWidget?.setFocused(false); focusedBrowserWidget = widget }
+                null -> { focusedWidget?.clearSelection(); focusedWidget?.setFocused(false); focusedWidget = null; focusedBrowserWidget?.setFocused(false); focusedBrowserWidget = null }
+            }
+            formattingMenu?.dismiss()
+        } finally {
+            suppressNestedFocusCallbacks = false
         }
-        formattingMenu?.dismiss(); contentObserver?.onFocusChanged(widget != null)
+        notifyFocusChanged(widget != null)
     }
 
     fun unfocusAll() {
@@ -3717,21 +4252,52 @@ class WidgetContainer @JvmOverloads constructor(
 
     fun onKeyPress(key: String, userInitiated: Boolean = false) {
         if (userInitiated) userInputActivity?.onUserInput(UserInputKind.KEYBOARD)
-        if (newsWidget?.handleSourcePanelKeyPress(key) == true) {
-            notifyContentChanged()
-            return
+        newsWidget?.let { news ->
+            val beforeSource = news.getSourceSpec()
+            var persistedChange = false
+            val handled = runPersistentMutation(
+                action = {
+                    news.handleSourcePanelKeyPress(key).also {
+                        persistedChange = news.getSourceSpec() != beforeSource
+                    }
+                },
+                changed = { it && persistedChange }
+            )
+            if (handled) {
+                if (!persistedChange) notifyTransientContentChanged()
+                return
+            }
         }
+        layoutOverlayNotificationEmitted = false
         if (layoutNamePrompt?.onKeyPress(key) == true) {
-            notifyContentChanged()
+            if (!layoutOverlayNotificationEmitted) notifyTransientContentChanged()
+            layoutOverlayNotificationEmitted = false
             return
         }
+        layoutOverlayNotificationEmitted = false
         if (mapWidget?.onAddressKeyPress(key) == true) {
-            notifyContentChanged()
+            notifyTransientContentChanged()
             return
         }
-        focusedWidget?.onKeyPress(key)
-        focusedBrowserWidget?.onKeyPress(key)
-        notifyContentChanged()
+        focusedWidget?.let { widget ->
+            val before = textPersistentSignature(widget)
+            runClassifiedInput(
+                action = { widget.onKeyPress(key); true },
+                changed = { textPersistentSignature(widget) != before }
+            )
+            return
+        }
+        focusedBrowserWidget?.let { browser ->
+            if (browser.isEditingAddress() && (key == "ENTER" || key == "\n")) {
+                runPersistentMutation { browser.onKeyPress(key) }
+            } else {
+                val before = browserPersistentSignature(browser)
+                runClassifiedInput(
+                    action = { browser.onKeyPress(key); true },
+                    changed = { browserPersistentSignature(browser) != before }
+                )
+            }
+        }
     }
 
     // ==================== Text Edit Menu ====================
@@ -3743,7 +4309,7 @@ class WidgetContainer @JvmOverloads constructor(
         // Request fresh clipboard from phone (will arrive async and update the menu)
         host?.requestClipboard()
         textEditMenu?.show(widget.x + widget.widgetWidth / 2 - 90f, widget.y - 60f, glassesClipboard ?: phoneClipboard, widget.hasSelection())
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     private fun showBrowserAddressEditMenu(widget: BrowserWidget, clipboardContent: String?) {
@@ -3762,7 +4328,7 @@ class WidgetContainer @JvmOverloads constructor(
             widget.addressHasSelection(),
             includeFormatting = false
         )
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
     
     /**
@@ -3774,7 +4340,7 @@ class WidgetContainer @JvmOverloads constructor(
         val browser = focusedBrowserWidget ?: fullscreenBrowserWidget
         if (textEditMenu?.isVisible == true && (widget?.isFocused() == true || browser?.isEditingAddress() == true)) {
             textEditMenu?.updateClipboard(glassesClipboard ?: phoneClipboard)
-            notifyContentChanged()
+            notifyTransientContentChanged()
         }
     }
 
@@ -3782,38 +4348,49 @@ class WidgetContainer @JvmOverloads constructor(
         if (textEditMenuTarget == TextEditMenuTarget.BROWSER_ADDRESS) {
             val browser = focusedBrowserWidget ?: fullscreenBrowserWidget ?: return
             glassesClipboard = browser.cutSelectedAddressText()
-            notifyContentChanged()
+            notifyTransientContentChanged()
             return
         }
-        val widget = focusedWidget ?: fullscreenTextWidget ?: return; if (!widget.hasSelection()) return; glassesClipboard = widget.getSelectedText(); widget.deleteSelection(); notifyContentChanged()
+        val widget = focusedWidget ?: fullscreenTextWidget ?: return
+        if (!widget.hasSelection()) return
+        runPersistentMutation {
+            glassesClipboard = widget.getSelectedText()
+            widget.deleteSelection()
+        }
     }
 
     private fun handleCopy() {
         if (textEditMenuTarget == TextEditMenuTarget.BROWSER_ADDRESS) {
             val browser = focusedBrowserWidget ?: fullscreenBrowserWidget ?: return
             glassesClipboard = browser.copySelectedAddressText()
-            notifyContentChanged()
+            notifyTransientContentChanged()
             return
         }
-        val widget = focusedWidget ?: fullscreenTextWidget ?: return; if (!widget.hasSelection()) return; glassesClipboard = widget.getSelectedText(); notifyContentChanged()
+        val widget = focusedWidget ?: fullscreenTextWidget ?: return
+        if (!widget.hasSelection()) return
+        glassesClipboard = widget.getSelectedText()
+        notifyTransientContentChanged()
     }
 
     private fun handlePaste(content: String) {
         if (textEditMenuTarget == TextEditMenuTarget.BROWSER_ADDRESS) {
             (focusedBrowserWidget ?: fullscreenBrowserWidget)?.pasteIntoAddress(content)
-            notifyContentChanged()
+            notifyTransientContentChanged()
             return
         }
-        (focusedWidget ?: fullscreenTextWidget)?.pasteText(content); notifyContentChanged()
+        runPersistentMutation { (focusedWidget ?: fullscreenTextWidget)?.pasteText(content) }
     }
 
     private fun handleSelectAll() {
         if (textEditMenuTarget == TextEditMenuTarget.BROWSER_ADDRESS) {
             (focusedBrowserWidget ?: fullscreenBrowserWidget)?.selectAllAddressText()
-            notifyContentChanged()
+            notifyTransientContentChanged()
             return
         }
-        (focusedWidget ?: fullscreenTextWidget)?.selectAll(); notifyContentChanged()
+        (focusedWidget ?: fullscreenTextWidget)?.let {
+            it.selectAll()
+            notifyTransientContentChanged()
+        }
     }
 
     private fun showFormattingMenu() {
@@ -3821,7 +4398,7 @@ class WidgetContainer @JvmOverloads constructor(
         textEditMenu?.dismiss()
         formattingMenu?.show(widget.x + widget.widgetWidth / 2, widget.y - 20f, widget.textFontSize, widget.isTextWrap, widget.getColumnCount())
         formattingMenu?.apply { isBold = widget.isBoldActive(); isItalic = widget.isItalicActive(); isUnderline = widget.isUnderlineActive() }
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     private fun ensureDrawnAboveNativeOverlays() {
@@ -3832,13 +4409,47 @@ class WidgetContainer @JvmOverloads constructor(
         if (elevation < 10f) elevation = 10f
     }
 
-    private fun handleFontSizeChanged(size: Float) { (focusedWidget ?: fullscreenTextWidget)?.setFontSize(size); notifyContentChanged() }
-    private fun handleTextWrapToggled(wrap: Boolean) { (focusedWidget ?: fullscreenTextWidget)?.setTextWrap(wrap); notifyContentChanged() }
-    private fun handleBoldToggled() { val widget = focusedWidget ?: fullscreenTextWidget ?: return; widget.toggleBold(); formattingMenu?.isBold = widget.isBoldActive(); notifyContentChanged() }
-    private fun handleItalicToggled() { val widget = focusedWidget ?: fullscreenTextWidget ?: return; widget.toggleItalic(); formattingMenu?.isItalic = widget.isItalicActive(); notifyContentChanged() }
-    private fun handleUnderlineToggled() { val widget = focusedWidget ?: fullscreenTextWidget ?: return; widget.toggleUnderline(); formattingMenu?.isUnderline = widget.isUnderlineActive(); notifyContentChanged() }
-    private fun handleBulletListToggled() { (focusedWidget ?: fullscreenTextWidget)?.toggleBulletList(); notifyContentChanged() }
-    private fun handleNumberedListToggled() { (focusedWidget ?: fullscreenTextWidget)?.toggleNumberedList(); notifyContentChanged() }
+    private fun handleFontSizeChanged(size: Float) {
+        runPersistentMutation {
+        (focusedWidget ?: fullscreenTextWidget)?.setFontSize(size)
+        }
+    }
+
+    private fun handleTextWrapToggled(wrap: Boolean) {
+        runPersistentMutation {
+        (focusedWidget ?: fullscreenTextWidget)?.setTextWrap(wrap)
+        }
+    }
+
+    private fun handleBoldToggled() = runPersistentMutation {
+        val widget = focusedWidget ?: fullscreenTextWidget ?: return@runPersistentMutation
+        widget.toggleBold()
+        formattingMenu?.isBold = widget.isBoldActive()
+    }
+
+    private fun handleItalicToggled() = runPersistentMutation {
+        val widget = focusedWidget ?: fullscreenTextWidget ?: return@runPersistentMutation
+        widget.toggleItalic()
+        formattingMenu?.isItalic = widget.isItalicActive()
+    }
+
+    private fun handleUnderlineToggled() = runPersistentMutation {
+        val widget = focusedWidget ?: fullscreenTextWidget ?: return@runPersistentMutation
+        widget.toggleUnderline()
+        formattingMenu?.isUnderline = widget.isUnderlineActive()
+    }
+
+    private fun handleBulletListToggled() {
+        runPersistentMutation {
+        (focusedWidget ?: fullscreenTextWidget)?.toggleBulletList()
+        }
+    }
+
+    private fun handleNumberedListToggled() {
+        runPersistentMutation {
+        (focusedWidget ?: fullscreenTextWidget)?.toggleNumberedList()
+        }
+    }
 
     // ==================== Public Accessors ====================
 
@@ -3894,7 +4505,7 @@ class WidgetContainer @JvmOverloads constructor(
             is3DofEnabled = enabled
             threeDofOverlay.set3DofEnabled(enabled)
             Log.d(TAG, "3DOF mode ${if (enabled) "enabled" else "disabled"}")
-            notifyContentChanged()
+            notifyTransientContentChanged()
         }
     }
 
@@ -3907,13 +4518,13 @@ class WidgetContainer @JvmOverloads constructor(
         threeDofOffsetX = offsetX
         threeDofOffsetY = offsetY
         threeDofOverlay.setContentOffset(offsetX, offsetY)
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
 
     fun set3DofRoll(rollDeg: Float) {
         threeDofRollDeg = rollDeg
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     /**
@@ -3922,7 +4533,7 @@ class WidgetContainer @JvmOverloads constructor(
      */
     fun set3DofTransitionProgress(progress: Float) {
         threeDofOverlay.setTransitionProgress(progress)
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     /**
@@ -4174,18 +4785,24 @@ class WidgetContainer @JvmOverloads constructor(
     private fun consumeVisibleKeyboardTap(cx: Float, cy: Float): Boolean {
         return when (val host = visibleKeyboardHostAt(cx, cy)) {
             is BrowserWidget -> {
-                host.getKeyboard()?.onTap(cx, cy)
-                notifyContentChanged()
+                val before = browserPersistentSignature(host)
+                runClassifiedInput(
+                    action = { host.getKeyboard()?.onTap(cx, cy) == true },
+                    changed = { browserPersistentSignature(host) != before }
+                )
                 true
             }
             is TextBoxWidget -> {
-                host.getKeyboard()?.onTap(cx, cy)
-                notifyContentChanged()
+                val before = textPersistentSignature(host)
+                runClassifiedInput(
+                    action = { host.getKeyboard()?.onTap(cx, cy) == true },
+                    changed = { textPersistentSignature(host) != before }
+                )
                 true
             }
             is MapWidget -> {
                 host.getAddressKeyboard()?.onTap(cx, cy)
-                notifyContentChanged()
+                notifyTransientContentChanged()
                 true
             }
             else -> false
@@ -4274,7 +4891,7 @@ class WidgetContainer @JvmOverloads constructor(
     private fun hoverControlsConsumeDoubleTap(cx: Float, cy: Float): Boolean {
         for (control in hoverControls.asReversed()) {
             if (control.isInteracting() && control.handleDoubleTap(cx, cy)) {
-                notifyContentChanged()
+                notifyTransientContentChanged()
                 if (control === lemonHoverControl) {
                     host?.requestCursorCenter()
                 }
@@ -4364,7 +4981,7 @@ class WidgetContainer @JvmOverloads constructor(
         }
         ShortcutsStore.save(context, commandRegistry, list.toList())
         lemonHoverControl.cancelInteraction()
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     fun executeCommand(invocation: AppCommandInvocation): AppCommandResult = commandExecutor.execute(invocation)
@@ -4421,12 +5038,15 @@ class WidgetContainer @JvmOverloads constructor(
                     )
                     return@Runnable
                 }
-                map.startNavigation(
-                    address = request.address,
-                    modeName = request.mode,
-                    presentationSpec = presentation
-                ) { outcome ->
-                    result.complete(outcome.toAssistantExecution())
+                withTransientChangeBatch {
+                    map.startNavigation(
+                        address = request.address,
+                        modeName = request.mode,
+                        presentationSpec = presentation
+                    ) { outcome ->
+                        result.complete(outcome.toAssistantExecution())
+                    }
+                    notifyTransientContentChanged()
                 }
             } catch (failure: Throwable) {
                 result.complete(
@@ -4456,8 +5076,11 @@ class WidgetContainer @JvmOverloads constructor(
     fun stopNavigation(): CompletableFuture<AssistantToolExecution> {
         val result = CompletableFuture<AssistantToolExecution>()
         val action = Runnable {
-            dismissMapPresentation()
-            mapWidget?.stopNavigation()
+            withTransientChangeBatch {
+                dismissMapPresentation()
+                mapWidget?.stopNavigation()
+                notifyTransientContentChanged()
+            }
             result.complete(
                 AssistantToolExecution(
                     true,
@@ -4504,9 +5127,12 @@ class WidgetContainer @JvmOverloads constructor(
         val result = CompletableFuture<AssistantToolExecution>()
         val action = Runnable {
             runCatching {
+                val mapWasAlreadyVisible = mapWidget != null
                 lifecycleController.show(WidgetTypeId.MAP)
                 val map = mapWidget ?: error("Map widget could not be created")
+                val beforeConfig = map.poiDisplayConfig
                 map.applyPoiDisplayConfig(request.config)
+                val configChanged = map.poiDisplayConfig != beforeConfig
                 val presented = request.presentation?.let { presentWidget(map, it) } ?: true
                 if (!presented) {
                     AssistantToolExecution(
@@ -4515,6 +5141,9 @@ class WidgetContainer @JvmOverloads constructor(
                         "Map presentation could not be started"
                     )
                 } else {
+                    // Creation already notified through the lifecycle controller.  Existing-map
+                    // configuration changes need the explicit persistent signal here.
+                    if (configChanged && mapWasAlreadyVisible) notifyPersistentContentChanged()
                     AssistantToolExecution(
                         true,
                         AssistantToolExecutionCodes.SUCCESS,
@@ -4696,7 +5325,7 @@ class WidgetContainer @JvmOverloads constructor(
     fun setAssistantStatus(status: AssistantStatus) {
         assistantVoiceHoverControl.configured = status.configured
         assistantVoiceHoverControl.state = status.state
-        invalidateHoverVisuals()
+        notifyTransientContentChanged()
     }
 
     fun configureAssistantSettings(
@@ -4726,14 +5355,16 @@ class WidgetContainer @JvmOverloads constructor(
         val builtIn = BuiltInLayouts.build(name, width.toFloat(), height.toFloat())
         if (builtIn != null) {
             requestLayoutSwitchBrightness()
-            applyPersistedStateReplacingCurrent(builtIn)
+            applyPersistedStateReplacingCurrent(builtIn, notifyRestored = false)
             layoutManager.activeLayoutName = name
+            notifyPersistentContentChanged()
             return true
         }
         val saved = stateStore.loadLayout(name) ?: return false
         requestLayoutSwitchBrightness()
-        applyPersistedDashboardReplacingCurrent(saved)
+        applyPersistedDashboardReplacingCurrent(saved, notifyRestored = false)
         layoutManager.activeLayoutName = name
+        notifyPersistentContentChanged()
         return true
     }
 
@@ -4742,11 +5373,17 @@ class WidgetContainer @JvmOverloads constructor(
     )
 
     /** Compatibility boundary for delivered layouts and legacy callers. */
-    fun applyPersistedStateReplacingCurrent(state: WidgetPersistence.PersistedState) {
-        applyPersistedDashboardReplacingCurrent(WidgetPersistenceV2.fromLegacy(state))
+    fun applyPersistedStateReplacingCurrent(
+        state: WidgetPersistence.PersistedState,
+        notifyRestored: Boolean = true
+    ) {
+        applyPersistedDashboardReplacingCurrent(WidgetPersistenceV2.fromLegacy(state), notifyRestored)
     }
 
-    fun applyPersistedDashboardReplacingCurrent(dashboard: WidgetPersistenceV2.PersistedDashboard) {
+    fun applyPersistedDashboardReplacingCurrent(
+        dashboard: WidgetPersistenceV2.PersistedDashboard,
+        notifyRestored: Boolean = true
+    ) {
         if (!isReady()) return
 
         val previousDashboard = captureWidgetDashboardWithoutLayoutName().copy(
@@ -4767,7 +5404,7 @@ class WidgetContainer @JvmOverloads constructor(
             suppressContentChangedCallback = false
         }
 
-        notifyContentChanged()
+        if (notifyRestored) notifyDashboardRestored()
     }
 
     private fun applyPersistedContents(dashboard: WidgetPersistenceV2.PersistedDashboard) {
@@ -4793,7 +5430,7 @@ class WidgetContainer @JvmOverloads constructor(
             width.toFloat(),
             height.toFloat()
         ) ?: return
-        settingsController.resetHoverControlPlacementsToDefault()
+        settingsController.resetHoverControlPlacementsToDefault(notify = false)
         applyPersistedStateReplacingCurrent(defaultState)
     }
 
@@ -4913,13 +5550,15 @@ class WidgetContainer @JvmOverloads constructor(
     private fun openClosedTextTemplate(): TextBoxWidget? {
         val template = closedTemplateState<WidgetPersistence.TextWidgetState>(WidgetTypeId.TEXT) ?: return null
         val widget = persistenceHelper.restoreTextWidgets(listOf(template), width, height).firstOrNull() ?: return null
-        lifecycleController.open(textLifecycle) { widget }
-        applyFullscreenState(widget, template.isFullscreen)
-        if (!widget.isMinimized) {
-            widget.setFocused(true)
-            setFocusedWidget(widget)
+        return runPersistentMutation {
+            lifecycleController.open(textLifecycle) { widget }
+            applyFullscreenState(widget, template.isFullscreen)
+            if (!widget.isMinimized) {
+                widget.setFocused(true)
+                setFocusedWidget(widget)
+            }
+            widget
         }
-        return widget
     }
 
     private fun openClosedBrowserTemplate(): BrowserWidget? {
@@ -4931,15 +5570,17 @@ class WidgetContainer @JvmOverloads constructor(
             ?: return null
 
         configureBrowserWidget(widget)
-        lifecycleController.open(browserLifecycle) { widget }
-        notifyMediaBrightnessCapChanged()
-        notifyBrowserMinimumBrightnessChanged()
-        applyFullscreenState(widget, template.isFullscreen)
-        if (!widget.isMinimized) {
-            widget.setFocused(true)
-            setFocusedWidget(widget)
+        return runPersistentMutation {
+            lifecycleController.open(browserLifecycle) { widget }
+            notifyMediaBrightnessCapChanged()
+            notifyBrowserMinimumBrightnessChanged()
+            applyFullscreenState(widget, template.isFullscreen)
+            if (!widget.isMinimized) {
+                widget.setFocused(true)
+                setFocusedWidget(widget)
+            }
+            widget
         }
-        return widget
     }
 
     private fun openTextStates(states: List<WidgetPersistence.TextWidgetState>) {
@@ -4948,7 +5589,6 @@ class WidgetContainer @JvmOverloads constructor(
             lifecycleController.open(textLifecycle) { widget }
             applyFullscreenState(widget, states.getOrNull(index)?.isFullscreen == true)
         }
-        notifyContentChanged()
     }
 
     /**
@@ -4965,7 +5605,7 @@ class WidgetContainer @JvmOverloads constructor(
      */
     private fun applyStatusBarState(state: WidgetPersistence.StatusBarState): StatusBarWidget {
         val widget = StatusBarWidget(context, state.x, state.y, 220f, 110f).apply {
-            onStateChanged = { notifyContentChanged() }
+            onStateChanged = { notifyTransientContentChanged() }
         }
         persistenceHelper.restoreStatusBarPosition(widget, state, width, height)
         applyFullscreenState(widget, state.isFullscreen)
@@ -4982,7 +5622,6 @@ class WidgetContainer @JvmOverloads constructor(
         }
         notifyMediaBrightnessCapChanged()
         notifyBrowserMinimumBrightnessChanged()
-        notifyContentChanged()
     }
 
     fun shouldApplyBrowserMinimumBrightness(): Boolean {
@@ -5000,7 +5639,6 @@ class WidgetContainer @JvmOverloads constructor(
             lifecycleController.open(imageLifecycle) { widget }
             applyFullscreenState(widget, validStates.getOrNull(index)?.isFullscreen == true)
         }
-        notifyContentChanged()
     }
 
     /**
@@ -5009,7 +5647,7 @@ class WidgetContainer @JvmOverloads constructor(
      */
     private fun applyMapState(state: WidgetPersistence.MapWidgetState): MapWidget {
         val widget = MapWidget(context, state.x, state.y, state.width, state.height).apply {
-            invalidate = { notifyContentChanged() }
+            invalidate = ::requestRepaint
             configurePhoneRouteTransport(phoneRouteTransport)
             onPhoneRouteConnectionChanged(phoneRouteConnected)
             bindMapNavigation(this)
@@ -5061,7 +5699,6 @@ class WidgetContainer @JvmOverloads constructor(
             lifecycleController.open(videoLifecycle) { widget }
             applyFullscreenState(widget, state.isFullscreen)
         }
-        notifyContentChanged()
     }
 
     private fun openPdfStates(states: List<WidgetPersistence.PdfWidgetState>) {
@@ -5093,7 +5730,6 @@ class WidgetContainer @JvmOverloads constructor(
             lifecycleController.open(pdfLifecycle) { widget }
             applyFullscreenState(widget, state.isFullscreen)
         }
-        notifyContentChanged()
     }
 
     private fun applyLocationState(state: WidgetPersistence.LocationWidgetState): LocationWidget {
@@ -5115,7 +5751,7 @@ class WidgetContainer @JvmOverloads constructor(
      */
     private fun applyCalendarState(state: WidgetPersistence.CalendarWidgetState): CalendarWidget {
         val widget = CalendarWidget(state.x, state.y, state.width, state.height).apply {
-            onStateChanged = { notifyContentChanged() }
+            onStateChanged = { notifyTransientContentChanged() }
             setFontScale(state.fontScale)
             setSnapshot(pendingCalendarSnapshot)
         }
@@ -5130,7 +5766,8 @@ class WidgetContainer @JvmOverloads constructor(
     private fun applyFinanceState(state: WidgetPersistence.FinanceWidgetState): FinanceWidget {
         val widget = FinanceWidget(state.x, state.y, state.width, state.height).apply {
             listener = object : FinanceWidgetListener {
-                override fun onStateChanged() = notifyContentChanged()
+                override fun onStateChanged() = notifyTransientContentChanged()
+                override fun onPersistentStateChanged() = notifyPersistentContentChanged()
                 override fun onDataRequested(visibleConfigs: List<FinanceDashboardTileConfig>, refreshTileIds: List<String>, force: Boolean, reason: String) {
                     dataProvider?.requestFinanceData(visibleConfigs, refreshTileIds, force, reason)
                 }
@@ -5154,7 +5791,8 @@ class WidgetContainer @JvmOverloads constructor(
     private fun applyNewsState(state: WidgetPersistence.NewsWidgetState): NewsWidget {
         val widget = NewsWidget(state.x, state.y, state.width, state.height).apply {
             listener = object : NewsWidgetListener {
-                override fun onStateChanged() = notifyContentChanged()
+                override fun onStateChanged() = notifyTransientContentChanged()
+                override fun onPersistentStateChanged() = notifyPersistentContentChanged()
                 override fun onDataRequested(countryCode: String, force: Boolean, reason: String) {
                     dataProvider?.requestNewsData(countryCode, force, reason)
                 }
@@ -5162,7 +5800,7 @@ class WidgetContainer @JvmOverloads constructor(
                     dataProvider?.requestNewsSourceData(sourceSpec, countryCode, force, reason, completion)
                         ?: completion(Result.failure(IllegalStateException("News data service is unavailable")))
                 }
-                override fun onSourceInputFocusChanged(focused: Boolean) { contentObserver?.onFocusChanged(focused) }
+                override fun onSourceInputFocusChanged(focused: Boolean) { notifyFocusChanged(focused) }
             }
             pendingNewsCountryCode?.let { setCountryCode(it) }
         }
@@ -5174,7 +5812,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun applyNotificationsState(state: WidgetPersistence.NotificationsWidgetState): NotificationsWidget {
         val widget = NotificationsWidget(context, state.x, state.y, state.width, state.height, height.toFloat()).apply {
-            onStateChanged = { notifyContentChanged() }
+            onStateChanged = { notifyTransientContentChanged() }
         }
         persistenceHelper.restoreNotificationsWidgetPosition(widget, state, width, height)
         widget.setScreenHeight(height.toFloat())
@@ -5229,12 +5867,14 @@ class WidgetContainer @JvmOverloads constructor(
     // ==================== Screen Mirroring ====================
 
     fun setMirroringEnabled(enabled: Boolean, phoneIp: String? = null) {
-        screenMirrorWidget?.setMirroringEnabled(enabled, phoneIp)
-        screenMirrorWidget?.onDisplayVisibilityChanged(
-            screenMirrorWidget?.let { isMirrorWidgetVisible(it) } ?: false
-        )
-        notifyMediaBrightnessCapChanged()
-        notifyContentChanged()
+        withTransientChangeBatch {
+            screenMirrorWidget?.setMirroringEnabled(enabled, phoneIp)
+            screenMirrorWidget?.onDisplayVisibilityChanged(
+                screenMirrorWidget?.let { isMirrorWidgetVisible(it) } ?: false
+            )
+            notifyMediaBrightnessCapChanged()
+            notifyTransientContentChanged()
+        }
     }
 
     fun onTrimMemory(level: Int) {

@@ -992,7 +992,12 @@ class BrowserWidget(
         }
     }
 
-    private fun setTabLoading(tabId: Int, isLoading: Boolean, progress: Int) {
+    private fun setTabLoading(
+        tabId: Int,
+        isLoading: Boolean,
+        progress: Int,
+        notifyState: Boolean = true
+    ) {
         val tab = tabs.find { it.id == tabId } ?: return
         val coercedProgress = progress.coerceIn(0, 100)
         val nextIsLoading = isLoading && coercedProgress < 100
@@ -1003,7 +1008,7 @@ class BrowserWidget(
 
         if (changed && tab.id == currentTab()?.id) {
             syncLoadingAnimation()
-            notifyStateChanged()
+            if (notifyState) notifyStateChanged()
         }
     }
 
@@ -1288,9 +1293,24 @@ class BrowserWidget(
         webView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
-                tabs.find { it.id == tabId }?.url = url ?: ""
+                var activeUrlChanged = false
+                tabs.find { it.id == tabId }?.let { tab ->
+                    val nextUrl = url ?: ""
+                    val urlChanged = tab.url != nextUrl
+                    tab.url = nextUrl
+                    activeUrlChanged = urlChanged && tab.id == currentTab()?.id
+                }
                 pageAgentRevision++
-                setTabLoading(tabId, isLoading = true, progress = 0)
+                // URL and loading state change together.  Suppress the loading-only callback
+                // when the active persisted URL changed so the listener receives one cumulative
+                // persistent signal for the navigation.
+                setTabLoading(
+                    tabId,
+                    isLoading = true,
+                    progress = 0,
+                    notifyState = !activeUrlChanged
+                )
+                if (activeUrlChanged) listener?.onPersistentStateChanged()
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {

@@ -104,7 +104,7 @@ class CursorView @JvmOverloads constructor(
     fun setGentleRedrawEnabled(enabled: Boolean) {
         if (gentleRedrawEnabled == enabled) return
         gentleRedrawEnabled = enabled
-        invalidate()
+        triggerRedraw()
     }
     
     /**
@@ -120,8 +120,8 @@ class CursorView @JvmOverloads constructor(
             forceHidden = hidden
             activityObserver?.onVisibilityChanged(isCursorVisible())
             if (useGentleRedraw) {
-                // Single invalidation to avoid power spikes during state transitions
-                invalidate()
+                // Single coalesced invalidation to avoid power spikes during state transitions
+                triggerRedraw()
             } else {
                 triggerRedraw()
             }
@@ -137,19 +137,9 @@ class CursorView @JvmOverloads constructor(
      * Aggressively trigger redraw for AR glasses display.
      */
     private fun triggerRedraw() {
-        if (gentleRedrawEnabled) {
-            invalidate()
-            (parent as? View)?.invalidate()
-            return
-        }
-
-        // Multiple invalidation methods to ensure redraw on AR glasses
-        invalidate()
-        postInvalidate()
-        postInvalidateOnAnimation()
-        
-        // Also invalidate parent
-        (parent as? View)?.invalidate()
+        // A child invalidation is propagated through the binocular view; choose exactly one
+        // thread-safe path so rapid cursor activity cannot enqueue duplicate redraws.
+        if (Looper.myLooper() == Looper.getMainLooper()) invalidate() else postInvalidate()
     }
     
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {

@@ -83,7 +83,6 @@ class InputCoordinator(
                 notifyUserActivity()
                 Log.d(TAG, "Phone DOWN at ${cursorView.getCursorX()}, ${cursorView.getCursorY()} pointerCount=${data.pointerCount}")
                 handlePointerDown(data.pointerCount.coerceAtLeast(1))
-                notifyTransientChange()
             }
             PointerAction.UP -> {
                 markUserInput(UserInputKind.PHONE_UP)
@@ -115,7 +114,6 @@ class InputCoordinator(
                 if (!handleImmediateContextMenuNavigationTap(x, y)) {
                     handleTapAtCoordinates(x, y)
                 }
-                notifyTransientChange()
             }
             PointerAction.DOUBLE_TAP -> {
                 markUserInput(UserInputKind.DOUBLE_TAP)
@@ -123,7 +121,6 @@ class InputCoordinator(
                 cursorView.onActivity()
                 Log.d(TAG, "Phone double-tap at ${cursorView.getCursorX()}, ${cursorView.getCursorY()}")
                 handleDoubleTapAtCoordinates(cursorView.getCursorX(), cursorView.getCursorY())
-                notifyTransientChange()
             }
             PointerAction.TRIPLE_TAP -> {
                 markUserInput(UserInputKind.TAP)
@@ -131,7 +128,6 @@ class InputCoordinator(
                 cursorView.onActivity()
                 Log.d(TAG, "Phone triple-tap")
                 onTripleTap()
-                notifyTransientChange()
             }
             PointerAction.POINTER_COUNT -> {
                 val pointerCount = data.pointerCount.coerceAtLeast(1)
@@ -140,7 +136,6 @@ class InputCoordinator(
                 cursorView.onActivity()
                 Log.d(TAG, "Phone pointer count changed: $pointerCount")
                 handlePointerCountChanged(pointerCount)
-                notifyTransientChange()
             }
         }
     }
@@ -150,7 +145,6 @@ class InputCoordinator(
         val y = cursorView.getCursorY()
 
         if (handleImmediateContextMenuNavigationTap(x, y)) {
-            notifyTransientChange()
             return
         }
 
@@ -298,6 +292,7 @@ class InputCoordinator(
         dy: Float,
         userInitiated: Boolean
     ) {
+        val notificationGeneration = widgetContainer.contentNotificationGeneration()
         if (pointerCount != lastPointerCount) {
             handlePointerCountChanged(pointerCount)
         }
@@ -326,14 +321,18 @@ class InputCoordinator(
                 cursorView.onActivity()
             }
         }
-        notifyTransientChange()
+        // Cursor movement is mirrored even when the widget layer only changed hover chrome.
+        // If the mutation owner emitted a classified widget signal, that signal already
+        // refreshes binocular output and the input wrapper must stay silent.
+        if (widgetContainer.contentNotificationGeneration() == notificationGeneration) {
+            notifyTransientChange()
+        }
     }
 
     private fun handlePointerUp() {
         cursorView.onActivity()
         widgetContainer.onCursorUp(cursorView.getCursorX(), cursorView.getCursorY())
         lastPointerCount = 1
-        notifyTransientChange()
     }
 
     private fun handlePointerCountChanged(pointerCount: Int) {
@@ -376,7 +375,6 @@ class InputCoordinator(
         val y = cursorView.getCursorY()
 
         if (handleImmediateContextMenuNavigationTap(x, y)) {
-            notifyTransientChange()
             return
         }
 
@@ -387,7 +385,6 @@ class InputCoordinator(
             handleTempleTapFallback(x, y)
         }
 
-        notifyTransientChange()
     }
 
     private fun handleTempleTapFallback(x: Float, y: Float) {

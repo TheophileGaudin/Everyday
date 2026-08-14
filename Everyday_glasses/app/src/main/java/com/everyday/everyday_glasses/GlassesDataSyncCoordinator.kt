@@ -41,9 +41,7 @@ class GlassesDataSyncCoordinator(
     private val googleAuthCoordinatorProvider: () -> GoogleAuthCoordinator?,
     private val googleCalendarClientProvider: () -> GoogleCalendarClient?,
     private val localLocationProvider: () -> Location?,
-    private val onPhoneLocationFix: (LocationFix) -> Unit,
-    private val notifyContentChanged: () -> Unit,
-    private val notifyTransientContentChanged: () -> Unit
+    private val onPhoneLocationFix: (LocationFix) -> Unit
 ) {
     companion object {
         private const val TAG = "GlassesDataSync"
@@ -87,7 +85,6 @@ class GlassesDataSyncCoordinator(
         snapshotStore.clearCalendar()
         postUi {
             widgetContainer.setCalendarSnapshot(null)
-            notifyContentChanged()
         }
     }
 
@@ -295,20 +292,7 @@ class GlassesDataSyncCoordinator(
                 }
             }
         }
-        val financeOnly = snapshot.finance != null &&
-            snapshot.location == null &&
-            snapshot.weather == null &&
-            snapshot.calendar == null &&
-            snapshot.news == null &&
-            snapshot.notifications == null
-        if (financeOnly) {
-            syncOrchestrator.cacheAndApplySnapshot(snapshot, notify = false)
-            if (widgetContainer.currentFinanceVisibleConfigs().isNotEmpty()) {
-                notifyTransientContentChanged()
-            }
-        } else {
-            syncOrchestrator.cacheAndApplySnapshot(snapshot, notify = true)
-        }
+        syncOrchestrator.cacheAndApplySnapshot(snapshot, notify = true)
         snapshot.news?.let { news ->
             val pending = pendingNewsSourceRequest
             if (pending != null && pending.sourceSpec == news.sourceSpec) {
@@ -328,7 +312,6 @@ class GlassesDataSyncCoordinator(
                 SyncChannel.FINANCE -> widgetContainer.applyFinanceError(error.message)
                 else -> Log.w(TAG, "Sync error ${error.channel}: ${error.message}")
             }
-            notifyContentChanged()
         }
     }
 
@@ -477,7 +460,6 @@ class GlassesDataSyncCoordinator(
                 Log.w(TAG, "Local news refresh failed", error)
                 postUi {
                     widgetContainer.applyNewsError("No news available")
-                    notifyContentChanged()
                 }
                 completion?.invoke(Result.failure(error))
             } finally {
@@ -520,7 +502,6 @@ class GlassesDataSyncCoordinator(
                 Log.w(TAG, "Local finance refresh failed", error)
                 postUi {
                     widgetContainer.applyFinanceError("No data")
-                    notifyContentChanged()
                 }
             }
         }
@@ -582,17 +563,18 @@ class GlassesDataSyncCoordinator(
 
     private fun applySnapshot(snapshot: SyncSnapshot, notify: Boolean) {
         postUi {
-            snapshot.location?.let(::applyLocation)
-            snapshot.weather?.let { applyWeather(it, updateUnitCountry = false) }
-            snapshot.calendar?.let(::applyCalendar)
-            snapshot.news?.let(::applyNews)
-            snapshot.finance?.let { applyFinance(it, notify = false) }
-            snapshot.notifications?.let(widgetContainer::applyNotificationsSnapshot)
-            snapshot.map?.let {
-                Log.d(TAG, "Applying phone map snapshot: roads=${it.roads.size} pois=${it.pois.size}")
-                widgetContainer.applyMapSnapshot(it)
+            widgetContainer.withTransientChangeBatch {
+                snapshot.location?.let(::applyLocation)
+                snapshot.weather?.let { applyWeather(it, updateUnitCountry = false) }
+                snapshot.calendar?.let(::applyCalendar)
+                snapshot.news?.let(::applyNews)
+                snapshot.finance?.let { applyFinance(it, notify = notify) }
+                snapshot.notifications?.let(widgetContainer::applyNotificationsSnapshot)
+                snapshot.map?.let {
+                    Log.d(TAG, "Applying phone map snapshot: roads=${it.roads.size} pois=${it.pois.size}")
+                    widgetContainer.applyMapSnapshot(it)
+                }
             }
-            if (notify) notifyContentChanged()
         }
     }
 

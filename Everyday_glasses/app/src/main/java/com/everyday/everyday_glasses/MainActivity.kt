@@ -159,8 +159,6 @@ class MainActivity : AppCompatActivity() {
     private var timeUpdateRunnable: Runnable? = null
     
     // Auto-save timer
-    private var autoSaveRunnable: Runnable? = null
-    private val AUTO_SAVE_INTERVAL_MS = 30000L
 
     // Pending widget restoration (waits for views to be ready)
     private var pendingWidgetRestore = false
@@ -412,7 +410,7 @@ class MainActivity : AppCompatActivity() {
                 override fun onStatusChanged(status: String) {
                     runOnUiThread {
                         Log.d(TAG, "Connection status: $status")
-                        binocularView.notifyContentChanged()
+                        notifyTransientBinocularChange()
                     }
                 }
 
@@ -445,7 +443,6 @@ class MainActivity : AppCompatActivity() {
                             )
                             widgetContainer.onPhoneReconnected()
                         }
-                        binocularView.notifyContentChanged()
                     }
                 }
             }
@@ -473,7 +470,6 @@ class MainActivity : AppCompatActivity() {
                         // Note: Text selection is now handled by glasses-side long-press detection
                         // Double-tap on focused text shows the text edit menu
                         widgetContainer.setPhoneClipboard(clipboardContent)
-                        binocularView.notifyContentChanged()
                     }
                 }
 
@@ -482,7 +478,6 @@ class MainActivity : AppCompatActivity() {
                         Log.d(TAG, "Phone clipboard updated: chars=${clipboardContent.length}")
                         // Store phone clipboard content for paste operations
                         widgetContainer.setPhoneClipboard(clipboardContent)
-                        binocularView.notifyContentChanged()
                     }
                 }
             }
@@ -508,7 +503,6 @@ class MainActivity : AppCompatActivity() {
                     runOnUiThread {
                         Log.d(TAG, "Open browser requested from phone: ${address.take(80)}")
                         widgetContainer.executeOpenUrlCommand(address)
-                        binocularView.notifyContentChanged()
                     }
                 }
             }
@@ -532,7 +526,6 @@ class MainActivity : AppCompatActivity() {
                         }
 
                         widgetContainer.setMirroringEnabled(enabled, ip)
-                        binocularView.notifyContentChanged()
                     }
                 }
             }
@@ -548,7 +541,6 @@ class MainActivity : AppCompatActivity() {
                             dataSyncCoordinator.clearCalendarSnapshot()
                         }
                         googleAuthCoordinator.onPhoneAuthStateChanged(status, account, detail)
-                        binocularView.notifyContentChanged()
                     }
                 }
             }
@@ -591,14 +583,12 @@ class MainActivity : AppCompatActivity() {
                 override fun onSubtitleStatusReceived(status: SubtitleStatus) {
                     runOnUiThread {
                         widgetContainer.applySubtitleStatus(status)
-                        binocularView.notifyContentChanged()
                     }
                 }
 
                 override fun onSubtitleTranscriptReceived(transcript: SubtitleTranscript) {
                     runOnUiThread {
                         widgetContainer.applySubtitleTranscript(transcript)
-                        binocularView.notifyContentChanged()
                     }
                 }
             }
@@ -643,7 +633,6 @@ class MainActivity : AppCompatActivity() {
                         assistantNetworkLease.update(status.state, status.sessionId != null)
                         widgetContainer.setAssistantStatus(status)
                         rfcommClient?.sendAssistantStatus(status)
-                        binocularView.notifyContentChanged()
                     }
                 }
 
@@ -654,7 +643,6 @@ class MainActivity : AppCompatActivity() {
                 ) {
                     runOnUiThread {
                         widgetContainer.setAssistantConfiguration(configuration, models, detail)
-                        binocularView.notifyContentChanged()
                     }
                 }
             },
@@ -701,9 +689,6 @@ class MainActivity : AppCompatActivity() {
         // Start time updates
         startTimeUpdates()
 
-        // Start periodic auto-save
-        startAutoSave()
-
         // Check if this is a returning user BEFORE layout happens.
         // This prevents onSizeChanged() from creating default singleton widgets
         // that the user has previously closed.
@@ -747,20 +732,6 @@ class MainActivity : AppCompatActivity() {
         Log.d(TAG, "onCreate complete, isPhoneMode=$isPhoneMode")
     }
 
-    /**
-     * Start periodic auto-save.
-     */
-    private fun startAutoSave() {
-        autoSaveRunnable = object : Runnable {
-            override fun run() {
-                saveWidgetState()
-                Log.d(TAG, "Auto-saved widgets")
-                handler.postDelayed(this, AUTO_SAVE_INTERVAL_MS)
-            }
-        }
-        handler.postDelayed(autoSaveRunnable!!, AUTO_SAVE_INTERVAL_MS)
-    }
-    
     /**
      * Hide system UI and enable immersive mode to prevent OS gestures.
      */
@@ -823,10 +794,9 @@ class MainActivity : AppCompatActivity() {
             override fun onFocusChanged(focused: Boolean) {
                 Log.d(TAG, "Widget focus changed: $focused")
                 rfcommClient?.sendTextFieldFocus(focused)
-                notifyTransientBinocularChange()
             }
 
-            override fun onContentChanged() {
+            override fun onPersistentContentChanged() {
                 refreshBinocularRenderingStrategy()
                 notifyStructuralBinocularChange(contentClass = BinocularContentClass.INTERACTIVE)
                 saveWidgetStateDebounced()
@@ -834,6 +804,11 @@ class MainActivity : AppCompatActivity() {
 
             override fun onTransientContentChanged() {
                 notifyTransientBinocularChange(contentClass = BinocularContentClass.INTERACTIVE)
+            }
+
+            override fun onDashboardRestored() {
+                refreshBinocularRenderingStrategy()
+                notifyStructuralBinocularChange(contentClass = BinocularContentClass.INTERACTIVE)
             }
 
             override fun onMediaFrame(sourceId: String) {
@@ -1077,13 +1052,7 @@ class MainActivity : AppCompatActivity() {
                 if (::googleCalendarClient.isInitialized) googleCalendarClient else null
             },
             localLocationProvider = { previousSpeedLocation },
-            onPhoneLocationFix = ::applyPhoneLocationFix,
-            notifyContentChanged = {
-                binocularView.notifyContentChanged()
-            },
-            notifyTransientContentChanged = {
-                notifyTransientBinocularChange()
-            }
+            onPhoneLocationFix = ::applyPhoneLocationFix
         )
         widgetContainer.dataProvider = object : WidgetDataProvider {
             override fun requestFinanceData(
@@ -1122,8 +1091,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateGoogleAuthUi(state: GoogleAuthState) {
         widgetContainer.setGoogleAuthState(state)
-        refreshBinocularRenderingStrategy()
-        notifyStructuralBinocularChange(contentClass = BinocularContentClass.INTERACTIVE)
     }
 
     private fun setupAmbientLightSensor() {
@@ -1370,7 +1337,6 @@ class MainActivity : AppCompatActivity() {
                         Log.d(TAG, "WiFi Direct connected, now enabling mirroring to $ip")
                         runOnUiThread {
                             widgetContainer.setMirroringEnabled(true, ip)
-                            binocularView.notifyContentChanged()
                         }
                         pendingWifiDirectMirrorIp = null
                     }
@@ -1460,9 +1426,8 @@ class MainActivity : AppCompatActivity() {
             // Clear transition flag before final invalidation
             isTransitioningDisplayState = false
 
-            // Use a single, controlled invalidation via post to allow the view
-            // hierarchy to settle before redrawing. This prevents power spikes.
-            binocularView.post { binocularView.invalidate() }
+            // WidgetContainer emits the single transient repaint/binocular update for this
+            // display transition after its visibility state has settled.
         }
         
         // Wire up callbacks for checking pinned widgets
@@ -1553,22 +1518,18 @@ class MainActivity : AppCompatActivity() {
             override fun onModeChanged(enabled: Boolean) {
                 Log.d(TAG, "3DOF mode changed: enabled=$enabled")
                 widgetContainer.set3DofEnabled(enabled)
-                notifyTransientBinocularChange()
             }
 
             override fun onOrientationChanged(offsetX: Float, offsetY: Float) {
                 widgetContainer.set3DofOffset(offsetX, offsetY)
-                notifyTransientBinocularChange()
             }
 
             override fun onRollChanged(rollDegrees: Float) {
                 widgetContainer.set3DofRoll(rollDegrees)
-                notifyTransientBinocularChange()
             }
 
             override fun onTransitionProgress(progress: Float) {
                 widgetContainer.set3DofTransitionProgress(progress)
-                notifyTransientBinocularChange()
             }
         }
 
@@ -1650,7 +1611,6 @@ class MainActivity : AppCompatActivity() {
 
         if (containerWasNotAwake) {
             Log.d(TAG, "Recovered visible wake state after stale internal mask ($reason)")
-            notifyStructuralBinocularChange(contentClass = BinocularContentClass.INTERACTIVE)
         }
 
         applyEffectiveWindowBrightness()
@@ -1681,8 +1641,6 @@ class MainActivity : AppCompatActivity() {
         Log.d(TAG, "Restoring widget dashboard: isFirstRun=${state.isFirstRun}, widgets=${state.widgets.size}, templates=${state.closedTemplates.size}")
 
         if (state.isFirstRun) {
-            refreshBinocularRenderingStrategy()
-            notifyStructuralBinocularChange()
             return
         }
 
@@ -1691,9 +1649,6 @@ class MainActivity : AppCompatActivity() {
             ?.let { BuiltInLayouts.build(it, widgetContainer.width.toFloat(), widgetContainer.height.toFloat()) }
             ?.let(WidgetPersistenceV2::fromLegacy)
         widgetContainer.applyPersistedDashboardReplacingCurrent(delivered ?: state)
-
-        refreshBinocularRenderingStrategy()
-        notifyStructuralBinocularChange()
     }
     
     /**
@@ -2041,6 +1996,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // Flush the last persistent mutation even when the activity is destroyed without a
+        // preceding pause/stop callback.
+        if (::persistenceManager.isInitialized) saveWidgetState()
         if (::voiceAssistantCoordinator.isInitialized) voiceAssistantCoordinator.release()
         if (::browserRoutingCoordinator.isInitialized) browserRoutingCoordinator.release()
         if (::assistantNetworkLease.isInitialized) assistantNetworkLease.close()
@@ -2059,9 +2017,6 @@ class MainActivity : AppCompatActivity() {
 
         // Stop time updates
         timeUpdateRunnable?.let { handler.removeCallbacks(it) }
-
-        // Stop auto-save
-        autoSaveRunnable?.let { handler.removeCallbacks(it) }
 
         layoutSwitchBrightnessRestoreRunnable?.let { handler.removeCallbacks(it) }
         layoutSwitchBrightnessRestoreRunnable = null
@@ -2854,7 +2809,6 @@ class MainActivity : AppCompatActivity() {
                 // Create ImageWidget on UI thread
                 runOnUiThread {
                     widgetContainer.createImageWidget(imageFile.absolutePath)
-                    binocularView.notifyContentChanged()
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling received image: ${e.message}", e)
@@ -2929,8 +2883,10 @@ class MainActivity : AppCompatActivity() {
                     setupLocationUpdates()
                 } else {
                     // Permission denied, show dashes
-                    widgetContainer.setLocationPermissionDenied()
-                    widgetContainer.setSpeedPermissionDenied()
+                    widgetContainer.withTransientChangeBatch {
+                        widgetContainer.setLocationPermissionDenied()
+                        widgetContainer.setSpeedPermissionDenied()
+                    }
                     previousSpeedLocation = null
                     smoothedSpeedKmh = 0f
                     lastReliableSpeedSampleElapsedMs = 0L
@@ -2939,7 +2895,6 @@ class MainActivity : AppCompatActivity() {
                     speedLog { "Location permission denied in result -> speed disabled" }
                 }
 
-                binocularView.notifyContentChanged()
             }
 
             REQUEST_STORAGE_PERMISSION -> {

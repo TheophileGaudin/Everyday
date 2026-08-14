@@ -9,8 +9,10 @@ import com.everyday.shared.sync.FinanceDashboardTileConfig
 /** Observes user-visible content changes produced by [WidgetContainer]. */
 interface WidgetContentObserver {
     fun onFocusChanged(focused: Boolean)
-    fun onContentChanged()
+    fun onPersistentContentChanged()
     fun onTransientContentChanged()
+    /** Emits the one structural binocular refresh that completes a suppressed restore. */
+    fun onDashboardRestored() = Unit
     fun onMediaFrame(sourceId: String)
     fun onBinocularContentSourceChanged(
         sourceId: String,
@@ -78,7 +80,7 @@ interface WidgetDataProvider {
     fun requestMapData(point: MapGeoPoint, config: PoiDisplayConfig)
 }
 
-interface MirrorWidgetListener {
+interface MirrorWidgetListener : WidgetChangeListener {
     fun onStateChanged(state: ScreenMirrorWidget.State)
     fun onStreamStateChanged(state: ScreenMirrorWidget.StreamState)
     fun onFrameReady()

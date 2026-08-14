@@ -15,7 +15,8 @@ class WidgetLayoutManager(
     private val dismissNamePrompt: () -> Unit,
     private val showDeleteConfirmation: (String) -> Unit,
     private val beforeApplyLayout: () -> Unit,
-    private val notifyContentChanged: () -> Unit
+    private val notifyTransientContentChanged: () -> Unit,
+    private val notifyPersistentContentChanged: () -> Unit
 ) {
     companion object {
         private const val TAG = "WidgetLayoutManager"
@@ -37,10 +38,11 @@ class WidgetLayoutManager(
 
     fun requestDeleteLayout(name: String): Boolean {
         if (isDeliveredWithoutSavedOverride(name)) {
+            notifyTransientContentChanged()
             return false
         }
         showDeleteConfirmation(name)
-        notifyContentChanged()
+        notifyTransientContentChanged()
         return true
     }
 
@@ -51,12 +53,12 @@ class WidgetLayoutManager(
         val trimmedName = name.trim()
         if (trimmedName.isBlank()) {
             showNameError("Name required")
-            notifyContentChanged()
+            notifyTransientContentChanged()
             return
         }
         if (BuiltInLayouts.isDelivered(trimmedName)) {
             showNameError("Delivered layout names are protected")
-            notifyContentChanged()
+            notifyTransientContentChanged()
             return
         }
         val saved = stateStore.saveLayout(trimmedName, capturePersistedDashboard())
@@ -66,8 +68,10 @@ class WidgetLayoutManager(
             Log.d(TAG, "Saved widget layout '$trimmedName'")
         } else {
             showNameError("Could not save layout")
+            notifyTransientContentChanged()
+            return
         }
-        notifyContentChanged()
+        notifyPersistentContentChanged()
     }
 
     fun deleteLayoutByName(name: String) {
@@ -76,8 +80,10 @@ class WidgetLayoutManager(
                 activeLayoutName = null
             }
             Log.d(TAG, "Deleted widget layout '$name'")
+            notifyPersistentContentChanged()
+        } else {
+            notifyTransientContentChanged()
         }
-        notifyContentChanged()
     }
 
     fun saveCurrentLayout() {
@@ -95,7 +101,7 @@ class WidgetLayoutManager(
                 ?.takeUnless { BuiltInLayouts.isDelivered(it) }
                 .orEmpty()
         showNamePrompt(suggestedName)
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     private fun loadLayoutByName(name: String) {
@@ -106,5 +112,8 @@ class WidgetLayoutManager(
         beforeApplyLayout()
         applyDashboard(state)
         activeLayoutName = loadedName
+        // Loading a layout is a user mutation.  The dashboard restore itself suppresses
+        // notifications, so emit the single persistent signal after the active name changes.
+        notifyPersistentContentChanged()
     }
 }

@@ -127,8 +127,8 @@ class HoverControlsLayoutEditor(
     // ==================== Layout ====================
 
     init {
-        resetPlacementsToDefault(notify = false)
-        applyPlacementsToControls()
+        resetPlacementsToDefaultInternal(notify = false)
+        applyPlacementsToControls(notify = false)
     }
 
     private fun defaultCellFor(controlId: String): GridCell = when (controlId) {
@@ -143,7 +143,7 @@ class HoverControlsLayoutEditor(
         menuKind = MenuKind.NONE
         draggingId = null
         ignoreNextDownCell = null
-        applyPlacementsToControls()
+        applyPlacementsToControls(notify = false)
     }
 
     fun dismiss() {
@@ -164,7 +164,7 @@ class HoverControlsLayoutEditor(
 
     fun applyPersistedPlacements(states: List<WidgetPersistence.HoverControlPlacementState>?) {
         if (states == null) {
-            resetPlacementsToDefault(notify = true)
+            resetPlacementsToDefaultInternal(notify = false)
             return
         }
 
@@ -191,14 +191,14 @@ class HoverControlsLayoutEditor(
                 occupied.add(defaultCell)
             }
         }
-        applyPlacementsToControls()
+        applyPlacementsToControls(notify = false)
     }
 
-    fun resetPlacementsToDefault() {
-        resetPlacementsToDefault(notify = true)
+    fun resetPlacementsToDefault(notify: Boolean = true) {
+        resetPlacementsToDefaultInternal(notify = notify)
     }
 
-    private fun resetPlacementsToDefault(notify: Boolean) {
+    private fun resetPlacementsToDefaultInternal(notify: Boolean) {
         placements.clear()
         ignoreNextDownCell = null
         for (control in controls) {
@@ -207,7 +207,7 @@ class HoverControlsLayoutEditor(
         if (notify) applyPlacementsToControls()
     }
 
-    private fun applyPlacementsToControls() {
+    private fun applyPlacementsToControls(notify: Boolean = true) {
         for (control in controls) {
             val cell = placements[control.id]
             if (cell != null) {
@@ -219,7 +219,7 @@ class HoverControlsLayoutEditor(
                 control.clearHover()
             }
         }
-        listener?.onLayoutChanged()
+        if (notify) listener?.onLayoutChanged()
     }
 
     private fun cellCenter(cell: GridCell): Pair<Float, Float> =
@@ -351,6 +351,7 @@ class HoverControlsLayoutEditor(
     fun onUp(): Boolean {
         if (!isVisible) return false
         val id = draggingId ?: return true
+        val previousPlacements = placements.toMap()
         if (dragMoved) {
             val target = cellAt(dragX, dragY)
             if (target != null) {
@@ -369,7 +370,7 @@ class HoverControlsLayoutEditor(
         }
         draggingId = null
         dragMoved = false
-        applyPlacementsToControls()
+        applyPlacementsToControls(notify = previousPlacements != placements)
         return true
     }
 
@@ -463,8 +464,8 @@ class HoverControlsLayoutEditor(
             is Action.Remove -> {
                 val cell = menuCell
                 if (cell != null) {
-                    controlIdAt(cell)?.let { placements.remove(it) }
-                    applyPlacementsToControls()
+                    val removed = controlIdAt(cell)?.let { placements.remove(it) }
+                    if (removed != null) applyPlacementsToControls()
                 }
                 closeMenu()
             }
@@ -477,10 +478,11 @@ class HoverControlsLayoutEditor(
                 if (cell != null) {
                     // Move the picked control into this cell, removing whoever was there
                     // and unplacing the control from any previous cell.
+                    val previousPlacements = placements.toMap()
                     placements.remove(action.controlId)
                     controlIdAt(cell)?.let { placements.remove(it) }
                     placements[action.controlId] = cell
-                    applyPlacementsToControls()
+                    if (previousPlacements != placements) applyPlacementsToControls()
                 }
                 closeMenu()
             }

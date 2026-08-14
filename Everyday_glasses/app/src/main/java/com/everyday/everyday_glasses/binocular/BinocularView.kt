@@ -247,11 +247,8 @@ class BinocularView @JvmOverloads constructor(
             invalidateAllChildren(contentContainer)
         }
 
-        // Invalidate ourselves
-        invalidate()
-
-        // Also use postInvalidate for thread safety
-        postInvalidate()
+        // Invalidate once; callers may arrive from a worker callback.
+        if (Looper.myLooper() == Looper.getMainLooper()) invalidate() else postInvalidate()
 
         if (isStructuralUpdate) {
             // Force the parent window to redraw as well for structural changes.

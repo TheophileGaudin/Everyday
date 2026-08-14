@@ -8,8 +8,8 @@ import com.everyday.shared.command.AppCommandInvocation
 class SettingsController(
     private val resources: Resources,
     private val defaultSpeedVisibilityThresholdKmh: Float,
-    private val invalidateView: () -> Unit,
-    private val notifyContentChanged: () -> Unit,
+    private val notifyTransientContentChanged: () -> Unit,
+    private val notifyPersistentContentChanged: () -> Unit,
     private val setSpeedometerForceVisibleWhenIdle: (Boolean) -> Boolean,
     private val isSmartAlignmentEnabled: () -> Boolean,
     private val setSmartAlignmentEnabled: (Boolean) -> Unit,
@@ -41,6 +41,8 @@ class SettingsController(
     private var hoverControlPlacements: List<WidgetPersistence.HoverControlPlacementState>? = null
     private var hasHoverControlPlacements = false
     private var shortcutsSettingsMenu: ShortcutsSettingsMenu? = null
+    private var hoverLayoutChangeEmitted = false
+    private var hoverDismissalEmitted = false
     private var lastScreenWidth: Float = 0f
     private var lastScreenHeight: Float = 0f
 
@@ -67,15 +69,15 @@ class SettingsController(
         hoverControlsLayoutEditor = HoverControlsLayoutEditor(screenWidth, screenHeight, controls).apply {
             listener = object : HoverControlsLayoutEditor.Listener {
                 override fun onLayoutChanged() {
+                    hoverLayoutChangeEmitted = true
                     hoverControlPlacements = exportPlacements()
                     hasHoverControlPlacements = true
-                    invalidateView()
-                    notifyContentChanged()
+                    notifyPersistentContentChanged()
                 }
 
                 override fun onDismissed() {
-                    invalidateView()
-                    notifyContentChanged()
+                    hoverDismissalEmitted = true
+                    notifyTransientContentChanged()
                 }
             }
             if (hasHoverControlPlacements) {
@@ -90,8 +92,7 @@ class SettingsController(
     fun showHoverControlsLayoutEditor() {
         val editor = hoverControlsLayoutEditor ?: return
         editor.show()
-        invalidateView()
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     fun getHoverControlPlacements(): List<WidgetPersistence.HoverControlPlacementState>? =
@@ -107,16 +108,14 @@ class SettingsController(
         hoverControlPlacements = migrated
         hasHoverControlPlacements = true
         hoverControlsLayoutEditor?.applyPersistedPlacements(migrated)
-        invalidateView()
-        notifyContentChanged()
+        notifyPersistentContentChanged()
     }
 
-    fun resetHoverControlPlacementsToDefault() {
+    fun resetHoverControlPlacementsToDefault(notify: Boolean = true) {
         hoverControlPlacements = null
         hasHoverControlPlacements = false
-        hoverControlsLayoutEditor?.resetPlacementsToDefault()
-        invalidateView()
-        notifyContentChanged()
+        hoverControlsLayoutEditor?.resetPlacementsToDefault(notify = false)
+        if (notify) notifyPersistentContentChanged()
     }
 
     fun drawHoverControlsLayoutEditor(canvas: Canvas) {
@@ -127,7 +126,7 @@ class SettingsController(
         val editor = hoverControlsLayoutEditor ?: return false
         if (!editor.isVisible) return false
         editor.onDown(x, y)
-        notifyContentChanged()
+        notifyTransientContentChanged()
         return true
     }
 
@@ -135,7 +134,7 @@ class SettingsController(
         val editor = hoverControlsLayoutEditor ?: return false
         if (!editor.isVisible) return false
         editor.onMove(x, y)
-        notifyContentChanged()
+        notifyTransientContentChanged()
         return true
     }
 
@@ -143,22 +142,33 @@ class SettingsController(
         val editor = hoverControlsLayoutEditor ?: return
         if (!editor.isVisible) return
         editor.onUp()
-        notifyContentChanged()
     }
 
     fun handleHoverControlsLayoutEditorTap(x: Float, y: Float): Boolean? {
         val editor = hoverControlsLayoutEditor ?: return null
         if (!editor.isVisible) return null
+        hoverLayoutChangeEmitted = false
+        hoverDismissalEmitted = false
         val consumed = editor.onTap(x, y)
-        if (consumed) notifyContentChanged()
+        if (consumed && !hoverLayoutChangeEmitted && !hoverDismissalEmitted) {
+            notifyTransientContentChanged()
+        }
+        hoverLayoutChangeEmitted = false
+        hoverDismissalEmitted = false
         return true
     }
 
     fun handleHoverControlsLayoutEditorDoubleTap(x: Float, y: Float): Boolean? {
         val editor = hoverControlsLayoutEditor ?: return null
         if (!editor.isVisible) return null
+        hoverLayoutChangeEmitted = false
+        hoverDismissalEmitted = false
         val consumed = editor.onDoubleTap(x, y)
-        if (consumed) notifyContentChanged()
+        if (consumed && !hoverLayoutChangeEmitted && !hoverDismissalEmitted) {
+            notifyTransientContentChanged()
+        }
+        hoverLayoutChangeEmitted = false
+        hoverDismissalEmitted = false
         return true
     }
 
@@ -175,11 +185,11 @@ class SettingsController(
                         setSpeedometerForceVisibleWhenIdle(speedVisibilityThresholdKmh <= 0f)
                         notifySpeedVisibilityThresholdChanged(threshold)
                     }
-                    invalidateView()
+                    notifyTransientContentChanged()
                 }
 
                 override fun onDismissed() {
-                    notifyContentChanged()
+                    notifyTransientContentChanged()
                 }
             }
         }
@@ -193,13 +203,14 @@ class SettingsController(
             createDashboardSettings(screenWidth, screenHeight)
             Log.d(TAG, "DashboardSettings created")
         }
+        notifyTransientContentChanged()
     }
 
     fun showSpeedometerSettingsMenu() {
         speedometerSettingsMenu?.let { menu ->
             menu.setThreshold(speedVisibilityThresholdKmh, notify = false)
             menu.show()
-            notifyContentChanged()
+            notifyTransientContentChanged()
         }
     }
 
@@ -240,28 +251,25 @@ class SettingsController(
             listener = object : ShortcutsSettingsMenu.Listener {
                 override fun onShortcutsChanged(shortcuts: List<com.everyday.shared.command.AppCommandInvocation>) {
                     this@SettingsController.onShortcutsChanged(shortcuts)
-                    invalidateView()
-                    notifyContentChanged()
+                    notifyTransientContentChanged()
                 }
 
                 override fun onDismissed() {
                     shortcutsSettingsMenu = null
-                    invalidateView()
-                    notifyContentChanged()
+                    notifyTransientContentChanged()
                 }
             }
             show()
         }
         shortcutsSettingsMenu = menu
-        invalidateView()
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     fun handleShortcutsSettingsMenuDown(x: Float, y: Float): Boolean {
         val menu = shortcutsSettingsMenu ?: return false
         if (!menu.isVisible) return false
         menu.onDown(x, y)
-        notifyContentChanged()
+        notifyTransientContentChanged()
         return true
     }
 
@@ -269,7 +277,7 @@ class SettingsController(
         val menu = shortcutsSettingsMenu ?: return false
         if (!menu.isVisible) return false
         menu.onMove(x, y)
-        notifyContentChanged()
+        notifyTransientContentChanged()
         return true
     }
 
@@ -277,14 +285,14 @@ class SettingsController(
         val menu = shortcutsSettingsMenu ?: return
         if (!menu.isVisible) return
         menu.onUp()
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     fun handleShortcutsSettingsMenuTap(x: Float, y: Float): Boolean? {
         val menu = shortcutsSettingsMenu ?: return null
         if (!menu.isVisible) return null
         val consumed = menu.onTap(x, y)
-        if (consumed) notifyContentChanged()
+        if (consumed) notifyTransientContentChanged()
         return true
     }
 
@@ -293,7 +301,7 @@ class SettingsController(
         val menu = speedometerSettingsMenu ?: return false
         if (!menu.isVisible) return false
         menu.onDown(x, y)
-        notifyContentChanged()
+        notifyTransientContentChanged()
         return true
     }
 
@@ -301,7 +309,7 @@ class SettingsController(
         val menu = speedometerSettingsMenu ?: return false
         if (!menu.isVisible) return false
         menu.onMove(x, y)
-        notifyContentChanged()
+        notifyTransientContentChanged()
         return true
     }
 
@@ -309,7 +317,7 @@ class SettingsController(
         val menu = speedometerSettingsMenu ?: return
         if (!menu.isVisible) return
         menu.onUp()
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     fun handleSpeedometerTap(x: Float, y: Float): Boolean? {
@@ -322,7 +330,7 @@ class SettingsController(
         val settings = dashboardSettings ?: return false
         if (!settings.isVisible) return false
         settings.onDown(x, y)
-        notifyContentChanged()
+        notifyTransientContentChanged()
         return true
     }
 
@@ -330,7 +338,7 @@ class SettingsController(
         val settings = dashboardSettings ?: return false
         if (!settings.isVisible) return false
         settings.onMove(x, y)
-        notifyContentChanged()
+        notifyTransientContentChanged()
         return true
     }
 
@@ -338,14 +346,14 @@ class SettingsController(
         val settings = dashboardSettings ?: return
         if (!settings.isVisible) return
         settings.onUp()
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     fun handleDashboardTap(x: Float, y: Float): Boolean? {
         val settings = dashboardSettings ?: return null
         if (!settings.isVisible) return null
         val consumed = settings.onTap(x, y)
-        if (consumed) notifyContentChanged()
+        if (consumed) notifyTransientContentChanged()
         return true
     }
 
@@ -428,8 +436,7 @@ class SettingsController(
     fun setGoogleAuthState(state: GoogleAuthState) {
         googleAuthState = state
         dashboardSettings?.googleAuthState = state
-        invalidateView()
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     fun setAssistantConfiguration(configuration: AssistantConfiguration?, models: List<AssistantModel>, detail: String) {
@@ -442,8 +449,7 @@ class SettingsController(
             geminiModelLabel = modelLabel(configuration)
             geminiDetail = detail
         }
-        invalidateView()
-        notifyContentChanged()
+        notifyTransientContentChanged()
     }
 
     private fun modelLabel(configuration: AssistantConfiguration?): String = when {
@@ -480,56 +486,55 @@ class SettingsController(
             handler = object : DashboardSettings.DashboardSettingsHandler {
                 override fun onBrightnessChanged(value: Float) {
                     executeBrightnessCommand(value)
-                    invalidateView()
+                    notifyTransientContentChanged()
                 }
 
                 override fun onUnitSystemModeChanged(mode: UnitSystemMode) {
                     notifyUnitSystemModeChanged(mode)
-                    invalidateView()
-                    notifyContentChanged()
+                    notifyTransientContentChanged()
                 }
 
                 override fun onAdaptiveBrightnessChanged(enabled: Boolean) {
                     this@SettingsController.adaptiveBrightnessEnabled = enabled
                     notifyAdaptiveBrightnessChanged(enabled)
-                    invalidateView()
+                    notifyTransientContentChanged()
                 }
 
                 override fun onHeadUpTimeChanged(value: Float) {
                     val ms = headUpTimeValueToMs(value)
                     this@SettingsController.headUpTimeMs = ms
                     notifyHeadUpTimeChanged(ms)
-                    invalidateView()
+                    notifyTransientContentChanged()
                 }
 
                 override fun onWakeDurationChanged(value: Float) {
                     val ms = wakeDurationValueToMs(value)
                     this@SettingsController.wakeDurationMs = ms
                     notifyWakeDurationChanged(ms)
-                    invalidateView()
+                    notifyTransientContentChanged()
                 }
 
                 override fun onAngleThresholdChanged(degrees: Float) {
                     this@SettingsController.angleThresholdDegrees = degrees
                     notifyAngleThresholdChanged(degrees)
-                    invalidateView()
+                    notifyTransientContentChanged()
                 }
 
                 override fun onHeadsUpEnabledChanged(enabled: Boolean) {
                     this@SettingsController.headsUpEnabled = enabled
                     notifyHeadsUpEnabledChanged(enabled)
-                    invalidateView()
+                    notifyTransientContentChanged()
                 }
 
                 override fun onSmartAlignmentChanged(enabled: Boolean) {
                     setSmartAlignmentEnabled(enabled)
                     notifySmartAlignmentChanged(enabled)
-                    invalidateView()
+                    notifyTransientContentChanged()
                 }
 
                 override fun onConnectGoogle() {
                     connectGoogle()
-                    invalidateView()
+                    notifyTransientContentChanged()
                 }
 
                 override fun onPasteGeminiKey() {
@@ -546,17 +551,17 @@ class SettingsController(
 
                 override fun onGrantCalendarAccess() {
                     grantCalendarAccess()
-                    invalidateView()
+                    notifyTransientContentChanged()
                 }
 
                 override fun onDisconnectGoogle() {
                     disconnectGoogle()
-                    invalidateView()
+                    notifyTransientContentChanged()
                 }
 
                 override fun onRetryGoogleAuth() {
                     retryGoogleAuth()
-                    invalidateView()
+                    notifyTransientContentChanged()
                 }
 
                 override fun onAppearanceRequested() {
@@ -575,6 +580,5 @@ class SettingsController(
 
             show()
         }
-        notifyContentChanged()
     }
 }

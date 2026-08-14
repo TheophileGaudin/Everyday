@@ -297,12 +297,19 @@ class WidgetLifecycleController(
         val registration = requireNotNull(registrations[record.type]) { "No lifecycle registration for ${record.type}" }
         val codec = requireNotNull(registration.stateCodec) { "No persistence codec for ${record.type}" }
         val state = requireNotNull(codec.decode(record.state)) { "Invalid state for ${record.type}" }
-        return restore(record.type, state)?.also { widget ->
-            registry.rebindStableId(widget, record.instanceId)
-            if (state is WidgetPersistence.CommonWidgetFields && state.isFullscreen && !widget.isMinimized && !widget.isFullscreen) {
-                widget.toggleFullscreen()
+        var restored: BaseWidget? = null
+        mutate {
+            restored = registration.restoreCandidate(state)?.also { widget ->
+                registerCandidate(widget, registration)
+                registry.rebindStableId(widget, record.instanceId)
+                if (state is WidgetPersistence.CommonWidgetFields &&
+                    state.isFullscreen && !widget.isMinimized && !widget.isFullscreen
+                ) {
+                    widget.toggleFullscreen()
+                }
             }
         }
+        return restored
     }
 
     private fun singletonRegistration(type: WidgetTypeId): WidgetLifecycleRegistration<out BaseWidget, out Any> {

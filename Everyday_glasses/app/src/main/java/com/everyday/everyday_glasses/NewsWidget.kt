@@ -925,8 +925,12 @@ class NewsWidget(
                 } else {
                     sourceSpec = requestedSpec
                     sourcePanelError = null
-                    applySnapshotInternal(snapshot)
-                    closeSourcePanel()
+                    // A successful source switch changes persisted configuration and the
+                    // visible feed together. Let the cumulative persistent callback cover
+                    // both paths without first emitting a redundant transient update.
+                    applySnapshotInternal(snapshot, notify = false)
+                    closeSourcePanel(notify = false)
+                    listener?.onPersistentStateChanged()
                     completion?.invoke(Result.success(snapshot))
                 }
             },
@@ -949,14 +953,14 @@ class NewsWidget(
         onStateChanged?.invoke()
     }
 
-    private fun closeSourcePanel() {
+    private fun closeSourcePanel(notify: Boolean = true) {
         val wasOpen = showSourcePanel || sourcePanelField != null
         val hadInputFocus = sourcePanelField != null
         showSourcePanel = false
         sourcePanelField = null
         sourcePanelError = null
         if (hadInputFocus) listener?.onSourceInputFocusChanged(false)
-        if (wasOpen) onStateChanged?.invoke()
+        if (wasOpen && notify) onStateChanged?.invoke()
     }
 
     private fun selectSourcePanelField(field: SourcePanelField) {
@@ -1033,7 +1037,7 @@ class NewsWidget(
         applySnapshotInternal(snapshot)
     }
 
-    private fun applySnapshotInternal(snapshot: NewsSnapshot) {
+    private fun applySnapshotInternal(snapshot: NewsSnapshot, notify: Boolean = true) {
         val previousLink = newsItems.getOrNull(currentIndex)?.link
         newsItems.clear()
         newsItems.addAll(snapshot.items)
@@ -1041,7 +1045,7 @@ class NewsWidget(
         contentScrollOffset = 0f
         dataState.markLoaded()
         Log.d(TAG, "News snapshot applied: items=${newsItems.size} country=$currentCountryCode")
-        onStateChanged?.invoke()
+        if (notify) onStateChanged?.invoke()
     }
 
     fun applyError(message: String = "No news available") {

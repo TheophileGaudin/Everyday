@@ -1,14 +1,20 @@
-New feature
+New features
 
-Added voice control agent
+Added voice control agent (default Lite class of Gemini models, others can be selected)
+Added page agent in browser (default Flash class of Gemini models, others can be selected)
 
 Improvement
 
 Completed port of x3player in file browser
+Added turn by turn navigation in map widget
+Added POI control settings in map widget
+Added RSS feed control settings in news widget
 
-Plans
+Efficiency optimizations
 
-=> Improve agent
-=> Turn by turn navigation
-=> configurable POI
-=> configurable RSS feed
+Tiered binocular update notifications
+Localized map refreshing
+
+Refactor
+
+Migrated a number of functionalities in WidgetContainer to dedicated services.

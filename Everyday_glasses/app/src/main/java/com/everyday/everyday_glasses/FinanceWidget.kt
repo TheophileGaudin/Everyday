@@ -327,7 +327,7 @@ class FinanceWidget(
             true,
             "assistant_finance_tile_updated"
         )
-        listener?.onStateChanged()
+        listener?.onPersistentStateChanged()
         return Result.success(updated)
     }
 
