@@ -105,8 +105,7 @@ class HeadUpWakeManager(context: Context) : SensorEventListener {
     private var wakeTimeoutRunnable: Runnable? = null
 
     // Callbacks
-    var onWakeRequested: (() -> Unit)? = null
-    var onSleepRequested: (() -> Unit)? = null
+    var wakeRequestListener: WakeRequestListener? = null
 
     // For game rotation vector processing
     private val rotationMatrix = FloatArray(9)
@@ -317,7 +316,7 @@ class HeadUpWakeManager(context: Context) : SensorEventListener {
         resetHeadUpState()
 
         // Notify listener to wake the screen
-        onWakeRequested?.invoke()
+        wakeRequestListener?.onWakeRequested()
 
         // Schedule automatic sleep after wake duration
         scheduleWakeTimeout()
@@ -331,7 +330,7 @@ class HeadUpWakeManager(context: Context) : SensorEventListener {
             // If the user/app turned it on by other means, we must not interfere.
             if (wokeScreenByHeadUp) {
                 Log.d(TAG, "Wake timeout expired, requesting sleep")
-                onSleepRequested?.invoke()
+                wakeRequestListener?.onSleepRequested()
             } else {
                 Log.d(TAG, "Wake timeout expired, but screen not woken by head-up; skipping sleep")
             }

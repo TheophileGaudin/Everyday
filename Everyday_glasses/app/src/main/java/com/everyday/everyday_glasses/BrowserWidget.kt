@@ -436,7 +436,7 @@ class BrowserWidget(
         isUrlTextSelected = selectAll && editingUrlText.isNotEmpty()
         urlEditorScrollLine = 0
         updateUrlEditorBounds()
-        onRequestKeyboard?.invoke(true)
+        listener?.onKeyboardRequested(true)
     }
 
     fun addressHasSelection(): Boolean = isEditingUrl && isUrlTextSelected && editingUrlText.isNotEmpty()
@@ -661,9 +661,10 @@ class BrowserWidget(
     private var autoFullscreenGestureRunnable: Runnable? = null
 
     // Callbacks (onCloseRequested is inherited from BaseWidget)
-    var onStateChanged: ((State) -> Unit)? = null
-    var onFocusChanged: ((Boolean) -> Unit)? = null
-    var onRequestKeyboard: ((Boolean) -> Unit)? = null
+    var listener: BrowserWidgetListener? = null
+    private val onStateChanged: ((State) -> Unit)? get() = listener?.let { value -> { value.onStateChanged(it) } }
+    private val onFocusChanged: ((Boolean) -> Unit)? get() = listener?.let { value -> { value.onFocusChanged(it) } }
+    private val onRequestKeyboard: ((Boolean) -> Unit)? get() = listener?.let { value -> { value.onKeyboardRequested(it) } }
 
     private var isFocused = false
 
@@ -1672,7 +1673,7 @@ class BrowserWidget(
             updateKeyboardLayout()
         }
         updateWebViewLayout()
-        onStateChanged?.invoke(state)
+        listener?.onStateChanged(state)
     }
 
     /**
@@ -1682,7 +1683,7 @@ class BrowserWidget(
         if (keyboardOverlay.show()) {
             updateKeyboardLayout()
             updateWebViewLayout()
-            onStateChanged?.invoke(state)
+            listener?.onStateChanged(state)
         }
     }
 
@@ -1692,7 +1693,7 @@ class BrowserWidget(
     fun hideKeyboard() {
         if (keyboardOverlay.hide()) {
             updateWebViewLayout()
-            onStateChanged?.invoke(state)
+            listener?.onStateChanged(state)
         }
     }
 
@@ -1723,7 +1724,7 @@ class BrowserWidget(
     override fun startDrag(isResize: Boolean) {
         super.startDrag(isResize)
         state = if (isResize) State.RESIZING else State.MOVING
-        onStateChanged?.invoke(state)
+        listener?.onStateChanged(state)
     }
 
     override fun onDrag(dx: Float, dy: Float, screenWidth: Float, screenHeight: Float) {
@@ -1822,7 +1823,7 @@ class BrowserWidget(
      * Helper to notify state changed callback.
      */
     private fun notifyStateChanged() {
-        onStateChanged?.invoke(state)
+        listener?.onStateChanged(state)
     }
     
     /**
@@ -1911,7 +1912,7 @@ class BrowserWidget(
     fun setFocused(focused: Boolean) {
         if (isFocused == focused) return
         isFocused = focused
-        onFocusChanged?.invoke(focused)
+        listener?.onFocusChanged(focused)
 
         if (focused) {
             ensureActiveWebView()
@@ -2107,8 +2108,8 @@ class BrowserWidget(
         isUrlTextSelected = false
         editingUrlText.clear()
         urlEditorScrollLine = 0
-        onRequestKeyboard?.invoke(false)
-        onStateChanged?.invoke(state)
+        listener?.onKeyboardRequested(false)
+        listener?.onStateChanged(state)
     }
 
     private fun navigateFromAddressBar() {
@@ -2123,7 +2124,7 @@ class BrowserWidget(
         isUrlTextSelected = false
         editingUrlText.clear()
         urlEditorScrollLine = 0
-        onRequestKeyboard?.invoke(false)
+        listener?.onKeyboardRequested(false)
     }
 
     private fun wrapAddressText(text: String, maxWidth: Float): List<String> {
@@ -2608,7 +2609,7 @@ class BrowserWidget(
                 if (!isFullscreen) {
                     state = State.MOVING
                     baseState = BaseState.MOVING
-                    onStateChanged?.invoke(state)
+                    listener?.onStateChanged(state)
                 }
                 true
             }

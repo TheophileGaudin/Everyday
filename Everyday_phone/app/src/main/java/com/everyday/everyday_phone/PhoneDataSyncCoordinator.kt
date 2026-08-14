@@ -73,13 +73,21 @@ class PhoneDataSyncCoordinator(
     private val notificationObserver: (PhoneNotificationsSnapshot) -> Unit = { snapshot ->
         onNotificationsSnapshotChanged(snapshot)
     }
+    private val locationWeatherObserver = object : LocationWeatherService.Observer {
+        override fun onLocationFixChanged(locationFix: LocationFix) {
+            onLocationFixChanged(locationFix)
+        }
+
+        override fun onWeatherSnapshotChanged(weatherSnapshot: WeatherSnapshot) {
+            onWeatherSnapshotChanged(weatherSnapshot)
+        }
+    }
     @Volatile private var isGlassesConnected = false
     @Volatile private var released = false
     @Volatile private var visibleFinanceConfigs: List<FinanceDashboardTileConfig> = emptyList()
 
     init {
-        LocationWeatherService.onLocationFixChanged = ::onLocationFixChanged
-        LocationWeatherService.onWeatherSnapshotChanged = ::onWeatherSnapshotChanged
+        LocationWeatherService.observer = locationWeatherObserver
         PhoneNotificationRepository.addObserver(notificationObserver, appContext)
     }
 
@@ -191,8 +199,9 @@ class PhoneDataSyncCoordinator(
     fun release() {
         released = true
         isGlassesConnected = false
-        LocationWeatherService.onLocationFixChanged = null
-        LocationWeatherService.onWeatherSnapshotChanged = null
+        if (LocationWeatherService.observer === locationWeatherObserver) {
+            LocationWeatherService.observer = null
+        }
         PhoneNotificationRepository.removeObserver(notificationObserver)
         binanceStreamManager.stopAll()
         mainHandler.removeCallbacksAndMessages(null)
@@ -537,8 +546,7 @@ class PhoneDataSyncCoordinator(
 
     private fun ensureLocationService() {
         if (!hasLocationPermission()) return
-        LocationWeatherService.onLocationFixChanged = ::onLocationFixChanged
-        LocationWeatherService.onWeatherSnapshotChanged = ::onWeatherSnapshotChanged
+        LocationWeatherService.observer = locationWeatherObserver
         LocationWeatherService.start(appContext)
     }
 

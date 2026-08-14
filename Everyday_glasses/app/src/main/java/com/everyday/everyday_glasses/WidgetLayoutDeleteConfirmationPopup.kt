@@ -30,8 +30,7 @@ class WidgetLayoutDeleteConfirmationPopup(
     private val backButtonRect = RectF()
     private var hoveredButton: String? = null
 
-    var onDeleteConfirmed: ((String) -> Unit)? = null
-    var onDismissed: (() -> Unit)? = null
+    var handler: LayoutDeletionHandler? = null
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#2a2a3e")
@@ -108,7 +107,7 @@ class WidgetLayoutDeleteConfirmationPopup(
         if (!isVisible) return
         isVisible = false
         hoveredButton = null
-        onDismissed?.invoke()
+        handler?.onPopupDismissed()
     }
 
     fun updateHover(px: Float, py: Float) {
@@ -126,7 +125,7 @@ class WidgetLayoutDeleteConfirmationPopup(
         if (deleteButtonRect.contains(px, py)) {
             val name = layoutName
             dismiss()
-            onDeleteConfirmed?.invoke(name)
+            handler?.deleteLayout(name)
             return true
         }
 

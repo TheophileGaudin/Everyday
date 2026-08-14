@@ -108,6 +108,16 @@ class HandlerPresentationScheduler(private val handler: Handler) : PresentationS
     }
 }
 
+/** Applies presentation lifecycle transitions to the owning widget host. */
+interface PresentationLifecycleDelegate {
+    fun onPresentationStarted(session: PresentationSession) = Unit
+    fun onRestorePrevious(session: PresentationSession) = Unit
+    fun onLeaveWindowed(session: PresentationSession) = Unit
+    fun onClose(targetId: String) = Unit
+    fun onProgressChanged(progress: PresentationProgress?) = Unit
+    fun onSessionEnded(session: PresentationSession, reason: PresentationEndReason) = Unit
+}
+
 /**
  * Owns exactly one temporary presentation session.
  *
@@ -118,12 +128,7 @@ class HandlerPresentationScheduler(private val handler: Handler) : PresentationS
 class PresentationController(
     private val scheduler: PresentationScheduler,
     private val nowElapsedMs: () -> Long = { System.nanoTime() / 1_000_000L },
-    private val onPresentationStarted: (PresentationSession) -> Unit = {},
-    private val onRestorePrevious: (PresentationSession) -> Unit = {},
-    private val onLeaveWindowed: (PresentationSession) -> Unit = {},
-    private val onClose: (String) -> Unit = {},
-    private val onProgressChanged: (PresentationProgress?) -> Unit = {},
-    private val onSessionEnded: (PresentationSession, PresentationEndReason) -> Unit = { _, _ -> }
+    private val delegate: PresentationLifecycleDelegate = object : PresentationLifecycleDelegate {}
 ) {
     companion object {
         // A four-Hz ring is visually legible at 640x480 without keeping the full AR scene on a
@@ -162,9 +167,9 @@ class PresentationController(
             snapshot = snapshot
         )
         activeSession = session
-        onProgressChanged(progressAt(session, startedAt))
+        delegate.onProgressChanged(progressAt(session, startedAt))
         try {
-            onPresentationStarted(session)
+            delegate.onPresentationStarted(session)
             scheduleNext(session)
         } catch (failure: Throwable) {
             finish(PresentationEndReason.EXPLICIT_DISMISSAL)
@@ -196,7 +201,7 @@ class PresentationController(
         if (atElapsedMs >= session.expiresAtElapsedMs) {
             finish(PresentationEndReason.EXPIRED)
         } else {
-            onProgressChanged(progressAt(session, atElapsedMs))
+            delegate.onProgressChanged(progressAt(session, atElapsedMs))
             scheduleNext(session, atElapsedMs)
         }
         return true
@@ -234,20 +239,20 @@ class PresentationController(
         timer?.cancel()
         timer = null
         // Clear progress before applying expiry so the indicator disappears immediately.
-        onProgressChanged(null)
+        delegate.onProgressChanged(null)
 
         when (reason) {
             PresentationEndReason.EXPIRED -> when (session.spec.onExpiry) {
-                PresentationExpiryPolicy.RESTORE_PREVIOUS -> onRestorePrevious(session)
-                PresentationExpiryPolicy.LEAVE_WINDOWED -> onLeaveWindowed(session)
-                PresentationExpiryPolicy.CLOSE -> onClose(session.targetId)
+                PresentationExpiryPolicy.RESTORE_PREVIOUS -> delegate.onRestorePrevious(session)
+                PresentationExpiryPolicy.LEAVE_WINDOWED -> delegate.onLeaveWindowed(session)
+                PresentationExpiryPolicy.CLOSE -> delegate.onClose(session.targetId)
             }
-            PresentationEndReason.REPLACED -> onRestorePrevious(session)
+            PresentationEndReason.REPLACED -> delegate.onRestorePrevious(session)
             PresentationEndReason.USER_CANCELLED,
             PresentationEndReason.EXPLICIT_DISMISSAL,
             PresentationEndReason.TARGET_REMOVED -> Unit
         }
-        onSessionEnded(session, reason)
+        delegate.onSessionEnded(session, reason)
         return true
     }
 }

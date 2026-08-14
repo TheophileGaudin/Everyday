@@ -34,10 +34,15 @@ class MapWidget(
     override val minWidth = MIN_WIDGET_SIZE
     override val minHeight = MIN_WIDGET_SIZE
 
-    var onMapDataRequested: ((MapGeoPoint, PoiDisplayConfig) -> Unit)? = null
-    var onAddressFocusChanged: ((Boolean) -> Unit)? = null
-    var onNavigationResult: ((NavigationOperationResult) -> Unit)? = null
-    var onStopNavigationRequested: (() -> Unit)? = null
+    var listener: MapWidgetListener? = null
+    private val onMapDataRequested: ((MapGeoPoint, PoiDisplayConfig) -> Unit)?
+        get() = listener?.let { value -> { point, config -> value.onMapDataRequested(point, config) } }
+    private val onAddressFocusChanged: ((Boolean) -> Unit)?
+        get() = listener?.let { value -> { focused -> value.onAddressFocusChanged(focused) } }
+    private val onNavigationResult: ((NavigationOperationResult) -> Unit)?
+        get() = listener?.let { value -> { result -> value.onNavigationResult(result) } }
+    private val onStopNavigationRequested: (() -> Unit)?
+        get() = listener?.let { value -> { value.onStopNavigationRequested() } }
     private val poiSelector = MapPoiSelector()
     private var poiSelection = MapPoiSelection()
     private val repository = MapRoadRepository(context, { r, p ->
@@ -59,13 +64,18 @@ class MapWidget(
     private val projection = GroundProjection()
     private val poseController = DevicePoseController(
         context.applicationContext,
-        onPoseChanged = { value ->
-            pose = value
-            heading = value.headingDeg
-            latestPoseHeading = value.headingDeg
-            requestPoseRedraw()
-        },
-        onStatusChanged = { Log.d(TAG, it) }
+        object : DevicePoseObserver {
+            override fun onPoseChanged(pose: DevicePose) {
+                this@MapWidget.pose = pose
+                heading = pose.headingDeg
+                latestPoseHeading = pose.headingDeg
+                requestPoseRedraw()
+            }
+
+            override fun onStatusChanged(status: String) {
+                Log.d(TAG, status)
+            }
+        }
     )
     var invalidate: (() -> Unit)? = null
     var mode = MapViewMode.TOP_DOWN; private set
@@ -100,18 +110,41 @@ class MapWidget(
     private var navigationRouteRequest: RouteTransportRequest? = null
     private var reroutePending = false
     private val phoneRouting = GlassesPhoneRoutingCoordinator({ phoneRouteTransport }).apply {
-        onRouteResult = { result -> navigationMain.post { handlePhoneRouteResult(result) } }
-        onAmbiguousRoute = { request, error -> navigationMain.post { handlePhoneRouteAmbiguous(request, error) } }
-        onFallback = { request, reason -> navigationMain.post { handlePhoneRouteFallback(request, reason) } }
+        listener = object : RouteResolutionListener {
+            override fun onRouteResolved(result: RouteTransportResult) {
+                navigationMain.post { handlePhoneRouteResult(result) }
+            }
+
+            override fun onRouteAmbiguous(request: RouteTransportRequest, error: RouteTransportError) {
+                navigationMain.post { handlePhoneRouteAmbiguous(request, error) }
+            }
+
+            override fun onRouteFallback(request: RouteTransportRequest, reason: GlassesRouteFallbackReason) {
+                navigationMain.post { handlePhoneRouteFallback(request, reason) }
+            }
+        }
     }
     private val phoneSearch = GlassesDestinationSearchCoordinator({ phoneSearchTransport }).apply {
-        onResult = { result -> navigationMain.post { handleDestinationSearchResult(result) } }
-        onFallback = { request, _ -> runLocalDestinationFallback(request) }
-        onFailure = { request, error -> navigationMain.post {
-            if (navigationState.status == NavigationStatus.SEARCHING && navigationState.query == request.query) {
-                finishNavigationFailure(error?.message ?: "Destination search timed out; try again.", null)
+        listener = object : DestinationSearchListener {
+            override fun onDestinationSearchResult(result: DestinationSearchResult) {
+                navigationMain.post { handleDestinationSearchResult(result) }
             }
-        } }
+
+            override fun onDestinationSearchFallback(
+                request: DestinationSearchRequest,
+                reason: DestinationSearchFallbackReason
+            ) {
+                runLocalDestinationFallback(request)
+            }
+
+            override fun onDestinationSearchFailure(request: DestinationSearchRequest, error: DestinationSearchError?) {
+                navigationMain.post {
+                    if (navigationState.status == NavigationStatus.SEARCHING && navigationState.query == request.query) {
+                        finishNavigationFailure(error?.message ?: "Destination search timed out; try again.", null)
+                    }
+                }
+            }
+        }
     }
     var navigationState: NavigationState = NavigationState()
         private set

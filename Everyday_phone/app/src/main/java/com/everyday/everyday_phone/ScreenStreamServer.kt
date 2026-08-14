@@ -41,6 +41,14 @@ import java.util.concurrent.atomic.AtomicReference
  */
 class ScreenStreamServer(private val context: Context) {
 
+    /** Receives streaming lifecycle and capture-configuration changes. */
+    interface StreamingListener {
+        fun onStreamingStateChanged(streaming: Boolean) = Unit
+        fun onStreamError(error: String) = Unit
+        fun onStreamStatusChanged(status: String) = Unit
+        fun onCaptureOrientationChanged(isLandscape: Boolean) = Unit
+    }
+
     companion object {
         private const val TAG = "ScreenStreamServer"
         const val STREAM_PORT = 5050
@@ -100,11 +108,7 @@ class ScreenStreamServer(private val context: Context) {
     private val framesSent = AtomicLong(0)
     private val bytesSent = AtomicLong(0)
     
-    // Callbacks
-    var onStreamingStateChanged: ((Boolean) -> Unit)? = null
-    var onError: ((String) -> Unit)? = null
-    var onStatusUpdate: ((String) -> Unit)? = null
-    var onOrientationChanged: ((Boolean) -> Unit)? = null  // Called when orientation changes, param is isLandscape
+    var streamingListener: StreamingListener? = null
     
     // MediaProjection callback (required on Android 14+)
     private val projectionCallback = object : MediaProjection.Callback() {
@@ -114,14 +118,13 @@ class ScreenStreamServer(private val context: Context) {
             handler.post {
                 isRunning.set(false)
                 isStreaming.set(false)
-                onStreamingStateChanged?.invoke(false)
+                streamingListener?.onStreamingStateChanged(false)
             }
         }
     }
 
     var connectionMode = ConnectionMode.NONE
         private set
-    var onConnectionModeChanged: ((ConnectionMode) -> Unit)? = null
     
     init {
         fileLog("ScreenStreamServer initialized")
@@ -138,8 +141,8 @@ class ScreenStreamServer(private val context: Context) {
         lastError.set(message)
         fileLog("Error: $message")
         handler.post { 
-            onError?.invoke(message)
-            onStatusUpdate?.invoke("Error: $message")
+            streamingListener?.onStreamError(message)
+            streamingListener?.onStreamStatusChanged("Error: $message")
         }
     }
     
@@ -336,7 +339,7 @@ class ScreenStreamServer(private val context: Context) {
         }
         
         fileLog("Stream server started")
-        handler.post { onStatusUpdate?.invoke("Server started on port $STREAM_PORT") }
+        handler.post { streamingListener?.onStreamStatusChanged("Server started on port $STREAM_PORT") }
     }
     
     /**
@@ -366,7 +369,7 @@ class ScreenStreamServer(private val context: Context) {
                     fileLog("*** DISPLAY ROTATION CHANGED: rotation=$newRotation, landscape=$newIsLandscape (was $currentIsLandscape) ***")
                     handler.post {
                         Toast.makeText(context, "Display rotated! Reconnecting...", Toast.LENGTH_SHORT).show()
-                        onStatusUpdate?.invoke("Display rotated, reconnecting...")
+                        streamingListener?.onStreamStatusChanged("Display rotated, reconnecting...")
                     }
                     
                     // Gracefully close the client socket to trigger reconnection
@@ -436,7 +439,7 @@ class ScreenStreamServer(private val context: Context) {
                     fileLog("*** ROTATION CHECKER: detected change! rotation=$newRotation, landscape=$newIsLandscape (was $currentIsLandscape) ***")
                     handler.post {
                         Toast.makeText(context, "Rotation detected! Reconnecting...", Toast.LENGTH_SHORT).show()
-                        onStatusUpdate?.invoke("Rotation detected, reconnecting...")
+                        streamingListener?.onStreamStatusChanged("Rotation detected, reconnecting...")
                     }
                     disconnectClientForOrientationChange()
                     return  // Stop checking, will restart on next connection
@@ -490,8 +493,8 @@ class ScreenStreamServer(private val context: Context) {
         outputStream = null
         
         handler.post { 
-            onStreamingStateChanged?.invoke(false)
-            onStatusUpdate?.invoke("Server stopped")
+            streamingListener?.onStreamingStateChanged(false)
+            streamingListener?.onStreamStatusChanged("Server stopped")
         }
     }
     
@@ -526,7 +529,7 @@ class ScreenStreamServer(private val context: Context) {
         handler.post {
             val modeStr = if (useSquareCapture) "SQUARE (seamless)" else "ORIENTATION-SPECIFIC"
             Toast.makeText(context, "Capture mode: $modeStr", Toast.LENGTH_SHORT).show()
-            onOrientationChanged?.invoke(currentIsLandscape)
+            streamingListener?.onCaptureOrientationChanged(currentIsLandscape)
         }
         
         // Need restart to apply
@@ -562,7 +565,7 @@ class ScreenStreamServer(private val context: Context) {
                 else -> "PORTRAIT"
             }
             Toast.makeText(context, "Mode: $modeStr", Toast.LENGTH_SHORT).show()
-            onOrientationChanged?.invoke(currentIsLandscape)
+            streamingListener?.onCaptureOrientationChanged(currentIsLandscape)
         }
         
         // On Android 14+, MediaProjection can't be reused after VirtualDisplay is released
@@ -582,14 +585,14 @@ class ScreenStreamServer(private val context: Context) {
         try {
             serverSocket = ServerSocket(STREAM_PORT)
             fileLog("Server listening on port $STREAM_PORT")
-            handler.post { onStatusUpdate?.invoke("Waiting for glasses on port $STREAM_PORT") }
+            handler.post { streamingListener?.onStreamStatusChanged("Waiting for glasses on port $STREAM_PORT") }
             
             while (isRunning.get()) {
                 try {
                     // Wait for client connection
                     val socket = serverSocket?.accept() ?: break
                     fileLog("Client connected from ${socket.inetAddress}")
-                    handler.post { onStatusUpdate?.invoke("Glasses connected: ${socket.inetAddress}") }
+                    handler.post { streamingListener?.onStreamStatusChanged("Glasses connected: ${socket.inetAddress}") }
                     
                     // Use the manually set orientation (currentIsLandscape)
                     val captureWidth = getCaptureWidth(currentIsLandscape)
@@ -613,7 +616,7 @@ class ScreenStreamServer(private val context: Context) {
                     outputStream = socket.getOutputStream()
                     
                     isStreaming.set(true)
-                    handler.post { onStreamingStateChanged?.invoke(true) }
+                    handler.post { streamingListener?.onStreamingStateChanged(true) }
                     
                     // Start capture and encoding with current orientation
                     if (!startCapture(captureWidth, captureHeight)) {
@@ -642,8 +645,8 @@ class ScreenStreamServer(private val context: Context) {
                 isStreaming.set(false)
                 
                 handler.post { 
-                    onStreamingStateChanged?.invoke(false)
-                    onStatusUpdate?.invoke("Glasses disconnected. Frames sent: ${framesSent.get()}")
+                    streamingListener?.onStreamingStateChanged(false)
+                    streamingListener?.onStreamStatusChanged("Glasses disconnected. Frames sent: ${framesSent.get()}")
                 }
                 stopCapture()
                 
@@ -664,7 +667,7 @@ class ScreenStreamServer(private val context: Context) {
     
     private fun startCapture(captureWidth: Int, captureHeight: Int): Boolean {
         fileLog("Starting capture: ${captureWidth}x${captureHeight}")
-        handler.post { onStatusUpdate?.invoke("Starting capture ${captureWidth}x${captureHeight}") }
+        handler.post { streamingListener?.onStreamStatusChanged("Starting capture ${captureWidth}x${captureHeight}") }
         
         try {
             // Create encoder with low-latency settings
@@ -707,7 +710,7 @@ class ScreenStreamServer(private val context: Context) {
             }
             
             fileLog("Encoder started successfully")
-            handler.post { onStatusUpdate?.invoke("Encoder started") }
+            handler.post { streamingListener?.onStreamStatusChanged("Encoder started") }
             
             // Create virtual display that renders to encoder surface
             fileLog("Creating virtual display...")
@@ -729,7 +732,7 @@ class ScreenStreamServer(private val context: Context) {
             }
             
             fileLog("Virtual display created successfully")
-            handler.post { onStatusUpdate?.invoke("Streaming...") }
+            handler.post { streamingListener?.onStreamStatusChanged("Streaming...") }
             return true
             
         } catch (e: Exception) {

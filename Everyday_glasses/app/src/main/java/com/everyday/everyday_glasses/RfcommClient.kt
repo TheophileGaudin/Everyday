@@ -54,26 +54,16 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
         private const val RX_LOG_MIN_INTERVAL_MS = 5000L
     }
 
-    var onStatusChanged: ((String) -> Unit)? = null
-    var onConnectionChanged: ((Boolean) -> Unit)? = null
-    var onPointerReceived: ((TransportMessage.Pointer) -> Unit)? = null
-    var onDeviceStatusReceived: ((TransportMessage.DeviceStatus) -> Unit)? = null
-    var onKeyReceived: ((String) -> Unit)? = null
-    var onMirrorStateChanged: ((enabled: Boolean, ip: String?, isWifiDirect: Boolean) -> Unit)? = null
-    var onLongPressWithClipboard: ((String?) -> Unit)? = null  // Called when phone sends long-press with clipboard
-    var onClipboardReceived: ((String) -> Unit)? = null  // Called when phone clipboard changes
-    var onImageReceived: ((ByteArray, String) -> Unit)? = null // Called when image data is received (data, fileName)
-    var onOpenBrowserRequested: ((String) -> Unit)? = null
-    var onGoogleAuthStateReceived: ((GooglePhoneAuthStatus, GoogleAccountSummary?, String?) -> Unit)? = null
-    var onSyncSnapshotReceived: ((SyncSnapshot) -> Unit)? = null
-    var onSyncErrorReceived: ((SyncError) -> Unit)? = null
-    var onSubtitleStatusReceived: ((SubtitleStatus) -> Unit)? = null
-    var onSubtitleTranscriptReceived: ((SubtitleTranscript) -> Unit)? = null
-    var onAssistantControlReceived: ((AssistantControl) -> Unit)? = null
-    var onRouteResultReceived: ((com.everyday.shared.transport.RouteTransportResult) -> Unit)? = null
-    var onRouteErrorReceived: ((com.everyday.shared.transport.RouteTransportError) -> Unit)? = null
-    var onDestinationSearchResultReceived: ((com.everyday.shared.transport.DestinationSearchResult) -> Unit)? = null
-    var onDestinationSearchErrorReceived: ((com.everyday.shared.transport.DestinationSearchError) -> Unit)? = null
+    var transportConnectionListener: TransportConnectionListener? = null
+    var remoteInputListener: RemoteInputListener? = null
+    var remoteContentListener: RemoteContentListener? = null
+    var mirrorSessionListener: MirrorSessionListener? = null
+    var remoteAuthListener: RemoteAuthListener? = null
+    var syncMessageListener: SyncMessageListener? = null
+    var routeMessageListener: RouteMessageListener? = null
+    var destinationSearchMessageListener: DestinationSearchMessageListener? = null
+    var subtitleMessageListener: SubtitleMessageListener? = null
+    var assistantControlListener: AssistantControlListener? = null
 
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var socket: BluetoothSocket? = null
@@ -103,17 +93,17 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
         bluetoothAdapter = bluetoothManager.adapter
 
         if (bluetoothAdapter == null) {
-            onStatusChanged?.invoke("Bluetooth not supported")
+            transportConnectionListener?.onStatusChanged("Bluetooth not supported")
             return false
         }
 
         if (!hasPermissions()) {
-            onStatusChanged?.invoke("Missing permissions")
+            transportConnectionListener?.onStatusChanged("Missing permissions")
             return false
         }
 
         if (bluetoothAdapter?.isEnabled != true) {
-            onStatusChanged?.invoke("Bluetooth disabled")
+            transportConnectionListener?.onStatusChanged("Bluetooth disabled")
             return false
         }
 
@@ -137,8 +127,8 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
         socket = null
         outputStream = null
 
-        onStatusChanged?.invoke("Disconnected")
-        onConnectionChanged?.invoke(false)
+        transportConnectionListener?.onStatusChanged("Disconnected")
+        transportConnectionListener?.onConnectionChanged(false)
     }
 
     /**
@@ -323,14 +313,14 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
                 val phone = findPairedPhone()
 
                 if (phone == null) {
-                    handler.post { onStatusChanged?.invoke("No paired phone found") }
+                    handler.post { transportConnectionListener?.onStatusChanged("No paired phone found") }
                     Thread.sleep(3000)
                     continue
                 }
 
                 // Grab name safely here to use in the handler
                 val deviceName = phone.name ?: phone.address
-                handler.post { onStatusChanged?.invoke("Connecting to $deviceName...") }
+                handler.post { transportConnectionListener?.onStatusChanged("Connecting to $deviceName...") }
 
                 try {
                     // Use insecure socket for better compatibility
@@ -348,8 +338,8 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
                         Log.d(TAG, "Successfully connected to phone!")
 
                         handler.post {
-                            onStatusChanged?.invoke("Connected")
-                            onConnectionChanged?.invoke(true)
+                            transportConnectionListener?.onStatusChanged("Connected")
+                            transportConnectionListener?.onConnectionChanged(true)
                         }
 
                         // Start battery monitoring
@@ -362,14 +352,14 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
 
                 } catch (e: IOException) {
                     Log.e(TAG, "Connection failed: ${e.message}")
-                    handler.post { onStatusChanged?.invoke("Connection failed, retrying...") }
+                    handler.post { transportConnectionListener?.onStatusChanged("Connection failed, retrying...") }
                     try { socket?.close() } catch (e2: IOException) {}
                     socket = null
                     outputStream = null
                     Thread.sleep(2000)
                 } catch (e: SecurityException) {
                     Log.e(TAG, "Permission error: ${e.message}")
-                    handler.post { onStatusChanged?.invoke("Permission error") }
+                    handler.post { transportConnectionListener?.onStatusChanged("Permission error") }
                     break
                 }
             }
@@ -453,14 +443,14 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
 
 
             handler.post {
-                onStatusChanged?.invoke("Disconnected")
-                onConnectionChanged?.invoke(false)
+                transportConnectionListener?.onStatusChanged("Disconnected")
+                transportConnectionListener?.onConnectionChanged(false)
             }
 
             if (isRunning.get()) {
                 handler.postDelayed({
                     if (isRunning.get() && !isConnected.get()) {
-                        onStatusChanged?.invoke("Reconnecting...")
+                        transportConnectionListener?.onStatusChanged("Reconnecting...")
                         connectToPhone()
                     }
                 }, 2000)
@@ -470,14 +460,14 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
 
     private fun routeMessage(message: TransportMessage) {
         when (message) {
-            is TransportMessage.Pointer -> handler.post { onPointerReceived?.invoke(message) }
-            is TransportMessage.KeyInput -> handler.post { onKeyReceived?.invoke(message.key) }
-            is TransportMessage.LongPress -> handler.post { onLongPressWithClipboard?.invoke(message.clipboard) }
-            is TransportMessage.ClipboardUpdate -> handler.post { onClipboardReceived?.invoke(message.content) }
+            is TransportMessage.Pointer -> handler.post { remoteInputListener?.onPointerReceived(message) }
+            is TransportMessage.KeyInput -> handler.post { remoteInputListener?.onKeyReceived(message.key) }
+            is TransportMessage.LongPress -> handler.post { remoteInputListener?.onLongPressWithClipboard(message.clipboard) }
+            is TransportMessage.ClipboardUpdate -> handler.post { remoteInputListener?.onClipboardReceived(message.content) }
             is TransportMessage.MirrorState -> handler.post {
-                onMirrorStateChanged?.invoke(message.enabled, message.ip, message.wifiDirect)
+                mirrorSessionListener?.onMirrorStateChanged(message.enabled, message.ip, message.wifiDirect)
             }
-            is TransportMessage.OpenBrowser -> handler.post { onOpenBrowserRequested?.invoke(message.address) }
+            is TransportMessage.OpenBrowser -> handler.post { remoteContentListener?.onOpenBrowserRequested(message.address) }
             is TransportMessage.GoogleAuthState -> {
                 val status = when (message.status) {
                     TransportGoogleAuthStatus.SIGNED_OUT -> GooglePhoneAuthStatus.SIGNED_OUT
@@ -486,14 +476,14 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
                     TransportGoogleAuthStatus.ERROR -> GooglePhoneAuthStatus.ERROR
                 }
                 val account = message.account?.let { GoogleAccountSummary(it.email, it.displayName) }
-                handler.post { onGoogleAuthStateReceived?.invoke(status, account, message.detail) }
+                handler.post { remoteAuthListener?.onGoogleAuthStateReceived(status, account, message.detail) }
             }
-            is TransportMessage.DeviceStatus -> handler.post { onDeviceStatusReceived?.invoke(message) }
-            is TransportMessage.SyncSnapshotMessage -> handler.post { onSyncSnapshotReceived?.invoke(message.snapshot) }
-            is TransportMessage.SyncErrorMessage -> handler.post { onSyncErrorReceived?.invoke(message.error) }
-            is TransportMessage.SubtitleStatusMessage -> handler.post { onSubtitleStatusReceived?.invoke(message.status) }
+            is TransportMessage.DeviceStatus -> handler.post { remoteContentListener?.onDeviceStatusReceived(message) }
+            is TransportMessage.SyncSnapshotMessage -> handler.post { syncMessageListener?.onSyncSnapshotReceived(message.snapshot) }
+            is TransportMessage.SyncErrorMessage -> handler.post { syncMessageListener?.onSyncErrorReceived(message.error) }
+            is TransportMessage.SubtitleStatusMessage -> handler.post { subtitleMessageListener?.onSubtitleStatusReceived(message.status) }
             is TransportMessage.SubtitleTranscriptMessage -> handler.post {
-                onSubtitleTranscriptReceived?.invoke(message.transcript)
+                subtitleMessageListener?.onSubtitleTranscriptReceived(message.transcript)
             }
             is TransportMessage.AssistantControlMessage -> {
                 if (message.control.action != com.everyday.shared.transport.AssistantControlAction.KEEPALIVE) {
@@ -503,20 +493,20 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
                             "session=${message.control.sessionId}"
                     )
                 }
-                handler.post { onAssistantControlReceived?.invoke(message.control) }
+                handler.post { assistantControlListener?.onAssistantControlReceived(message.control) }
             }
             is TransportMessage.AssistantStatusMessage -> Unit
             is TransportMessage.RouteResultMessage -> handler.post {
-                onRouteResultReceived?.invoke(message.result)
+                routeMessageListener?.onRouteResultReceived(message.result)
             }
             is TransportMessage.RouteErrorMessage -> handler.post {
-                onRouteErrorReceived?.invoke(message.error)
+                routeMessageListener?.onRouteErrorReceived(message.error)
             }
             is TransportMessage.DestinationSearchResultMessage -> handler.post {
-                onDestinationSearchResultReceived?.invoke(message.result)
+                destinationSearchMessageListener?.onDestinationSearchResultReceived(message.result)
             }
             is TransportMessage.DestinationSearchErrorMessage -> handler.post {
-                onDestinationSearchErrorReceived?.invoke(message.error)
+                destinationSearchMessageListener?.onDestinationSearchErrorReceived(message.error)
             }
             is TransportMessage.Image -> {
                 val bytes = runCatching { Base64.decode(message.base64Data, Base64.NO_WRAP) }
@@ -524,7 +514,7 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
                         Log.w(TAG, "RX rejected kind=${message.kind}: invalid base64 image")
                         return
                     }
-                handler.post { onImageReceived?.invoke(bytes, message.fileName) }
+                handler.post { remoteContentListener?.onImageReceived(bytes, message.fileName) }
             }
             else -> Log.w(TAG, "RX unexpected kind=${message.kind} for glasses endpoint")
         }

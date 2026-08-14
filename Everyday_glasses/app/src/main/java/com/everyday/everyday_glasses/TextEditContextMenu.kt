@@ -51,12 +51,7 @@ class TextEditContextMenu(
     private var hasSelection: Boolean = false
     
     // Callbacks
-    var onCut: (() -> Unit)? = null
-    var onCopy: (() -> Unit)? = null
-    var onPaste: ((String) -> Unit)? = null
-    var onSelectAll: (() -> Unit)? = null
-    var onFormatting: (() -> Unit)? = null
-    var onDismissed: (() -> Unit)? = null
+    var commandHandler: TextEditCommandHandler? = null
     
     // Paints
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -197,7 +192,7 @@ class TextEditContextMenu(
             isVisible = false
             hoveredItemIndex = -1
             clipboardContent = null
-            onDismissed?.invoke()
+            commandHandler?.onMenuDismissed()
             Log.d(TAG, "Menu dismissed")
         }
     }
@@ -265,21 +260,21 @@ class TextEditContextMenu(
                 
                 when (item.id) {
                     "cut" -> {
-                        onCut?.invoke()
+                        commandHandler?.cut()
                     }
                     "copy" -> {
-                        onCopy?.invoke()
+                        commandHandler?.copy()
                     }
                     "paste" -> {
                         clipboardContent?.let { content ->
-                            onPaste?.invoke(content)
+                            commandHandler?.paste(content)
                         }
                     }
                     "selectall" -> {
-                        onSelectAll?.invoke()
+                        commandHandler?.selectAll()
                     }
                     "formatting" -> {
-                        onFormatting?.invoke()
+                        commandHandler?.showFormatting()
                     }
                 }
                 

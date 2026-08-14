@@ -13,6 +13,16 @@ import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 
+/** Receives assistant status and configuration changes from [VoiceAssistantCoordinator]. */
+interface AssistantStateObserver {
+    fun onAssistantStatusChanged(status: AssistantStatus) = Unit
+    fun onAssistantConfigurationChanged(
+        configuration: AssistantConfiguration?,
+        models: List<AssistantModel>,
+        detail: String
+    ) = Unit
+}
+
 class VoiceAssistantCoordinator(
     private val preferences: AssistantPreferencesStore,
     private val provider: VoiceAssistantProvider,
@@ -21,8 +31,7 @@ class VoiceAssistantCoordinator(
     private val requestMicrophonePermission: () -> Unit,
     private val toolCatalog: () -> AssistantToolCatalog,
     private val captureUiContext: () -> AssistantUiContext,
-    private val onStatus: (AssistantStatus) -> Unit,
-    private val onConfiguration: (AssistantConfiguration?, List<AssistantModel>, String) -> Unit,
+    private val stateObserver: AssistantStateObserver,
     private val captureUiContextOnDemand: () -> CompletableFuture<AssistantUiContext> = {
         assistantCompletedFuture(captureUiContext())
     },
@@ -53,8 +62,7 @@ class VoiceAssistantCoordinator(
         toolCatalog: () -> AssistantToolCatalog,
         captureUiContext: () -> AssistantUiContext,
         executeCommand: (com.everyday.shared.command.AppCommandInvocation) -> AppCommandResult,
-        onStatus: (AssistantStatus) -> Unit,
-        onConfiguration: (AssistantConfiguration?, List<AssistantModel>, String) -> Unit
+        stateObserver: AssistantStateObserver
     ) : this(
         preferences,
         provider,
@@ -63,8 +71,7 @@ class VoiceAssistantCoordinator(
         requestMicrophonePermission,
         toolCatalog,
         captureUiContext,
-        onStatus,
-        onConfiguration,
+        stateObserver,
         { assistantCompletedFuture(captureUiContext()) },
         { assistantFailedFuture(UnsupportedOperationException("Screenshot capture is unavailable")) },
         executeCommand
@@ -118,7 +125,7 @@ class VoiceAssistantCoordinator(
         configuration = null
         models = emptyList()
         state = AssistantSessionState.UNCONFIGURED
-        onConfiguration(null, emptyList(), "Gemini is off")
+        stateObserver.onAssistantConfigurationChanged(null, emptyList(), "Gemini is off")
         emitStatus("Gemini is off")
     }
 
@@ -204,7 +211,11 @@ class VoiceAssistantCoordinator(
                 models = available
                 if (selected == null) {
                     state = AssistantSessionState.ERROR
-                    onConfiguration(configuration, models, "Select a compatible Gemini model")
+                    stateObserver.onAssistantConfigurationChanged(
+                        configuration,
+                        models,
+                        "Select a compatible Gemini model"
+                    )
                     emitStatus("No compatible model")
                     return@post
                 }
@@ -216,7 +227,7 @@ class VoiceAssistantCoordinator(
                 }
                 configuration = next
                 state = AssistantSessionState.IDLE
-                onConfiguration(next, models, "Gemini ready")
+                stateObserver.onAssistantConfigurationChanged(next, models, "Gemini ready")
                 if (!hasMicrophonePermission()) requestMicrophonePermission()
                 emitStatus(if (hasMicrophonePermission()) "Gemini ready" else "Microphone permission required")
             }
@@ -492,6 +503,6 @@ class VoiceAssistantCoordinator(
             "TX status state=${state.wireName} session=${id ?: "-"} " +
                 "origin=${origin?.wireName ?: "-"} detail=${detail ?: "-"}"
         )
-        onStatus(status(detail, origin, id))
+        stateObserver.onAssistantStatusChanged(status(detail, origin, id))
     }
 }

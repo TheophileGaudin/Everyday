@@ -56,7 +56,7 @@ class VideoWidget(
             if (isFullscreen) {
                 toggleFullscreen()
             } else {
-                onCloseRequested?.invoke()
+                lifecycleListener?.onCloseRequested(this)
             }
         },
     )
@@ -65,8 +65,10 @@ class VideoWidget(
     private var released = false
     private var displayVisible = true
     private var mediaSourceActive = false
-    var onStateChanged: (() -> Unit)? = null
-    var onPlaybackVisibilityChanged: ((Boolean) -> Unit)? = null
+    var listener: VideoWidgetListener? = null
+    private val onStateChanged: (() -> Unit)? get() = listener?.let { value -> { value.onStateChanged() } }
+    private val onPlaybackVisibilityChanged: ((Boolean) -> Unit)?
+        get() = listener?.let { value -> { active -> value.onPlaybackVisibilityChanged(active) } }
 
     override val minimizeLabel: String = "V"
     override val minWidth: Float = 320f
@@ -234,7 +236,6 @@ class VideoWidget(
         playerUi.release()
         controller.release()
         (host.parent as? ViewGroup)?.removeView(host)
-        onStateChanged = null
-        onPlaybackVisibilityChanged = null
+        listener = null
     }
 }

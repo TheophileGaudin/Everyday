@@ -30,6 +30,12 @@ internal fun headingFromRayNeoOpticalForward(
     return heading
 }
 
+/** Receives pose samples and sensor status updates from [DevicePoseController]. */
+interface DevicePoseObserver {
+    fun onPoseChanged(pose: DevicePose)
+    fun onStatusChanged(status: String)
+}
+
 /**
  * Supplies relative head pose plus an absolute, tilt-compensated compass heading.
  *
@@ -39,8 +45,7 @@ internal fun headingFromRayNeoOpticalForward(
  */
 class DevicePoseController(
     context: Context,
-    private val onPoseChanged: (DevicePose) -> Unit,
-    private val onStatusChanged: (String) -> Unit
+    private val observer: DevicePoseObserver
 ) : SensorEventListener {
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val compassRotationVector = sensorManager.getDefaultSensor(Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR)
@@ -100,7 +105,7 @@ class DevicePoseController(
         if (running && activeMode == mode && activeDelay == sensorDelay) return
         val poseSensor = if (mode == PoseMode.TOP_DOWN) compassRotationVector else relativeRotationVector
         if (poseSensor == null) {
-            onStatusChanged("Pose: required orientation sensors unavailable")
+            observer.onStatusChanged("Pose: required orientation sensors unavailable")
             return
         }
         if (running) sensorManager.unregisterListener(this)
@@ -114,7 +119,7 @@ class DevicePoseController(
         running = true
         activeDelay = sensorDelay
         activeMode = mode
-        onStatusChanged("Pose: ${poseSensor.name}; direct tilt-compensated compass")
+        observer.onStatusChanged("Pose: ${poseSensor.name}; direct tilt-compensated compass")
     }
 
     fun stop() {
@@ -123,7 +128,7 @@ class DevicePoseController(
         running = false
         activeDelay = -1
         activeMode = null
-        onStatusChanged("Pose: paused")
+        observer.onStatusChanged("Pose: paused")
     }
 
     override fun onSensorChanged(event: SensorEvent) {
@@ -182,7 +187,7 @@ class DevicePoseController(
             )
             if (!loggedNorthCorrection) {
                 loggedNorthCorrection = true
-                onStatusChanged("Pose: trusted north correction acquired")
+                observer.onStatusChanged("Pose: trusted north correction acquired")
             }
         }
         val heading = when (activeMode) {
@@ -204,21 +209,21 @@ class DevicePoseController(
         }
         if (!loggedInitialHeading && !compassHeadingDeg.isNaN()) {
             loggedInitialHeading = true
-            onStatusChanged("Pose: initial direct-compass heading ${heading.toInt()}deg")
+            observer.onStatusChanged("Pose: initial direct-compass heading ${heading.toInt()}deg")
         }
         smoothedHeading = smoothAngle(smoothedHeading, heading, HEADING_OUTPUT_ALPHA)
 
         val nowMs = SystemClock.elapsedRealtime()
         if (nowMs - lastHeadingTraceMs >= HEADING_TRACE_INTERVAL_MS) {
             lastHeadingTraceMs = nowMs
-            onStatusChanged(
+            observer.onStatusChanged(
                 "Pose sample: heading=${smoothedHeading.toInt()}deg " +
                     "inertial=${inertialHeadingDeg.toInt()}deg " +
                     "yaw=${yawDeg.toInt()}deg pitch=${pitchDeg.toInt()}deg"
             )
         }
 
-        onPoseChanged(
+        observer.onPoseChanged(
             DevicePose(
                 headingDeg = smoothedHeading,
                 yawDeg = yawDeg,
@@ -251,7 +256,7 @@ class DevicePoseController(
             SensorManager.SENSOR_STATUS_ACCURACY_HIGH -> "high"
             else -> accuracy.toString()
         }
-        onStatusChanged("Pose: ${sensor?.name}; accuracy $label")
+        observer.onStatusChanged("Pose: ${sensor?.name}; accuracy $label")
     }
 
     private fun updateCompassHeading() {

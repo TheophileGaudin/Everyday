@@ -14,6 +14,11 @@ class SpeedometerSettingsMenu(
     private val screenWidth: Float,
     private val screenHeight: Float
 ) {
+    /** Receives speedometer threshold changes and menu dismissal. */
+    interface Listener {
+        fun onThresholdChanged(threshold: Float) = Unit
+        fun onDismissed() = Unit
+    }
 
     companion object {
         private const val MENU_WIDTH = 360f
@@ -30,8 +35,7 @@ class SpeedometerSettingsMenu(
     var isVisible = false
         private set
 
-    var onThresholdChanged: ((Float) -> Unit)? = null
-    var onDismissed: (() -> Unit)? = null
+    var listener: Listener? = null
 
     private var thresholdValue = DEFAULT_THRESHOLD
     private var speedUnit = SpeedometerWidget.SpeedUnit.KMH
@@ -113,14 +117,14 @@ class SpeedometerSettingsMenu(
         if (!isVisible) return
         isVisible = false
         sliderDragging = false
-        onDismissed?.invoke()
+        listener?.onDismissed()
     }
 
     fun setThreshold(value: Float, notify: Boolean = true) {
         val clamped = value.coerceIn(0f, 1f)
         if (thresholdValue == clamped) return
         thresholdValue = clamped
-        if (notify) onThresholdChanged?.invoke(thresholdValue)
+        if (notify) listener?.onThresholdChanged(thresholdValue)
     }
 
     fun setSpeedUnit(unit: SpeedometerWidget.SpeedUnit) {

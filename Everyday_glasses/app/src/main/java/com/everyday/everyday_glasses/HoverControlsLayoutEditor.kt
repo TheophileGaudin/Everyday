@@ -21,6 +21,12 @@ class HoverControlsLayoutEditor(
     private val screenHeight: Float,
     private val controls: List<BaseHoverControl>
 ) {
+    /** Receives layout persistence and visibility events from the editor. */
+    interface Listener {
+        fun onLayoutChanged() = Unit
+        fun onDismissed() = Unit
+    }
+
     companion object {
         private const val GRID_COLS = 8
         private const val GRID_ROWS = 5
@@ -74,9 +80,7 @@ class HoverControlsLayoutEditor(
 
     private data class MenuItem(val rect: RectF, val action: Action, val label: String, val hasSubmenu: Boolean)
 
-    // Callbacks
-    var onDismissed: (() -> Unit)? = null
-    var onLayoutChanged: (() -> Unit)? = null
+    var listener: Listener? = null
 
     // ==================== Paints ====================
 
@@ -148,7 +152,7 @@ class HoverControlsLayoutEditor(
         menuKind = MenuKind.NONE
         draggingId = null
         ignoreNextDownCell = null
-        onDismissed?.invoke()
+        listener?.onDismissed()
     }
 
     fun exportPlacements(): List<WidgetPersistence.HoverControlPlacementState> =
@@ -215,7 +219,7 @@ class HoverControlsLayoutEditor(
                 control.clearHover()
             }
         }
-        onLayoutChanged?.invoke()
+        listener?.onLayoutChanged()
     }
 
     private fun cellCenter(cell: GridCell): Pair<Float, Float> =

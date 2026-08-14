@@ -38,6 +38,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class LocationWeatherService : Service() {
 
+    /** Receives the cached phone data that should be synchronized to the glasses. */
+    interface Observer {
+        fun onLocationFixChanged(locationFix: LocationFix) = Unit
+        fun onWeatherSnapshotChanged(weatherSnapshot: WeatherSnapshot) = Unit
+    }
+
     companion object {
         private const val NOTIFICATION_ID = 1002
         private const val CHANNEL_ID = "location_weather_channel"
@@ -57,8 +63,7 @@ class LocationWeatherService : Service() {
         var instance: LocationWeatherService? = null
             private set
 
-        var onLocationFixChanged: ((LocationFix) -> Unit)? = null
-        var onWeatherSnapshotChanged: ((WeatherSnapshot) -> Unit)? = null
+        var observer: Observer? = null
 
         fun start(context: Context) {
             // A live service is already receiving location updates. Restarting it
@@ -225,7 +230,7 @@ class LocationWeatherService : Service() {
         val locationFix = resolveLocationFix(location)
         cachedLocationFix = locationFix
         cachedSpeedMps = locationFix.speedMps.takeIf { locationFix.quality == LocationFixQuality.VALID }
-        onLocationFixChanged?.invoke(locationFix)
+        observer?.onLocationFixChanged(locationFix)
         fileLog(
             "Processing location: $lat, $lon " +
                     "speedMps=${cachedSpeedMps ?: "na"} quality=${locationFix.quality}"
@@ -345,7 +350,7 @@ class LocationWeatherService : Service() {
         val locationFix = resolveLocationFix(location)
         cachedLocationFix = locationFix
         cachedSpeedMps = locationFix.speedMps.takeIf { locationFix.quality == LocationFixQuality.VALID }
-        onLocationFixChanged?.invoke(locationFix)
+        observer?.onLocationFixChanged(locationFix)
     }
 
     private fun geocodeLocation(lat: Double, lon: Double) {
@@ -529,7 +534,7 @@ class LocationWeatherService : Service() {
             payloadTimestamp = System.currentTimeMillis()
             val snapshot = getCurrentWeatherSnapshot()
             if (snapshot != null) {
-                onWeatherSnapshotChanged?.invoke(snapshot)
+                observer?.onWeatherSnapshotChanged(snapshot)
             }
 
             if (failures.isEmpty()) {
@@ -554,7 +559,7 @@ class LocationWeatherService : Service() {
         // payloadTimestamp == 0 means data hasn't been refreshed this session (stale from previous run)
         if (town != null && countryCode != null && payloadTimestamp > 0) {
             // Send full weather data with description and timestamp for proper icon display
-            onWeatherSnapshotChanged?.invoke(
+            observer?.onWeatherSnapshotChanged(
                 WeatherSnapshot(
                     town = town,
                     countryCode = countryCode,

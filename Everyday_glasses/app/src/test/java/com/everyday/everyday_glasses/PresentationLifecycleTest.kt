@@ -105,8 +105,16 @@ class PresentationLifecycleTest {
         val controller = PresentationController(
             scheduler = scheduler,
             nowElapsedMs = { 0L },
-            onPresentationStarted = { order += "start:${it.targetId}" },
-            onRestorePrevious = { order += "restore:${it.targetId}"; state = "old-restored" }
+            delegate = object : PresentationLifecycleDelegate {
+                override fun onPresentationStarted(session: PresentationSession) {
+                    order += "start:${session.targetId}"
+                }
+
+                override fun onRestorePrevious(session: PresentationSession) {
+                    order += "restore:${session.targetId}"
+                    state = "old-restored"
+                }
+            }
         )
 
         controller.start("old", PresentationSpec(PresentationMode.FULLSCREEN, 10, PresentationExpiryPolicy.CLOSE)) {
@@ -128,7 +136,11 @@ class PresentationLifecycleTest {
         val controller = PresentationController(
             scheduler = scheduler,
             nowElapsedMs = { 0L },
-            onProgressChanged = { progress += it }
+            delegate = object : PresentationLifecycleDelegate {
+                override fun onProgressChanged(value: PresentationProgress?) {
+                    progress += value
+                }
+            }
         )
         val session = controller.start("text#0", PresentationSpec(PresentationMode.WINDOWED, 10, PresentationExpiryPolicy.CLOSE)) {
             snapshot
@@ -154,11 +166,16 @@ class PresentationLifecycleTest {
         val controller = PresentationController(
             scheduler = scheduler,
             nowElapsedMs = { 0L },
-            onProgressChanged = { value ->
-                progress += value
-                if (value == null) order += "progress-cleared"
-            },
-            onLeaveWindowed = { order += "expiry-applied" }
+            delegate = object : PresentationLifecycleDelegate {
+                override fun onProgressChanged(value: PresentationProgress?) {
+                    progress += value
+                    if (value == null) order += "progress-cleared"
+                }
+
+                override fun onLeaveWindowed(session: PresentationSession) {
+                    order += "expiry-applied"
+                }
+            }
         )
         val session = controller.start(
             "text#0",
@@ -180,8 +197,7 @@ class PresentationLifecycleTest {
         var currentState = "fullscreen"
         val controller = PresentationController(
             scheduler = scheduler,
-            nowElapsedMs = { 0L },
-            onProgressChanged = {}
+            nowElapsedMs = { 0L }
         )
         var delivered = false
         val input = UserInputActivity {
@@ -214,10 +230,23 @@ class PresentationLifecycleTest {
         val controller = PresentationController(
             scheduler = scheduler,
             nowElapsedMs = { 0L },
-            onPresentationStarted = { state = "presented" },
-            onRestorePrevious = { state = if (it.snapshot.existedBeforePresentation) "restored" else "closed" },
-            onLeaveWindowed = { state = "windowed" },
-            onClose = { state = "closed" }
+            delegate = object : PresentationLifecycleDelegate {
+                override fun onPresentationStarted(session: PresentationSession) {
+                    state = "presented"
+                }
+
+                override fun onRestorePrevious(session: PresentationSession) {
+                    state = if (session.snapshot.existedBeforePresentation) "restored" else "closed"
+                }
+
+                override fun onLeaveWindowed(session: PresentationSession) {
+                    state = "windowed"
+                }
+
+                override fun onClose(targetId: String) {
+                    state = "closed"
+                }
+            }
         )
         controller.start("target", PresentationSpec(PresentationMode.FULLSCREEN, 5, policy)) {
             targetSnapshot

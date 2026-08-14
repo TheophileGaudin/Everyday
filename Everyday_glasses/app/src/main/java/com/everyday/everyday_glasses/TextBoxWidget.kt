@@ -137,8 +137,9 @@ class TextBoxWidget(
     // ==================== Callbacks ====================
     // (onCloseRequested is inherited from BaseWidget)
 
-    var onFocusChanged: ((Boolean) -> Unit)? = null
-    var onStateChanged: ((State) -> Unit)? = null
+    var listener: TextBoxWidgetListener? = null
+    private val onFocusChanged: ((Boolean) -> Unit)? get() = listener?.let { value -> { value.onFocusChanged(it) } }
+    private val onStateChanged: ((State) -> Unit)? get() = listener?.let { value -> { value.onStateChanged(it) } }
     
     // ==================== Additional Paints ====================
     

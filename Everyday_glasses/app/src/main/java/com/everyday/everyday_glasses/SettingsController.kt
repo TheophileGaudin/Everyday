@@ -54,9 +54,7 @@ class SettingsController(
     private var assistantConfiguration: AssistantConfiguration? = null
     private var assistantModels: List<AssistantModel> = emptyList()
     private var assistantDetail: String = "Paste an API key to enable voice"
-    var onPasteGeminiKey: (() -> Unit)? = null
-    var onRemoveGeminiKey: (() -> Unit)? = null
-    var onSelectGeminiModel: ((String?) -> Unit)? = null
+    var geminiListener: GeminiSettingsListener? = null
     private var speedVisibilityThresholdKmh = defaultSpeedVisibilityThresholdKmh
     private var unitSystemMode = UnitSystemMode.AUTO
     private var speedUnit = SpeedometerWidget.SpeedUnit.KMH
@@ -67,15 +65,18 @@ class SettingsController(
         controls: List<BaseHoverControl>
     ) {
         hoverControlsLayoutEditor = HoverControlsLayoutEditor(screenWidth, screenHeight, controls).apply {
-            onLayoutChanged = {
-                hoverControlPlacements = exportPlacements()
-                hasHoverControlPlacements = true
-                invalidateView()
-                notifyContentChanged()
-            }
-            onDismissed = {
-                invalidateView()
-                notifyContentChanged()
+            listener = object : HoverControlsLayoutEditor.Listener {
+                override fun onLayoutChanged() {
+                    hoverControlPlacements = exportPlacements()
+                    hasHoverControlPlacements = true
+                    invalidateView()
+                    notifyContentChanged()
+                }
+
+                override fun onDismissed() {
+                    invalidateView()
+                    notifyContentChanged()
+                }
             }
             if (hasHoverControlPlacements) {
                 applyPersistedPlacements(hoverControlPlacements)
@@ -167,15 +168,20 @@ class SettingsController(
         speedometerSettingsMenu = SpeedometerSettingsMenu(screenWidth, screenHeight).apply {
             setThreshold(speedVisibilityThresholdKmh, notify = false)
             setSpeedUnit(speedUnit)
-            onThresholdChanged = { threshold ->
-                if (speedVisibilityThresholdKmh != threshold) {
-                    speedVisibilityThresholdKmh = threshold
-                    setSpeedometerForceVisibleWhenIdle(speedVisibilityThresholdKmh <= 0f)
-                    notifySpeedVisibilityThresholdChanged(threshold)
+            listener = object : SpeedometerSettingsMenu.Listener {
+                override fun onThresholdChanged(threshold: Float) {
+                    if (speedVisibilityThresholdKmh != threshold) {
+                        speedVisibilityThresholdKmh = threshold
+                        setSpeedometerForceVisibleWhenIdle(speedVisibilityThresholdKmh <= 0f)
+                        notifySpeedVisibilityThresholdChanged(threshold)
+                    }
+                    invalidateView()
                 }
-                invalidateView()
+
+                override fun onDismissed() {
+                    notifyContentChanged()
+                }
             }
-            onDismissed = { notifyContentChanged() }
         }
     }
 
@@ -231,15 +237,18 @@ class SettingsController(
             registry = commandRegistry,
             initialShortcuts = shortcutsProvider()
         ).apply {
-            onChanged = { actions ->
-                onShortcutsChanged(actions)
-                invalidateView()
-                notifyContentChanged()
-            }
-            onDismissed = {
-                shortcutsSettingsMenu = null
-                invalidateView()
-                notifyContentChanged()
+            listener = object : ShortcutsSettingsMenu.Listener {
+                override fun onShortcutsChanged(shortcuts: List<com.everyday.shared.command.AppCommandInvocation>) {
+                    this@SettingsController.onShortcutsChanged(shortcuts)
+                    invalidateView()
+                    notifyContentChanged()
+                }
+
+                override fun onDismissed() {
+                    shortcutsSettingsMenu = null
+                    invalidateView()
+                    notifyContentChanged()
+                }
             }
             show()
         }
@@ -449,7 +458,7 @@ class SettingsController(
         val choices = listOf<String?>(null) + assistantModels.map { it.id }
         val currentChoice: String? = if (current.selectionMode == AssistantModelSelectionMode.AUTO_RECOMMENDED) null else current.modelId
         val next = choices[(choices.indexOf(currentChoice).coerceAtLeast(0) + 1) % choices.size]
-        onSelectGeminiModel?.invoke(next)
+        geminiListener?.onSelectGeminiModel(next)
     }
 
     private fun createDashboardSettings(screenWidth: Float, screenHeight: Float) {
@@ -468,90 +477,100 @@ class SettingsController(
             geminiDetail = assistantDetail
             setUnitSystemMode(this@SettingsController.unitSystemMode, notify = false)
 
-            onBrightnessChanged = { value ->
-                executeBrightnessCommand(value)
-                invalidateView()
-            }
+            handler = object : DashboardSettings.DashboardSettingsHandler {
+                override fun onBrightnessChanged(value: Float) {
+                    executeBrightnessCommand(value)
+                    invalidateView()
+                }
 
-            onUnitSystemModeChanged = { mode ->
-                notifyUnitSystemModeChanged(mode)
-                invalidateView()
-                notifyContentChanged()
-            }
+                override fun onUnitSystemModeChanged(mode: UnitSystemMode) {
+                    notifyUnitSystemModeChanged(mode)
+                    invalidateView()
+                    notifyContentChanged()
+                }
 
-            onAdaptiveBrightnessChanged = { enabled ->
-                this@SettingsController.adaptiveBrightnessEnabled = enabled
-                notifyAdaptiveBrightnessChanged(enabled)
-                invalidateView()
-            }
+                override fun onAdaptiveBrightnessChanged(enabled: Boolean) {
+                    this@SettingsController.adaptiveBrightnessEnabled = enabled
+                    notifyAdaptiveBrightnessChanged(enabled)
+                    invalidateView()
+                }
 
-            onHeadUpTimeChanged = { value ->
-                val ms = headUpTimeValueToMs(value)
-                this@SettingsController.headUpTimeMs = ms
-                notifyHeadUpTimeChanged(ms)
-                invalidateView()
-            }
+                override fun onHeadUpTimeChanged(value: Float) {
+                    val ms = headUpTimeValueToMs(value)
+                    this@SettingsController.headUpTimeMs = ms
+                    notifyHeadUpTimeChanged(ms)
+                    invalidateView()
+                }
 
-            onWakeDurationChanged = { value ->
-                val ms = wakeDurationValueToMs(value)
-                this@SettingsController.wakeDurationMs = ms
-                notifyWakeDurationChanged(ms)
-                invalidateView()
-            }
+                override fun onWakeDurationChanged(value: Float) {
+                    val ms = wakeDurationValueToMs(value)
+                    this@SettingsController.wakeDurationMs = ms
+                    notifyWakeDurationChanged(ms)
+                    invalidateView()
+                }
 
-            onAngleThresholdChanged = { degrees ->
-                this@SettingsController.angleThresholdDegrees = degrees
-                notifyAngleThresholdChanged(degrees)
-                invalidateView()
-            }
+                override fun onAngleThresholdChanged(degrees: Float) {
+                    this@SettingsController.angleThresholdDegrees = degrees
+                    notifyAngleThresholdChanged(degrees)
+                    invalidateView()
+                }
 
-            onHeadsUpEnabledChanged = { enabled ->
-                this@SettingsController.headsUpEnabled = enabled
-                notifyHeadsUpEnabledChanged(enabled)
-                invalidateView()
-            }
+                override fun onHeadsUpEnabledChanged(enabled: Boolean) {
+                    this@SettingsController.headsUpEnabled = enabled
+                    notifyHeadsUpEnabledChanged(enabled)
+                    invalidateView()
+                }
 
-            onSmartAlignmentChanged = { enabled ->
-                setSmartAlignmentEnabled(enabled)
-                notifySmartAlignmentChanged(enabled)
-                invalidateView()
-            }
+                override fun onSmartAlignmentChanged(enabled: Boolean) {
+                    setSmartAlignmentEnabled(enabled)
+                    notifySmartAlignmentChanged(enabled)
+                    invalidateView()
+                }
 
-            onConnectGoogle = {
-                connectGoogle()
-                invalidateView()
-            }
+                override fun onConnectGoogle() {
+                    connectGoogle()
+                    invalidateView()
+                }
 
-            onPasteGeminiKey = { this@SettingsController.onPasteGeminiKey?.invoke() }
-            onRemoveGeminiKey = { this@SettingsController.onRemoveGeminiKey?.invoke() }
-            onCycleGeminiModel = { cycleAssistantModel() }
+                override fun onPasteGeminiKey() {
+                    this@SettingsController.geminiListener?.onPasteGeminiKey()
+                }
 
-            onGrantCalendarAccess = {
-                grantCalendarAccess()
-                invalidateView()
-            }
+                override fun onRemoveGeminiKey() {
+                    this@SettingsController.geminiListener?.onRemoveGeminiKey()
+                }
 
-            onDisconnectGoogle = {
-                disconnectGoogle()
-                invalidateView()
-            }
+                override fun onCycleGeminiModel() {
+                    cycleAssistantModel()
+                }
 
-            onRetryGoogleAuth = {
-                retryGoogleAuth()
-                invalidateView()
-            }
+                override fun onGrantCalendarAccess() {
+                    grantCalendarAccess()
+                    invalidateView()
+                }
 
-            onAppearanceRequested = {
-                showHoverControlsLayoutEditor()
-            }
+                override fun onDisconnectGoogle() {
+                    disconnectGoogle()
+                    invalidateView()
+                }
 
-            onShortcutsRequested = {
-                showShortcutsSettingsMenu()
-            }
+                override fun onRetryGoogleAuth() {
+                    retryGoogleAuth()
+                    invalidateView()
+                }
 
-            onDismissed = {
-                dashboardSettings = null
-                Log.d(TAG, "DashboardSettings removed")
+                override fun onAppearanceRequested() {
+                    showHoverControlsLayoutEditor()
+                }
+
+                override fun onShortcutsRequested() {
+                    showShortcutsSettingsMenu()
+                }
+
+                override fun onDismissed() {
+                    dashboardSettings = null
+                    Log.d(TAG, "DashboardSettings removed")
+                }
             }
 
             show()

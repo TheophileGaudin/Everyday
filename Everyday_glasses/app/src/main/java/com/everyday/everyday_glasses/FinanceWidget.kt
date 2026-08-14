@@ -88,8 +88,10 @@ class FinanceWidget(
 
     private var tiles = mutableListOf(defaultTile("^GSPC"))
 
-    var onStateChanged: (() -> Unit)? = null
-    var onDataRequested: ((visibleConfigs: List<FinanceDashboardTileConfig>, refreshTileIds: List<String>, force: Boolean, reason: String) -> Unit)? = null
+    var listener: FinanceWidgetListener? = null
+    private val onStateChanged: (() -> Unit)? get() = listener?.let { value -> { value.onStateChanged() } }
+    private val onDataRequested: ((List<FinanceDashboardTileConfig>, List<String>, Boolean, String) -> Unit)?
+        get() = listener?.let { value -> { configs, ids, force, reason -> value.onDataRequested(configs, ids, force, reason) } }
 
     private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
@@ -319,13 +321,13 @@ class FinanceWidget(
 
         // Keep the existing data/sync pipeline. This deliberately requests even a non-visible
         // explicitly targeted tile so its cache is ready when the user navigates to it.
-        onDataRequested?.invoke(
+        listener?.onDataRequested(
             listOf(updated),
             listOf(updated.id),
             true,
             "assistant_finance_tile_updated"
         )
-        onStateChanged?.invoke()
+        listener?.onStateChanged()
         return Result.success(updated)
     }
 
@@ -361,7 +363,7 @@ class FinanceWidget(
         val refreshTileIds = visibleConfigs
             .filter { config -> force || shouldRequest(config) }
             .map { it.id }
-        onDataRequested?.invoke(visibleConfigs, refreshTileIds, force, reason)
+        listener?.onDataRequested(visibleConfigs, refreshTileIds, force, reason)
     }
 
     fun applySnapshot(snapshot: FinanceSnapshot) {
@@ -386,14 +388,14 @@ class FinanceWidget(
             navigationIndex = it.first
             updateInternalBounds()
             requestData(force = false, reason = "finance_nav_visible")
-            onStateChanged?.invoke()
+            listener?.onStateChanged()
             return true
         }
 
         val tileHit = tileBounds.firstOrNull { it.second.contains(px, py) }
         if (tileHit != null) {
             selectedTileIndex = tileHit.first
-            onStateChanged?.invoke()
+            listener?.onStateChanged()
             return true
         }
         return false
@@ -403,7 +405,7 @@ class FinanceWidget(
         if (!containsPoint(px, py)) return false
         if (!isFullscreen) {
             toggleFullscreen()
-            onStateChanged?.invoke()
+            listener?.onStateChanged()
         }
         return true
     }
@@ -703,7 +705,7 @@ class FinanceWidget(
         updateLegacySelection()
         updateInternalBounds()
         requestData(force = false, reason = "dashboard_layout_changed")
-        onStateChanged?.invoke()
+        listener?.onStateChanged()
         return true
     }
 
@@ -739,7 +741,7 @@ class FinanceWidget(
         }
         updateLegacySelection()
         updateInternalBounds()
-        onStateChanged?.invoke()
+        listener?.onStateChanged()
         return true
     }
 
@@ -764,7 +766,7 @@ class FinanceWidget(
         dropdownVisible = false
         updateLegacySelection()
         requestTileIfVisible(tileIndex, force = true, reason = "tile_symbol_changed")
-        onStateChanged?.invoke()
+        listener?.onStateChanged()
         return true
     }
 
@@ -976,7 +978,7 @@ class FinanceWidget(
             updateLegacySelection()
             updateInternalBounds()
             requestData(force = false, reason = "finance_tile_reordered")
-            onStateChanged?.invoke()
+            listener?.onStateChanged()
             return true
         }
         return false
@@ -1003,7 +1005,7 @@ class FinanceWidget(
         if (index !in visibleIndices(capacity)) return
         val config = tiles.getOrNull(index) ?: return
         val needsData = shouldRequest(config)
-        onDataRequested?.invoke(listOf(config), if (force || needsData) listOf(config.id) else emptyList(), force, reason)
+        listener?.onDataRequested(listOf(config), if (force || needsData) listOf(config.id) else emptyList(), force, reason)
     }
 
     private fun shouldRequest(config: FinanceDashboardTileConfig): Boolean {

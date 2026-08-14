@@ -234,52 +234,55 @@ class MainActivity : AppCompatActivity() {
         }
         
         rfcommServer = RfcommServer(this).apply {
-            onStatusChanged = { status ->
-                runOnUiThread { 
+            deviceListener = object : RfcommServer.DeviceListener {
+                override fun onServerStatusChanged(status: String) {
+                    this@MainActivity.runOnUiThread {
                     // Minimalist design: don't show verbose status
                     // statusText.text = status 
-                }
-            }
-            onConnectionChanged = { connected ->
-                phoneRouteCoordinator.onConnectionChanged(connected)
-                phoneDestinationSearchCoordinator.onConnectionChanged(connected)
-                // Connection and location/sync startup must not wait for a
-                // potentially busy UI thread.  The foreground service is what
-                // keeps live phone location available behind the lock screen.
-                Thread {
-                    dataSyncCoordinator.onConnectionChanged(connected)
-                }.start()
-                runOnUiThread { 
-                    isGlassesConnected = connected
-                    if (!connected) {
-                        glassesBatteryPercent = null
-                        lastSentClipboard = null  // Reset on disconnect
-                        assistantStatus = null
-                    } else {
-                        // Also send current clipboard so glasses have it
-                        sendCurrentClipboardToGlasses()
-                        sendPendingSharedAddress()
                     }
-                    updateStatusDisplay()
-                    trackpad.alpha = if (connected) 1.0f else 0.5f
-                    updateMirrorButton()
-                    updateImagePickerButton()
-                    updateOpenOnGlassesButton()
-                    if (!connected) cancelAssistantPushToTalk()
-                    updateAssistantPushToTalk()
+                }
 
-                    if (!connected) {
-                        hideKeyboard()
-                        // Stop mirroring when glasses disconnect
-                        if (isMirroringEnabled) {
-                            stopMirroring()
+                override fun onConnectionChanged(connected: Boolean) {
+                    phoneRouteCoordinator.onConnectionChanged(connected)
+                    phoneDestinationSearchCoordinator.onConnectionChanged(connected)
+                    // Connection and location/sync startup must not wait for a
+                    // potentially busy UI thread.  The foreground service is what
+                    // keeps live phone location available behind the lock screen.
+                    Thread {
+                        dataSyncCoordinator.onConnectionChanged(connected)
+                    }.start()
+                    this@MainActivity.runOnUiThread {
+                        isGlassesConnected = connected
+                        if (!connected) {
+                            glassesBatteryPercent = null
+                            lastSentClipboard = null  // Reset on disconnect
+                            assistantStatus = null
+                        } else {
+                            // Also send current clipboard so glasses have it
+                            sendCurrentClipboardToGlasses()
+                            sendPendingSharedAddress()
                         }
-                        phoneSubtitleCoordinator?.stop()
+                        updateStatusDisplay()
+                        trackpad.alpha = if (connected) 1.0f else 0.5f
+                        updateMirrorButton()
+                        updateImagePickerButton()
+                        updateOpenOnGlassesButton()
+                        if (!connected) cancelAssistantPushToTalk()
+                        updateAssistantPushToTalk()
+
+                        if (!connected) {
+                            hideKeyboard()
+                            // Stop mirroring when glasses disconnect
+                            if (isMirroringEnabled) {
+                                stopMirroring()
+                            }
+                            phoneSubtitleCoordinator?.stop()
+                        }
                     }
                 }
-            }
-            onTextFieldFocusChanged = { focused ->
-                runOnUiThread {
+
+                override fun onTextFieldFocusChanged(focused: Boolean) {
+                    this@MainActivity.runOnUiThread {
                     if (focused) {
                         showKeyboard()
                         // Send clipboard when text field is focused (so paste is available)
@@ -287,58 +290,78 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         hideKeyboard()
                     }
+                    }
                 }
-            }
-            onBatteryChanged = { batteryPercent ->
-                runOnUiThread {
+
+                override fun onGlassesBatteryChanged(batteryPercent: Int) {
+                    this@MainActivity.runOnUiThread {
                     glassesBatteryPercent = batteryPercent
                     updateStatusDisplay()
+                    }
                 }
             }
-            onMirrorActionRequested = { start ->
-                runOnUiThread {
+
+            phoneActionListener = object : RfcommServer.PhoneActionListener {
+                override fun onMirrorActionRequested(start: Boolean) {
+                    this@MainActivity.runOnUiThread {
                     if (start) {
                         startMirroringFromBackground()
                     } else {
                         stopMirroring()
                     }
+                    }
                 }
-            }
-            
-            onClipboardRequested = {
-                runOnUiThread {
-                    sendCurrentClipboardToGlasses()
+
+                override fun onClipboardRequested() {
+                    this@MainActivity.runOnUiThread {
+                        sendCurrentClipboardToGlasses()
+                    }
+                }
+
+                override fun onGoogleAuthRequested() {
+                    this@MainActivity.runOnUiThread {
+                        beginPhoneGoogleAuthorization()
+                    }
+                }
+
+                override fun onGoogleDisconnectRequested() {
+                    this@MainActivity.runOnUiThread {
+                        disconnectPhoneGoogleAuthorization()
+                    }
                 }
             }
 
-            onGoogleAuthRequested = {
-                runOnUiThread {
-                    beginPhoneGoogleAuthorization()
+            dataRequestListener = object : RfcommServer.DataRequestListener {
+                override fun onSyncRequested(request: com.everyday.shared.sync.SyncRequest) {
+                    dataSyncCoordinator.onSyncRequest(request)
+                }
+
+                override fun onRouteRequestReceived(request: com.everyday.shared.transport.RouteTransportRequest) {
+                    phoneRouteCoordinator.onRouteRequest(request)
+                }
+
+                override fun onRouteCancellationReceived(cancellation: com.everyday.shared.transport.RouteTransportCancellation) {
+                    phoneRouteCoordinator.onRouteCancellation(cancellation)
+                }
+
+                override fun onDestinationSearchRequestReceived(request: com.everyday.shared.transport.DestinationSearchRequest) {
+                    phoneDestinationSearchCoordinator.onSearchRequest(request)
+                }
+
+                override fun onDestinationSearchCancellationReceived(cancellation: com.everyday.shared.transport.DestinationSearchCancellation) {
+                    phoneDestinationSearchCoordinator.onSearchCancellation(cancellation)
                 }
             }
 
-            onGoogleDisconnectRequested = {
-                runOnUiThread {
-                    disconnectPhoneGoogleAuthorization()
+            experienceControlListener = object : RfcommServer.ExperienceControlListener {
+                override fun onSubtitleControlRequested(control: com.everyday.shared.sync.SubtitleControl) {
+                    this@MainActivity.runOnUiThread {
+                        phoneSubtitleCoordinator?.onControl(control)
+                    }
                 }
-            }
 
-            onSyncRequested = { request ->
-                dataSyncCoordinator.onSyncRequest(request)
-            }
-
-            onRouteRequestReceived = phoneRouteCoordinator::onRouteRequest
-            onRouteCancellationReceived = phoneRouteCoordinator::onRouteCancellation
-            onDestinationSearchRequestReceived = phoneDestinationSearchCoordinator::onSearchRequest
-            onDestinationSearchCancellationReceived = phoneDestinationSearchCoordinator::onSearchCancellation
-
-            onSubtitleControlRequested = { control ->
-                runOnUiThread {
-                    phoneSubtitleCoordinator?.onControl(control)
-                }
-            }
-            onAssistantStatusReceived = { status ->
-                runOnUiThread {
+                override fun onAssistantStatusReceived(status: com.everyday.shared.transport.AssistantStatus) {
+                    this@MainActivity.runOnUiThread {
                     assistantStatus = status
                     if (status.sessionId == assistantSessionId && status.state != AssistantSessionState.LISTENING) {
                         assistantHandler.removeCallbacks(assistantKeepalive)
@@ -353,28 +376,32 @@ class MainActivity : AppCompatActivity() {
                         clearAssistantStopPending(pendingStop)
                     }
                     updateAssistantPushToTalk()
+                    }
                 }
             }
         }
         
         // Initialize screen stream server
         screenStreamServer = ScreenStreamServer(this).apply {
-            onStreamingStateChanged = { streaming ->
-                runOnUiThread {
+            streamingListener = object : ScreenStreamServer.StreamingListener {
+                override fun onStreamingStateChanged(streaming: Boolean) {
+                    this@MainActivity.runOnUiThread {
                     fileLog("Streaming state changed: $streaming")
                     // Don't overwrite detailed status updates
                 }
-            }
-            onError = { error ->
-                runOnUiThread {
+                }
+
+                override fun onStreamError(error: String) {
+                    this@MainActivity.runOnUiThread {
                     fileLog("Stream error: $error")
                     // DEBUG: coordsText commented out for minimalist design
                     // coordsText.text = "❌ $error"
                     // coordsText.setTextColor(0xFFFF6666.toInt())
                 }
-            }
-            onStatusUpdate = { status ->
-                runOnUiThread {
+                }
+
+                override fun onStreamStatusChanged(status: String) {
+                    this@MainActivity.runOnUiThread {
                     fileLog("Stream status: $status")
                     // DEBUG: coordsText commented out for minimalist design
                     // coordsText.text = status
@@ -383,9 +410,11 @@ class MainActivity : AppCompatActivity() {
                     //     coordsText.setTextColor(0xFF00FF00.toInt())
                     // }
                 }
-            }
-            onOrientationChanged = { isLandscape ->
-                // Orientation button removed - no action needed
+                }
+
+                override fun onCaptureOrientationChanged(isLandscape: Boolean) {
+                    // Orientation button removed - no action needed
+                }
             }
         }
 
@@ -446,7 +475,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun initializeWifiDirect() {
         wifiDirectManager = WifiDirectManager(this).apply {
-            onGroupFormed = { ownerIp ->
+            connectionListener = object : WifiDirectManager.ConnectionListener {
+                override fun onGroupFormed(ownerIp: String) {
                 fileLog("WiFi Direct group formed, IP: $ownerIp")
                 runOnUiThread {
                     Toast.makeText(this@MainActivity, "WiFi Direct ready: $ownerIp", Toast.LENGTH_SHORT).show()
@@ -461,22 +491,23 @@ class MainActivity : AppCompatActivity() {
                     }
                     else -> Unit
                 }
-            }
+                }
 
-            onGroupRemoved = {
-                fileLog("WiFi Direct group removed")
-            }
+                override fun onGroupRemoved() {
+                    fileLog("WiFi Direct group removed")
+                }
 
-            onError = { error ->
+                override fun onError(error: String) {
                 fileLog("WiFi Direct error: $error")
                 runOnUiThread {
                     Toast.makeText(this@MainActivity, "WiFi Direct: $error", Toast.LENGTH_SHORT).show()
                     transportManager.onWifiDirectError()
                 }
-            }
+                }
 
-            onStateChanged = { enabled ->
-                fileLog("WiFi Direct enabled: $enabled")
+                override fun onStateChanged(enabled: Boolean) {
+                    fileLog("WiFi Direct enabled: $enabled")
+                }
             }
 
             initialize()
@@ -1179,8 +1210,8 @@ class MainActivity : AppCompatActivity() {
                     true
                 }
                 else -> true
+                }
             }
-        }
         updateAssistantPushToTalk()
     }
 

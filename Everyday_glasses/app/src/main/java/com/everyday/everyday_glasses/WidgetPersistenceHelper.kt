@@ -22,16 +22,23 @@ class WidgetPersistenceHelper(private val context: Context) {
         private const val TAG = "WidgetPersistenceHelper"
     }
 
-    // Callbacks for widget events (set by WidgetContainer)
-    var onWidgetFocusChanged: ((widget: BaseWidget?, focused: Boolean) -> Unit)? = null
-    var onWidgetDeleted: ((widget: TextBoxWidget) -> Unit)? = null
-    var onBrowserWidgetClosed: ((widget: BrowserWidget) -> Unit)? = null
-    var onWidgetStateChanged: (() -> Unit)? = null
-    var onTextWidgetFullscreenToggled: ((widget: TextBoxWidget, isFullscreen: Boolean) -> Unit)? = null
-    var onTextWidgetMinimizeToggled: ((widget: TextBoxWidget, isMinimized: Boolean) -> Unit)? = null
-    var onBrowserWidgetFullscreenToggled: ((widget: BrowserWidget, isFullscreen: Boolean) -> Unit)? = null
-    var onMinimizeToggled: ((widget: BrowserWidget, isMinimized: Boolean) -> Unit)? = null
-    var onBrowserKeyboardRequest: ((show: Boolean) -> Unit)? = null
+    /** Widget restore events consumed by [WidgetContainer]. */
+    var listener: WidgetPersistenceListener? = null
+    private val onWidgetFocusChanged: ((BaseWidget?, Boolean) -> Unit)?
+        get() = listener?.let { value -> { widget, focused -> value.onWidgetFocusChanged(widget, focused) } }
+    private val onWidgetDeleted: ((TextBoxWidget) -> Unit)? get() = listener?.let { value -> { value.onTextWidgetDeleted(it) } }
+    private val onBrowserWidgetClosed: ((BrowserWidget) -> Unit)? get() = listener?.let { value -> { value.onBrowserWidgetClosed(it) } }
+    private val onWidgetStateChanged: (() -> Unit)? get() = listener?.let { value -> { value.onWidgetStateChanged() } }
+    private val onTextWidgetFullscreenToggled: ((TextBoxWidget, Boolean) -> Unit)?
+        get() = listener?.let { value -> { widget, fullscreen -> value.onTextWidgetFullscreenToggled(widget, fullscreen) } }
+    private val onTextWidgetMinimizeToggled: ((TextBoxWidget, Boolean) -> Unit)?
+        get() = listener?.let { value -> { widget, minimized -> value.onTextWidgetMinimizeToggled(widget, minimized) } }
+    private val onBrowserWidgetFullscreenToggled: ((BrowserWidget, Boolean) -> Unit)?
+        get() = listener?.let { value -> { widget, fullscreen -> value.onBrowserWidgetFullscreenToggled(widget, fullscreen) } }
+    private val onMinimizeToggled: ((BrowserWidget, Boolean) -> Unit)?
+        get() = listener?.let { value -> { widget, minimized -> value.onBrowserWidgetMinimizeToggled(widget, minimized) } }
+    private val onBrowserKeyboardRequest: ((Boolean) -> Unit)?
+        get() = listener?.let { value -> { show -> value.onBrowserKeyboardRequested(show) } }
 
     // ==================== Common-field helpers ====================
 
@@ -478,20 +485,26 @@ class WidgetPersistenceHelper(private val context: Context) {
 
                 restoreCommonState(this, state, adjustedX, adjustedY)
 
-                onFocusChanged = { focused ->
-                    onWidgetFocusChanged?.invoke(this, focused)
+                listener = object : TextBoxWidgetListener {
+                    override fun onFocusChanged(focused: Boolean) {
+                        onWidgetFocusChanged?.invoke(this@apply, focused)
+                    }
+                    override fun onStateChanged(state: TextBoxWidget.State) {
+                        onWidgetStateChanged?.invoke()
+                    }
                 }
-                onCloseRequested = {
-                    onWidgetDeleted?.invoke(this)
-                }
-                onStateChanged = { _ ->
-                    onWidgetStateChanged?.invoke()
-                }
-                onFullscreenToggled = { isFullscreen ->
-                    onTextWidgetFullscreenToggled?.invoke(this, isFullscreen)
-                }
-                onMinimizeToggled = { isMinimized ->
-                    onTextWidgetMinimizeToggled?.invoke(this, isMinimized)
+                lifecycleListener = object : WidgetLifecycleListener {
+                    override fun onCloseRequested(widget: BaseWidget) {
+                        onWidgetDeleted?.invoke(this@apply)
+                    }
+
+                    override fun onFullscreenToggled(widget: BaseWidget, isFullscreen: Boolean) {
+                        onTextWidgetFullscreenToggled?.invoke(this@apply, isFullscreen)
+                    }
+
+                    override fun onMinimizeToggled(widget: BaseWidget, isMinimized: Boolean) {
+                        onTextWidgetMinimizeToggled?.invoke(this@apply, isMinimized)
+                    }
                 }
             }
         }
@@ -607,23 +620,29 @@ class WidgetPersistenceHelper(private val context: Context) {
 
                 restoreCommonState(this, state, adjustedX, adjustedY)
 
-                onFocusChanged = { focused ->
-                    onWidgetFocusChanged?.invoke(this, focused)
+                listener = object : BrowserWidgetListener {
+                    override fun onFocusChanged(focused: Boolean) {
+                        onWidgetFocusChanged?.invoke(this@apply, focused)
+                    }
+                    override fun onStateChanged(state: BrowserWidget.State) {
+                        onWidgetStateChanged?.invoke()
+                    }
+                    override fun onKeyboardRequested(show: Boolean) {
+                        onBrowserKeyboardRequest?.invoke(show)
+                    }
                 }
-                onCloseRequested = {
-                    onBrowserWidgetClosed?.invoke(this)
-                }
-                onStateChanged = { _ ->
-                    onWidgetStateChanged?.invoke()
-                }
-                onFullscreenToggled = { isFullscreen ->
-                    onBrowserWidgetFullscreenToggled?.invoke(this, isFullscreen)
-                }
-                onMinimizeToggled = { isMinimized ->
-                    this@WidgetPersistenceHelper.onMinimizeToggled?.invoke(this, isMinimized)
-                }
-                onRequestKeyboard = { show ->
-                    onBrowserKeyboardRequest?.invoke(show)
+                lifecycleListener = object : WidgetLifecycleListener {
+                    override fun onCloseRequested(widget: BaseWidget) {
+                        onBrowserWidgetClosed?.invoke(this@apply)
+                    }
+
+                    override fun onFullscreenToggled(widget: BaseWidget, isFullscreen: Boolean) {
+                        onBrowserWidgetFullscreenToggled?.invoke(this@apply, isFullscreen)
+                    }
+
+                    override fun onMinimizeToggled(widget: BaseWidget, isMinimized: Boolean) {
+                        this@WidgetPersistenceHelper.onMinimizeToggled?.invoke(this@apply, isMinimized)
+                    }
                 }
 
                 // Fix z-order

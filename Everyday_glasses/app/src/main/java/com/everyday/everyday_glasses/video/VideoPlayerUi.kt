@@ -91,24 +91,28 @@ class VideoPlayerUi(
 
     init {
         host.addView(root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        controller.onStateChanged = {
-            render()
-            onStateChanged?.invoke()
-        }
-        controller.onItemChanged = {
-            subtitleRowsSignature = null
-            renderSubtitleRows()
-            render()
-        }
-        controller.onSubtitleCandidatesChanged = {
-            renderSubtitleImportRows()
-            render()
-            // Everyday mirrors this native hierarchy into the binocular output on demand.
-            // Notify again after Android has laid out the newly inserted rows; the immediate
-            // controller notification can otherwise capture the still-empty pre-layout frame.
-            subtitleImportListContainer.requestLayout()
-            root.post {
-                if (!released) onStateChanged?.invoke()
+        controller.observer = object : VideoPlaybackObserver {
+            override fun onPlaybackStateChanged() {
+                render()
+                onStateChanged?.invoke()
+            }
+
+            override fun onVideoItemChanged(item: VideoItem) {
+                subtitleRowsSignature = null
+                renderSubtitleRows()
+                render()
+            }
+
+            override fun onSubtitleCandidatesChanged(candidates: List<LocalSubtitleCandidate>) {
+                renderSubtitleImportRows()
+                render()
+                // Everyday mirrors this native hierarchy into the binocular output on demand.
+                // Notify again after Android has laid out the newly inserted rows; the immediate
+                // controller notification can otherwise capture the still-empty pre-layout frame.
+                subtitleImportListContainer.requestLayout()
+                root.post {
+                    if (!released) onStateChanged?.invoke()
+                }
             }
         }
         setupClickHandlers()
@@ -190,9 +194,7 @@ class VideoPlayerUi(
         released = true
         handler.removeCallbacks(controlsHideRunnable)
         controlsHideScheduled = false
-        controller.onStateChanged = null
-        controller.onItemChanged = null
-        controller.onSubtitleCandidatesChanged = null
+        controller.observer = null
         onStateChanged = null
         playerView.player = null
         (root.parent as? ViewGroup)?.removeView(root)

@@ -14,6 +14,19 @@ interface GlassesDestinationSearchTransport {
 
 enum class DestinationSearchFallbackReason { NOT_CONNECTED, SEND_FAILURE, HEDGE, PHONE_ERROR }
 
+/** Receives results and fallback milestones for a phone-backed destination search. */
+interface DestinationSearchListener {
+    fun onDestinationSearchResult(result: DestinationSearchResult) = Unit
+    fun onDestinationSearchFallback(
+        request: DestinationSearchRequest,
+        reason: DestinationSearchFallbackReason
+    ) = Unit
+    fun onDestinationSearchFailure(
+        request: DestinationSearchRequest,
+        error: DestinationSearchError?
+    ) = Unit
+}
+
 class GlassesDestinationSearchCoordinator(
     private val transportProvider: () -> GlassesDestinationSearchTransport?,
     private val hedgeMs: Long = 2_500L,
@@ -22,9 +35,7 @@ class GlassesDestinationSearchCoordinator(
         Thread(r, "DestinationSearchDeadline").apply { isDaemon = true }
     }
 ) {
-    var onResult: ((DestinationSearchResult) -> Unit)? = null
-    var onFallback: ((DestinationSearchRequest, DestinationSearchFallbackReason) -> Unit)? = null
-    var onFailure: ((DestinationSearchRequest, DestinationSearchError?) -> Unit)? = null
+    var listener: DestinationSearchListener? = null
     private data class Active(val request: DestinationSearchRequest, var hedge: ScheduledFuture<*>? = null,
         var deadline: ScheduledFuture<*>? = null, var fallbackStarted: Boolean = false,
         var lastError: DestinationSearchError? = null)
@@ -45,7 +56,7 @@ class GlassesDestinationSearchCoordinator(
                 if (active !== item) return@schedule
                 clearLocked(item); active = null; item.lastError
             }
-            onFailure?.invoke(item.request, error)
+            listener?.onDestinationSearchFailure(item.request, error)
         }, deadlineMs, TimeUnit.MILLISECONDS)
     }
 
@@ -55,7 +66,7 @@ class GlassesDestinationSearchCoordinator(
             if (item.request.requestId != result.requestId) return
             clearLocked(item); active = null; true
         }
-        if (accepted) onResult?.invoke(result)
+        if (accepted) listener?.onDestinationSearchResult(result)
     }
 
     fun onError(error: DestinationSearchError) {
@@ -98,7 +109,7 @@ class GlassesDestinationSearchCoordinator(
         val should = synchronized(lock) {
             if (active !== item || item.fallbackStarted) false else { item.fallbackStarted = true; true }
         }
-        if (should) onFallback?.invoke(item.request, reason)
+        if (should) listener?.onDestinationSearchFallback(item.request, reason)
     }
     private fun clearLocked(item: Active) { item.hedge?.cancel(false); item.deadline?.cancel(false) }
 }

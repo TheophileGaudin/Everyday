@@ -59,8 +59,10 @@ class SubtitleWidget(
     var options: SubtitleOptions = SubtitleOptions()
         private set
 
-    var onSubtitleControlRequested: ((SubtitleControl) -> Unit)? = null
-    var onStateChanged: (() -> Unit)? = null
+    var listener: SubtitleWidgetListener? = null
+    private val onSubtitleControlRequested: ((SubtitleControl) -> Unit)?
+        get() = listener?.let { value -> { control -> value.onSubtitleControlRequested(control) } }
+    private val onStateChanged: (() -> Unit)? get() = listener?.let { value -> { value.onStateChanged() } }
 
     private val panelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#D0000000")

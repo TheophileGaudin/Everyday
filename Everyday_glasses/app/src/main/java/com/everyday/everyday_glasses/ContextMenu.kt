@@ -71,14 +71,11 @@ class ContextMenu(
     private var contentTop = 0f
     private var visibleRows = MAX_VISIBLE_ROWS
 
-    var onSubmenuWillShow: ((MenuItem) -> List<SubMenuItem>)? = null
+    var handler: ContextMenuHandler? = null
 
     var isVisible = false
         private set
 
-    var onItemSelected: ((MenuItem) -> Unit)? = null
-    var onSubmenuItemDoubleTapped: ((MenuItem, SubMenuItem) -> Boolean)? = null
-    var onDismissed: (() -> Unit)? = null
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#2a2a3e")
@@ -244,7 +241,7 @@ class ContextMenu(
         pageStack.clear()
         rowRects.clear()
         backRect.setEmpty()
-        onDismissed?.invoke()
+        handler?.onMenuDismissed()
         Log.d(TAG, "Menu dismissed")
     }
 
@@ -295,7 +292,7 @@ class ContextMenu(
             if (!rect.contains(px, py)) continue
 
             if (entry is Entry.SubMenu && isSelectable(entry.item)) {
-                val handled = onSubmenuItemDoubleTapped?.invoke(entry.parent, entry.item) == true
+                val handled = handler?.selectSubmenuItem(entry.parent, entry.item) == true
                 if (handled) {
                     dismiss()
                 } else if (pageStack.size > 1) {
@@ -403,7 +400,7 @@ class ContextMenu(
             return
         }
 
-        onItemSelected?.invoke(item)
+        handler?.selectItem(item)
         dismiss()
     }
 
@@ -416,13 +413,13 @@ class ContextMenu(
         if (!isSelectable(item)) return
 
         if (commandRegistry.find(item.id) != null) {
-            onItemSelected?.invoke(MenuItem(item.id, item.label))
+            handler?.selectItem(MenuItem(item.id, item.label))
         }
         dismiss()
     }
 
     private fun openMenuPage(item: MenuItem) {
-        val freshItems = onSubmenuWillShow?.invoke(item) ?: item.submenu ?: emptyList()
+        val freshItems = handler?.submenuItemsFor(item) ?: item.submenu ?: emptyList()
         val refreshedItem = item.copy(submenu = freshItems)
         replaceRootItem(refreshedItem)
         pageStack.add(

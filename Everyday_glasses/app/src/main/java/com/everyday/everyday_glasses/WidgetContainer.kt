@@ -168,7 +168,7 @@ class WidgetContainer @JvmOverloads constructor(
         override fun toggleLayoutLock() = setWidgetLayoutLocked(!isWidgetLayoutLocked)
         override fun saveLayout() = layoutManager.saveCurrentLayout()
         override fun saveLayoutAs() = layoutManager.showSaveLayoutAsPrompt()
-        override fun openFilePicker() { onFilePickerRequest?.invoke() }
+        override fun openFilePicker() { host?.requestFilePicker() }
         override fun openSettings() = settingsController.toggleDashboardSettings(width.toFloat(), height.toFloat())
         override fun requestClose() = triggerCloseAppConfirmation()
         override fun setBrightness(value: Float) = settingsController.setBrightness(value)
@@ -183,7 +183,7 @@ class WidgetContainer @JvmOverloads constructor(
         executeCommand(commandRegistry.invocation(commandRegistry.closeApp))
     }
     private val assistantVoiceHoverControl = AssistantVoiceHoverControl {
-        onAssistantVoiceToggle?.invoke()
+        host?.toggleAssistantVoice()
     }
 
     // Mutable list of lemon shortcuts; loaded lazily from disk on first access so the
@@ -211,7 +211,7 @@ class WidgetContainer @JvmOverloads constructor(
                 pendingCreateY = 0f
             }
             executeCommand(invocation)
-            onCursorCenterRequested?.invoke()
+            host?.requestCursorCenter()
         },
         invalidate = { invalidateHoverVisuals() }
     )
@@ -310,22 +310,22 @@ class WidgetContainer @JvmOverloads constructor(
         },
         isSmartAlignmentEnabled = { smartAlignment.enabled },
         setSmartAlignmentEnabled = { enabled -> smartAlignment.enabled = enabled },
-        notifyBrightnessChanged = { value -> onBrightnessChanged?.invoke(value) },
+        notifyBrightnessChanged = { value -> displaySettingsHandler?.applyBrightness(value) },
         executeBrightnessCommand = { value ->
             executeCommand(AppCommandInvocation(commandRegistry.setBrightness.id, AppCommandArguments.Brightness(value)))
         },
-        notifyAdaptiveBrightnessChanged = { enabled -> onAdaptiveBrightnessChanged?.invoke(enabled) },
-        notifyHeadUpTimeChanged = { ms -> onHeadUpTimeChanged?.invoke(ms) },
-        notifyWakeDurationChanged = { ms -> onWakeDurationChanged?.invoke(ms) },
-        notifyAngleThresholdChanged = { degrees -> onAngleThresholdChanged?.invoke(degrees) },
-        notifyHeadsUpEnabledChanged = { enabled -> onHeadsUpEnabledChanged?.invoke(enabled) },
-        notifySmartAlignmentChanged = { enabled -> onSmartAlignmentChanged?.invoke(enabled) },
-        notifySpeedVisibilityThresholdChanged = { threshold -> onSpeedVisibilityThresholdChanged?.invoke(threshold) },
+        notifyAdaptiveBrightnessChanged = { enabled -> displaySettingsHandler?.applyAdaptiveBrightness(enabled) },
+        notifyHeadUpTimeChanged = { ms -> displaySettingsHandler?.applyHeadUpTime(ms) },
+        notifyWakeDurationChanged = { ms -> displaySettingsHandler?.applyWakeDuration(ms) },
+        notifyAngleThresholdChanged = { degrees -> displaySettingsHandler?.applyHeadUpAngleThreshold(degrees) },
+        notifyHeadsUpEnabledChanged = { enabled -> displaySettingsHandler?.applyHeadsUpEnabled(enabled) },
+        notifySmartAlignmentChanged = { enabled -> displaySettingsHandler?.applySmartAlignment(enabled) },
+        notifySpeedVisibilityThresholdChanged = { threshold -> displaySettingsHandler?.applySpeedVisibilityThreshold(threshold) },
         notifyUnitSystemModeChanged = { mode -> unitSettings.setGlobalMode(mode) },
-        connectGoogle = { onConnectGoogle?.invoke() },
-        grantCalendarAccess = { onGrantCalendarAccess?.invoke() },
-        disconnectGoogle = { onDisconnectGoogle?.invoke() },
-        retryGoogleAuth = { onRetryGoogleAuth?.invoke() },
+        connectGoogle = { googleAccountHandler?.connectGoogleAccount() },
+        grantCalendarAccess = { googleAccountHandler?.grantCalendarAccess() },
+        disconnectGoogle = { googleAccountHandler?.disconnectGoogleAccount() },
+        retryGoogleAuth = { googleAccountHandler?.retryGoogleAuthentication() },
         commandRegistry = commandRegistry,
         shortcutsProvider = { ensureLemonShortcuts().toList() },
         onShortcutsChanged = { updated -> applyShortcuts(updated) }
@@ -346,7 +346,7 @@ class WidgetContainer @JvmOverloads constructor(
         showNamePrompt = { suggestedName ->
             dismissMenu()
             layoutNamePrompt?.show(suggestedName)
-            onFocusChanged?.invoke(true)
+            contentObserver?.onFocusChanged(true)
         },
         showNameError = { error -> layoutNamePrompt?.showError(error) },
         dismissNamePrompt = { layoutNamePrompt?.dismiss() },
@@ -355,24 +355,8 @@ class WidgetContainer @JvmOverloads constructor(
         notifyContentChanged = ::notifyContentChanged
     )
 
-    // Callback to apply window-level brightness (set by MainActivity)
-    var onBrightnessChanged: ((Float) -> Unit)? = null
-    var onAdaptiveBrightnessChanged: ((Boolean) -> Unit)? = null
-    var onMediaBrightnessCapChanged: ((Boolean) -> Unit)? = null
-    var onBrowserMinimumBrightnessChanged: ((Boolean) -> Unit)? = null
-    var onLayoutSwitchBrightnessRequested: (() -> Unit)? = null
-
-    // Callbacks for head-up wake settings (set by MainActivity)
-    var onHeadUpTimeChanged: ((Long) -> Unit)? = null
-    var onWakeDurationChanged: ((Long) -> Unit)? = null
-    var onAngleThresholdChanged: ((Float) -> Unit)? = null
-    var onHeadsUpEnabledChanged: ((Boolean) -> Unit)? = null
-    var onSmartAlignmentChanged: ((Boolean) -> Unit)? = null
-    var onConnectGoogle: (() -> Unit)? = null
-    var onGrantCalendarAccess: (() -> Unit)? = null
-    var onDisconnectGoogle: (() -> Unit)? = null
-    var onRetryGoogleAuth: (() -> Unit)? = null
-    var onGoogleAuthBrowserClosed: (() -> Unit)? = null
+    var displaySettingsHandler: DisplaySettingsHandler? = null
+    var googleAccountHandler: GoogleAccountHandler? = null
 
     // Access to widget lists via registry
     private val widgets: MutableList<TextBoxWidget>
@@ -442,13 +426,27 @@ class WidgetContainer @JvmOverloads constructor(
         PresentationController(
             scheduler = HandlerPresentationScheduler(handler),
             nowElapsedMs = { android.os.SystemClock.elapsedRealtime() },
-            onPresentationStarted = { session -> applyPresentation(session) },
-            onRestorePrevious = ::restorePresentationPrevious,
-            onLeaveWindowed = ::leavePresentationWindowed,
-            onClose = ::closePresentationTarget,
-            onProgressChanged = { progress ->
-                presentationProgress = progress
-                notifyTransientContentChanged()
+            delegate = object : PresentationLifecycleDelegate {
+                override fun onPresentationStarted(session: PresentationSession) {
+                    applyPresentation(session)
+                }
+
+                override fun onRestorePrevious(session: PresentationSession) {
+                    restorePresentationPrevious(session)
+                }
+
+                override fun onLeaveWindowed(session: PresentationSession) {
+                    leavePresentationWindowed(session)
+                }
+
+                override fun onClose(targetId: String) {
+                    closePresentationTarget(targetId)
+                }
+
+                override fun onProgressChanged(progress: PresentationProgress?) {
+                    presentationProgress = progress
+                    notifyTransientContentChanged()
+                }
             }
         )
     }
@@ -670,35 +668,13 @@ class WidgetContainer @JvmOverloads constructor(
     private var isTwoFingerScrollMode = false
     private var currentPointerCount = 1
 
-    // ==================== Callbacks ====================
-    
-    var onFocusChanged: ((Boolean) -> Unit)? = null
-    var onContentChanged: (() -> Unit)? = null
-    var onTransientContentChanged: (() -> Unit)? = null
-    var onMediaFrame: ((String) -> Unit)? = null
-    var onBinocularContentSourceChanged: ((String, BinocularContentClass, Boolean) -> Unit)? = null
-    var onCloseRequested: (() -> Unit)? = null
-    var onMirrorRequest: ((Boolean) -> Unit)? = null
-    var onBrowserKeyboardRequest: ((Boolean) -> Unit)? = null
-    var onClipboardRequest: (() -> Unit)? = null
-    var onFilePickerRequest: (() -> Unit)? = null
-    var onStoragePermissionRequest: (() -> Unit)? = null
-    var onCursorCenterRequested: (() -> Unit)? = null
-    var onSpeedVisibilityThresholdChanged: ((Float) -> Unit)? = null
-    var onFinanceDataRequested: ((visibleConfigs: List<FinanceDashboardTileConfig>, refreshTileIds: List<String>, force: Boolean, reason: String) -> Unit)? = null
-    var onFinanceVisibilityChanged: ((visible: Boolean) -> Unit)? = null
-    var onNewsDataRequested: ((countryCode: String, force: Boolean, reason: String) -> Unit)? = null
-    var onNewsSourceDataRequested: ((
-        sourceSpec: NewsSourceSpec,
-        countryCode: String,
-        force: Boolean,
-        reason: String,
-        completion: (Result<NewsSnapshot>) -> Unit
-    ) -> Unit)? = null
-    var onMapDataRequested: ((MapGeoPoint, PoiDisplayConfig) -> Unit)? = null
+    // ==================== Host contracts ====================
+
+    var contentObserver: WidgetContentObserver? = null
+    var host: WidgetHost? = null
+    var dataProvider: WidgetDataProvider? = null
     private var phoneRouteTransport: GlassesRouteTransport? = null
     private var phoneRouteConnected = false
-    var onSubtitleControlRequested: ((SubtitleControl) -> Unit)? = null
     var userInputActivity: UserInputActivity? = null
 
     private var isCursorVisible = false
@@ -777,34 +753,33 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun setupPersistenceHelperCallbacks() {
-        persistenceHelper.onWidgetFocusChanged = { widget, focused ->
-            if (focused && widget != null) {
-                setFocusedWidget(widget)
-            } else if (!focused) {
-                if (widget is TextBoxWidget && focusedWidget == widget) {
-                    setFocusedWidget(null)
-                } else if (widget is BrowserWidget && focusedBrowserWidget == widget) {
-                    setFocusedWidget(null)
+        persistenceHelper.listener = object : WidgetPersistenceListener {
+            override fun onWidgetFocusChanged(widget: BaseWidget?, focused: Boolean) {
+                if (focused && widget != null) {
+                    setFocusedWidget(widget)
+                } else if (!focused) {
+                    if (widget is TextBoxWidget && focusedWidget == widget) {
+                        setFocusedWidget(null)
+                    } else if (widget is BrowserWidget && focusedBrowserWidget == widget) {
+                        setFocusedWidget(null)
+                    }
                 }
             }
-        }
-        persistenceHelper.onWidgetDeleted = { widget -> removeWidget(widget) }
-        persistenceHelper.onBrowserWidgetClosed = { widget -> removeBrowserWidget(widget) }
-        persistenceHelper.onWidgetStateChanged = { notifyContentChanged() }
-        persistenceHelper.onTextWidgetFullscreenToggled = { widget, isFullscreen ->
-            handleTextWidgetFullscreenToggle(widget, isFullscreen)
-        }
-        persistenceHelper.onTextWidgetMinimizeToggled = { widget, isMinimized ->
-            handleTextWidgetMinimizeToggle(widget, isMinimized)
-        }
-        persistenceHelper.onBrowserWidgetFullscreenToggled = { widget, isFullscreen ->
-            handleBrowserWidgetFullscreenToggle(widget, isFullscreen)
-        }
-        persistenceHelper.onMinimizeToggled = { widget, isMinimized ->
-            handleBrowserWidgetMinimizeToggle(widget, isMinimized)
-        }
-        persistenceHelper.onBrowserKeyboardRequest = { show ->
-            onBrowserKeyboardRequest?.invoke(show)
+
+            override fun onTextWidgetDeleted(widget: TextBoxWidget) = removeWidget(widget)
+            override fun onBrowserWidgetClosed(widget: BrowserWidget) = removeBrowserWidget(widget)
+            override fun onWidgetStateChanged() = notifyContentChanged()
+            override fun onTextWidgetFullscreenToggled(widget: TextBoxWidget, isFullscreen: Boolean) =
+                handleTextWidgetFullscreenToggle(widget, isFullscreen)
+            override fun onTextWidgetMinimizeToggled(widget: TextBoxWidget, isMinimized: Boolean) =
+                handleTextWidgetMinimizeToggle(widget, isMinimized)
+            override fun onBrowserWidgetFullscreenToggled(widget: BrowserWidget, isFullscreen: Boolean) =
+                handleBrowserWidgetFullscreenToggle(widget, isFullscreen)
+            override fun onBrowserWidgetMinimizeToggled(widget: BrowserWidget, isMinimized: Boolean) =
+                handleBrowserWidgetMinimizeToggle(widget, isMinimized)
+            override fun onBrowserKeyboardRequested(show: Boolean) {
+                host?.requestBrowserKeyboard(show)
+            }
         }
     }
 
@@ -1186,7 +1161,7 @@ class WidgetContainer @JvmOverloads constructor(
         postInvalidate()
         (parent as? View)?.invalidate()
         if (!suppressContentChangedCallback) {
-            onContentChanged?.invoke()
+            contentObserver?.onContentChanged()
         }
     }
 
@@ -1194,7 +1169,7 @@ class WidgetContainer @JvmOverloads constructor(
         invalidate()
         postInvalidate()
         (parent as? View)?.invalidate()
-        onTransientContentChanged?.invoke()
+        contentObserver?.onTransientContentChanged()
     }
 
     /**
@@ -1212,23 +1187,23 @@ class WidgetContainer @JvmOverloads constructor(
         invalidate()
         postInvalidate()
         (parent as? View)?.invalidate()
-        onMediaFrame?.invoke(sourceId)
+        contentObserver?.onMediaFrame(sourceId)
     }
 
     private fun setBinocularMediaSourceActive(sourceId: String, active: Boolean) {
-        onBinocularContentSourceChanged?.invoke(sourceId, BinocularContentClass.MEDIA, active)
+        contentObserver?.onBinocularContentSourceChanged(sourceId, BinocularContentClass.MEDIA, active)
     }
 
     private fun notifyMediaBrightnessCapChanged() {
-        onMediaBrightnessCapChanged?.invoke(shouldApplyMediaBrightnessCap())
+        displaySettingsHandler?.applyMediaBrightnessCap(shouldApplyMediaBrightnessCap())
     }
 
     private fun notifyBrowserMinimumBrightnessChanged() {
-        onBrowserMinimumBrightnessChanged?.invoke(shouldApplyBrowserMinimumBrightness())
+        displaySettingsHandler?.applyBrowserMinimumBrightness(shouldApplyBrowserMinimumBrightness())
     }
 
     private fun requestLayoutSwitchBrightness() {
-        onLayoutSwitchBrightnessRequested?.invoke()
+        displaySettingsHandler?.applyLayoutSwitchBrightness()
     }
 
     private fun isBrowserWidgetVisible(widget: BrowserWidget): Boolean {
@@ -1248,58 +1223,65 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun configureBrowserWidget(widget: BrowserWidget) {
-        widget.onFocusChanged = { focused ->
-            if (focused) {
-                setFocusedWidget(widget)
-            } else if (focusedBrowserWidget == widget) {
-                setFocusedWidget(null)
+        widget.listener = object : BrowserWidgetListener {
+            override fun onFocusChanged(focused: Boolean) {
+                if (focused) setFocusedWidget(widget)
+                else if (focusedBrowserWidget == widget) setFocusedWidget(null)
+            }
+            override fun onStateChanged(state: BrowserWidget.State) {
+                widget.onDisplayVisibilityChanged(isBrowserWidgetVisible(widget))
+                notifyTransientContentChanged()
+            }
+            override fun onKeyboardRequested(show: Boolean) {
+                host?.requestBrowserKeyboard(show)
             }
         }
-        widget.onCloseRequested = { removeBrowserWidget(widget) }
-        widget.onStateChanged = {
-            widget.onDisplayVisibilityChanged(isBrowserWidgetVisible(widget))
-            notifyTransientContentChanged()
-        }
-        widget.onFullscreenToggled = { isFullscreen ->
-            handleBrowserWidgetFullscreenToggle(widget, isFullscreen)
-        }
-        widget.onMinimizeToggled = { isMinimized ->
-            handleBrowserWidgetMinimizeToggle(widget, isMinimized)
-        }
-        widget.onRequestKeyboard = { show ->
-            onBrowserKeyboardRequest?.invoke(show)
-        }
+        widget.configureLifecycleListener(
+            onClose = { removeBrowserWidget(widget) },
+            onFullscreen = { isFullscreen ->
+                handleBrowserWidgetFullscreenToggle(widget, isFullscreen)
+            },
+            onMinimize = { isMinimized ->
+                handleBrowserWidgetMinimizeToggle(widget, isMinimized)
+            }
+        )
         widget.onDisplayVisibilityChanged(isBrowserWidgetVisible(widget))
         notifyBrowserMinimumBrightnessChanged()
     }
 
     private fun configureScreenMirrorWidget(widget: ScreenMirrorWidget) {
-        widget.onStateChanged = { state ->
-            when (state) {
-                ScreenMirrorWidget.State.MOVING -> mirrorDesc.dragging = true
-                ScreenMirrorWidget.State.IDLE -> mirrorDesc.dragging = false
-                else -> {}
+        widget.listener = object : MirrorWidgetListener {
+            override fun onStateChanged(state: ScreenMirrorWidget.State) {
+                when (state) {
+                    ScreenMirrorWidget.State.MOVING -> mirrorDesc.dragging = true
+                    ScreenMirrorWidget.State.IDLE -> mirrorDesc.dragging = false
+                    else -> Unit
+                }
+                widget.onDisplayVisibilityChanged(isMirrorWidgetVisible(widget))
+                notifyTransientContentChanged()
             }
-            widget.onDisplayVisibilityChanged(isMirrorWidgetVisible(widget))
-            notifyTransientContentChanged()
-        }
-        widget.onStreamStateChanged = {
-            notifyMediaBrightnessCapChanged()
-            notifyContentChanged()
-        }
-        widget.onFrameReady = {
-            if (widget.isBinocularMediaActive()) {
-                notifyMediaFrame(widget.binocularSourceId)
+
+            override fun onStreamStateChanged(state: ScreenMirrorWidget.StreamState) {
+                notifyMediaBrightnessCapChanged()
+                notifyContentChanged()
+            }
+
+            override fun onFrameReady() {
+                if (widget.isBinocularMediaActive()) notifyMediaFrame(widget.binocularSourceId)
+            }
+
+            override fun onMediaStateChanged(active: Boolean) {
+                setBinocularMediaSourceActive(widget.binocularSourceId, active)
+            }
+
+            override fun requestMirror(start: Boolean) {
+                host?.requestMirror(start)
             }
         }
-        widget.onMediaStateChanged = { active ->
-            setBinocularMediaSourceActive(widget.binocularSourceId, active)
-        }
-        widget.hookupSingleton(mirrorDesc)
-        widget.onMirrorRequest = { start ->
-            this@WidgetContainer.onMirrorRequest?.invoke(start)
-        }
-        widget.onCloseRequested = { executeDefinition(commandRegistry.toggleMirror) }
+        widget.hookupSingleton(
+            mirrorDesc,
+            onClose = { executeDefinition(commandRegistry.toggleMirror) }
+        )
         widget.onDisplayVisibilityChanged(isMirrorWidgetVisible(widget))
         notifyMediaBrightnessCapChanged()
     }
@@ -1321,44 +1303,57 @@ class WidgetContainer @JvmOverloads constructor(
 
         contextMenu = ContextMenu(w.toFloat(), h.toFloat(), commandRegistry).apply {
             setLayoutLockState(isWidgetLayoutLocked)
-            onItemSelected = { item -> handleMenuItemSelected(item) }
-            onSubmenuItemDoubleTapped = { _, subItem -> handleSubmenuItemDoubleTapped(subItem) }
-            onSubmenuWillShow = { item -> getUpdatedSubmenuItems(item) }
-            onDismissed = { notifyContentChanged() }
+            handler = object : ContextMenuHandler {
+                override fun submenuItemsFor(item: ContextMenu.MenuItem) = getUpdatedSubmenuItems(item)
+                override fun selectItem(item: ContextMenu.MenuItem) = handleMenuItemSelected(item)
+                override fun selectSubmenuItem(
+                    parent: ContextMenu.MenuItem,
+                    item: ContextMenu.SubMenuItem
+                ) = handleSubmenuItemDoubleTapped(item)
+                override fun onMenuDismissed() = notifyContentChanged()
+            }
         }
 
         textEditMenu = TextEditContextMenu(w.toFloat(), h.toFloat()).apply {
-            onCut = { handleCut() }
-            onCopy = { handleCopy() }
-            onPaste = { content -> handlePaste(content) }
-            onSelectAll = { handleSelectAll() }
-            onFormatting = { showFormattingMenu() }
-            onDismissed = { notifyContentChanged() }
+            commandHandler = object : TextEditCommandHandler {
+                override fun cut() = handleCut()
+                override fun copy() = handleCopy()
+                override fun paste(content: String) = handlePaste(content)
+                override fun selectAll() = handleSelectAll()
+                override fun showFormatting() = showFormattingMenu()
+                override fun onMenuDismissed() = notifyContentChanged()
+            }
         }
 
         formattingMenu = FormattingMenu(w.toFloat(), h.toFloat()).apply {
-            onFontSizeChanged = { size -> handleFontSizeChanged(size) }
-            onTextWrapToggled = { wrap -> handleTextWrapToggled(wrap) }
-            onBoldToggled = { _ -> handleBoldToggled() }
-            onItalicToggled = { _ -> handleItalicToggled() }
-            onUnderlineToggled = { _ -> handleUnderlineToggled() }
-            onBulletListToggled = { _ -> handleBulletListToggled() }
-            onNumberedListToggled = { _ -> handleNumberedListToggled() }
-            onColumnsChanged = { columns ->
-                (focusedWidget as? TextBoxWidget)?.setColumns(columns)
-                notifyContentChanged()
+            formattingHandler = object : TextFormattingHandler {
+                override fun setFontSize(size: Float) = handleFontSizeChanged(size)
+                override fun setTextWrap(enabled: Boolean) = handleTextWrapToggled(enabled)
+                override fun setBold(enabled: Boolean) = handleBoldToggled()
+                override fun setItalic(enabled: Boolean) = handleItalicToggled()
+                override fun setUnderline(enabled: Boolean) = handleUnderlineToggled()
+                override fun setBulletList(enabled: Boolean) = handleBulletListToggled()
+                override fun setNumberedList(enabled: Boolean) = handleNumberedListToggled()
+                override fun setColumns(columns: Int) {
+                    focusedWidget?.setColumns(columns)
+                    notifyContentChanged()
+                }
+                override fun onMenuDismissed() = notifyContentChanged()
             }
-            onDismissed = { notifyContentChanged() }
         }
 
         closeConfirmationPopup = CloseConfirmationPopup(w.toFloat(), h.toFloat()).apply {
-            onCloseConfirmed = { onCloseRequested?.invoke() }
-            onDismissed = { notifyContentChanged() }
+            handler = object : CloseConfirmationHandler {
+                override fun confirmClose() { host?.requestClose() }
+                override fun onPopupDismissed() = notifyContentChanged()
+            }
         }
 
         layoutDeleteConfirmationPopup = WidgetLayoutDeleteConfirmationPopup(w.toFloat(), h.toFloat()).apply {
-            onDeleteConfirmed = { name -> layoutManager.deleteLayoutByName(name) }
-            onDismissed = { notifyContentChanged() }
+            handler = object : LayoutDeletionHandler {
+                override fun deleteLayout(name: String) = layoutManager.deleteLayoutByName(name)
+                override fun onPopupDismissed() = notifyContentChanged()
+            }
         }
 
         settingsController.createSpeedometerSettingsMenu(w.toFloat(), h.toFloat())
@@ -1372,10 +1367,12 @@ class WidgetContainer @JvmOverloads constructor(
         )
 
         layoutNamePrompt = WidgetLayoutNamePrompt(w.toFloat(), h.toFloat()).apply {
-            onSubmitted = { name -> layoutManager.saveLayoutWithName(name) }
-            onDismissed = {
-                onFocusChanged?.invoke(hasFocusedWidget())
-                notifyContentChanged()
+            handler = object : LayoutNameHandler {
+                override fun submitLayoutName(name: String) = layoutManager.saveLayoutWithName(name)
+                override fun onPromptDismissed() {
+                    contentObserver?.onFocusChanged(hasFocusedWidget())
+                    notifyContentChanged()
+                }
             }
         }
 
@@ -1426,10 +1423,32 @@ class WidgetContainer @JvmOverloads constructor(
         }
     }
 
-    /** Wires the two standard singleton lifecycle callbacks on a widget inside an apply block. */
-    private fun BaseWidget.hookupSingleton(desc: SingletonDesc) {
-        onFullscreenToggled = { fs  -> handleSingletonFullscreenToggle(desc, fs) }
-        onMinimizeToggled   = { min -> handleSingletonMinimizeToggle(desc, min) }
+    /** Wires standard singleton behavior plus any widget-specific lifecycle handling. */
+    private fun BaseWidget.hookupSingleton(
+        desc: SingletonDesc,
+        onClose: () -> Unit = {},
+        onMinimize: (Boolean) -> Unit = {}
+    ) {
+        configureLifecycleListener(
+            onClose = onClose,
+            onFullscreen = { fs -> handleSingletonFullscreenToggle(desc, fs) },
+            onMinimize = { min ->
+                handleSingletonMinimizeToggle(desc, min)
+                onMinimize(min)
+            }
+        )
+    }
+
+    private fun BaseWidget.configureLifecycleListener(
+        onClose: () -> Unit = {},
+        onFullscreen: (Boolean) -> Unit = {},
+        onMinimize: (Boolean) -> Unit = {}
+    ) {
+        lifecycleListener = object : WidgetLifecycleListener {
+            override fun onCloseRequested(widget: BaseWidget) = onClose()
+            override fun onFullscreenToggled(widget: BaseWidget, isFullscreen: Boolean) = onFullscreen(isFullscreen)
+            override fun onMinimizeToggled(widget: BaseWidget, isMinimized: Boolean) = onMinimize(isMinimized)
+        }
     }
 
     private fun handleSingletonFullscreenToggle(desc: SingletonDesc, isFullscreen: Boolean) {
@@ -1546,8 +1565,7 @@ class WidgetContainer @JvmOverloads constructor(
         widgetHeight: Float
     ): SpeedometerWidget {
         return SpeedometerWidget(startX, startY, widgetWidth, widgetHeight).apply {
-            hookupSingleton(speedometerDesc)
-            onCloseRequested = { executeDefinition(commandRegistry.toggleSpeedometer) }
+            hookupSingleton(speedometerDesc, onClose = { executeDefinition(commandRegistry.toggleSpeedometer) })
             onUnitChanged = {
                 unitSettings.toggleSpeedOverride()
             }
@@ -1565,10 +1583,13 @@ class WidgetContainer @JvmOverloads constructor(
         autoStart: Boolean
     ): SubtitleWidget {
         return SubtitleWidget(startX, startY, widgetWidth, widgetHeight).apply {
-            hookupSingleton(subtitleDesc)
-            onCloseRequested = { executeDefinition(commandRegistry.toggleSubtitle) }
-            onStateChanged = { notifyContentChanged() }
-            onSubtitleControlRequested = { control -> this@WidgetContainer.onSubtitleControlRequested?.invoke(control) }
+            hookupSingleton(subtitleDesc, onClose = { executeDefinition(commandRegistry.toggleSubtitle) })
+            listener = object : SubtitleWidgetListener {
+                override fun onStateChanged() = notifyContentChanged()
+                override fun onSubtitleControlRequested(control: SubtitleControl) {
+                    host?.requestSubtitleControl(control)
+                }
+            }
             if (autoStart) {
                 setCaptureEnabled(true)
             }
@@ -2854,7 +2875,7 @@ class WidgetContainer @JvmOverloads constructor(
         y: Float,
         onElse: ((BaseWidget.BaseHitArea) -> Boolean)? = null
     ): Boolean = when (val hit = widget.baseHitTest(x, y)) {
-        BaseWidget.BaseHitArea.CLOSE_BUTTON      -> { widget.onCloseRequested?.invoke(); notifyContentChanged(); true }
+        BaseWidget.BaseHitArea.CLOSE_BUTTON      -> { widget.lifecycleListener?.onCloseRequested(widget); notifyContentChanged(); true }
         BaseWidget.BaseHitArea.FULLSCREEN_BUTTON -> { widget.toggleFullscreen(); notifyContentChanged(); true }
         BaseWidget.BaseHitArea.MINIMIZE_BUTTON   -> { widget.toggleMinimize(); notifyContentChanged(); true }
         BaseWidget.BaseHitArea.PIN_BUTTON        -> { widget.isPinned = !widget.isPinned; notifyContentChanged(); true }
@@ -3397,8 +3418,7 @@ class WidgetContainer @JvmOverloads constructor(
                     else if (statusBarDesc.dragging && state == StatusBarWidget.State.IDLE) statusBarDesc.dragging = false
                     notifyContentChanged()
                 }
-                hookupSingleton(statusBarDesc)
-                onCloseRequested = { executeDefinition(commandRegistry.toggleStatus) }
+                hookupSingleton(statusBarDesc, onClose = { executeDefinition(commandRegistry.toggleStatus) })
             }
             Log.d(TAG, "StatusBarWidget created")
         }
@@ -3427,8 +3447,7 @@ class WidgetContainer @JvmOverloads constructor(
             val locWidth = 300f
             val locHeight = 120f
             locationWidget = LocationWidget(context, 20f, height - locHeight - 20f, locWidth, locHeight).apply {
-                hookupSingleton(locationDesc)
-                onCloseRequested = { executeDefinition(commandRegistry.toggleLocation) }
+                hookupSingleton(locationDesc, onClose = { executeDefinition(commandRegistry.toggleLocation) })
                 onTemperatureUnitChanged = { unitSettings.toggleTemperatureOverride() }
                 setTemperatureUnit(unitSettings.effectiveTemperatureUnit())
                 if (pendingLocationAddress != null || pendingLocationWeather != null) {
@@ -3451,12 +3470,10 @@ class WidgetContainer @JvmOverloads constructor(
             val size = 210f
             mapWidget = MapWidget(context, width - size - 24f, 24f, size, size).apply {
                 invalidate = { notifyContentChanged() }
-                onMapDataRequested = { point, config -> this@WidgetContainer.onMapDataRequested?.invoke(point, config) }
                 configurePhoneRouteTransport(phoneRouteTransport)
                 onPhoneRouteConnectionChanged(phoneRouteConnected)
                 bindMapNavigation(this)
-                hookupSingleton(mapDesc)
-                onCloseRequested = { executeDefinition(commandRegistry.toggleMap) }
+                hookupSingleton(mapDesc, onClose = { executeDefinition(commandRegistry.toggleMap) })
                 pendingMapLocation?.let(::setLocation)
                 setLocationMetadata(pendingMapLocationLabel, pendingMapCountryCode)
             }
@@ -3511,8 +3528,7 @@ class WidgetContainer @JvmOverloads constructor(
                 CalendarWidget.DEFAULT_WIDTH,
                 CalendarWidget.DEFAULT_HEIGHT
             ).apply {
-                hookupSingleton(calendarDesc)
-                onCloseRequested = { executeDefinition(commandRegistry.toggleCalendar) }
+                hookupSingleton(calendarDesc, onClose = { executeDefinition(commandRegistry.toggleCalendar) })
                 onStateChanged = { notifyContentChanged() }
                 setSnapshot(pendingCalendarSnapshot)
             }
@@ -3560,7 +3576,7 @@ class WidgetContainer @JvmOverloads constructor(
                 )
             }
             teardownSingleton(financeDesc)
-            onFinanceVisibilityChanged?.invoke(false)
+            dataProvider?.onFinanceVisibilityChanged(false)
             financeWidget?.onDestroy()
             financeWidget = null
             Log.d(TAG, "FinanceWidget removed")
@@ -3573,20 +3589,26 @@ class WidgetContainer @JvmOverloads constructor(
             val fWidth = FinanceWidget.DEFAULT_WIDTH
             val fHeight = FinanceWidget.DEFAULT_HEIGHT
             financeWidget = FinanceWidget(20f, 20f, fWidth, fHeight).apply {
-                hookupSingleton(financeDesc)
-                onCloseRequested = { executeDefinition(commandRegistry.toggleFinance) }
-                onStateChanged = { notifyContentChanged() }
-                onDataRequested = { visibleConfigs, refreshTileIds, force, reason ->
-                    onFinanceDataRequested?.invoke(visibleConfigs, refreshTileIds, force, reason)
-                }
-                onMinimizeToggled = { isMinimized ->
-                    handleSingletonMinimizeToggle(financeDesc, isMinimized)
-                    onFinanceVisibilityChanged?.invoke(!isMinimized)
-                    if (!isMinimized) requestData(force = false, reason = "finance_unminimized")
+                hookupSingleton(
+                    financeDesc,
+                    onClose = { executeDefinition(commandRegistry.toggleFinance) },
+                    onMinimize = { isMinimized ->
+                        dataProvider?.onFinanceVisibilityChanged(!isMinimized)
+                        if (!isMinimized) requestData(force = false, reason = "finance_unminimized")
+                    }
+                )
+                listener = object : FinanceWidgetListener {
+                    override fun onStateChanged() = notifyContentChanged()
+                    override fun onDataRequested(
+                        visibleConfigs: List<FinanceDashboardTileConfig>,
+                        refreshTileIds: List<String>, force: Boolean, reason: String
+                    ) {
+                        dataProvider?.requestFinanceData(visibleConfigs, refreshTileIds, force, reason)
+                    }
                 }
                 pendingFinanceCountryCode?.let { setCountryCode(it) }
                 requestData(force = true, reason = "widget_toggled_on")
-                onFinanceVisibilityChanged?.invoke(true)
+                dataProvider?.onFinanceVisibilityChanged(true)
             }
             Log.d(TAG, "FinanceWidget created")
         }
@@ -3618,18 +3640,18 @@ class WidgetContainer @JvmOverloads constructor(
             val startY = 20f
 
             newsWidget = NewsWidget(startX, startY, nWidth, nHeight).apply {
-                hookupSingleton(newsDesc)
-                onCloseRequested = { executeDefinition(commandRegistry.toggleNews) }
-                onStateChanged = { notifyContentChanged() }
-                onDataRequested = { countryCode, force, reason ->
-                    onNewsDataRequested?.invoke(countryCode, force, reason)
+                hookupSingleton(newsDesc, onClose = { executeDefinition(commandRegistry.toggleNews) })
+                listener = object : NewsWidgetListener {
+                    override fun onStateChanged() = notifyContentChanged()
+                    override fun onDataRequested(countryCode: String, force: Boolean, reason: String) {
+                        dataProvider?.requestNewsData(countryCode, force, reason)
+                    }
+                    override fun onSourceDataRequested(sourceSpec: NewsSourceSpec, countryCode: String, force: Boolean, reason: String, completion: (Result<NewsSnapshot>) -> Unit) {
+                        dataProvider?.requestNewsSourceData(sourceSpec, countryCode, force, reason, completion)
+                            ?: completion(Result.failure(IllegalStateException("News data service is unavailable")))
+                    }
+                    override fun onSourceInputFocusChanged(focused: Boolean) { contentObserver?.onFocusChanged(focused) }
                 }
-                onSourceDataRequested = { sourceSpec, countryCode, force, reason, completion ->
-                    onNewsSourceDataRequested?.invoke(
-                        sourceSpec, countryCode, force, reason, completion
-                    ) ?: completion(Result.failure(IllegalStateException("News data service is unavailable")))
-                }
-                onSourceInputFocusChanged = { focused -> onFocusChanged?.invoke(focused) }
                 pendingNewsCountryCode?.let { setCountryCode(it) }
                 requestData(force = true, reason = "widget_toggled_on")
             }
@@ -3658,8 +3680,7 @@ class WidgetContainer @JvmOverloads constructor(
             val startX = (width - nWidth - 20f).coerceAtLeast(20f)
             val startY = 20f
             notificationsWidget = NotificationsWidget(context, startX, startY, nWidth, nHeight, height.toFloat()).apply {
-                hookupSingleton(notificationsDesc)
-                onCloseRequested = { executeDefinition(commandRegistry.toggleNotifications) }
+                hookupSingleton(notificationsDesc, onClose = { executeDefinition(commandRegistry.toggleNotifications) })
                 onStateChanged = { notifyContentChanged() }
                 setNotificationsSnapshot(latestNotificationsSnapshot)
             }
@@ -3754,13 +3775,18 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun bindMapNavigation(map: MapWidget) {
-        map.onAddressFocusChanged = { focused ->
-            if (focused) bringWidgetToFront(map)
-            onFocusChanged?.invoke(focused)
-            notifyContentChanged()
+        map.listener = object : MapWidgetListener {
+            override fun onMapDataRequested(point: MapGeoPoint, config: PoiDisplayConfig) {
+                dataProvider?.requestMapData(point, config)
+            }
+            override fun onAddressFocusChanged(focused: Boolean) {
+                if (focused) bringWidgetToFront(map)
+                contentObserver?.onFocusChanged(focused)
+                notifyContentChanged()
+            }
+            override fun onNavigationResult(result: NavigationOperationResult) = notifyContentChanged()
+            override fun onStopNavigationRequested() = stopNavigationFromMap()
         }
-        map.onNavigationResult = { notifyContentChanged() }
-        map.onStopNavigationRequested = { stopNavigationFromMap() }
     }
 
     fun configurePhoneRouteTransport(transport: GlassesRouteTransport?) {
@@ -3902,9 +3928,11 @@ class WidgetContainer @JvmOverloads constructor(
         val createY = if (y >= 0) y else pendingCreateY
         
         val widget = ImageWidget(createX, createY, path).apply {
-            onCloseRequested = { removeImageWidget(this) }
-            onFullscreenToggled = { isFullscreen -> handleImageWidgetFullscreenToggle(this, isFullscreen) }
-            onMinimizeToggled = { isMinimized -> handleImageWidgetMinimizeToggle(this, isMinimized) }
+            configureLifecycleListener(
+                onClose = { removeImageWidget(this) },
+                onFullscreen = { isFullscreen -> handleImageWidgetFullscreenToggle(this, isFullscreen) },
+                onMinimize = { isMinimized -> handleImageWidgetMinimizeToggle(this, isMinimized) }
+            )
         }
         lifecycleController.open(imageLifecycle) { widget }
     }
@@ -3928,13 +3956,17 @@ class WidgetContainer @JvmOverloads constructor(
             y = createY,
             queueItems = buildVideoQueue(uri, displayName),
         ).apply {
-            onCloseRequested = { removeVideoWidget(this) }
-            onFullscreenToggled = { isFullscreen -> handleVideoWidgetFullscreenToggle(this, isFullscreen) }
-            onMinimizeToggled = { isMinimized -> handleVideoWidgetMinimizeToggle(this, isMinimized) }
-            onStateChanged = { notifyTransientContentChanged() }
-            onPlaybackVisibilityChanged = { active ->
-                setBinocularMediaSourceActive(sourceId, active)
-                notifyMediaBrightnessCapChanged()
+            configureLifecycleListener(
+                onClose = { removeVideoWidget(this) },
+                onFullscreen = { isFullscreen -> handleVideoWidgetFullscreenToggle(this, isFullscreen) },
+                onMinimize = { isMinimized -> handleVideoWidgetMinimizeToggle(this, isMinimized) }
+            )
+            listener = object : VideoWidgetListener {
+                override fun onStateChanged() = notifyTransientContentChanged()
+                override fun onPlaybackVisibilityChanged(active: Boolean) {
+                    setBinocularMediaSourceActive(sourceId, active)
+                    notifyMediaBrightnessCapChanged()
+                }
             }
         }
         lifecycleController.open(videoLifecycle) { widget }
@@ -4026,9 +4058,11 @@ class WidgetContainer @JvmOverloads constructor(
         val createX = if (x >= 0f) x else ((width - 360f) / 2f).coerceAtLeast(0f)
         val createY = if (y >= 0f) y else ((height - 260f) / 2f).coerceAtLeast(0f)
         val widget = PdfWidget(context, uri, displayName, createX, createY).apply {
-            onCloseRequested = { removePdfWidget(this) }
-            onFullscreenToggled = { isFullscreen -> handlePdfWidgetFullscreenToggle(this, isFullscreen) }
-            onMinimizeToggled = { isMinimized -> handlePdfWidgetMinimizeToggle(this, isMinimized) }
+            configureLifecycleListener(
+                onClose = { removePdfWidget(this) },
+                onFullscreen = { isFullscreen -> handlePdfWidgetFullscreenToggle(this, isFullscreen) },
+                onMinimize = { isMinimized -> handlePdfWidgetMinimizeToggle(this, isMinimized) }
+            )
             onStateChanged = { notifyTransientContentChanged() }
         }
         lifecycleController.open(pdfLifecycle) { widget }
@@ -4061,16 +4095,19 @@ class WidgetContainer @JvmOverloads constructor(
         val createY = if (y >= 0) y.coerceIn(0f, (height - browserHeight).coerceAtLeast(0f))
                       else ((height - browserHeight) / 2f).coerceAtLeast(0f)
 
+        val selectionHandler = onFileSelected
         val widget = FileBrowserWidget(context, createX, createY, browserWidth, browserHeight, filter).apply {
-            onCloseRequested = { removeFileBrowserWidget(this) }
-            onFullscreenToggled = { isFullscreen -> handleFileBrowserWidgetFullscreenToggle(this, isFullscreen) }
-            onMinimizeToggled = { isMinimized -> handleFileBrowserWidgetMinimizeToggle(this, isMinimized) }
-            onStateChanged = { notifyContentChanged() }
-            this.onFileSelected = { entry ->
-                // Pass the FileEntry directly - caller can use URI or path as needed
-                onFileSelected?.invoke(entry)
-                // Close the file browser after selection
-                removeFileBrowserWidget(this)
+            configureLifecycleListener(
+                onClose = { removeFileBrowserWidget(this) },
+                onFullscreen = { isFullscreen -> handleFileBrowserWidgetFullscreenToggle(this, isFullscreen) },
+                onMinimize = { isMinimized -> handleFileBrowserWidgetMinimizeToggle(this, isMinimized) }
+            )
+            listener = object : FileBrowserWidgetListener {
+                override fun onStateChanged(state: FileBrowserWidget.State) = notifyContentChanged()
+                override fun onFileSelected(entry: FileBrowserWidget.FileEntry) {
+                    selectionHandler?.invoke(entry)
+                    removeFileBrowserWidget(this@apply)
+                }
             }
         }
         lifecycleController.open(filesLifecycle) { widget }
@@ -4079,7 +4116,7 @@ class WidgetContainer @JvmOverloads constructor(
         // Opening the picker may complete asynchronously after a runtime/all-files permission
         // screen. Re-center after the widget actually exists so hover chrome is visible at once
         // and two-finger scrolling is routed to the new browser without a priming drag.
-        onCursorCenterRequested?.invoke()
+        host?.requestCursorCenter()
     }
 
     private fun removeFileBrowserWidget(widget: FileBrowserWidget) {
@@ -4094,11 +4131,18 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun buildTextBox(x: Float, y: Float, boxWidth: Float, boxHeight: Float): TextBoxWidget =
         TextBoxWidget(context, x, y, boxWidth, boxHeight).apply {
-            onFocusChanged = { focused -> if (focused) setFocusedWidget(this) else if (focusedWidget == this) setFocusedWidget(null) }
-            onCloseRequested = { removeWidget(this) }
-            onStateChanged = { notifyContentChanged() }
-            onFullscreenToggled = { isFullscreen -> handleTextWidgetFullscreenToggle(this, isFullscreen) }
-            onMinimizeToggled = { isMinimized -> handleTextWidgetMinimizeToggle(this, isMinimized) }
+            configureLifecycleListener(
+                onClose = { removeWidget(this) },
+                onFullscreen = { isFullscreen -> handleTextWidgetFullscreenToggle(this, isFullscreen) },
+                onMinimize = { isMinimized -> handleTextWidgetMinimizeToggle(this, isMinimized) }
+            )
+            listener = object : TextBoxWidgetListener {
+                override fun onFocusChanged(focused: Boolean) {
+                    if (focused) setFocusedWidget(this@apply)
+                    else if (focusedWidget == this@apply) setFocusedWidget(null)
+                }
+                override fun onStateChanged(state: TextBoxWidget.State) = notifyContentChanged()
+            }
         }
 
     fun createTextBox(x: Float, y: Float) {
@@ -4122,7 +4166,7 @@ class WidgetContainer @JvmOverloads constructor(
             is BrowserWidget -> { if (focusedBrowserWidget == widget) return; focusedWidget?.clearSelection(); focusedWidget?.setFocused(false); focusedWidget = null; focusedBrowserWidget?.setFocused(false); focusedBrowserWidget = widget }
             null -> { focusedWidget?.clearSelection(); focusedWidget?.setFocused(false); focusedWidget = null; focusedBrowserWidget?.setFocused(false); focusedBrowserWidget = null }
         }
-        formattingMenu?.dismiss(); onFocusChanged?.invoke(widget != null)
+        formattingMenu?.dismiss(); contentObserver?.onFocusChanged(widget != null)
     }
 
     fun unfocusAll() {
@@ -4162,7 +4206,7 @@ class WidgetContainer @JvmOverloads constructor(
         textEditMenuTarget = TextEditMenuTarget.TEXT_WIDGET
         if (clipboardContent != null) phoneClipboard = clipboardContent
         // Request fresh clipboard from phone (will arrive async and update the menu)
-        onClipboardRequest?.invoke()
+        host?.requestClipboard()
         textEditMenu?.show(widget.x + widget.widgetWidth / 2 - 90f, widget.y - 60f, glassesClipboard ?: phoneClipboard, widget.hasSelection())
         notifyContentChanged()
     }
@@ -4173,7 +4217,7 @@ class WidgetContainer @JvmOverloads constructor(
         if (!widget.isEditingAddress()) widget.beginAddressEditing(selectAll = true)
         setFocusedWidget(widget)
         ensureDrawnAboveNativeOverlays()
-        onClipboardRequest?.invoke()
+        host?.requestClipboard()
         val menuX = widget.x + widget.widgetWidth / 2 - 90f
         val menuY = (widget.y + 8f).coerceAtLeast(0f)
         textEditMenu?.show(
@@ -4731,7 +4775,7 @@ class WidgetContainer @JvmOverloads constructor(
             if (control.isInteracting() && control.handleDoubleTap(cx, cy)) {
                 notifyContentChanged()
                 if (control === lemonHoverControl) {
-                    onCursorCenterRequested?.invoke()
+                    host?.requestCursorCenter()
                 }
                 return true
             }
@@ -4804,8 +4848,6 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     fun executeCommand(invocation: AppCommandInvocation): AppCommandResult = commandExecutor.execute(invocation)
-
-    var onAssistantVoiceToggle: (() -> Unit)? = null
 
     fun configureBrowserRouting(routing: BrowserRoutingCoordinator?) {
         browserRoutingCoordinator = routing
@@ -5142,12 +5184,14 @@ class WidgetContainer @JvmOverloads constructor(
         onRemoveKey: () -> Unit,
         onSelectModel: (String?) -> Unit
     ) {
-        settingsController.onPasteGeminiKey = {
-            val clipboard = phoneClipboard
-            if (!clipboard.isNullOrBlank()) onPasteKey(clipboard) else onClipboardRequest?.invoke()
+        settingsController.geminiListener = object : GeminiSettingsListener {
+            override fun onPasteGeminiKey() {
+                val clipboard = phoneClipboard
+                if (!clipboard.isNullOrBlank()) onPasteKey(clipboard) else host?.requestClipboard()
+            }
+            override fun onRemoveGeminiKey() = onRemoveKey()
+            override fun onSelectGeminiModel(model: String?) = onSelectModel(model)
         }
-        settingsController.onRemoveGeminiKey = onRemoveKey
-        settingsController.onSelectGeminiModel = onSelectModel
     }
 
     fun setAssistantConfiguration(configuration: AssistantConfiguration?, models: List<AssistantModel>, detail: String) {
@@ -5295,7 +5339,7 @@ class WidgetContainer @JvmOverloads constructor(
             setBinocularMediaSourceActive(widget.binocularSourceId, false)
         }
         if (widget is FinanceWidget) {
-            onFinanceVisibilityChanged?.invoke(false)
+            dataProvider?.onFinanceVisibilityChanged(false)
         }
         widget.onDestroy()
     }
@@ -5371,8 +5415,7 @@ class WidgetContainer @JvmOverloads constructor(
                     else if (statusBarDesc.dragging && s == StatusBarWidget.State.IDLE) statusBarDesc.dragging = false
                     notifyContentChanged()
                 }
-                hookupSingleton(statusBarDesc)
-                onCloseRequested = { executeDefinition(commandRegistry.toggleStatus) }
+                hookupSingleton(statusBarDesc, onClose = { executeDefinition(commandRegistry.toggleStatus) })
             }
         }
         persistenceHelper.restoreStatusBarPosition(statusBarWidget, state, width, height)
@@ -5405,9 +5448,11 @@ class WidgetContainer @JvmOverloads constructor(
         val restoredWidgets = persistenceHelper.restoreImageWidgets(states, width, height)
         val validStates = states.filter { File(it.imagePath).exists() }
         for ((index, widget) in restoredWidgets.withIndex()) {
-            widget.onCloseRequested = { removeImageWidget(widget) }
-            widget.onFullscreenToggled = { isFullscreen -> handleImageWidgetFullscreenToggle(widget, isFullscreen) }
-            widget.onMinimizeToggled = { isMinimized -> handleImageWidgetMinimizeToggle(widget, isMinimized) }
+            widget.configureLifecycleListener(
+                onClose = { removeImageWidget(widget) },
+                onFullscreen = { isFullscreen -> handleImageWidgetFullscreenToggle(widget, isFullscreen) },
+                onMinimize = { isMinimized -> handleImageWidgetMinimizeToggle(widget, isMinimized) }
+            )
             lifecycleController.open(imageLifecycle) { widget }
             applyFullscreenState(widget, validStates.getOrNull(index)?.isFullscreen == true)
         }
@@ -5422,12 +5467,10 @@ class WidgetContainer @JvmOverloads constructor(
         if (mapWidget == null) {
             mapWidget = MapWidget(context, state.x, state.y, state.width, state.height).apply {
                 invalidate = { notifyContentChanged() }
-                onMapDataRequested = { point, config -> this@WidgetContainer.onMapDataRequested?.invoke(point, config) }
                 configurePhoneRouteTransport(phoneRouteTransport)
                 onPhoneRouteConnectionChanged(phoneRouteConnected)
                 bindMapNavigation(this)
-                hookupSingleton(mapDesc)
-                onCloseRequested = { executeDefinition(commandRegistry.toggleMap) }
+                hookupSingleton(mapDesc, onClose = { executeDefinition(commandRegistry.toggleMap) })
                 pendingMapLocation?.let(::setLocation)
                 setLocationMetadata(pendingMapLocationLabel, pendingMapCountryCode)
             }
@@ -5465,13 +5508,17 @@ class WidgetContainer @JvmOverloads constructor(
             ).apply {
                 widgetWidth = adjustedWidth
                 widgetHeight = adjustedHeight
-                onCloseRequested = { removeVideoWidget(this) }
-                onFullscreenToggled = { isFullscreen -> handleVideoWidgetFullscreenToggle(this, isFullscreen) }
-                onMinimizeToggled = { isMinimized -> handleVideoWidgetMinimizeToggle(this, isMinimized) }
-                onStateChanged = { notifyTransientContentChanged() }
-                onPlaybackVisibilityChanged = { active ->
-                    setBinocularMediaSourceActive(sourceId, active)
-                    notifyMediaBrightnessCapChanged()
+                configureLifecycleListener(
+                    onClose = { removeVideoWidget(this) },
+                    onFullscreen = { isFullscreen -> handleVideoWidgetFullscreenToggle(this, isFullscreen) },
+                    onMinimize = { isMinimized -> handleVideoWidgetMinimizeToggle(this, isMinimized) }
+                )
+                listener = object : VideoWidgetListener {
+                    override fun onStateChanged() = notifyTransientContentChanged()
+                    override fun onPlaybackVisibilityChanged(active: Boolean) {
+                        setBinocularMediaSourceActive(sourceId, active)
+                        notifyMediaBrightnessCapChanged()
+                    }
                 }
             }
             persistenceHelper.restoreVideoWidgetState(widget, state, adjustedX, adjustedY)
@@ -5504,9 +5551,11 @@ class WidgetContainer @JvmOverloads constructor(
                 initialPage = state.page,
                 initialZoom = state.zoom,
             ).apply {
-                onCloseRequested = { removePdfWidget(this) }
-                onFullscreenToggled = { isFullscreen -> handlePdfWidgetFullscreenToggle(this, isFullscreen) }
-                onMinimizeToggled = { isMinimized -> handlePdfWidgetMinimizeToggle(this, isMinimized) }
+                configureLifecycleListener(
+                    onClose = { removePdfWidget(this) },
+                    onFullscreen = { isFullscreen -> handlePdfWidgetFullscreenToggle(this, isFullscreen) },
+                    onMinimize = { isMinimized -> handlePdfWidgetMinimizeToggle(this, isMinimized) }
+                )
                 onStateChanged = { notifyTransientContentChanged() }
             }
             persistenceHelper.restorePdfWidgetState(widget, state, adjustedX, adjustedY)
@@ -5520,8 +5569,7 @@ class WidgetContainer @JvmOverloads constructor(
         // Create location widget if it doesn't exist
         if (locationWidget == null) {
             locationWidget = LocationWidget(context, state.x, state.y, state.width, state.height).apply {
-                hookupSingleton(locationDesc)
-                onCloseRequested = { executeDefinition(commandRegistry.toggleLocation) }
+                hookupSingleton(locationDesc, onClose = { executeDefinition(commandRegistry.toggleLocation) })
                 onTemperatureUnitChanged = { unitSettings.toggleTemperatureOverride() }
                 setTemperatureUnit(unitSettings.effectiveTemperatureUnit())
                 if (pendingLocationAddress != null || pendingLocationWeather != null) {
@@ -5543,8 +5591,7 @@ class WidgetContainer @JvmOverloads constructor(
             calendarWidget = CalendarWidget(state.x, state.y, state.width, state.height)
         }
         calendarWidget?.apply {
-            hookupSingleton(calendarDesc)
-            onCloseRequested = { executeDefinition(commandRegistry.toggleCalendar) }
+            hookupSingleton(calendarDesc, onClose = { executeDefinition(commandRegistry.toggleCalendar) })
             onStateChanged = { notifyContentChanged() }
             setFontScale(state.fontScale)
             setSnapshot(pendingCalendarSnapshot)
@@ -5560,16 +5607,19 @@ class WidgetContainer @JvmOverloads constructor(
     private fun applyFinanceState(state: WidgetPersistence.FinanceWidgetState) {
         if (financeWidget == null) {
             financeWidget = FinanceWidget(state.x, state.y, state.width, state.height).apply {
-                hookupSingleton(financeDesc)
-                onCloseRequested = { executeDefinition(commandRegistry.toggleFinance) }
-                onStateChanged = { notifyContentChanged() }
-                onDataRequested = { visibleConfigs, refreshTileIds, force, reason ->
-                    onFinanceDataRequested?.invoke(visibleConfigs, refreshTileIds, force, reason)
-                }
-                onMinimizeToggled = { isMinimized ->
-                    handleSingletonMinimizeToggle(financeDesc, isMinimized)
-                    onFinanceVisibilityChanged?.invoke(!isMinimized)
-                    if (!isMinimized) requestData(force = false, reason = "finance_unminimized")
+                hookupSingleton(
+                    financeDesc,
+                    onClose = { executeDefinition(commandRegistry.toggleFinance) },
+                    onMinimize = { isMinimized ->
+                        dataProvider?.onFinanceVisibilityChanged(!isMinimized)
+                        if (!isMinimized) requestData(force = false, reason = "finance_unminimized")
+                    }
+                )
+                listener = object : FinanceWidgetListener {
+                    override fun onStateChanged() = notifyContentChanged()
+                    override fun onDataRequested(visibleConfigs: List<FinanceDashboardTileConfig>, refreshTileIds: List<String>, force: Boolean, reason: String) {
+                        dataProvider?.requestFinanceData(visibleConfigs, refreshTileIds, force, reason)
+                    }
                 }
                 pendingFinanceCountryCode?.let { setCountryCode(it) }
             }
@@ -5577,10 +5627,10 @@ class WidgetContainer @JvmOverloads constructor(
         persistenceHelper.restoreFinanceWidgetPosition(financeWidget, state, width, height)
         applyFullscreenState(financeWidget, state.isFullscreen)
         if (financeWidget?.isMinimized == true) {
-            onFinanceVisibilityChanged?.invoke(false)
+            dataProvider?.onFinanceVisibilityChanged(false)
         } else {
             financeWidget?.requestData(force = true, reason = "widget_restored")
-            onFinanceVisibilityChanged?.invoke(true)
+            dataProvider?.onFinanceVisibilityChanged(true)
         }
         notifyContentChanged()
     }
@@ -5591,18 +5641,18 @@ class WidgetContainer @JvmOverloads constructor(
     private fun applyNewsState(state: WidgetPersistence.NewsWidgetState) {
         if (newsWidget == null) {
             newsWidget = NewsWidget(state.x, state.y, state.width, state.height).apply {
-                hookupSingleton(newsDesc)
-                onCloseRequested = { executeDefinition(commandRegistry.toggleNews) }
-                onStateChanged = { notifyContentChanged() }
-                onDataRequested = { countryCode, force, reason ->
-                    onNewsDataRequested?.invoke(countryCode, force, reason)
+                hookupSingleton(newsDesc, onClose = { executeDefinition(commandRegistry.toggleNews) })
+                listener = object : NewsWidgetListener {
+                    override fun onStateChanged() = notifyContentChanged()
+                    override fun onDataRequested(countryCode: String, force: Boolean, reason: String) {
+                        dataProvider?.requestNewsData(countryCode, force, reason)
+                    }
+                    override fun onSourceDataRequested(sourceSpec: NewsSourceSpec, countryCode: String, force: Boolean, reason: String, completion: (Result<NewsSnapshot>) -> Unit) {
+                        dataProvider?.requestNewsSourceData(sourceSpec, countryCode, force, reason, completion)
+                            ?: completion(Result.failure(IllegalStateException("News data service is unavailable")))
+                    }
+                    override fun onSourceInputFocusChanged(focused: Boolean) { contentObserver?.onFocusChanged(focused) }
                 }
-                onSourceDataRequested = { sourceSpec, countryCode, force, reason, completion ->
-                    onNewsSourceDataRequested?.invoke(
-                        sourceSpec, countryCode, force, reason, completion
-                    ) ?: completion(Result.failure(IllegalStateException("News data service is unavailable")))
-                }
-                onSourceInputFocusChanged = { focused -> onFocusChanged?.invoke(focused) }
                 pendingNewsCountryCode?.let { setCountryCode(it) }
             }
         }
@@ -5615,8 +5665,7 @@ class WidgetContainer @JvmOverloads constructor(
     private fun applyNotificationsState(state: WidgetPersistence.NotificationsWidgetState) {
         if (notificationsWidget == null) {
             notificationsWidget = NotificationsWidget(context, state.x, state.y, state.width, state.height, height.toFloat()).apply {
-                hookupSingleton(notificationsDesc)
-                onCloseRequested = { executeDefinition(commandRegistry.toggleNotifications) }
+                hookupSingleton(notificationsDesc, onClose = { executeDefinition(commandRegistry.toggleNotifications) })
                 onStateChanged = { notifyContentChanged() }
             }
         }

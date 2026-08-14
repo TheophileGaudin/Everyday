@@ -42,7 +42,11 @@ class GlassesPhoneRoutingCoordinatorTest {
         val transport = FakeTransport()
         val results = mutableListOf<RouteTransportResult>()
         val coordinator = coordinator(transport, mutableListOf()).apply {
-            onRouteResult = { results += it }
+            listener = object : RouteResolutionListener {
+                override fun onRouteResolved(result: RouteTransportResult) {
+                    results += result
+                }
+            }
         }
 
         assertTrue(coordinator.request(request("one")))
@@ -69,10 +73,14 @@ class GlassesPhoneRoutingCoordinatorTest {
             timeoutMs = 30L,
             scheduler = scheduler
         ).apply {
-            onFallback = {
-                    _, reason ->
-                synchronized(fallbacks) { fallbacks += reason }
-                fallbackLatch.countDown()
+            listener = object : RouteResolutionListener {
+                override fun onRouteFallback(
+                    request: RouteTransportRequest,
+                    reason: GlassesRouteFallbackReason
+                ) {
+                    synchronized(fallbacks) { fallbacks += reason }
+                    fallbackLatch.countDown()
+                }
             }
         }
 
@@ -82,9 +90,11 @@ class GlassesPhoneRoutingCoordinatorTest {
         assertEquals(listOf("timeout"), transport.cancellations.map { it.requestId })
 
         val disconnectLatch = CountDownLatch(1)
-        coordinator.onFallback = { _, reason ->
-            synchronized(fallbacks) { fallbacks += reason }
-            disconnectLatch.countDown()
+        coordinator.listener = object : RouteResolutionListener {
+            override fun onRouteFallback(request: RouteTransportRequest, reason: GlassesRouteFallbackReason) {
+                synchronized(fallbacks) { fallbacks += reason }
+                disconnectLatch.countDown()
+            }
         }
         assertTrue(coordinator.request(request("disconnect")))
         coordinator.onConnectionChanged(false)
@@ -94,7 +104,11 @@ class GlassesPhoneRoutingCoordinatorTest {
 
         transport.connected = true
         var reconnected = 0
-        coordinator.onRouteResult = { reconnected++ }
+        coordinator.listener = object : RouteResolutionListener {
+            override fun onRouteResolved(result: RouteTransportResult) {
+                reconnected++
+            }
+        }
         coordinator.onConnectionChanged(true)
         assertTrue(coordinator.request(request("reconnect")))
         coordinator.cancelActive("user_stop")
@@ -110,7 +124,15 @@ class GlassesPhoneRoutingCoordinatorTest {
         val fallbacks = mutableListOf<GlassesRouteFallbackReason>()
         var ambiguous = 0
         val coordinator = coordinator(transport, fallbacks).apply {
-            onAmbiguousRoute = { _, _ -> ambiguous++ }
+            listener = object : RouteResolutionListener {
+                override fun onRouteAmbiguous(request: RouteTransportRequest, error: RouteTransportError) {
+                    ambiguous++
+                }
+
+                override fun onRouteFallback(request: RouteTransportRequest, reason: GlassesRouteFallbackReason) {
+                    synchronized(fallbacks) { fallbacks += reason }
+                }
+            }
         }
 
         coordinator.request(request("phone-error"))
@@ -147,7 +169,15 @@ class GlassesPhoneRoutingCoordinatorTest {
         val fallbacks = mutableListOf<GlassesRouteFallbackReason>()
         val results = mutableListOf<String>()
         val coordinator = coordinator(transport, fallbacks).apply {
-            onRouteResult = { results += it.requestId }
+            listener = object : RouteResolutionListener {
+                override fun onRouteResolved(result: RouteTransportResult) {
+                    results += result.requestId
+                }
+
+                override fun onRouteFallback(request: RouteTransportRequest, reason: GlassesRouteFallbackReason) {
+                    synchronized(fallbacks) { fallbacks += reason }
+                }
+            }
         }
 
         assertTrue(coordinator.request(request("reroute-old")))
@@ -177,7 +207,11 @@ class GlassesPhoneRoutingCoordinatorTest {
         timeoutMs = 1_000L,
         scheduler = Executors.newSingleThreadScheduledExecutor()
     ).apply {
-        onFallback = { _, reason -> synchronized(fallbacks) { fallbacks += reason } }
+        listener = object : RouteResolutionListener {
+            override fun onRouteFallback(request: RouteTransportRequest, reason: GlassesRouteFallbackReason) {
+                synchronized(fallbacks) { fallbacks += reason }
+            }
+        }
     }
 
     private fun request(id: String) = RouteTransportRequest(

@@ -83,10 +83,8 @@ class FileBrowserWidget(
 
     // State
     private var state = State.IDLE
-    var onStateChanged: ((State) -> Unit)? = null
-
-    // Callback when a file is selected - provides the FileEntry which contains path and optional URI
-    var onFileSelected: ((FileEntry) -> Unit)? = null
+    var listener: FileBrowserWidgetListener? = null
+    private val onStateChanged: ((State) -> Unit)? get() = listener?.let { value -> { value.onStateChanged(it) } }
 
     // Current directory and file list
     private var currentDirectory: File = getDefaultDirectory()
@@ -325,7 +323,7 @@ class FileBrowserWidget(
 
         updateScrollBounds()
         Log.d(TAG, "Loaded ${entries.size} entries from ${directory.path}")
-        onStateChanged?.invoke(state)
+        listener?.onStateChanged(state)
     }
 
     /**
@@ -931,7 +929,7 @@ class FileBrowserWidget(
 
         return when (hitArea) {
             HitArea.CLOSE_BUTTON -> {
-                onCloseRequested?.invoke()
+                lifecycleListener?.onCloseRequested(this)
                 true
             }
             HitArea.FULLSCREEN_BUTTON -> {
@@ -965,7 +963,7 @@ class FileBrowserWidget(
                         loadDirectory(dirFile)
                     } else {
                         // Select the file
-                        onFileSelected?.invoke(entry)
+                        listener?.onFileSelected(entry)
                     }
                 }
                 true
@@ -983,7 +981,7 @@ class FileBrowserWidget(
 
         scrollOffset = (scrollOffset + dy).coerceIn(0f, maxScrollOffset)
         updateScrollbarThumb()
-        onStateChanged?.invoke(state)
+        listener?.onStateChanged(state)
     }
 
     private fun navigateUp() {

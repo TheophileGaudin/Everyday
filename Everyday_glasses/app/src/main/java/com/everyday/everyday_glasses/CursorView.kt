@@ -53,10 +53,9 @@ class CursorView @JvmOverloads constructor(
     private var hideRunnable: Runnable? = null
     
     // Callback for visibility changes
-    var onVisibilityChanged: ((Boolean) -> Unit)? = null
+    var activityObserver: CursorActivityObserver? = null
 
     /** Called for every input activity, including activity while the cursor is already visible. */
-    var onUserActivity: (() -> Unit)? = null
     
     fun setCursorPosition(x: Float, y: Float) {
         cursorX = x.coerceIn(0f, maxX)
@@ -77,12 +76,12 @@ class CursorView @JvmOverloads constructor(
      * Resets the auto-hide timer.
      */
     fun onActivity() {
-        onUserActivity?.invoke()
+        activityObserver?.onUserActivity()
 
         // Show cursor if hidden
         if (!cursorVisible) {
             cursorVisible = true
-            onVisibilityChanged?.invoke(true)
+            activityObserver?.onVisibilityChanged(true)
             triggerRedraw()
         }
         
@@ -92,7 +91,7 @@ class CursorView @JvmOverloads constructor(
         // Schedule new hide timer
         hideRunnable = Runnable {
             cursorVisible = false
-            onVisibilityChanged?.invoke(false)
+            activityObserver?.onVisibilityChanged(false)
             triggerRedraw()
         }
         handler.postDelayed(hideRunnable!!, CURSOR_HIDE_DELAY_MS)
@@ -119,7 +118,7 @@ class CursorView @JvmOverloads constructor(
     fun setForceHidden(hidden: Boolean, useGentleRedraw: Boolean = false) {
         if (forceHidden != hidden) {
             forceHidden = hidden
-            onVisibilityChanged?.invoke(isCursorVisible())
+            activityObserver?.onVisibilityChanged(isCursorVisible())
             if (useGentleRedraw) {
                 // Single invalidation to avoid power spikes during state transitions
                 invalidate()

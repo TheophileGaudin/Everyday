@@ -94,15 +94,7 @@ class FormattingMenu(
 
 
     // Callbacks
-    var onBoldToggled: ((Boolean) -> Unit)? = null
-    var onItalicToggled: ((Boolean) -> Unit)? = null
-    var onUnderlineToggled: ((Boolean) -> Unit)? = null
-    var onFontSizeChanged: ((Float) -> Unit)? = null
-    var onTextWrapToggled: ((Boolean) -> Unit)? = null
-    var onBulletListToggled: ((Boolean) -> Unit)? = null
-    var onNumberedListToggled: ((Boolean) -> Unit)? = null
-    var onDismissed: (() -> Unit)? = null
-    var onColumnsChanged: ((Int) -> Unit)? = null
+    var formattingHandler: TextFormattingHandler? = null
 
     // Paints
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -224,7 +216,7 @@ class FormattingMenu(
             isVisible = false
             hoveredButton = null
             isDragging = false
-            onDismissed?.invoke()
+            formattingHandler?.onMenuDismissed()
             Log.d(TAG, "Formatting menu dismissed")
         }
     }
@@ -437,69 +429,69 @@ class FormattingMenu(
             boldButtonRect.contains(px, py) -> {
                 isBold = !isBold
                 Log.d(TAG, "Bold toggled: $isBold")
-                onBoldToggled?.invoke(isBold)
+                formattingHandler?.setBold(isBold)
                 return true
             }
             italicButtonRect.contains(px, py) -> {
                 isItalic = !isItalic
                 Log.d(TAG, "Italic toggled: $isItalic")
-                onItalicToggled?.invoke(isItalic)
+                formattingHandler?.setItalic(isItalic)
                 return true
             }
             underlineButtonRect.contains(px, py) -> {
                 isUnderline = !isUnderline
                 Log.d(TAG, "Underline toggled: $isUnderline")
-                onUnderlineToggled?.invoke(isUnderline)
+                formattingHandler?.setUnderline(isUnderline)
                 return true
             }
             fontSizeMinusRect.contains(px, py) -> {
                 fontSize = (fontSize - FONT_SIZE_STEP).coerceIn(MIN_FONT_SIZE, MAX_FONT_SIZE)
                 Log.d(TAG, "Font size decreased: $fontSize")
-                onFontSizeChanged?.invoke(fontSize)
+                formattingHandler?.setFontSize(fontSize)
                 return true
             }
             fontSizePlusRect.contains(px, py) -> {
                 fontSize = (fontSize + FONT_SIZE_STEP).coerceIn(MIN_FONT_SIZE, MAX_FONT_SIZE)
                 Log.d(TAG, "Font size increased: $fontSize")
-                onFontSizeChanged?.invoke(fontSize)
+                formattingHandler?.setFontSize(fontSize)
                 return true
             }
             wrapButtonRect.contains(px, py) -> {
                 isTextWrap = !isTextWrap
                 Log.d(TAG, "Text wrap toggled: $isTextWrap")
-                onTextWrapToggled?.invoke(isTextWrap)
+                formattingHandler?.setTextWrap(isTextWrap)
                 return true
             }
             bulletListRect.contains(px, py) -> {
                 isBulletList = !isBulletList
                 if (isBulletList) isNumberedList = false  // Mutually exclusive
                 Log.d(TAG, "Bullet list toggled: $isBulletList")
-                onBulletListToggled?.invoke(isBulletList)
+                formattingHandler?.setBulletList(isBulletList)
                 return true
             }
             numberedListRect.contains(px, py) -> {
                 isNumberedList = !isNumberedList
                 if (isNumberedList) isBulletList = false  // Mutually exclusive
                 Log.d(TAG, "Numbered list toggled: $isNumberedList")
-                onNumberedListToggled?.invoke(isNumberedList)
+                formattingHandler?.setNumberedList(isNumberedList)
                 return true
             }
             col1ButtonRect.contains(px, py) -> {
                 currentColumns = 1
                 Log.d(TAG, "Columns set to 1")
-                onColumnsChanged?.invoke(1)
+                formattingHandler?.setColumns(1)
                 return true
             }
             col2ButtonRect.contains(px, py) -> {
                 currentColumns = 2
                 Log.d(TAG, "Columns set to 2")
-                onColumnsChanged?.invoke(2)
+                formattingHandler?.setColumns(2)
                 return true
             }
             col3ButtonRect.contains(px, py) -> {
                 currentColumns = 3
                 Log.d(TAG, "Columns set to 3")
-                onColumnsChanged?.invoke(3)
+                formattingHandler?.setColumns(3)
                 return true
             }
         }

@@ -27,6 +27,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
+/** Receives changes produced by a [VideoPlayerController]. */
+interface VideoPlaybackObserver {
+    fun onPlaybackStateChanged() = Unit
+    fun onVideoItemChanged(item: VideoItem) = Unit
+    fun onSubtitleCandidatesChanged(candidates: List<LocalSubtitleCandidate>) = Unit
+}
+
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 class VideoPlayerController(
     context: Context,
@@ -48,9 +55,7 @@ class VideoPlayerController(
         val selected: Boolean,
     )
 
-    var onStateChanged: (() -> Unit)? = null
-    var onItemChanged: ((VideoItem) -> Unit)? = null
-    var onSubtitleCandidatesChanged: ((List<LocalSubtitleCandidate>) -> Unit)? = null
+    var observer: VideoPlaybackObserver? = null
 
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -187,9 +192,7 @@ class VideoPlayerController(
     fun release() {
         releaseForPause()
         scope.cancel()
-        onStateChanged = null
-        onItemChanged = null
-        onSubtitleCandidatesChanged = null
+        observer = null
     }
 
     fun playPause() {
@@ -270,7 +273,7 @@ class VideoPlayerController(
                 }
                 .getOrDefault(emptyList())
             subtitleCandidatesValue = candidates
-            onSubtitleCandidatesChanged?.invoke(candidates)
+            observer?.onSubtitleCandidatesChanged(candidates)
             notifyChanged()
         }
     }
@@ -331,7 +334,7 @@ class VideoPlayerController(
         queueIndex = index
         currentItemValue = queue[queueIndex]
         shouldAutoplay = true
-        onItemChanged?.invoke(currentItemValue)
+        observer?.onVideoItemChanged(currentItemValue)
         prepareCurrent(initialPlayback = true, autoPlay = true)
         return true
     }
@@ -376,7 +379,7 @@ class VideoPlayerController(
                 playbackErrorText = null
                 playbackMessage = null
                 startPositionUpdates()
-                onItemChanged?.invoke(item)
+                observer?.onVideoItemChanged(item)
             } finally {
                 preparing.set(false)
                 notifyChanged()
@@ -543,7 +546,7 @@ class VideoPlayerController(
     }
 
     private fun notifyChanged() {
-        onStateChanged?.invoke()
+        observer?.onPlaybackStateChanged()
     }
 
     private data class SubtitleTrackOptionInternal(

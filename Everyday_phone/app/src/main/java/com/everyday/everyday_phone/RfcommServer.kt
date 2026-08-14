@@ -45,6 +45,37 @@ import kotlin.math.sqrt
  * and handles keyboard input when text fields are focused.
  */
 class RfcommServer(private val context: Context) : SyncMessenger, PhoneRouteTransport, PhoneDestinationSearchTransport {
+
+    /** Receives RFCOMM connection lifecycle and glasses device-state events. */
+    interface DeviceListener {
+        fun onServerStatusChanged(status: String) = Unit
+        fun onConnectionChanged(connected: Boolean) = Unit
+        fun onTextFieldFocusChanged(focused: Boolean) = Unit
+        fun onGlassesBatteryChanged(batteryPercent: Int) = Unit
+    }
+
+    /** Receives user actions requested by the glasses. */
+    interface PhoneActionListener {
+        fun onMirrorActionRequested(start: Boolean) = Unit
+        fun onClipboardRequested() = Unit
+        fun onGoogleAuthRequested() = Unit
+        fun onGoogleDisconnectRequested() = Unit
+    }
+
+    /** Receives sync and navigation requests decoded from the glasses transport. */
+    interface DataRequestListener {
+        fun onSyncRequested(request: SyncRequest) = Unit
+        fun onRouteRequestReceived(request: com.everyday.shared.transport.RouteTransportRequest) = Unit
+        fun onRouteCancellationReceived(cancellation: com.everyday.shared.transport.RouteTransportCancellation) = Unit
+        fun onDestinationSearchRequestReceived(request: com.everyday.shared.transport.DestinationSearchRequest) = Unit
+        fun onDestinationSearchCancellationReceived(cancellation: com.everyday.shared.transport.DestinationSearchCancellation) = Unit
+    }
+
+    /** Receives controls for interactive glasses experiences. */
+    interface ExperienceControlListener {
+        fun onSubtitleControlRequested(control: SubtitleControl) = Unit
+        fun onAssistantStatusReceived(status: AssistantStatus) = Unit
+    }
     
     companion object {
         private const val TAG = "RfcommServer"
@@ -66,21 +97,10 @@ class RfcommServer(private val context: Context) : SyncMessenger, PhoneRouteTran
             private set
     }
     
-    var onStatusChanged: ((String) -> Unit)? = null
-    var onConnectionChanged: ((Boolean) -> Unit)? = null
-    var onTextFieldFocusChanged: ((Boolean) -> Unit)? = null
-    var onBatteryChanged: ((Int) -> Unit)? = null
-    var onMirrorActionRequested: ((Boolean) -> Unit)? = null
-    var onClipboardRequested: (() -> Unit)? = null
-    var onGoogleAuthRequested: (() -> Unit)? = null
-    var onGoogleDisconnectRequested: (() -> Unit)? = null
-    var onSyncRequested: ((SyncRequest) -> Unit)? = null
-    var onRouteRequestReceived: ((com.everyday.shared.transport.RouteTransportRequest) -> Unit)? = null
-    var onRouteCancellationReceived: ((com.everyday.shared.transport.RouteTransportCancellation) -> Unit)? = null
-    var onDestinationSearchRequestReceived: ((com.everyday.shared.transport.DestinationSearchRequest) -> Unit)? = null
-    var onDestinationSearchCancellationReceived: ((com.everyday.shared.transport.DestinationSearchCancellation) -> Unit)? = null
-    var onSubtitleControlRequested: ((SubtitleControl) -> Unit)? = null
-    var onAssistantStatusReceived: ((AssistantStatus) -> Unit)? = null
+    var deviceListener: DeviceListener? = null
+    var phoneActionListener: PhoneActionListener? = null
+    var dataRequestListener: DataRequestListener? = null
+    var experienceControlListener: ExperienceControlListener? = null
     
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var serverSocket: BluetoothServerSocket? = null
@@ -132,17 +152,17 @@ class RfcommServer(private val context: Context) : SyncMessenger, PhoneRouteTran
         bluetoothAdapter = bluetoothManager.adapter
 
         if (bluetoothAdapter == null) {
-            onStatusChanged?.invoke("Bluetooth not supported")
+            deviceListener?.onServerStatusChanged("Bluetooth not supported")
             return false
         }
 
         if (!hasPermissions()) {
-            onStatusChanged?.invoke("Missing permissions")
+            deviceListener?.onServerStatusChanged("Missing permissions")
             return false
         }
 
         if (bluetoothAdapter?.isEnabled != true) {
-            onStatusChanged?.invoke("Bluetooth disabled")
+            deviceListener?.onServerStatusChanged("Bluetooth disabled")
             return false
         }
 
@@ -186,8 +206,8 @@ class RfcommServer(private val context: Context) : SyncMessenger, PhoneRouteTran
         pendingTapRunnable = null
         resetSentPayloadCache()
         
-        onStatusChanged?.invoke("Stopped")
-        onConnectionChanged?.invoke(false)
+        deviceListener?.onServerStatusChanged("Stopped")
+        deviceListener?.onConnectionChanged(false)
     }
 
     private fun resetSentPayloadCache() {
@@ -502,7 +522,7 @@ class RfcommServer(private val context: Context) : SyncMessenger, PhoneRouteTran
         try {
             serverSocket = bluetoothAdapter?.listenUsingRfcommWithServiceRecord(SERVICE_NAME, SPP_UUID)
             if (serverSocket == null) {
-                onStatusChanged?.invoke("Failed to create server")
+                deviceListener?.onServerStatusChanged("Failed to create server")
                 return false
             }
             
@@ -515,11 +535,11 @@ class RfcommServer(private val context: Context) : SyncMessenger, PhoneRouteTran
                 start()
             }
             
-            onStatusChanged?.invoke("Waiting for glasses...")
+            deviceListener?.onServerStatusChanged("Waiting for glasses...")
             return true
             
         } catch (e: Exception) {
-            onStatusChanged?.invoke("Failed to start server")
+            deviceListener?.onServerStatusChanged("Failed to start server")
             return false
         }
     }
@@ -536,8 +556,8 @@ class RfcommServer(private val context: Context) : SyncMessenger, PhoneRouteTran
                 resetSentPayloadCache()
 
                 handler.post {
-                    onStatusChanged?.invoke("Glasses connected")
-                    onConnectionChanged?.invoke(true)
+                    deviceListener?.onServerStatusChanged("Glasses connected")
+                    deviceListener?.onConnectionChanged(true)
                 }
 
                 startPeriodicUpdates(socket)
@@ -545,7 +565,7 @@ class RfcommServer(private val context: Context) : SyncMessenger, PhoneRouteTran
                 
             } catch (e: IOException) {
                 if (isRunning.get()) {
-                    handler.post { onStatusChanged?.invoke("Connection error") }
+                    handler.post { deviceListener?.onServerStatusChanged("Connection error") }
                 }
                 break
             }
@@ -607,13 +627,13 @@ class RfcommServer(private val context: Context) : SyncMessenger, PhoneRouteTran
             
             // Reset text field state on disconnect
             if (isTextFieldFocused.getAndSet(false)) {
-                handler.post { onTextFieldFocusChanged?.invoke(false) }
+                handler.post { deviceListener?.onTextFieldFocusChanged(false) }
             }
             
             handler.post {
-                onStatusChanged?.invoke("Disconnected")
-                onConnectionChanged?.invoke(false)
-                if (isRunning.get()) onStatusChanged?.invoke("Waiting for glasses...")
+                deviceListener?.onServerStatusChanged("Disconnected")
+                deviceListener?.onConnectionChanged(false)
+                if (isRunning.get()) deviceListener?.onServerStatusChanged("Waiting for glasses...")
             }
         }.start()
     }
@@ -622,27 +642,27 @@ class RfcommServer(private val context: Context) : SyncMessenger, PhoneRouteTran
         when (message) {
             is TransportMessage.TextFieldFocus -> {
                 val changed = isTextFieldFocused.getAndSet(message.focused) != message.focused
-                if (changed) handler.post { onTextFieldFocusChanged?.invoke(message.focused) }
+                if (changed) handler.post { deviceListener?.onTextFieldFocusChanged(message.focused) }
             }
             is TransportMessage.DeviceStatus -> message.glassesBatteryPercent?.let { battery ->
-                handler.post { onBatteryChanged?.invoke(battery) }
+                handler.post { deviceListener?.onGlassesBatteryChanged(battery) }
             }
-            is TransportMessage.MirrorRequest -> handler.post { onMirrorActionRequested?.invoke(message.start) }
-            TransportMessage.ClipboardRequest -> handler.post { onClipboardRequested?.invoke() }
-            TransportMessage.GoogleAuthRequest -> handler.post { onGoogleAuthRequested?.invoke() }
-            TransportMessage.GoogleAuthDisconnect -> handler.post { onGoogleDisconnectRequested?.invoke() }
+            is TransportMessage.MirrorRequest -> handler.post { phoneActionListener?.onMirrorActionRequested(message.start) }
+            TransportMessage.ClipboardRequest -> handler.post { phoneActionListener?.onClipboardRequested() }
+            TransportMessage.GoogleAuthRequest -> handler.post { phoneActionListener?.onGoogleAuthRequested() }
+            TransportMessage.GoogleAuthDisconnect -> handler.post { phoneActionListener?.onGoogleDisconnectRequested() }
             // Sync dispatch stays on the RFCOMM reader thread; refresh work is then
             // handed to the coordinator's bounded executors.
-            is TransportMessage.SyncRequestMessage -> onSyncRequested?.invoke(message.request)
-            is TransportMessage.RouteRequestMessage -> onRouteRequestReceived?.invoke(message.request)
-            is TransportMessage.RouteCancellationMessage -> onRouteCancellationReceived?.invoke(message.cancellation)
-            is TransportMessage.DestinationSearchRequestMessage -> onDestinationSearchRequestReceived?.invoke(message.request)
-            is TransportMessage.DestinationSearchCancellationMessage -> onDestinationSearchCancellationReceived?.invoke(message.cancellation)
+            is TransportMessage.SyncRequestMessage -> dataRequestListener?.onSyncRequested(message.request)
+            is TransportMessage.RouteRequestMessage -> dataRequestListener?.onRouteRequestReceived(message.request)
+            is TransportMessage.RouteCancellationMessage -> dataRequestListener?.onRouteCancellationReceived(message.cancellation)
+            is TransportMessage.DestinationSearchRequestMessage -> dataRequestListener?.onDestinationSearchRequestReceived(message.request)
+            is TransportMessage.DestinationSearchCancellationMessage -> dataRequestListener?.onDestinationSearchCancellationReceived(message.cancellation)
             is TransportMessage.SubtitleControlMessage -> handler.post {
-                onSubtitleControlRequested?.invoke(message.control)
+                experienceControlListener?.onSubtitleControlRequested(message.control)
             }
             is TransportMessage.AssistantStatusMessage -> handler.post {
-                onAssistantStatusReceived?.invoke(message.status)
+                experienceControlListener?.onAssistantStatusReceived(message.status)
             }
             else -> fileLog("RX unexpected kind=${message.kind} for phone endpoint")
         }

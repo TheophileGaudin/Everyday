@@ -24,6 +24,11 @@ class ShortcutsSettingsMenu(
     private val registry: AppCommandRegistry,
     private val initialShortcuts: List<AppCommandInvocation>
 ) {
+    /** Receives shortcut assignments and menu visibility changes. */
+    interface Listener {
+        fun onShortcutsChanged(shortcuts: List<AppCommandInvocation>) = Unit
+        fun onDismissed() = Unit
+    }
 
     var isVisible: Boolean = false
         private set
@@ -34,8 +39,7 @@ class ShortcutsSettingsMenu(
     private var leftScroll: Float = 0f
     private var rightScroll: Float = 0f
 
-    var onChanged: ((List<AppCommandInvocation>) -> Unit)? = null
-    var onDismissed: (() -> Unit)? = null
+    var listener: Listener? = null
 
     private val backdropRect = RectF()
     private val panelRect = RectF()
@@ -120,7 +124,7 @@ class ShortcutsSettingsMenu(
     fun dismiss() {
         if (!isVisible) return
         isVisible = false
-        onDismissed?.invoke()
+        listener?.onDismissed()
     }
 
     fun containsPoint(x: Float, y: Float): Boolean = isVisible
@@ -359,6 +363,6 @@ class ShortcutsSettingsMenu(
     }
 
     private fun notifyChanged() {
-        onChanged?.invoke(onLemon.map(registry::invocation))
+        listener?.onShortcutsChanged(onLemon.map(registry::invocation))
     }
 }

@@ -171,11 +171,9 @@ abstract class BaseWidget(
     var wasFullscreenBeforeMinimize = false
         protected set
     
-    // ==================== Callbacks ====================
+    // ==================== Lifecycle listener ====================
 
-    var onFullscreenToggled: ((Boolean) -> Unit)? = null
-    var onMinimizeToggled: ((Boolean) -> Unit)? = null
-    var onCloseRequested: (() -> Unit)? = null
+    var lifecycleListener: WidgetLifecycleListener? = null
     
     // ==================== Paints ====================
     
@@ -561,7 +559,7 @@ abstract class BaseWidget(
     protected fun handleChromeTap(px: Float, py: Float): Boolean {
         return when {
             closeButtonBounds.contains(px, py) -> {
-                onCloseRequested?.invoke()
+                lifecycleListener?.onCloseRequested(this)
                 true
             }
             fullscreenButtonBounds.contains(px, py) -> {
@@ -601,7 +599,7 @@ abstract class BaseWidget(
         
         isFullscreen = true
         Log.d(TAG, "Entering fullscreen, saved bounds: ($savedX, $savedY) ${savedWidth}x${savedHeight}")
-        onFullscreenToggled?.invoke(true)
+        lifecycleListener?.onFullscreenToggled(this, true)
     }
     
     protected open fun exitFullscreen() {
@@ -615,7 +613,7 @@ abstract class BaseWidget(
         
         isFullscreen = false
         Log.d(TAG, "Exiting fullscreen, restored bounds: ($x, $y) ${widgetWidth}x${widgetHeight}")
-        onFullscreenToggled?.invoke(false)
+        lifecycleListener?.onFullscreenToggled(this, false)
     }
     
     /**
@@ -675,7 +673,7 @@ abstract class BaseWidget(
         widgetHeight = 64f
         // Position will be handled by container
 
-        onMinimizeToggled?.invoke(true)
+        lifecycleListener?.onMinimizeToggled(this, true)
     }
 
     protected open fun restore() {
@@ -704,7 +702,7 @@ abstract class BaseWidget(
             Log.d(TAG, "Re-entering fullscreen after restore")
         }
 
-        onMinimizeToggled?.invoke(false)
+        lifecycleListener?.onMinimizeToggled(this, false)
     }
     
     // ==================== Drag / Move ====================

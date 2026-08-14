@@ -24,6 +24,13 @@ enum class GlassesRouteFallbackReason {
     PHONE_ERROR
 }
 
+/** Receives the terminal outcome of a phone-first route request. */
+interface RouteResolutionListener {
+    fun onRouteResolved(result: RouteTransportResult) = Unit
+    fun onRouteAmbiguous(request: RouteTransportRequest, error: RouteTransportError) = Unit
+    fun onRouteFallback(request: RouteTransportRequest, reason: GlassesRouteFallbackReason) = Unit
+}
+
 /**
  * Bounded phone-first request state machine for the glasses.  It deliberately does not calculate
  * routes itself: callers provide the existing glasses-local fallback and receive one callback when
@@ -36,9 +43,7 @@ class GlassesPhoneRoutingCoordinator(
         Thread(runnable, "GlassesRouteTimeout").apply { isDaemon = true }
     }
 ) {
-    var onRouteResult: ((RouteTransportResult) -> Unit)? = null
-    var onAmbiguousRoute: ((RouteTransportRequest, RouteTransportError) -> Unit)? = null
-    var onFallback: ((RouteTransportRequest, GlassesRouteFallbackReason) -> Unit)? = null
+    var listener: RouteResolutionListener? = null
 
     private val lock = Any()
     private var active: ActiveRequest? = null
@@ -73,7 +78,7 @@ class GlassesPhoneRoutingCoordinator(
             }
         }
         if (endpoint == null) {
-            onFallback?.invoke(request, GlassesRouteFallbackReason.NOT_CONNECTED)
+            listener?.onRouteFallback(request, GlassesRouteFallbackReason.NOT_CONNECTED)
             return false
         }
 
@@ -85,7 +90,7 @@ class GlassesPhoneRoutingCoordinator(
         val sent = runCatching { endpoint.sendRouteRequest(request) }.getOrDefault(false)
         if (!sent) {
             clearIfCurrent(current)
-            onFallback?.invoke(request, GlassesRouteFallbackReason.SEND_FAILURE)
+            listener?.onRouteFallback(request, GlassesRouteFallbackReason.SEND_FAILURE)
             return false
         }
         try {
@@ -96,7 +101,7 @@ class GlassesPhoneRoutingCoordinator(
             )
         } catch (_: RuntimeException) {
             clearIfCurrent(current)
-            onFallback?.invoke(request, GlassesRouteFallbackReason.SEND_FAILURE)
+            listener?.onRouteFallback(request, GlassesRouteFallbackReason.SEND_FAILURE)
             return false
         }
         return true
@@ -110,7 +115,7 @@ class GlassesPhoneRoutingCoordinator(
             active = null
             true
         }
-        if (deliver) onRouteResult?.invoke(result)
+        if (deliver) listener?.onRouteResolved(result)
     }
 
     fun onRouteError(error: RouteTransportError) {
@@ -122,9 +127,9 @@ class GlassesPhoneRoutingCoordinator(
             current.request
         }
         if (error.code == RouteTransportErrorCode.GEOCODING_AMBIGUOUS && error.choices.isNotEmpty()) {
-            onAmbiguousRoute?.invoke(request, error)
+            listener?.onRouteAmbiguous(request, error)
         } else {
-            onFallback?.invoke(request, GlassesRouteFallbackReason.PHONE_ERROR)
+            listener?.onRouteFallback(request, GlassesRouteFallbackReason.PHONE_ERROR)
         }
     }
 
@@ -137,7 +142,7 @@ class GlassesPhoneRoutingCoordinator(
             active = null
             current.request
         }
-        onFallback?.invoke(request, GlassesRouteFallbackReason.DISCONNECTED)
+        listener?.onRouteFallback(request, GlassesRouteFallbackReason.DISCONNECTED)
     }
 
     /** Stops a request without starting local fallback, used by stop/replacement. */
@@ -177,7 +182,7 @@ class GlassesPhoneRoutingCoordinator(
                 RouteTransportCancellation(request.requestId, System.currentTimeMillis(), "timeout")
             )
         }
-        onFallback?.invoke(request, GlassesRouteFallbackReason.TIMEOUT)
+        listener?.onRouteFallback(request, GlassesRouteFallbackReason.TIMEOUT)
     }
 
     private fun clearIfCurrent(current: ActiveRequest) {

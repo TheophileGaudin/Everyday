@@ -26,6 +26,28 @@ class DashboardSettings(
     private val screenHeight: Float
 ) {
 
+    /** Handles settings changes and actions initiated from this dashboard. */
+    interface DashboardSettingsHandler {
+        fun onBrightnessChanged(value: Float) = Unit
+        fun onAdaptiveBrightnessChanged(enabled: Boolean) = Unit
+        fun onHeadUpTimeChanged(value: Float) = Unit
+        fun onWakeDurationChanged(value: Float) = Unit
+        fun onAngleThresholdChanged(degrees: Float) = Unit
+        fun onHeadsUpEnabledChanged(enabled: Boolean) = Unit
+        fun onSmartAlignmentChanged(enabled: Boolean) = Unit
+        fun onUnitSystemModeChanged(mode: UnitSystemMode) = Unit
+        fun onConnectGoogle() = Unit
+        fun onGrantCalendarAccess() = Unit
+        fun onDisconnectGoogle() = Unit
+        fun onRetryGoogleAuth() = Unit
+        fun onPasteGeminiKey() = Unit
+        fun onRemoveGeminiKey() = Unit
+        fun onCycleGeminiModel() = Unit
+        fun onAppearanceRequested() = Unit
+        fun onShortcutsRequested() = Unit
+        fun onDismissed() = Unit
+    }
+
     companion object {
         private const val TAG = "DashboardSettings"
         private const val BASE_SCREEN_WIDTH = 640f
@@ -76,47 +98,47 @@ class DashboardSettings(
     var brightnessValue: Float = 1.0f
         set(value) {
             field = value.coerceIn(0f, 1f)
-            onBrightnessChanged?.invoke(field)
+            handler?.onBrightnessChanged(field)
         }
 
     var adaptiveBrightnessEnabled: Boolean = true
         set(value) {
             field = value
-            onAdaptiveBrightnessChanged?.invoke(field)
+            handler?.onAdaptiveBrightnessChanged(field)
         }
 
     // Head-up hold time value (0.0 to 1.0, maps to the configured min/max range)
     var headUpTimeValue: Float = msToHeadUpTimeValue(HeadUpWakeManager.DEFAULT_HEAD_UP_HOLD_TIME_MS)
         set(value) {
             field = value.coerceIn(0f, 1f)
-            onHeadUpTimeChanged?.invoke(field)
+            handler?.onHeadUpTimeChanged(field)
         }
 
     // Wake duration value (0.0 to 1.0, maps to the configured min/max range)
     var wakeDurationValue: Float = msToWakeDurationValue(HeadUpWakeManager.DEFAULT_WAKE_DURATION_MS)
         set(value) {
             field = value.coerceIn(0f, 1f)
-            onWakeDurationChanged?.invoke(field)
+            handler?.onWakeDurationChanged(field)
         }
 
     // Angle threshold value (0.0 to 1.0, maps to MIN_ANGLE_THRESHOLD - MAX_ANGLE_THRESHOLD degrees)
     var angleThresholdValue: Float = (DEFAULT_ANGLE_THRESHOLD - MIN_ANGLE_THRESHOLD) / (MAX_ANGLE_THRESHOLD - MIN_ANGLE_THRESHOLD)
         set(value) {
             field = value.coerceIn(0f, 1f)
-            onAngleThresholdChanged?.invoke(angleThresholdValueToDegrees(field))
+            handler?.onAngleThresholdChanged(angleThresholdValueToDegrees(field))
         }
 
     // Head-up enabled state
     var headsUpEnabled: Boolean = true
         set(value) {
             field = value
-            onHeadsUpEnabledChanged?.invoke(field)
+            handler?.onHeadsUpEnabledChanged(field)
         }
 
     var smartAlignmentEnabled: Boolean = true
         set(value) {
             field = value
-            onSmartAlignmentChanged?.invoke(field)
+            handler?.onSmartAlignmentChanged(field)
         }
 
     var googleAuthState: GoogleAuthState = GoogleAuthState.signedOut()
@@ -129,32 +151,14 @@ class DashboardSettings(
     var geminiModelLabel = "Recommended - automatic"
     var geminiDetail = "Paste an API key to enable voice"
 
-    // Callbacks when sliders change
-    var onBrightnessChanged: ((Float) -> Unit)? = null
-    var onAdaptiveBrightnessChanged: ((Boolean) -> Unit)? = null
-    var onHeadUpTimeChanged: ((Float) -> Unit)? = null
-    var onWakeDurationChanged: ((Float) -> Unit)? = null
-    var onAngleThresholdChanged: ((Float) -> Unit)? = null  // Callback with degrees
-    var onHeadsUpEnabledChanged: ((Boolean) -> Unit)? = null
-    var onSmartAlignmentChanged: ((Boolean) -> Unit)? = null
-    var onUnitSystemModeChanged: ((UnitSystemMode) -> Unit)? = null
-    var onConnectGoogle: (() -> Unit)? = null
-    var onGrantCalendarAccess: (() -> Unit)? = null
-    var onDisconnectGoogle: (() -> Unit)? = null
-    var onRetryGoogleAuth: (() -> Unit)? = null
-    var onPasteGeminiKey: (() -> Unit)? = null
-    var onRemoveGeminiKey: (() -> Unit)? = null
-    var onCycleGeminiModel: (() -> Unit)? = null
-    var onAppearanceRequested: (() -> Unit)? = null
-    var onShortcutsRequested: (() -> Unit)? = null
-    var onDismissed: (() -> Unit)? = null
+    var handler: DashboardSettingsHandler? = null
 
     var unitSystemMode: UnitSystemMode = UnitSystemMode.AUTO
         private set
 
     fun setUnitSystemMode(mode: UnitSystemMode, notify: Boolean = true) {
         unitSystemMode = mode
-        if (notify) onUnitSystemModeChanged?.invoke(mode)
+        if (notify) handler?.onUnitSystemModeChanged(mode)
     }
 
     /**
@@ -604,7 +608,7 @@ class DashboardSettings(
             activeSlider = ActiveSlider.NONE
             currentView = ViewMode.MAIN
             updateLayout()
-            onDismissed?.invoke()
+            handler?.onDismissed()
         }
     }
 
@@ -1320,13 +1324,13 @@ class DashboardSettings(
                     MainButton.APPEARANCE -> {
                         // Hand off control to the layout editor; close this menu so it stays
                         // out of the way while the editor is on screen.
-                        onAppearanceRequested?.invoke()
+                        handler?.onAppearanceRequested()
                         dismiss()
                     }
                     MainButton.SHORTCUTS -> {
                         // Hand off to the shortcuts configurator; close this menu so it does
                         // not stack on top of the new full-screen overlay.
-                        onShortcutsRequested?.invoke()
+                        handler?.onShortcutsRequested()
                         dismiss()
                     }
                     MainButton.MORE -> showMoreSubmenu()
@@ -1370,10 +1374,10 @@ class DashboardSettings(
 
             if (googlePrimaryActionLabel() != null && googlePrimaryButtonRect.contains(x, y)) {
                 when (googlePrimaryAction()) {
-                    GoogleAction.CONNECT -> onConnectGoogle?.invoke()
-                    GoogleAction.CONTINUE_PHONE -> onRetryGoogleAuth?.invoke()
-                    GoogleAction.GRANT -> onGrantCalendarAccess?.invoke()
-                    GoogleAction.RETRY -> onRetryGoogleAuth?.invoke()
+                    GoogleAction.CONNECT -> handler?.onConnectGoogle()
+                    GoogleAction.CONTINUE_PHONE -> handler?.onRetryGoogleAuth()
+                    GoogleAction.GRANT -> handler?.onGrantCalendarAccess()
+                    GoogleAction.RETRY -> handler?.onRetryGoogleAuth()
                     GoogleAction.DISCONNECT,
                     GoogleAction.NONE -> Unit
                 }
@@ -1382,25 +1386,25 @@ class DashboardSettings(
 
             if (googleSecondaryActionLabel() != null && googleSecondaryButtonRect.contains(x, y)) {
                 when (googleSecondaryAction()) {
-                    GoogleAction.CONNECT -> onConnectGoogle?.invoke()
-                    GoogleAction.CONTINUE_PHONE -> onRetryGoogleAuth?.invoke()
-                    GoogleAction.GRANT -> onGrantCalendarAccess?.invoke()
-                    GoogleAction.RETRY -> onRetryGoogleAuth?.invoke()
-                    GoogleAction.DISCONNECT -> onDisconnectGoogle?.invoke()
+                    GoogleAction.CONNECT -> handler?.onConnectGoogle()
+                    GoogleAction.CONTINUE_PHONE -> handler?.onRetryGoogleAuth()
+                    GoogleAction.GRANT -> handler?.onGrantCalendarAccess()
+                    GoogleAction.RETRY -> handler?.onRetryGoogleAuth()
+                    GoogleAction.DISCONNECT -> handler?.onDisconnectGoogle()
                     GoogleAction.NONE -> Unit
                 }
                 return true
             }
             if (geminiKeyButtonRect.contains(x, y)) {
-                onPasteGeminiKey?.invoke()
+                handler?.onPasteGeminiKey()
                 return true
             }
             if (geminiConfigured && geminiModelButtonRect.contains(x, y)) {
-                onCycleGeminiModel?.invoke()
+                handler?.onCycleGeminiModel()
                 return true
             }
             if (geminiConfigured && geminiRemoveButtonRect.contains(x, y)) {
-                onRemoveGeminiKey?.invoke()
+                handler?.onRemoveGeminiKey()
                 return true
             }
         } else {

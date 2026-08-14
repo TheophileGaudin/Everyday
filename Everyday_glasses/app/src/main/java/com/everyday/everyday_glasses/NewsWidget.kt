@@ -106,16 +106,12 @@ class NewsWidget(
     // Timer
     private val handler = Handler(Looper.getMainLooper())
 
-    var onStateChanged: (() -> Unit)? = null
-    var onDataRequested: ((countryCode: String, force: Boolean, reason: String) -> Unit)? = null
-    var onSourceDataRequested: ((
-        sourceSpec: NewsSourceSpec,
-        countryCode: String,
-        force: Boolean,
-        reason: String,
-        completion: (Result<NewsSnapshot>) -> Unit
-    ) -> Unit)? = null
-    var onSourceInputFocusChanged: ((Boolean) -> Unit)? = null
+    var listener: NewsWidgetListener? = null
+    private val onStateChanged: (() -> Unit)? get() = listener?.let { value -> { value.onStateChanged() } }
+    private val onDataRequested: ((String, Boolean, String) -> Unit)?
+        get() = listener?.let { value -> { country, force, reason -> value.onDataRequested(country, force, reason) } }
+    private val onSourceInputFocusChanged: ((Boolean) -> Unit)?
+        get() = listener?.let { value -> { focused -> value.onSourceInputFocusChanged(focused) } }
 
     // Overlay arrows
     private val leftArrowBounds = RectF()
@@ -391,12 +387,12 @@ class NewsWidget(
         val callback: (Result<NewsSnapshot>) -> Unit = { result ->
             handler.post { finishSourceRequest(spec, result) }
         }
-        val request = onSourceDataRequested
+        val request = listener
         if (request == null) {
             callback(Result.failure(IllegalStateException("News data service is unavailable")))
         } else {
             runCatching {
-                request(spec, currentCountryCode, true, "news_source_changed", callback)
+                request.onSourceDataRequested(spec, currentCountryCode, true, "news_source_changed", callback)
             }.onFailure { callback(Result.failure(it)) }
         }
     }
@@ -959,20 +955,20 @@ class NewsWidget(
         showSourcePanel = false
         sourcePanelField = null
         sourcePanelError = null
-        if (hadInputFocus) onSourceInputFocusChanged?.invoke(false)
+        if (hadInputFocus) listener?.onSourceInputFocusChanged(false)
         if (wasOpen) onStateChanged?.invoke()
     }
 
     private fun selectSourcePanelField(field: SourcePanelField) {
         sourcePanelField = field
         sourcePanelError = null
-        onSourceInputFocusChanged?.invoke(true)
+        listener?.onSourceInputFocusChanged(true)
         onStateChanged?.invoke()
     }
 
     private fun requestSourceFromPanel(spec: NewsSourceSpec) {
         sourcePanelField = null
-        onSourceInputFocusChanged?.invoke(false)
+        listener?.onSourceInputFocusChanged(false)
         sourcePanelError = null
         requestSource(spec) { /* The widget owns the result and keeps failures non-destructive. */ }
     }
@@ -1024,7 +1020,7 @@ class NewsWidget(
     fun requestData(force: Boolean, reason: String) {
         dataState.startLoading(clearError = newsItems.isEmpty())
         onStateChanged?.invoke()
-        onDataRequested?.invoke(currentCountryCode, force, reason)
+        listener?.onDataRequested(currentCountryCode, force, reason)
     }
 
     fun applySnapshot(snapshot: NewsSnapshot) {

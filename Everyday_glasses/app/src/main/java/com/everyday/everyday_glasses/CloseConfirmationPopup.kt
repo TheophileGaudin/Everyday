@@ -41,8 +41,7 @@ class CloseConfirmationPopup(
     private var hoveredButton: String? = null  // "close", "back", or null
     
     // Callbacks
-    var onCloseConfirmed: (() -> Unit)? = null
-    var onDismissed: (() -> Unit)? = null
+    var handler: CloseConfirmationHandler? = null
     
     // Paints
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -127,7 +126,7 @@ class CloseConfirmationPopup(
         if (isVisible) {
             isVisible = false
             hoveredButton = null
-            onDismissed?.invoke()
+            handler?.onPopupDismissed()
             Log.d(TAG, "Popup dismissed")
         }
     }
@@ -156,7 +155,7 @@ class CloseConfirmationPopup(
         if (closeButtonRect.contains(px, py)) {
             Log.d(TAG, "Close button tapped")
             dismiss()
-            onCloseConfirmed?.invoke()
+            handler?.confirmClose()
             return true
         }
         

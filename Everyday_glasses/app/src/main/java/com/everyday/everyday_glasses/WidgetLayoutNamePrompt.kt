@@ -22,8 +22,7 @@ class WidgetLayoutNamePrompt(
     var isVisible = false
         private set
 
-    var onSubmitted: ((String) -> Unit)? = null
-    var onDismissed: (() -> Unit)? = null
+    var handler: LayoutNameHandler? = null
 
     private var text = ""
     private var allSelected = false
@@ -119,7 +118,7 @@ class WidgetLayoutNamePrompt(
         isVisible = false
         keyboardOverlay.hide()
         errorMessage = null
-        onDismissed?.invoke()
+        handler?.onPromptDismissed()
     }
 
     fun showError(message: String) {
@@ -233,7 +232,7 @@ class WidgetLayoutNamePrompt(
             errorMessage = "Name required"
             return
         }
-        onSubmitted?.invoke(trimmed)
+        handler?.submitLayoutName(trimmed)
     }
 
     private fun updateLayout() {

@@ -38,7 +38,22 @@ import com.everyday.everyday_glasses.binocular.DisplayConfig
 import com.everyday.everyday_glasses.binocular.BinocularUpdateType
 import com.everyday.everyday_glasses.binocular.BinocularView
 import com.everyday.shared.sync.LocationFix
+import com.everyday.shared.sync.FinanceDashboardTileConfig
+import com.everyday.shared.sync.NewsSnapshot
+import com.everyday.shared.sync.NewsSourceSpec
+import com.everyday.shared.sync.SyncError
+import com.everyday.shared.sync.SyncSnapshot
+import com.everyday.shared.sync.SubtitleControl
+import com.everyday.shared.sync.SubtitleStatus
+import com.everyday.shared.sync.SubtitleTranscript
 import com.everyday.shared.sync.usableSpeedMps
+import com.everyday.shared.transport.AssistantControl
+import com.everyday.shared.transport.AssistantStatus
+import com.everyday.shared.transport.DestinationSearchError
+import com.everyday.shared.transport.DestinationSearchResult
+import com.everyday.shared.transport.RouteTransportError
+import com.everyday.shared.transport.RouteTransportResult
+import com.everyday.shared.transport.TransportMessage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -338,23 +353,18 @@ class MainActivity : AppCompatActivity() {
         // Initialize file picker for opening images, PDFs, etc.
         filePicker = FilePicker(this)
 
-        // Setup cursor visibility callback
-        cursorView.onVisibilityChanged = { isVisible ->
-            // Update widget container with current cursor position and new visibility
-            val cursorX = cursorView.getCursorX()
-            val cursorY = cursorView.getCursorY()
-            widgetContainer.updateCursor(cursorX, cursorY, isVisible)
-            widgetContainer.onCursorVisibilityChanged(isVisible)
-
-            // Skip aggressive invalidation during display state transitions
-            // to prevent power spikes that cause flashes on battery power
-            if (!isTransitioningDisplayState) {
-                notifyTransientBinocularChange()
+        cursorView.activityObserver = object : CursorActivityObserver {
+            override fun onVisibilityChanged(visible: Boolean) {
+                val cursorX = cursorView.getCursorX()
+                val cursorY = cursorView.getCursorY()
+                widgetContainer.updateCursor(cursorX, cursorY, visible)
+                widgetContainer.onCursorVisibilityChanged(visible)
+                if (!isTransitioningDisplayState) notifyTransientBinocularChange()
             }
-        }
 
-        cursorView.onUserActivity = {
-            widgetContainer.onCursorActivity()
+            override fun onUserActivity() {
+                widgetContainer.onCursorActivity()
+            }
         }
 
         // Setup widget container
@@ -398,178 +408,205 @@ class MainActivity : AppCompatActivity() {
 
         // Create RFCOMM client
         rfcommClient = RfcommClient(this).apply {
-            onStatusChanged = { status ->
-                runOnUiThread {
-                    Log.d(TAG, "Connection status: $status")
-                    binocularView.notifyContentChanged()
-                }
-            }
-            
-            onPointerReceived = { data ->
-                runOnUiThread {
-                    if (isPhoneMode) {
-                        handlePhonePointer(data)
-                    }
-                }
-            }
-
-            onDeviceStatusReceived = { status ->
-                status.phoneBatteryPercent?.let { battery ->
+            transportConnectionListener = object : TransportConnectionListener {
+                override fun onStatusChanged(status: String) {
                     runOnUiThread {
-                        latestPhoneBatteryPercent = battery
-                        updateStatusBar(isPhoneConnected = true, phoneBattery = battery)
+                        Log.d(TAG, "Connection status: $status")
+                        binocularView.notifyContentChanged()
                     }
                 }
-            }
-            
-            onKeyReceived = { key ->
-                runOnUiThread {
-                    handleKeyFromPhone(key)
-                }
-            }
-            
-            onConnectionChanged = { connected ->
-                runOnUiThread {
-                    widgetContainer.onPhoneRouteConnectionChanged(connected)
-                    if (::voiceAssistantCoordinator.isInitialized) {
-                        if (connected) rfcommClient?.sendAssistantStatus(voiceAssistantCoordinator.currentStatus())
-                        else voiceAssistantCoordinator.onPhoneDisconnected()
+
+                override fun onConnectionChanged(connected: Boolean) {
+                    runOnUiThread {
+                        widgetContainer.onPhoneRouteConnectionChanged(connected)
+                        if (::voiceAssistantCoordinator.isInitialized) {
+                            if (connected) rfcommClient?.sendAssistantStatus(voiceAssistantCoordinator.currentStatus())
+                            else voiceAssistantCoordinator.onPhoneDisconnected()
+                        }
+                        if (::dataSyncCoordinator.isInitialized) {
+                            dataSyncCoordinator.onPhoneConnectionChanged(connected)
+                        }
+                        if (!connected && isPhoneMode) {
+                            latestPhoneBatteryPercent = -1
+                            // Update status bar to show disconnected
+                            updateStatusBar(
+                                isPhoneConnected = false,
+                                phoneBattery = -1,
+                            )
+                            // Unfocus any widgets on disconnect
+                            widgetContainer.unfocusAll()
+                            // Disable mirroring on disconnect
+                            widgetContainer.setMirroringEnabled(false)
+                            widgetContainer.onSubtitlePhoneDisconnected()
+                        } else if (connected) {
+                            updateStatusBar(
+                                isPhoneConnected = true,
+                                phoneBattery = latestPhoneBatteryPercent,
+                            )
+                            widgetContainer.onPhoneReconnected()
+                        }
+                        binocularView.notifyContentChanged()
                     }
-                    if (::dataSyncCoordinator.isInitialized) {
-                        dataSyncCoordinator.onPhoneConnectionChanged(connected)
-                    }
-                    if (!connected && isPhoneMode) {
-                        latestPhoneBatteryPercent = -1
-                        // Update status bar to show disconnected
-                        updateStatusBar(
-                            isPhoneConnected = false,
-                            phoneBattery = -1,
-                        )
-                        // Unfocus any widgets on disconnect
-                        widgetContainer.unfocusAll()
-                        // Disable mirroring on disconnect
-                        widgetContainer.setMirroringEnabled(false)
-                        widgetContainer.onSubtitlePhoneDisconnected()
-                    } else if (connected) {
-                        updateStatusBar(
-                            isPhoneConnected = true,
-                            phoneBattery = latestPhoneBatteryPercent,
-                        )
-                        widgetContainer.onPhoneReconnected()
-                    }
-                    binocularView.notifyContentChanged()
                 }
             }
 
-            onMirrorStateChanged = { enabled, ip, isWifiDirect ->
-                runOnUiThread {
-                    Log.d(TAG, "Mirror state changed: enabled=$enabled, ip=$ip, wifiDirect=$isWifiDirect")
-
-                    if (enabled && isWifiDirect) {
-                        // Phone told us this is WiFi Direct - we need to join the P2P group first
-                        if (wifiDirectClient?.isConnected != true) {
-                            Log.d(TAG, "WiFi Direct mode, starting peer discovery...")
-                            pendingWifiDirectMirrorIp = ip  // Save IP for when we connect
-                            wifiDirectClient?.discoverPeers()
-                            // DON'T enable mirroring yet - wait for P2P connection
-                            return@runOnUiThread
-                        } else {
-                            Log.d(TAG, "Already connected to WiFi Direct, proceeding with mirroring")
+            remoteInputListener = object : RemoteInputListener {
+                override fun onPointerReceived(data: TransportMessage.Pointer) {
+                    runOnUiThread {
+                        if (isPhoneMode) {
+                            handlePhonePointer(data)
                         }
                     }
+                }
 
-                    widgetContainer.setMirroringEnabled(enabled, ip)
-                    binocularView.notifyContentChanged()
-                }
-            }
-            
-            onLongPressWithClipboard = { clipboardContent ->
-                runOnUiThread {
-                    userInputActivity.onUserInput(UserInputKind.LONG_PRESS)
-                    Log.d(TAG, "Phone clipboard received: available=${clipboardContent != null}")
-                    // Store phone clipboard content for paste operations
-                    // Note: Text selection is now handled by glasses-side long-press detection
-                    // Double-tap on focused text shows the text edit menu
-                    widgetContainer.setPhoneClipboard(clipboardContent)
-                    binocularView.notifyContentChanged()
-                }
-            }
-            
-            onClipboardReceived = { clipboardContent ->
-                runOnUiThread {
-                    Log.d(TAG, "Phone clipboard updated: chars=${clipboardContent.length}")
-                    // Store phone clipboard content for paste operations
-                    widgetContainer.setPhoneClipboard(clipboardContent)
-                    binocularView.notifyContentChanged()
-                }
-            }
-
-            onImageReceived = { imageData, fileName ->
-                runOnUiThread {
-                    Log.d(TAG, "Image received from phone: $fileName (${imageData.size} bytes)")
-                    handleReceivedImage(imageData, fileName)
-                }
-            }
-
-            onOpenBrowserRequested = { address ->
-                runOnUiThread {
-                    Log.d(TAG, "Open browser requested from phone: ${address.take(80)}")
-                    widgetContainer.executeOpenUrlCommand(address)
-                    binocularView.notifyContentChanged()
-                }
-            }
-
-            onGoogleAuthStateReceived = { status, account, detail ->
-                runOnUiThread {
-                    if (status == GooglePhoneAuthStatus.SIGNED_OUT) {
-                        dataSyncCoordinator.clearCalendarSnapshot()
+                override fun onKeyReceived(key: String) {
+                    runOnUiThread {
+                        handleKeyFromPhone(key)
                     }
-                    googleAuthCoordinator.onPhoneAuthStateChanged(status, account, detail)
-                    binocularView.notifyContentChanged()
+                }
+
+                override fun onLongPressWithClipboard(clipboardContent: String?) {
+                    runOnUiThread {
+                        userInputActivity.onUserInput(UserInputKind.LONG_PRESS)
+                        Log.d(TAG, "Phone clipboard received: available=${clipboardContent != null}")
+                        // Store phone clipboard content for paste operations
+                        // Note: Text selection is now handled by glasses-side long-press detection
+                        // Double-tap on focused text shows the text edit menu
+                        widgetContainer.setPhoneClipboard(clipboardContent)
+                        binocularView.notifyContentChanged()
+                    }
+                }
+
+                override fun onClipboardReceived(clipboardContent: String) {
+                    runOnUiThread {
+                        Log.d(TAG, "Phone clipboard updated: chars=${clipboardContent.length}")
+                        // Store phone clipboard content for paste operations
+                        widgetContainer.setPhoneClipboard(clipboardContent)
+                        binocularView.notifyContentChanged()
+                    }
                 }
             }
 
-            onSyncSnapshotReceived = { snapshot ->
-                runOnUiThread {
-                    dataSyncCoordinator.onSyncSnapshotReceived(snapshot)
+            remoteContentListener = object : RemoteContentListener {
+                override fun onDeviceStatusReceived(status: TransportMessage.DeviceStatus) {
+                    status.phoneBatteryPercent?.let { battery ->
+                        runOnUiThread {
+                            latestPhoneBatteryPercent = battery
+                            updateStatusBar(isPhoneConnected = true, phoneBattery = battery)
+                        }
+                    }
+                }
+
+                override fun onImageReceived(imageData: ByteArray, fileName: String) {
+                    runOnUiThread {
+                        Log.d(TAG, "Image received from phone: $fileName (${imageData.size} bytes)")
+                        handleReceivedImage(imageData, fileName)
+                    }
+                }
+
+                override fun onOpenBrowserRequested(address: String) {
+                    runOnUiThread {
+                        Log.d(TAG, "Open browser requested from phone: ${address.take(80)}")
+                        widgetContainer.executeOpenUrlCommand(address)
+                        binocularView.notifyContentChanged()
+                    }
                 }
             }
 
-            onSyncErrorReceived = { error ->
-                runOnUiThread {
-                    dataSyncCoordinator.onSyncErrorReceived(error)
+            mirrorSessionListener = object : MirrorSessionListener {
+                override fun onMirrorStateChanged(enabled: Boolean, ip: String?, isWifiDirect: Boolean) {
+                    runOnUiThread {
+                        Log.d(TAG, "Mirror state changed: enabled=$enabled, ip=$ip, wifiDirect=$isWifiDirect")
+
+                        if (enabled && isWifiDirect) {
+                            // Phone told us this is WiFi Direct - we need to join the P2P group first
+                            if (wifiDirectClient?.isConnected != true) {
+                                Log.d(TAG, "WiFi Direct mode, starting peer discovery...")
+                                pendingWifiDirectMirrorIp = ip  // Save IP for when we connect
+                                wifiDirectClient?.discoverPeers()
+                                // DON'T enable mirroring yet - wait for P2P connection
+                                return@runOnUiThread
+                            } else {
+                                Log.d(TAG, "Already connected to WiFi Direct, proceeding with mirroring")
+                            }
+                        }
+
+                        widgetContainer.setMirroringEnabled(enabled, ip)
+                        binocularView.notifyContentChanged()
+                    }
                 }
             }
 
-            onRouteResultReceived = { result ->
-                runOnUiThread { widgetContainer.onPhoneRouteResult(result) }
-            }
-            onRouteErrorReceived = { error ->
-                runOnUiThread { widgetContainer.onPhoneRouteError(error) }
-            }
-            onDestinationSearchResultReceived = { result ->
-                runOnUiThread { widgetContainer.onPhoneDestinationSearchResult(result) }
-            }
-            onDestinationSearchErrorReceived = { error ->
-                runOnUiThread { widgetContainer.onPhoneDestinationSearchError(error) }
-            }
-
-            onSubtitleStatusReceived = { status ->
-                runOnUiThread {
-                    widgetContainer.applySubtitleStatus(status)
-                    binocularView.notifyContentChanged()
+            remoteAuthListener = object : RemoteAuthListener {
+                override fun onGoogleAuthStateReceived(
+                    status: GooglePhoneAuthStatus,
+                    account: GoogleAccountSummary?,
+                    detail: String?
+                ) {
+                    runOnUiThread {
+                        if (status == GooglePhoneAuthStatus.SIGNED_OUT) {
+                            dataSyncCoordinator.clearCalendarSnapshot()
+                        }
+                        googleAuthCoordinator.onPhoneAuthStateChanged(status, account, detail)
+                        binocularView.notifyContentChanged()
+                    }
                 }
             }
 
-            onSubtitleTranscriptReceived = { transcript ->
-                runOnUiThread {
-                    widgetContainer.applySubtitleTranscript(transcript)
-                    binocularView.notifyContentChanged()
+            syncMessageListener = object : SyncMessageListener {
+                override fun onSyncSnapshotReceived(snapshot: SyncSnapshot) {
+                    runOnUiThread {
+                        dataSyncCoordinator.onSyncSnapshotReceived(snapshot)
+                    }
+                }
+
+                override fun onSyncErrorReceived(error: SyncError) {
+                    runOnUiThread {
+                        dataSyncCoordinator.onSyncErrorReceived(error)
+                    }
                 }
             }
 
-            onAssistantControlReceived = { control ->
-                if (::voiceAssistantCoordinator.isInitialized) voiceAssistantCoordinator.handleControl(control)
+            routeMessageListener = object : RouteMessageListener {
+                override fun onRouteResultReceived(result: RouteTransportResult) {
+                    runOnUiThread { widgetContainer.onPhoneRouteResult(result) }
+                }
+
+                override fun onRouteErrorReceived(error: RouteTransportError) {
+                    runOnUiThread { widgetContainer.onPhoneRouteError(error) }
+                }
+            }
+
+            destinationSearchMessageListener = object : DestinationSearchMessageListener {
+                override fun onDestinationSearchResultReceived(result: DestinationSearchResult) {
+                    runOnUiThread { widgetContainer.onPhoneDestinationSearchResult(result) }
+                }
+
+                override fun onDestinationSearchErrorReceived(error: DestinationSearchError) {
+                    runOnUiThread { widgetContainer.onPhoneDestinationSearchError(error) }
+                }
+            }
+
+            subtitleMessageListener = object : SubtitleMessageListener {
+                override fun onSubtitleStatusReceived(status: SubtitleStatus) {
+                    runOnUiThread {
+                        widgetContainer.applySubtitleStatus(status)
+                        binocularView.notifyContentChanged()
+                    }
+                }
+
+                override fun onSubtitleTranscriptReceived(transcript: SubtitleTranscript) {
+                    runOnUiThread {
+                        widgetContainer.applySubtitleTranscript(transcript)
+                        binocularView.notifyContentChanged()
+                    }
+                }
+            }
+
+            assistantControlListener = object : AssistantControlListener {
+                override fun onAssistantControlReceived(control: AssistantControl) {
+                    if (::voiceAssistantCoordinator.isInitialized) voiceAssistantCoordinator.handleControl(control)
+                }
             }
         }
         widgetContainer.configurePhoneRouteTransport(rfcommClient)
@@ -600,18 +637,25 @@ class MainActivity : AppCompatActivity() {
             },
             toolCatalog = widgetContainer::assistantToolCatalog,
             captureUiContext = widgetContainer::assistantUiContext,
-            onStatus = { status ->
-                runOnUiThread {
-                    assistantNetworkLease.update(status.state, status.sessionId != null)
-                    widgetContainer.setAssistantStatus(status)
-                    rfcommClient?.sendAssistantStatus(status)
-                    binocularView.notifyContentChanged()
+            stateObserver = object : AssistantStateObserver {
+                override fun onAssistantStatusChanged(status: AssistantStatus) {
+                    runOnUiThread {
+                        assistantNetworkLease.update(status.state, status.sessionId != null)
+                        widgetContainer.setAssistantStatus(status)
+                        rfcommClient?.sendAssistantStatus(status)
+                        binocularView.notifyContentChanged()
+                    }
                 }
-            },
-            onConfiguration = { configuration, models, detail ->
-                runOnUiThread {
-                    widgetContainer.setAssistantConfiguration(configuration, models, detail)
-                    binocularView.notifyContentChanged()
+
+                override fun onAssistantConfigurationChanged(
+                    configuration: AssistantConfiguration?,
+                    models: List<AssistantModel>,
+                    detail: String
+                ) {
+                    runOnUiThread {
+                        widgetContainer.setAssistantConfiguration(configuration, models, detail)
+                        binocularView.notifyContentChanged()
+                    }
                 }
             },
             captureUiContextOnDemand = ::captureAssistantUiContextOnDemand,
@@ -623,7 +667,6 @@ class MainActivity : AppCompatActivity() {
         // On-demand inspection is marshalled to the UI thread; ordinary context capture
         // remains the small snapshot taken when the voice request is submitted.
 
-        widgetContainer.onAssistantVoiceToggle = voiceAssistantCoordinator::toggleLocal
         widgetContainer.configureAssistantSettings(
             voiceAssistantCoordinator::configureApiKey,
             voiceAssistantCoordinator::removeApiKey,
@@ -776,189 +819,182 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupWidgetContainer() {
-        widgetContainer.onFocusChanged = { focused ->
-            Log.d(TAG, "Widget focus changed: $focused")
-            
-            // Notify phone to show/hide keyboard
-            rfcommClient?.sendTextFieldFocus(focused)
-            
-            notifyTransientBinocularChange()
-        }
-        
-        widgetContainer.onContentChanged = {
-            refreshBinocularRenderingStrategy()
-            notifyStructuralBinocularChange(contentClass = BinocularContentClass.INTERACTIVE)
-            
-            // Save widget state only for structural changes.
-            saveWidgetStateDebounced()
+        widgetContainer.contentObserver = object : WidgetContentObserver {
+            override fun onFocusChanged(focused: Boolean) {
+                Log.d(TAG, "Widget focus changed: $focused")
+                rfcommClient?.sendTextFieldFocus(focused)
+                notifyTransientBinocularChange()
+            }
+
+            override fun onContentChanged() {
+                refreshBinocularRenderingStrategy()
+                notifyStructuralBinocularChange(contentClass = BinocularContentClass.INTERACTIVE)
+                saveWidgetStateDebounced()
+            }
+
+            override fun onTransientContentChanged() {
+                notifyTransientBinocularChange(contentClass = BinocularContentClass.INTERACTIVE)
+            }
+
+            override fun onMediaFrame(sourceId: String) {
+                binocularView.onMediaFrame(sourceId)
+                notifyTransientBinocularChange(contentClass = BinocularContentClass.MEDIA)
+            }
+
+            override fun onBinocularContentSourceChanged(
+                sourceId: String,
+                contentClass: BinocularContentClass,
+                active: Boolean
+            ) {
+                binocularView.setContentClass(sourceId, contentClass, active)
+                if (contentClass == BinocularContentClass.MEDIA) {
+                    if (active) keepAwakeMediaSources += sourceId else keepAwakeMediaSources -= sourceId
+                    if (::wakeSleepManager.isInitialized) {
+                        wakeSleepManager.setKeepAwake(keepAwakeMediaSources.isNotEmpty())
+                    }
+                }
+                refreshBinocularRenderingStrategy()
+                notifyStructuralBinocularChange(
+                    contentClass = if (active && contentClass == BinocularContentClass.MEDIA) {
+                        BinocularContentClass.MEDIA
+                    } else {
+                        BinocularContentClass.INTERACTIVE
+                    }
+                )
+            }
         }
 
-        widgetContainer.onTransientContentChanged = {
-            notifyTransientBinocularChange(contentClass = BinocularContentClass.INTERACTIVE)
-        }
+        widgetContainer.host = object : WidgetHost {
+            override fun requestClose() {
+                Log.d(TAG, "Close requested by user")
+                finish()
+            }
 
-        widgetContainer.onMediaFrame = { sourceId ->
-            binocularView.onMediaFrame(sourceId)
-            notifyTransientBinocularChange(contentClass = BinocularContentClass.MEDIA)
-        }
+            override fun requestMirror(start: Boolean) {
+                Log.d(TAG, "Mirror request from widget: start=$start")
+                rfcommClient?.sendMirrorRequest(start)
+            }
 
-        widgetContainer.onBinocularContentSourceChanged = { sourceId, contentClass, active ->
-            binocularView.setContentClass(sourceId, contentClass, active)
-            if (contentClass == BinocularContentClass.MEDIA) {
-                if (active) keepAwakeMediaSources += sourceId else keepAwakeMediaSources -= sourceId
-                if (::wakeSleepManager.isInitialized) {
-                    wakeSleepManager.setKeepAwake(keepAwakeMediaSources.isNotEmpty())
+            override fun requestSubtitleControl(control: SubtitleControl) {
+                Log.d(TAG, "Subtitle control from widget: action=${control.action.wireName}")
+                if (rfcommClient?.sendSubtitleControl(control) != true) {
+                    widgetContainer.onSubtitlePhoneDisconnected()
                 }
             }
-            refreshBinocularRenderingStrategy()
-            notifyStructuralBinocularChange(
-                contentClass = if (active && contentClass == BinocularContentClass.MEDIA) {
-                    BinocularContentClass.MEDIA
+
+            override fun requestBrowserKeyboard(show: Boolean) {
+                Log.d(TAG, "Browser keyboard request: show=$show")
+                rfcommClient?.sendTextFieldFocus(show)
+            }
+
+            override fun requestClipboard() {
+                Log.d(TAG, "Clipboard request from widget - asking phone for current clipboard")
+                rfcommClient?.requestClipboard()
+            }
+
+            override fun requestFilePicker() {
+                Log.d(TAG, "File picker requested")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
+                    requestAllFilesAccessForBrowser()
+                } else if (hasStoragePermission()) {
+                    openFileBrowser()
                 } else {
-                    BinocularContentClass.INTERACTIVE
-                }
-            )
-        }
-        
-        widgetContainer.onCloseRequested = {
-            Log.d(TAG, "Close requested by user")
-            finish()
-        }
-        
-        widgetContainer.onMirrorRequest = { start ->
-            Log.d(TAG, "Mirror request from widget: start=$start")
-            rfcommClient?.sendMirrorRequest(start)
-        }
-
-        widgetContainer.onSubtitleControlRequested = { control ->
-            Log.d(TAG, "Subtitle control from widget: action=${control.action.wireName}")
-            if (rfcommClient?.sendSubtitleControl(control) != true) {
-                widgetContainer.onSubtitlePhoneDisconnected()
-            }
-        }
-        
-        widgetContainer.onBrowserKeyboardRequest = { show ->
-            Log.d(TAG, "Browser keyboard request: show=$show")
-            // Send keyboard focus request to phone for browser input fields
-            rfcommClient?.sendTextFieldFocus(show)
-        }
-        
-        widgetContainer.onClipboardRequest = {
-            Log.d(TAG, "Clipboard request from widget - asking phone for current clipboard")
-            rfcommClient?.requestClipboard()
-        }
-
-        widgetContainer.onFilePickerRequest = {
-            Log.d(TAG, "File picker requested")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
-                requestAllFilesAccessForBrowser()
-            } else if (hasStoragePermission()) {
-                openFileBrowser()
-            } else {
-                requestStoragePermission()
-            }
-        }
-
-        widgetContainer.onStoragePermissionRequest = {
-            Log.d(TAG, "Storage permission requested by widget")
-            requestStoragePermission()
-        }
-
-        widgetContainer.onCursorCenterRequested = {
-            val logicalWidth = if (cursorView.width > DisplayConfig.EYE_WIDTH) {
-                DisplayConfig.EYE_WIDTH
-            } else {
-                cursorView.width
-            }
-            val logicalHeight = minOf(cursorView.height, DisplayConfig.EYE_HEIGHT)
-            val centerX = logicalWidth.toFloat() / 2f
-            val centerY = logicalHeight.toFloat() / 2f
-            cursorView.setCursorPosition(centerX, centerY)
-            widgetContainer.setCursorPosition(cursorView.getCursorX(), cursorView.getCursorY())
-            notifyTransientBinocularChange()
-        }
-
-        widgetContainer.onSpeedVisibilityThresholdChanged = { threshold ->
-            speedVisibilityThresholdKmh = threshold.coerceIn(0f, 1f)
-            saveSpeedVisibilityThreshold(speedVisibilityThresholdKmh)
-
-            val previousMoving = isSpeedMoving
-            isSpeedMoving = computeSpeedMovingState(smoothedSpeedKmh, lastSpeedQualityOk, previousMoving)
-            widgetContainer.updateSpeedData(smoothedSpeedKmh, lastSpeedQualityOk, isSpeedMoving)
-
-            if (previousMoving != isSpeedMoving) {
-                val transition = if (isSpeedMoving) "idle -> moving" else "moving -> idle"
-                speedLog {
-                    "Movement transition: $transition at " +
-                            "${String.format(Locale.ENGLISH, "%.2f", smoothedSpeedKmh)} km/h " +
-                            "(threshold=${formatSpeedThresholdForLog()})"
+                    this@MainActivity.requestStoragePermission()
                 }
             }
 
-            speedLog { "Speed visibility threshold changed to ${formatSpeedThresholdForLog()}" }
-        }
-
-        // Setup brightness callback for window-level dimming
-        widgetContainer.onBrightnessChanged = { brightness ->
-            requestedBrightness = brightness.coerceIn(0f, 1f)
-            saveBrightnessSettings()
-            applyEffectiveWindowBrightness()
-        }
-
-        widgetContainer.onAdaptiveBrightnessChanged = { enabled ->
-            adaptiveBrightnessEnabled = enabled
-            smoothedAmbientLux = null
-            lastAdaptiveBrightnessTarget = null
-            updateAmbientLightMonitoring()
-            saveBrightnessSettings()
-            applyEffectiveWindowBrightness()
-        }
-
-        widgetContainer.onMediaBrightnessCapChanged = { active ->
-            isMediaBrightnessCapActive = active
-            applyEffectiveWindowBrightness()
-        }
-
-        widgetContainer.onBrowserMinimumBrightnessChanged = { active ->
-            isBrowserMinimumBrightnessActive = active
-            applyEffectiveWindowBrightness()
-        }
-
-        widgetContainer.onLayoutSwitchBrightnessRequested = {
-            beginLayoutSwitchMinimumBrightness()
-        }
-
-        // Setup head-up wake settings callbacks
-        widgetContainer.onHeadUpTimeChanged = { ms ->
-            if (::headUpWakeManager.isInitialized) {
-                headUpWakeManager.headUpHoldTimeMs = ms
+            override fun requestStoragePermission() {
+                Log.d(TAG, "Storage permission requested by widget")
+                this@MainActivity.requestStoragePermission()
             }
-            saveHeadUpSettings()
-        }
 
-        widgetContainer.onWakeDurationChanged = { ms ->
-            if (::headUpWakeManager.isInitialized) {
-                headUpWakeManager.wakeDurationMs = ms
+            override fun requestCursorCenter() {
+                val logicalWidth = if (cursorView.width > DisplayConfig.EYE_WIDTH) {
+                    DisplayConfig.EYE_WIDTH
+                } else {
+                    cursorView.width
+                }
+                val logicalHeight = minOf(cursorView.height, DisplayConfig.EYE_HEIGHT)
+                val centerX = logicalWidth.toFloat() / 2f
+                val centerY = logicalHeight.toFloat() / 2f
+                cursorView.setCursorPosition(centerX, centerY)
+                widgetContainer.setCursorPosition(cursorView.getCursorX(), cursorView.getCursorY())
+                notifyTransientBinocularChange()
             }
-            saveHeadUpSettings()
-        }
 
-        widgetContainer.onAngleThresholdChanged = { degrees ->
-            if (::headUpWakeManager.isInitialized) {
-                headUpWakeManager.pitchChangeThreshold = degrees
+            override fun toggleAssistantVoice() {
+                if (::voiceAssistantCoordinator.isInitialized) voiceAssistantCoordinator.toggleLocal()
             }
-            saveHeadUpSettings()
         }
 
-        widgetContainer.onHeadsUpEnabledChanged = { enabled ->
-            if (::headUpWakeManager.isInitialized) {
-                headUpWakeManager.isHeadsUpGestureEnabled = enabled
+        widgetContainer.displaySettingsHandler = object : DisplaySettingsHandler {
+            override fun applySpeedVisibilityThreshold(threshold: Float) {
+                speedVisibilityThresholdKmh = threshold.coerceIn(0f, 1f)
+                saveSpeedVisibilityThreshold(speedVisibilityThresholdKmh)
+
+                val previousMoving = isSpeedMoving
+                isSpeedMoving = computeSpeedMovingState(smoothedSpeedKmh, lastSpeedQualityOk, previousMoving)
+                widgetContainer.updateSpeedData(smoothedSpeedKmh, lastSpeedQualityOk, isSpeedMoving)
+
+                if (previousMoving != isSpeedMoving) {
+                    val transition = if (isSpeedMoving) "idle -> moving" else "moving -> idle"
+                    speedLog {
+                        "Movement transition: $transition at " +
+                                "${String.format(Locale.ENGLISH, "%.2f", smoothedSpeedKmh)} km/h " +
+                                "(threshold=${formatSpeedThresholdForLog()})"
+                    }
+                }
+                speedLog { "Speed visibility threshold changed to ${formatSpeedThresholdForLog()}" }
             }
-            saveHeadUpSettings()
-        }
 
-        widgetContainer.onSmartAlignmentChanged = { enabled ->
-            saveSmartAlignmentSetting(enabled)
+            override fun applyBrightness(brightness: Float) {
+                requestedBrightness = brightness.coerceIn(0f, 1f)
+                saveBrightnessSettings()
+                applyEffectiveWindowBrightness()
+            }
+
+            override fun applyAdaptiveBrightness(enabled: Boolean) {
+                adaptiveBrightnessEnabled = enabled
+                smoothedAmbientLux = null
+                lastAdaptiveBrightnessTarget = null
+                updateAmbientLightMonitoring()
+                saveBrightnessSettings()
+                applyEffectiveWindowBrightness()
+            }
+
+            override fun applyMediaBrightnessCap(active: Boolean) {
+                isMediaBrightnessCapActive = active
+                applyEffectiveWindowBrightness()
+            }
+
+            override fun applyBrowserMinimumBrightness(active: Boolean) {
+                isBrowserMinimumBrightnessActive = active
+                applyEffectiveWindowBrightness()
+            }
+
+            override fun applyLayoutSwitchBrightness() = beginLayoutSwitchMinimumBrightness()
+
+            override fun applyHeadUpTime(durationMs: Long) {
+                if (::headUpWakeManager.isInitialized) headUpWakeManager.headUpHoldTimeMs = durationMs
+                saveHeadUpSettings()
+            }
+
+            override fun applyWakeDuration(durationMs: Long) {
+                if (::headUpWakeManager.isInitialized) headUpWakeManager.wakeDurationMs = durationMs
+                saveHeadUpSettings()
+            }
+
+            override fun applyHeadUpAngleThreshold(degrees: Float) {
+                if (::headUpWakeManager.isInitialized) headUpWakeManager.pitchChangeThreshold = degrees
+                saveHeadUpSettings()
+            }
+
+            override fun applyHeadsUpEnabled(enabled: Boolean) {
+                if (::headUpWakeManager.isInitialized) headUpWakeManager.isHeadsUpGestureEnabled = enabled
+                saveHeadUpSettings()
+            }
+
+            override fun applySmartAlignment(enabled: Boolean) = saveSmartAlignmentSetting(enabled)
         }
 
         // Restore saved settings
@@ -1000,24 +1036,30 @@ class MainActivity : AppCompatActivity() {
 
         googleCalendarClient = GoogleCalendarClient(googleAuthCoordinator)
 
-        widgetContainer.onConnectGoogle = {
-            googleAuthCoordinator.beginConnect(this)
-        }
-        widgetContainer.onGrantCalendarAccess = {
-            googleAuthCoordinator.requestCalendarGrant(this)
-        }
-        widgetContainer.onDisconnectGoogle = {
-            if (::dataSyncCoordinator.isInitialized) {
-                dataSyncCoordinator.clearCalendarSnapshot()
-            } else {
-                widgetContainer.setCalendarSnapshot(null)
+        widgetContainer.googleAccountHandler = object : GoogleAccountHandler {
+            override fun connectGoogleAccount() {
+                googleAuthCoordinator.beginConnect(this@MainActivity)
             }
-            googleAuthCoordinator.disconnect()
+
+            override fun grantCalendarAccess() {
+                googleAuthCoordinator.requestCalendarGrant(this@MainActivity)
+            }
+
+            override fun disconnectGoogleAccount() {
+                if (::dataSyncCoordinator.isInitialized) {
+                    dataSyncCoordinator.clearCalendarSnapshot()
+                } else {
+                    widgetContainer.setCalendarSnapshot(null)
+                }
+                googleAuthCoordinator.disconnect()
+            }
+
+            override fun retryGoogleAuthentication() {
+                googleAuthCoordinator.retry(this@MainActivity)
+            }
+
+            override fun onGoogleAuthBrowserClosed() = Unit
         }
-        widgetContainer.onRetryGoogleAuth = {
-            googleAuthCoordinator.retry(this)
-        }
-        widgetContainer.onGoogleAuthBrowserClosed = null
 
         updateGoogleAuthUi(googleAuthCoordinator.getCurrentState())
     }
@@ -1043,19 +1085,38 @@ class MainActivity : AppCompatActivity() {
                 notifyTransientBinocularChange()
             }
         )
-        widgetContainer.onFinanceDataRequested = { visibleConfigs, refreshTileIds, force, reason ->
-            dataSyncCoordinator.onFinanceDataRequested(visibleConfigs, refreshTileIds, force, reason)
+        widgetContainer.dataProvider = object : WidgetDataProvider {
+            override fun requestFinanceData(
+                visibleConfigs: List<FinanceDashboardTileConfig>,
+                refreshTileIds: List<String>,
+                force: Boolean,
+                reason: String
+            ) {
+                dataSyncCoordinator.onFinanceDataRequested(visibleConfigs, refreshTileIds, force, reason)
+            }
+
+            override fun onFinanceVisibilityChanged(visible: Boolean) {
+                dataSyncCoordinator.onFinanceVisibilityChanged(visible)
+            }
+
+            override fun requestNewsData(countryCode: String, force: Boolean, reason: String) {
+                dataSyncCoordinator.onNewsDataRequested(countryCode, force, reason)
+            }
+
+            override fun requestNewsSourceData(
+                sourceSpec: NewsSourceSpec,
+                countryCode: String,
+                force: Boolean,
+                reason: String,
+                completion: (Result<NewsSnapshot>) -> Unit
+            ) {
+                dataSyncCoordinator.requestNewsSource(sourceSpec, countryCode, completion)
+            }
+
+            override fun requestMapData(point: MapGeoPoint, config: PoiDisplayConfig) {
+                dataSyncCoordinator.onMapDataRequested(point, config)
+            }
         }
-        widgetContainer.onFinanceVisibilityChanged = { visible ->
-            dataSyncCoordinator.onFinanceVisibilityChanged(visible)
-        }
-        widgetContainer.onNewsDataRequested = { countryCode, force, reason ->
-            dataSyncCoordinator.onNewsDataRequested(countryCode, force, reason)
-        }
-        widgetContainer.onNewsSourceDataRequested = { sourceSpec, countryCode, _, _, completion ->
-            dataSyncCoordinator.requestNewsSource(sourceSpec, countryCode, completion)
-        }
-        widgetContainer.onMapDataRequested = dataSyncCoordinator::onMapDataRequested
         dataSyncCoordinator.restoreCachedSnapshots()
     }
 
@@ -1302,46 +1363,43 @@ class MainActivity : AppCompatActivity() {
 
     private fun initializeWifiDirect() {
         wifiDirectClient = WifiDirectClient(this).apply {
-            onConnected = { groupOwnerIp ->
-                Log.d(TAG, "WiFi Direct connected, group owner: $groupOwnerIp")
-                // Now we're in the P2P group - we can connect to the mirror stream!
-                pendingWifiDirectMirrorIp?.let { ip ->
-                    Log.d(TAG, "WiFi Direct connected, now enabling mirroring to $ip")
-                    runOnUiThread {
-                        widgetContainer.setMirroringEnabled(true, ip)
-                        binocularView.notifyContentChanged()
-                    }
-                    pendingWifiDirectMirrorIp = null
-                }
-            }
-
-            onDisconnected = {
-                Log.d(TAG, "WiFi Direct disconnected")
-            }
-
-            onPeersAvailable = { peers ->
-                Log.d(TAG, "WiFi Direct peers available: ${peers.size}")
-                peers.forEach { device ->
-                    Log.d(TAG, "  - ${device.deviceName} (${device.deviceAddress}) status=${device.status}")
-                }
-
-                // Auto-connect to the first available peer (the phone)
-                // Device status: 0=CONNECTED, 1=INVITED, 2=FAILED, 3=AVAILABLE, 4=UNAVAILABLE
-                val availableDevice = peers.firstOrNull { it.status == WifiP2pDevice.AVAILABLE }
-                if (availableDevice != null) {
-                    Log.d(TAG, "Auto-connecting to: ${availableDevice.deviceName}")
-                    connectToDevice(availableDevice)
-                } else {
-                    // Maybe already connected or invited?
-                    val connectedDevice = peers.firstOrNull { it.status == WifiP2pDevice.CONNECTED }
-                    if (connectedDevice != null) {
-                        Log.d(TAG, "Already connected to: ${connectedDevice.deviceName}")
+            connectionListener = object : WifiDirectConnectionListener {
+                override fun onConnected(groupOwnerIp: String) {
+                    Log.d(TAG, "WiFi Direct connected, group owner: $groupOwnerIp")
+                    pendingWifiDirectMirrorIp?.let { ip ->
+                        Log.d(TAG, "WiFi Direct connected, now enabling mirroring to $ip")
+                        runOnUiThread {
+                            widgetContainer.setMirroringEnabled(true, ip)
+                            binocularView.notifyContentChanged()
+                        }
+                        pendingWifiDirectMirrorIp = null
                     }
                 }
-            }
 
-            onError = { error ->
-                Log.e(TAG, "WiFi Direct error: $error")
+                override fun onDisconnected() {
+                    Log.d(TAG, "WiFi Direct disconnected")
+                }
+
+                override fun onPeersAvailable(peers: List<WifiP2pDevice>) {
+                    Log.d(TAG, "WiFi Direct peers available: ${peers.size}")
+                    peers.forEach { device ->
+                        Log.d(TAG, "  - ${device.deviceName} (${device.deviceAddress}) status=${device.status}")
+                    }
+
+                    val availableDevice = peers.firstOrNull { it.status == WifiP2pDevice.AVAILABLE }
+                    if (availableDevice != null) {
+                        Log.d(TAG, "Auto-connecting to: ${availableDevice.deviceName}")
+                        connectToDevice(availableDevice)
+                    } else {
+                        peers.firstOrNull { it.status == WifiP2pDevice.CONNECTED }?.let {
+                            Log.d(TAG, "Already connected to: ${it.deviceName}")
+                        }
+                    }
+                }
+
+                override fun onError(message: String) {
+                    Log.e(TAG, "WiFi Direct error: $message")
+                }
             }
 
             initialize()
@@ -1447,41 +1505,28 @@ class MainActivity : AppCompatActivity() {
             true
         )
 
-        // Wake callback - called when head-up motion is detected while activity is in foreground
-        // (This is for waking from internal OFF state, not from lock screen)
-        headUpWakeManager.onWakeRequested = {
-            Log.d(TAG, "Head-up wake requested (activity in foreground, waking from internal OFF state)")
-            // Only wake if currently in OFF or SLEEP state
-            if (::wakeSleepManager.isInitialized) {
-                when (wakeSleepManager.state) {
-                    WakeSleepManager.DisplayState.OFF,
-                    WakeSleepManager.DisplayState.SLEEP -> {
-                        // Mark this as a head-up wake session so it auto-turns-off
-                        isHeadUpWakeSession = true
-                        val wakeDurationMs = headUpWakeManager.wakeDurationMs
-                        Log.d(TAG, "Starting head-up wake session with duration ${wakeDurationMs}ms")
-
-                        // Start the auto-finish timer BEFORE transitioning to WAKE
-                        // (so the timer is running when the screen comes on)
-                        startHeadUpWakeAutoFinishTimer(wakeDurationMs)
-
-                        // Transition to WAKE state
-                        wakeSleepManager.transitionTo(WakeSleepManager.DisplayState.WAKE)
-                        widgetContainer.onHeadUpWake()
-                    }
-                    WakeSleepManager.DisplayState.WAKE -> {
-                        // Already awake, do nothing
+        headUpWakeManager.wakeRequestListener = object : WakeRequestListener {
+            override fun onWakeRequested() {
+                Log.d(TAG, "Head-up wake requested (activity in foreground, waking from internal OFF state)")
+                if (::wakeSleepManager.isInitialized) {
+                    when (wakeSleepManager.state) {
+                        WakeSleepManager.DisplayState.OFF,
+                        WakeSleepManager.DisplayState.SLEEP -> {
+                            isHeadUpWakeSession = true
+                            val wakeDurationMs = headUpWakeManager.wakeDurationMs
+                            Log.d(TAG, "Starting head-up wake session with duration ${wakeDurationMs}ms")
+                            startHeadUpWakeAutoFinishTimer(wakeDurationMs)
+                            wakeSleepManager.transitionTo(WakeSleepManager.DisplayState.WAKE)
+                            widgetContainer.onHeadUpWake()
+                        }
+                        WakeSleepManager.DisplayState.WAKE -> Unit
                     }
                 }
             }
-        }
 
-        // Sleep callback - this is now handled by the auto-finish timer instead
-        // We keep this callback for cleanup but it shouldn't normally be called
-        headUpWakeManager.onSleepRequested = {
-            Log.d(TAG, "Head-up wake onSleepRequested callback (should be handled by auto-finish timer)")
-            // The auto-finish timer now handles transitioning to OFF state
-            // This callback is here as a fallback but shouldn't normally be reached
+            override fun onSleepRequested() {
+                Log.d(TAG, "Head-up wake onSleepRequested callback (should be handled by auto-finish timer)")
+            }
         }
 
         // Don't enable here - onResume will enable it, onPause will disable it
@@ -1504,28 +1549,27 @@ class MainActivity : AppCompatActivity() {
             com.everyday.everyday_glasses.binocular.DisplayConfig.EYE_HEIGHT.toFloat()
         )
 
-        // Mode change callback
-        threeDofManager.onModeChanged = { enabled ->
-            Log.d(TAG, "3DOF mode changed: enabled=$enabled")
-            widgetContainer.set3DofEnabled(enabled)
-            notifyTransientBinocularChange()
-        }
+        threeDofManager.observer = object : ThreeDofObserver {
+            override fun onModeChanged(enabled: Boolean) {
+                Log.d(TAG, "3DOF mode changed: enabled=$enabled")
+                widgetContainer.set3DofEnabled(enabled)
+                notifyTransientBinocularChange()
+            }
 
-        // Orientation change callback - update content offset
-        threeDofManager.onOrientationChanged = { offsetX, offsetY ->
-            widgetContainer.set3DofOffset(offsetX, offsetY)
-            notifyTransientBinocularChange()
-        }
+            override fun onOrientationChanged(offsetX: Float, offsetY: Float) {
+                widgetContainer.set3DofOffset(offsetX, offsetY)
+                notifyTransientBinocularChange()
+            }
 
-        threeDofManager.onRollChanged = { rollDeg ->
-            widgetContainer.set3DofRoll(rollDeg)
-            notifyTransientBinocularChange()
-        }
+            override fun onRollChanged(rollDegrees: Float) {
+                widgetContainer.set3DofRoll(rollDegrees)
+                notifyTransientBinocularChange()
+            }
 
-        // Transition animation callback
-        threeDofManager.onTransitionProgress = { progress ->
-            widgetContainer.set3DofTransitionProgress(progress)
-            notifyTransientBinocularChange()
+            override fun onTransitionProgress(progress: Float) {
+                widgetContainer.set3DofTransitionProgress(progress)
+                notifyTransientBinocularChange()
+            }
         }
 
         Log.d(TAG, "ThreeDofManager initialized")
@@ -1538,16 +1582,18 @@ class MainActivity : AppCompatActivity() {
     private fun setupTapGestureDetector() {
         tapGestureDetector = TapGestureDetector()
 
-        tapGestureDetector.onSingleTap = { x, y ->
-            inputCoordinator.handleTapAtCoordinates(x, y)
-        }
+        tapGestureDetector.listener = object : TapGestureListener {
+            override fun onSingleTap(x: Float, y: Float) {
+                inputCoordinator.handleTapAtCoordinates(x, y)
+            }
 
-        tapGestureDetector.onDoubleTap = { x, y ->
-            inputCoordinator.handleDoubleTapAtCoordinates(x, y)
-        }
+            override fun onDoubleTap(x: Float, y: Float) {
+                inputCoordinator.handleDoubleTapAtCoordinates(x, y)
+            }
 
-        tapGestureDetector.onTripleTap = { x, y ->
-            handleTripleTap()
+            override fun onTripleTap(x: Float, y: Float) {
+                handleTripleTap()
+            }
         }
 
         Log.d(TAG, "TapGestureDetector initialized")

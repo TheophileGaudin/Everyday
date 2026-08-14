@@ -19,6 +19,15 @@ import java.net.NetworkInterface
  */
 class WifiDirectManager(private val context: Context) {
 
+    /** Receives Wi-Fi Direct availability, peer discovery, and group lifecycle events. */
+    interface ConnectionListener {
+        fun onGroupFormed(ownerIp: String) = Unit
+        fun onGroupRemoved() = Unit
+        fun onError(error: String) = Unit
+        fun onStateChanged(enabled: Boolean) = Unit
+        fun onPeersChanged(peers: List<WifiP2pDevice>) = Unit
+    }
+
     companion object {
         private const val TAG = "WifiDirectManager"
         const val GROUP_OWNER_PORT = 5050  // Same port as regular streaming
@@ -40,18 +49,13 @@ class WifiDirectManager(private val context: Context) {
     var isGroupFormed = false
         private set
     
-    // Callbacks
-    var onGroupFormed: ((ownerIp: String) -> Unit)? = null
-    var onGroupRemoved: (() -> Unit)? = null
-    var onError: ((String) -> Unit)? = null
-    var onStateChanged: ((enabled: Boolean) -> Unit)? = null
-    var onPeersChanged: ((List<WifiP2pDevice>) -> Unit)? = null
+    var connectionListener: ConnectionListener? = null
 
     fun initialize() {
         wifiP2pManager = context.getSystemService(Context.WIFI_P2P_SERVICE) as? WifiP2pManager
         if (wifiP2pManager == null) {
             Log.e(TAG, "WiFi Direct not supported on this device")
-            onError?.invoke("WiFi Direct not supported")
+            connectionListener?.onError("WiFi Direct not supported")
             return
         }
         
@@ -71,7 +75,7 @@ class WifiDirectManager(private val context: Context) {
                         val state = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1)
                         isWifiDirectEnabled = (state == WifiP2pManager.WIFI_P2P_STATE_ENABLED)
                         Log.d(TAG, "WiFi P2P state: $isWifiDirectEnabled")
-                        handler.post { onStateChanged?.invoke(isWifiDirectEnabled) }
+                        handler.post { connectionListener?.onStateChanged(isWifiDirectEnabled) }
                     }
                     
                     WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> {
@@ -89,7 +93,7 @@ class WifiDirectManager(private val context: Context) {
                             isGroupFormed = false
                             isGroupOwner = false
                             groupOwnerAddress = null
-                            handler.post { onGroupRemoved?.invoke() }
+                            handler.post { connectionListener?.onGroupRemoved() }
                         }
                     }
                     
@@ -135,7 +139,7 @@ class WifiDirectManager(private val context: Context) {
                     val p2pIp = getWifiDirectIp()
                     Log.d(TAG, "Group formed, our P2P IP: $p2pIp")
                     p2pIp?.let { 
-                        handler.post { onGroupFormed?.invoke(it) }
+                        handler.post { connectionListener?.onGroupFormed(it) }
                     }
                 }
             }
@@ -150,7 +154,7 @@ class WifiDirectManager(private val context: Context) {
             deviceList.forEach { device ->
                 Log.d(TAG, "  - ${device.deviceName} (${device.deviceAddress})")
             }
-            handler.post { onPeersChanged?.invoke(deviceList) }
+            handler.post { connectionListener?.onPeersChanged(deviceList) }
         }
     }
 
@@ -177,7 +181,7 @@ class WifiDirectManager(private val context: Context) {
                 }
                 Log.e(TAG, "Group creation failed: $reasonStr")
                 fileLog("WiFi Direct group creation failed: $reasonStr")
-                handler.post { onError?.invoke("Group creation failed: $reasonStr") }
+                handler.post { connectionListener?.onError("Group creation failed: $reasonStr") }
             }
         })
     }

@@ -79,16 +79,15 @@ class GlassesService : Service() {
 
             Log.d(TAG, "HeadUpWakeManager settings: headUpTime=${headUpHoldTimeMs}ms, wakeDuration=${wakeDurationMs}ms, angle=${pitchChangeThreshold}°, enabled=$isHeadsUpGestureEnabled")
 
-            // When head-up is detected, launch MainActivity
-            onWakeRequested = {
-                Log.d(TAG, "Head-up wake detected in service - launching MainActivity")
-                launchMainActivity()
-            }
+            wakeRequestListener = object : WakeRequestListener {
+                override fun onWakeRequested() {
+                    Log.d(TAG, "Head-up wake detected in service - launching MainActivity")
+                    launchMainActivity()
+                }
 
-            // Sleep callback is handled by the activity's own wake/sleep manager
-            // once it's launched, so we don't need to do anything here
-            onSleepRequested = {
-                Log.d(TAG, "Head-up wake timeout in service (activity should handle this)")
+                override fun onSleepRequested() {
+                    Log.d(TAG, "Head-up wake timeout in service (activity should handle this)")
+                }
             }
 
             // Start disabled - will be enabled when activity goes to background

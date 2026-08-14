@@ -132,11 +132,8 @@ class ThreeDofManager(context: Context) : SensorEventListener {
 
     // ==================== Callbacks ====================
 
-    var onModeChanged: ((Boolean) -> Unit)? = null
-    var onOrientationChanged: ((Float, Float) -> Unit)? = null
+    var observer: ThreeDofObserver? = null
     // Optional: if your UI wants to compensate roll, subscribe here (degrees).
-    var onRollChanged: ((Float) -> Unit)? = null
-    var onTransitionProgress: ((Float) -> Unit)? = null
 
     init {
         // Log available sensors for debugging
@@ -189,7 +186,7 @@ class ThreeDofManager(context: Context) : SensorEventListener {
         startSensorListening()
         startUpdateLoop()
 
-        onModeChanged?.invoke(true)
+        observer?.onModeChanged(true)
     }
 
     fun disable3Dof() {
@@ -218,7 +215,7 @@ class ThreeDofManager(context: Context) : SensorEventListener {
         smoothRoll = 0f
 
         // Keep update loop running during transition (will animate back to 0,0)
-        onModeChanged?.invoke(false)
+        observer?.onModeChanged(false)
     }
 
     fun setScreenDimensions(width: Float, height: Float) {
@@ -279,11 +276,11 @@ class ThreeDofManager(context: Context) : SensorEventListener {
             override fun run() {
                 if (is3DofEnabled || isTransitioning) {
                     val (offsetX, offsetY) = getContentOffset()
-                    onOrientationChanged?.invoke(offsetX, offsetY)
+                    observer?.onOrientationChanged(offsetX, offsetY)
 
                     // Roll is not part of the (x,y) content offset, but some UIs may want to rotate/level content.
                     // We animate roll in/out alongside the main transition so it doesn't snap.
-                    if (onRollChanged != null) {
+                    if (observer != null) {
                         val rollOut = if (isTransitioning) {
                             val elapsed = System.currentTimeMillis() - transitionStartTime
                             val progress = (elapsed.toFloat() / TRANSITION_DURATION_MS).coerceIn(0f, 1f)
@@ -299,13 +296,13 @@ class ThreeDofManager(context: Context) : SensorEventListener {
                             smoothRoll
                         }
                         // Emit the *compensation* roll, i.e. opposite to head tilt, so content stays world-locked.
-                        onRollChanged?.invoke(rollOut * ROLL_GAIN)
+                        observer?.onRollChanged(rollOut * ROLL_GAIN)
                     }
 
                     if (isTransitioning) {
                         val elapsed = System.currentTimeMillis() - transitionStartTime
                         val progress = (elapsed.toFloat() / TRANSITION_DURATION_MS).coerceIn(0f, 1f)
-                        onTransitionProgress?.invoke(progress)
+                        observer?.onTransitionProgress(progress)
                     }
 
                     handler.postDelayed(this, UPDATE_INTERVAL_MS)

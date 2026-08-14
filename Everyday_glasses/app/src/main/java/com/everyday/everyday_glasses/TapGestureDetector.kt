@@ -55,19 +55,17 @@ class TapGestureDetector {
      * Called when a single tap is confirmed.
      * Parameters: (x, y) coordinates of the tap
      */
-    var onSingleTap: ((Float, Float) -> Unit)? = null
+    var listener: TapGestureListener? = null
 
     /**
      * Called when a double tap is confirmed.
      * Parameters: (x, y) coordinates of the tap
      */
-    var onDoubleTap: ((Float, Float) -> Unit)? = null
 
     /**
      * Called when a triple tap is confirmed.
      * Parameters: (x, y) coordinates of the tap
      */
-    var onTripleTap: ((Float, Float) -> Unit)? = null
 
     // ==================== Public API ====================
 
@@ -117,7 +115,7 @@ class TapGestureDetector {
                 // Triple tap - dispatch immediately
                 Log.d(TAG, "Triple tap confirmed at ($x, $y)")
                 tapCount = 0  // Reset sequence
-                onTripleTap?.invoke(x, y)
+                listener?.onTripleTap(x, y)
             }
             else -> {
                 // More than 3 taps - reset and treat as new single tap
@@ -157,11 +155,11 @@ class TapGestureDetector {
             when (count) {
                 1 -> {
                     Log.d(TAG, "Single tap confirmed at ($x, $y)")
-                    onSingleTap?.invoke(x, y)
+                    listener?.onSingleTap(x, y)
                 }
                 2 -> {
                     Log.d(TAG, "Double tap confirmed at ($x, $y)")
-                    onDoubleTap?.invoke(x, y)
+                    listener?.onDoubleTap(x, y)
                 }
             }
             tapCount = 0  // Reset after dispatch

@@ -35,16 +35,13 @@ class WifiDirectClient(private val context: Context) {
         private set
 
     // Callbacks
-    var onConnected: ((groupOwnerIp: String) -> Unit)? = null
-    var onDisconnected: (() -> Unit)? = null
-    var onError: ((String) -> Unit)? = null
-    var onPeersAvailable: ((List<WifiP2pDevice>) -> Unit)? = null
+    var connectionListener: WifiDirectConnectionListener? = null
 
     fun initialize() {
         wifiP2pManager = context.getSystemService(Context.WIFI_P2P_SERVICE) as? WifiP2pManager
         if (wifiP2pManager == null) {
             Log.e(TAG, "WiFi Direct not supported")
-            onError?.invoke("WiFi Direct not supported")
+            connectionListener?.onError("WiFi Direct not supported")
             return
         }
 
@@ -84,7 +81,7 @@ class WifiDirectClient(private val context: Context) {
                             Log.d(TAG, "Disconnected from WiFi Direct")
                             isConnected = false
                             groupOwnerAddress = null
-                            handler.post { onDisconnected?.invoke() }
+                            handler.post { connectionListener?.onDisconnected() }
                         }
                     }
                 }
@@ -125,7 +122,7 @@ class WifiDirectClient(private val context: Context) {
         wifiP2pManager?.requestPeers(channel) { peers ->
             val deviceList = peers?.deviceList?.toList() ?: emptyList()
             Log.d(TAG, "Found ${deviceList.size} peers")
-            handler.post { onPeersAvailable?.invoke(deviceList) }
+            handler.post { connectionListener?.onPeersAvailable(deviceList) }
         }
     }
 
@@ -138,7 +135,7 @@ class WifiDirectClient(private val context: Context) {
                 Log.d(TAG, "Connected! Group owner: $groupOwnerAddress")
 
                 groupOwnerAddress?.let { ip ->
-                    handler.post { onConnected?.invoke(ip) }
+                    handler.post { connectionListener?.onConnected(ip) }
                 }
             }
         }
@@ -169,7 +166,7 @@ class WifiDirectClient(private val context: Context) {
                     else -> "Unknown ($reason)"
                 }
                 Log.e(TAG, "Connection failed: $reasonStr")
-                handler.post { onError?.invoke("Connection failed: $reasonStr") }
+                handler.post { connectionListener?.onError("Connection failed: $reasonStr") }
             }
         })
     }

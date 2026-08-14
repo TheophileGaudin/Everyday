@@ -92,11 +92,7 @@ class ScreenMirrorWidget(
     private var convertedFrames = 0
     private var skippedFrames = 0
     
-    var onStateChanged: ((State) -> Unit)? = null
-    var onStreamStateChanged: ((StreamState) -> Unit)? = null
-    var onFrameReady: (() -> Unit)? = null
-    var onMirrorRequest: ((Boolean) -> Unit)? = null
-    var onMediaStateChanged: ((Boolean) -> Unit)? = null
+    var listener: MirrorWidgetListener? = null
     
     private val handler = Handler(Looper.getMainLooper())
     private var isHostPaused = false
@@ -379,7 +375,7 @@ class ScreenMirrorWidget(
         val isActive = isBinocularMediaActive()
         if (lastReportedMediaActive == isActive) return
         lastReportedMediaActive = isActive
-        handler.post { onMediaStateChanged?.invoke(isActive) }
+        handler.post { listener?.onMediaStateChanged(isActive) }
     }
     
     fun setMirroringEnabled(enabled: Boolean, phoneIp: String? = null) {
@@ -456,7 +452,7 @@ class ScreenMirrorWidget(
         if (newState != state) {
             Log.d(TAG, "State changed: $state -> $newState")
             state = newState
-            onStateChanged?.invoke(state)
+            listener?.onStateChanged(state)
         }
     }
     
@@ -484,7 +480,7 @@ class ScreenMirrorWidget(
             HitArea.RUN_PAUSE_BUTTON -> {
                 val shouldStart = streamState != StreamState.STREAMING && streamState != StreamState.CONNECTING
                 Log.d(TAG, "Run/Pause button tapped. Requesting start=$shouldStart")
-                onMirrorRequest?.invoke(shouldStart)
+                listener?.requestMirror(shouldStart)
                 true
             }
             HitArea.BORDER -> {
@@ -492,7 +488,7 @@ class ScreenMirrorWidget(
                     Log.d(TAG, "Border tapped - starting move")
                     state = State.MOVING
                     baseState = BaseState.MOVING
-                    onStateChanged?.invoke(state)
+                    listener?.onStateChanged(state)
                 }
                 true
             }
@@ -521,7 +517,7 @@ class ScreenMirrorWidget(
     private fun updateStreamState(newState: StreamState) {
         if (streamState != newState) {
             streamState = newState
-            handler.post { onStreamStateChanged?.invoke(newState) }
+            handler.post { listener?.onStreamStateChanged(newState) }
             dispatchMediaStateIfChanged()
         }
     }
@@ -863,7 +859,7 @@ class ScreenMirrorWidget(
         }
         
         convertedFrames++
-        handler.post { onFrameReady?.invoke() }
+        handler.post { listener?.onFrameReady() }
     }
     
     private fun convertWithSoftware(image: Image, width: Int, height: Int) {
@@ -927,7 +923,7 @@ class ScreenMirrorWidget(
         }
         
         convertedFrames++
-        handler.post { onFrameReady?.invoke() }
+        handler.post { listener?.onFrameReady() }
     }
     
     override fun draw(canvas: Canvas) {
@@ -1066,7 +1062,7 @@ class ScreenMirrorWidget(
     override fun onDestroy() {
         stopStreaming()
         lastReportedMediaActive = false
-        handler.post { onMediaStateChanged?.invoke(false) }
+        handler.post { listener?.onMediaStateChanged(false) }
         try {
             yuvToRgbScript?.destroy()
             renderScript?.destroy()

@@ -16,7 +16,11 @@ class GlassesDestinationSearchCoordinatorTest {
         val transport = FakeTransport()
         val coordinator = GlassesDestinationSearchCoordinator({ transport }, hedgeMs = 1_000, deadlineMs = 2_000)
         var delivered = 0
-        coordinator.onResult = { delivered++ }
+        coordinator.listener = object : DestinationSearchListener {
+            override fun onDestinationSearchResult(result: DestinationSearchResult) {
+                delivered++
+            }
+        }
         coordinator.request(request())
         coordinator.onResult(DestinationSearchResult("search", "train station", listOf(
             DestinationSearchCandidate("Station", "Nearby", GeoPoint(48.801, 2.3), DestinationSearchCandidateKind.POI)
@@ -31,7 +35,14 @@ class GlassesDestinationSearchCoordinatorTest {
         val transport = FakeTransport()
         val latch = CountDownLatch(1)
         val coordinator = GlassesDestinationSearchCoordinator({ transport }, hedgeMs = 10, deadlineMs = 1_000)
-        coordinator.onFallback = { _, _ -> latch.countDown() }
+        coordinator.listener = object : DestinationSearchListener {
+            override fun onDestinationSearchFallback(
+                request: DestinationSearchRequest,
+                reason: DestinationSearchFallbackReason
+            ) {
+                latch.countDown()
+            }
+        }
         coordinator.request(request())
         assertTrue(latch.await(1, TimeUnit.SECONDS))
         assertTrue(coordinator.acceptFallback("search"))
