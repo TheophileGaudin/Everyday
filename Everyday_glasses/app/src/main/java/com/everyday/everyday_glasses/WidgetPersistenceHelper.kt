@@ -293,6 +293,7 @@ class WidgetPersistenceHelper(private val context: Context) {
             x = c.x, y = c.y, width = c.width, height = c.height,
             mode = it.mode.name, zoom = it.zoom.name,
             showLocation = it.isLocationVisible(), showCountry = it.isCountryVisible(),
+            poiConfig = it.poiDisplayConfig,
             isMinimized = c.isMinimized, isFullscreen = c.isFullscreen,
             savedMinX = c.savedMinX, savedMinY = c.savedMinY,
             savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
@@ -344,6 +345,7 @@ class WidgetPersistenceHelper(private val context: Context) {
             WidgetPersistence.NewsWidgetState(
                 x = c.x, y = c.y, width = c.width, height = c.height,
                 countryCode = it.getCountryCode(),
+                sourceSpec = it.getSourceSpec(),
                 selectedIndex = it.getSelectedIndex(),
                 fontScale = it.getFontScale(),
                 isMinimized = c.isMinimized,
@@ -689,7 +691,13 @@ class WidgetPersistenceHelper(private val context: Context) {
         widget.widgetWidth = adjustedWidth
         widget.widgetHeight = adjustedHeight
         restoreCommonState(widget, state, adjustedX, adjustedY)
-        widget.restorePreferences(state.mode, state.zoom, state.showLocation, state.showCountry)
+        widget.restorePreferences(
+            state.mode,
+            state.zoom,
+            state.showLocation,
+            state.showCountry,
+            state.poiConfig
+        )
     }
 
     /**
@@ -800,6 +808,7 @@ class WidgetPersistenceHelper(private val context: Context) {
             nw.setPosition(adjustedX, adjustedY)
             nw.widgetWidth = adjustedWidth
             nw.widgetHeight = adjustedHeight
+            nw.setSourceSpec(state.sourceSpec)
             nw.setCountryCode(state.countryCode)
             nw.setSelectedIndex(state.selectedIndex)
             nw.setFontScale(state.fontScale)

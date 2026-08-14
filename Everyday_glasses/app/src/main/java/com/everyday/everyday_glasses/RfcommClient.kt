@@ -17,20 +17,19 @@ import android.os.Looper
 import android.util.Base64
 import android.util.Log
 import androidx.core.app.ActivityCompat
-import org.json.JSONObject
-import com.everyday.shared.sync.SyncChannel
 import com.everyday.shared.sync.SyncError
-import com.everyday.shared.sync.SyncProtocol
 import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot
-import com.everyday.shared.sync.FinanceAssetType
-import com.everyday.shared.sync.FinanceChartType
-import com.everyday.shared.sync.FinanceDashboardTileConfig
-import com.everyday.shared.sync.SpeedSnapshot
 import com.everyday.shared.sync.SubtitleControl
-import com.everyday.shared.sync.SubtitleProtocol
 import com.everyday.shared.sync.SubtitleStatus
 import com.everyday.shared.sync.SubtitleTranscript
+import com.everyday.shared.transport.SyncMessenger
+import com.everyday.shared.transport.AssistantControl
+import com.everyday.shared.transport.AssistantStatus
+import com.everyday.shared.transport.TransportDecodeResult
+import com.everyday.shared.transport.TransportGoogleAuthStatus
+import com.everyday.shared.transport.TransportMessage
+import com.everyday.shared.transport.TransportProtocol
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
@@ -44,7 +43,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Can also send messages to the phone (e.g., text field focus state).
  * Connection is kept alive during pause to allow instant resuming.
  */
-class RfcommClient(private val context: Context) {
+class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTransport, GlassesDestinationSearchTransport {
 
     companion object {
         private const val TAG = "RfcommClient"
@@ -57,7 +56,8 @@ class RfcommClient(private val context: Context) {
 
     var onStatusChanged: ((String) -> Unit)? = null
     var onConnectionChanged: ((Boolean) -> Unit)? = null
-    var onDataReceived: ((PhoneData) -> Unit)? = null
+    var onPointerReceived: ((TransportMessage.Pointer) -> Unit)? = null
+    var onDeviceStatusReceived: ((TransportMessage.DeviceStatus) -> Unit)? = null
     var onKeyReceived: ((String) -> Unit)? = null
     var onMirrorStateChanged: ((enabled: Boolean, ip: String?, isWifiDirect: Boolean) -> Unit)? = null
     var onLongPressWithClipboard: ((String?) -> Unit)? = null  // Called when phone sends long-press with clipboard
@@ -67,9 +67,13 @@ class RfcommClient(private val context: Context) {
     var onGoogleAuthStateReceived: ((GooglePhoneAuthStatus, GoogleAccountSummary?, String?) -> Unit)? = null
     var onSyncSnapshotReceived: ((SyncSnapshot) -> Unit)? = null
     var onSyncErrorReceived: ((SyncError) -> Unit)? = null
-    var onSpeedSnapshotReceived: ((SpeedSnapshot) -> Unit)? = null
     var onSubtitleStatusReceived: ((SubtitleStatus) -> Unit)? = null
     var onSubtitleTranscriptReceived: ((SubtitleTranscript) -> Unit)? = null
+    var onAssistantControlReceived: ((AssistantControl) -> Unit)? = null
+    var onRouteResultReceived: ((com.everyday.shared.transport.RouteTransportResult) -> Unit)? = null
+    var onRouteErrorReceived: ((com.everyday.shared.transport.RouteTransportError) -> Unit)? = null
+    var onDestinationSearchResultReceived: ((com.everyday.shared.transport.DestinationSearchResult) -> Unit)? = null
+    var onDestinationSearchErrorReceived: ((com.everyday.shared.transport.DestinationSearchError) -> Unit)? = null
 
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var socket: BluetoothSocket? = null
@@ -91,17 +95,6 @@ class RfcommClient(private val context: Context) {
 
 
     private val handler = Handler(Looper.getMainLooper())
-
-    data class PhoneData(
-        val time: String,
-        val battery: Int,
-        val event: String,  // "move", "tap", "update", "key", "longpress", "scroll"
-        val dx: Int,
-        val dy: Int,
-        val key: String? = null,  // For "key" events
-        val clipboard: String? = null,  // For "longpress" events
-        val pointerCount: Int = 1  // Number of fingers touching (1 = normal, 2+ = scroll mode)
-    )
 
     fun start(): Boolean {
         if (isRunning.get()) return true
@@ -129,7 +122,7 @@ class RfcommClient(private val context: Context) {
         return true
     }
 
-    fun isConnected(): Boolean = isConnected.get()
+    override fun isConnected(): Boolean = isConnected.get()
 
     fun stop() {
         isRunning.set(false)
@@ -152,88 +145,60 @@ class RfcommClient(private val context: Context) {
      * Send text field focus state to the phone.
      * When focused, phone shows keyboard; when unfocused, phone hides keyboard.
      */
-    fun sendTextFieldFocus(focused: Boolean, fieldId: String? = null) {
-        val batteryLevel = getGlassesBatteryLevel()
-        val fieldIdPart = if (fieldId != null) ""","fieldId":"$fieldId"""" else ""
-        val message = """{"textFieldFocused":$focused$fieldIdPart,"battery":$batteryLevel}""" + "\n"
-
-        Log.d(TAG, "Sending to phone: $message")
-        enqueueWrite(message, "send text field focus")
-    }
+    fun sendTextFieldFocus(focused: Boolean, fieldId: String? = null): Boolean =
+        enqueueMessage(TransportMessage.TextFieldFocus(focused, fieldId), "send text field focus")
 
     /**
      * Send request to start/stop mirroring.
      */
-    fun sendMirrorRequest(start: Boolean) {
-        val message = """{"action":"mirrorRequest","start":$start}""" + "\n"
-        Log.d(TAG, "Sending mirror request: $message")
-        enqueueWrite(message, "send mirror request")
-    }
+    fun sendMirrorRequest(start: Boolean): Boolean =
+        enqueueMessage(TransportMessage.MirrorRequest(start), "send mirror request")
     
     /**
      * Send request to phone to send its current clipboard content.
      * This is useful when opening paste menu to ensure we have latest clipboard.
      */
-    fun requestClipboard() {
-        val message = """{"action":"requestClipboard"}""" + "\n"
-        Log.d(TAG, "Requesting clipboard from phone")
-        enqueueWrite(message, "request clipboard")
+    fun requestClipboard(): Boolean =
+        enqueueMessage(TransportMessage.ClipboardRequest, "request clipboard")
+
+    override fun sendSyncRequest(request: SyncRequest): Boolean =
+        enqueueMessage(TransportMessage.SyncRequestMessage(request), "request sync")
+
+    override fun sendRouteRequest(request: com.everyday.shared.transport.RouteTransportRequest): Boolean =
+        enqueueMessage(TransportMessage.RouteRequestMessage(request), "send route request")
+
+    override fun sendRouteCancellation(
+        cancellation: com.everyday.shared.transport.RouteTransportCancellation
+    ): Boolean = enqueueMessage(TransportMessage.RouteCancellationMessage(cancellation), "cancel route request")
+
+    override fun sendDestinationSearchRequest(
+        request: com.everyday.shared.transport.DestinationSearchRequest
+    ): Boolean = enqueueMessage(TransportMessage.DestinationSearchRequestMessage(request), "send destination search")
+
+    override fun sendDestinationSearchCancellation(
+        cancellation: com.everyday.shared.transport.DestinationSearchCancellation
+    ): Boolean = enqueueMessage(TransportMessage.DestinationSearchCancellationMessage(cancellation), "cancel destination search")
+
+    fun sendSubtitleControl(control: SubtitleControl): Boolean =
+        enqueueMessage(TransportMessage.SubtitleControlMessage(control), "send subtitle control")
+
+    fun requestGooglePhoneAuthorization(): Boolean =
+        enqueueMessage(TransportMessage.GoogleAuthRequest, "request Google auth")
+
+    fun disconnectGooglePhoneAuth(): Boolean =
+        enqueueMessage(TransportMessage.GoogleAuthDisconnect, "request Google disconnect")
+
+    fun sendAssistantStatus(status: AssistantStatus): Boolean {
+        Log.d(
+            TAG,
+            "TX assistant.status state=${status.state.wireName} " +
+                "session=${status.sessionId ?: "-"} origin=${status.origin?.wireName ?: "-"}"
+        )
+        return enqueueMessage(TransportMessage.AssistantStatusMessage(status), "send assistant status")
     }
 
-    fun requestSync(
-        channels: Set<SyncChannel>,
-        force: Boolean,
-        reason: String,
-        countryCode: String? = null,
-        financeTiles: List<FinanceDashboardTileConfig> = emptyList(),
-        financeRefreshTileIds: List<String> = emptyList(),
-        financeSymbol: String? = null,
-        financeRange: String? = null,
-        financeAssetType: FinanceAssetType? = null,
-        financeChartType: FinanceChartType? = null,
-        financeTileId: String? = null,
-        financeLiveEnabled: Boolean? = null,
-        mapLat: Double? = null,
-        mapLon: Double? = null
-    ) {
-        val message = SyncProtocol.encodeRequest(
-            SyncRequest(
-                channels = channels,
-                force = force,
-                reason = reason,
-                countryCode = countryCode,
-                financeTiles = financeTiles,
-                financeRefreshTileIds = financeRefreshTileIds,
-                financeSymbol = financeSymbol,
-                financeRange = financeRange,
-                financeAssetType = financeAssetType,
-                financeChartType = financeChartType,
-                financeTileId = financeTileId,
-                financeLiveEnabled = financeLiveEnabled,
-                mapLat = mapLat,
-                mapLon = mapLon
-            )
-        ) + "\n"
-
-        enqueueWrite(message, "request sync")
-    }
-
-    fun sendSubtitleControl(control: SubtitleControl) {
-        val message = SubtitleProtocol.encodeControl(control) + "\n"
-        enqueueWrite(message, "send subtitle control")
-    }
-
-    fun requestGooglePhoneAuthorization() {
-        val message = """{"action":"requestGoogleAuth"}""" + "\n"
-        Log.d(TAG, "Requesting Google auth from phone")
-        enqueueWrite(message, "request Google auth")
-    }
-
-    fun disconnectGooglePhoneAuth() {
-        val message = """{"action":"disconnectGoogleAuth"}""" + "\n"
-        Log.d(TAG, "Requesting Google disconnect on phone")
-        enqueueWrite(message, "request Google disconnect")
-    }
+    override fun sendSyncSnapshot(snapshot: SyncSnapshot): Boolean = false
+    override fun sendSyncError(error: SyncError): Boolean = false
     
     /**
      * Send battery update to phone.
@@ -243,8 +208,14 @@ class RfcommClient(private val context: Context) {
         if (!batteryWritePending.compareAndSet(false, true)) return
 
         val batteryLevel = getGlassesBatteryLevel()
-        val message = """{"battery":$batteryLevel}""" + "\n"
-        val queued = enqueueWrite(message, "send battery update") {
+        if (batteryLevel !in 0..100) {
+            batteryWritePending.set(false)
+            return
+        }
+        val queued = enqueueMessage(
+            TransportMessage.DeviceStatus(glassesBatteryPercent = batteryLevel),
+            "send device status"
+        ) {
             batteryWritePending.set(false)
         }
         if (!queued) {
@@ -279,6 +250,16 @@ class RfcommClient(private val context: Context) {
             }
         }
         return true
+    }
+
+    private fun enqueueMessage(
+        message: TransportMessage,
+        operation: String,
+        onComplete: (() -> Unit)? = null
+    ): Boolean {
+        val encoded = TransportProtocol.encode(message) + "\n"
+        Log.d(TAG, "TX kind=${message.kind} bytes=${encoded.length}")
+        return enqueueWrite(encoded, operation, onComplete)
     }
     
     /**
@@ -434,65 +415,26 @@ class RfcommClient(private val context: Context) {
                     // Log ALL received lines for debugging
                     //Log.d(TAG, "RX: ${line.take(150)}")
 
+                    if (line.length > TransportProtocol.MAX_MESSAGE_CHARS) {
+                        Log.w(TAG, "RX rejected oversized message bytes=${line.length}")
+                        continue
+                    }
+
                     // IF PAUSED: Skip processing, but keep the loop alive
                     if (isPaused) {
-                        logRxThrottled(kind = "paused_drop", raw = line, summary = "paused=true (dropped)")
+                        logRxThrottled(kind = "paused_drop", size = line.length, summary = "paused=true (dropped)")
                         continue
                     }
 
-                    // Mirror control?
-                    if (parseMirrorMessage(line)) {
-                        logRxThrottled(kind = "mirror", raw = line, summary = "mirror message parsed")
-                        continue
-                    }
-
-                    // Clipboard update?
-                    if (parseClipboardMessage(line)) {
-                        logRxThrottled(kind = "clipboard", raw = line, summary = "clipboard message parsed")
-                        continue
-                    }
-
-                    if (parseOpenBrowserMessage(line)) {
-                        logRxThrottled(kind = "open_browser", raw = line, summary = "open browser message parsed")
-                        continue
-                    }
-
-                    if (parseGoogleAuthStateMessage(line)) {
-                        continue
-                    }
-
-                    if (parseSyncMessage(line)) {
-                        continue
-                    }
-
-                    if (parseSubtitleMessage(line)) {
-                        logRxThrottled(kind = "subtitle", raw = line, summary = "subtitle message parsed")
-                        continue
-                    }
-
-                    // Image data from phone?
-                    if (parseImageMessage(line)) {
-                        logRxThrottled(kind = "image", raw = line.take(100), summary = "image message parsed")
-                        continue
-                    }
-
-                    val data = parseData(line)
-                    if (data != null) {
-                        val sum = "event=${data.event} dx=${data.dx} dy=${data.dy} batt=${data.battery} time=${data.time}" +
-                                (if (data.key != null) " key=\"${data.key.take(30)}\"" else "") +
-                                (if (data.pointerCount != 1) " pointers=${data.pointerCount}" else "")
-
-                        logRxThrottled(kind = "data", raw = line, summary = sum)
-
-                        if (data.event == "key" && data.key != null) {
-                            handler.post { onKeyReceived?.invoke(data.key) }
-                        } else if (data.event == "longpress") {
-                            handler.post { onLongPressWithClipboard?.invoke(data.clipboard) }
-                        } else {
-                            handler.post { onDataReceived?.invoke(data) }
+                    when (val decoded = TransportProtocol.decode(line)) {
+                        is TransportDecodeResult.Success -> {
+                            logRxThrottled(decoded.message.kind, line.length)
+                            routeMessage(decoded.message)
                         }
-                    } else {
-                        logRxThrottled(kind = "parse_fail", raw = line, summary = "parseData returned null")
+                        is TransportDecodeResult.Failure -> Log.w(
+                            TAG,
+                            "RX rejected kind=${decoded.kind ?: "unknown"} bytes=${line.length}: ${decoded.reason}"
+                        )
                     }
                 }
             } catch (e: IOException) {
@@ -526,238 +468,65 @@ class RfcommClient(private val context: Context) {
         }.start()
     }
 
-    private fun parseData(json: String): PhoneData? {
-        return try {
-            val timeRegex = """"time":"([^"]+)"""".toRegex()
-            val batteryRegex = """"battery":(\d+)""".toRegex()
-            val eventRegex = """"event":"([^"]+)"""".toRegex()
-            val dxRegex = """"dx":(-?\d+)""".toRegex()
-            val dyRegex = """"dy":(-?\d+)""".toRegex()
-            val keyRegex = """"key":"([^"\\]*(?:\\.[^"\\]*)*)"""".toRegex()
-            
-            val time = timeRegex.find(json)?.groupValues?.get(1) ?: "?"
-            val battery = batteryRegex.find(json)?.groupValues?.get(1)?.toIntOrNull() ?: -1
-            val event = eventRegex.find(json)?.groupValues?.get(1) ?: "update"
-            val dx = dxRegex.find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-            val dy = dyRegex.find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-            
-            // Parse key for key events (handle escaped characters including newlines)
-            val key = if (event == "key") {
-                keyRegex.find(json)?.groupValues?.get(1)
-                    ?.replace("\\\"", "\"")
-                    ?.replace("\\\\", "\\")
-                    ?.replace("\\n", "\n")  // Handle escaped newlines
-            } else null
-            
-            // Parse clipboard for longpress events
-            val clipboardRegex = """"clipboard":"([^"\\]*(?:\\.[^"\\]*)*)"""".toRegex()
-            val clipboard = if (event == "longpress") {
-                clipboardRegex.find(json)?.groupValues?.get(1)
-                    ?.replace("\\\"", "\"")
-                    ?.replace("\\\\", "\\")
-                    ?.replace("\\n", "\n")
-                    ?.replace("\\r", "\r")
-            } else null
-            
-            // Parse pointer count for multi-touch scroll
-            val pointerCountRegex = """"pointerCount":(\d+)""".toRegex()
-            val pointerCount = pointerCountRegex.find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 1
-
-            PhoneData(time, battery, event, dx, dy, key, clipboard, pointerCount)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse: $json", e)
-            null
-        }
-    }
-    
-    /**
-     * Parse mirror control messages from phone.
-     * Format: {"mirror":"on","ip":"192.168.x.x","port":5050}
-     *         {"mirror":"off"}
-     * Returns true if message was a mirror control message.
-     */
-     private fun parseMirrorMessage(json: String): Boolean {
-        return try {
-            val mirrorRegex = """"mirror":"(on|off)"""".toRegex()
-            val ipRegex = """"ip":"([^"]+)"""".toRegex()
-            val wifiDirectRegex = """"wifiDirect":(true|false)""".toRegex()
-
-            val mirrorMatch = mirrorRegex.find(json)
-            if (mirrorMatch != null) {
-                val mirrorState = mirrorMatch.groupValues[1]
-                val enabled = mirrorState == "on"
-
-                val ip = if (enabled) {
-                    ipRegex.find(json)?.groupValues?.get(1)
-                } else null
-
-                // Parse explicit WiFi Direct flag (default false for backwards compatibility)
-                val isWifiDirect = wifiDirectRegex.find(json)?.groupValues?.get(1) == "true"
-
-                Log.d(TAG, "Mirror message: enabled=$enabled, ip=$ip, wifiDirect=$isWifiDirect")
-                handler.post { onMirrorStateChanged?.invoke(enabled, ip, isWifiDirect) }
-                true
-            } else {
-                false
+    private fun routeMessage(message: TransportMessage) {
+        when (message) {
+            is TransportMessage.Pointer -> handler.post { onPointerReceived?.invoke(message) }
+            is TransportMessage.KeyInput -> handler.post { onKeyReceived?.invoke(message.key) }
+            is TransportMessage.LongPress -> handler.post { onLongPressWithClipboard?.invoke(message.clipboard) }
+            is TransportMessage.ClipboardUpdate -> handler.post { onClipboardReceived?.invoke(message.content) }
+            is TransportMessage.MirrorState -> handler.post {
+                onMirrorStateChanged?.invoke(message.enabled, message.ip, message.wifiDirect)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error parsing mirror message: $json", e)
-            false
-        }
-     }
-    
-    /**
-     * Parse clipboard update messages from phone.
-     * Format: {"event":"clipboard","content":"..."}
-     * Returns true if message was a clipboard message.
-     */
-    private fun parseClipboardMessage(json: String): Boolean {
-        return try {
-            // Check if this is a clipboard event
-            if (!json.contains(""""event":"clipboard"""")) {
-                return false
+            is TransportMessage.OpenBrowser -> handler.post { onOpenBrowserRequested?.invoke(message.address) }
+            is TransportMessage.GoogleAuthState -> {
+                val status = when (message.status) {
+                    TransportGoogleAuthStatus.SIGNED_OUT -> GooglePhoneAuthStatus.SIGNED_OUT
+                    TransportGoogleAuthStatus.AUTHORIZING -> GooglePhoneAuthStatus.AUTHORIZING
+                    TransportGoogleAuthStatus.AUTHORIZED -> GooglePhoneAuthStatus.AUTHORIZED
+                    TransportGoogleAuthStatus.ERROR -> GooglePhoneAuthStatus.ERROR
+                }
+                val account = message.account?.let { GoogleAccountSummary(it.email, it.displayName) }
+                handler.post { onGoogleAuthStateReceived?.invoke(status, account, message.detail) }
             }
-            
-            val contentRegex = """"content":"([^"\\]*(?:\\.[^"\\]*)*)"""".toRegex()
-            val contentMatch = contentRegex.find(json)
-            
-            if (contentMatch != null) {
-                val content = contentMatch.groupValues[1]
-                    .replace("\\\"", "\"")
-                    .replace("\\\\", "\\")
-                    .replace("\\n", "\n")
-                    .replace("\\r", "\r")
-                
-                Log.d(TAG, "Clipboard received: ${content.take(50)}...")
-                handler.post { onClipboardReceived?.invoke(content) }
-                true
-            } else {
-                false
+            is TransportMessage.DeviceStatus -> handler.post { onDeviceStatusReceived?.invoke(message) }
+            is TransportMessage.SyncSnapshotMessage -> handler.post { onSyncSnapshotReceived?.invoke(message.snapshot) }
+            is TransportMessage.SyncErrorMessage -> handler.post { onSyncErrorReceived?.invoke(message.error) }
+            is TransportMessage.SubtitleStatusMessage -> handler.post { onSubtitleStatusReceived?.invoke(message.status) }
+            is TransportMessage.SubtitleTranscriptMessage -> handler.post {
+                onSubtitleTranscriptReceived?.invoke(message.transcript)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error parsing clipboard message: $json", e)
-            false
-        }
-    }
-
-    private fun parseOpenBrowserMessage(json: String): Boolean {
-        return try {
-            if (!json.contains(""""event":"open_browser"""")) {
-                return false
+            is TransportMessage.AssistantControlMessage -> {
+                if (message.control.action != com.everyday.shared.transport.AssistantControlAction.KEEPALIVE) {
+                    Log.d(
+                        TAG,
+                        "RX assistant.control action=${message.control.action.wireName} " +
+                            "session=${message.control.sessionId}"
+                    )
+                }
+                handler.post { onAssistantControlReceived?.invoke(message.control) }
             }
-
-            val root = JSONObject(json)
-            val address = root.optString("address").trim()
-            if (address.isBlank()) {
-                Log.w(TAG, "Open browser message missing address")
-                return true
+            is TransportMessage.AssistantStatusMessage -> Unit
+            is TransportMessage.RouteResultMessage -> handler.post {
+                onRouteResultReceived?.invoke(message.result)
             }
-
-            handler.post { onOpenBrowserRequested?.invoke(address) }
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Error parsing open browser message: $json", e)
-            false
-        }
-    }
-
-    private fun parseGoogleAuthStateMessage(json: String): Boolean {
-        return try {
-            if (!json.contains(""""event":"google_auth_state"""")) {
-                return false
+            is TransportMessage.RouteErrorMessage -> handler.post {
+                onRouteErrorReceived?.invoke(message.error)
             }
-
-            val root = JSONObject(json)
-            val statusValue = root.optString("status", "error")
-            val detail = root.optString("detail").takeIf { it.isNotBlank() }
-            val account = root.optJSONObject("account")?.let { accountJson ->
-                val email = accountJson.optString("email")
-                if (email.isBlank()) null else GoogleAccountSummary(
-                    email = email,
-                    displayName = accountJson.optString("displayName").takeIf { it.isNotBlank() }
-                )
+            is TransportMessage.DestinationSearchResultMessage -> handler.post {
+                onDestinationSearchResultReceived?.invoke(message.result)
             }
-            val status = when (statusValue) {
-                "signed_out" -> GooglePhoneAuthStatus.SIGNED_OUT
-                "authorizing" -> GooglePhoneAuthStatus.AUTHORIZING
-                "authorized" -> GooglePhoneAuthStatus.AUTHORIZED
-                else -> GooglePhoneAuthStatus.ERROR
+            is TransportMessage.DestinationSearchErrorMessage -> handler.post {
+                onDestinationSearchErrorReceived?.invoke(message.error)
             }
-            handler.post { onGoogleAuthStateReceived?.invoke(status, account, detail) }
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Error parsing google auth state message: $json", e)
-            false
-        }
-    }
-
-    private fun parseSyncMessage(json: String): Boolean {
-        SyncProtocol.decodeSpeedSnapshot(json)?.let { snapshot ->
-            handler.post { onSpeedSnapshotReceived?.invoke(snapshot) }
-            return true
-        }
-        SyncProtocol.decodeSnapshot(json)?.let { snapshot ->
-            handler.post { onSyncSnapshotReceived?.invoke(snapshot) }
-            return true
-        }
-        SyncProtocol.decodeError(json)?.let { error ->
-            handler.post { onSyncErrorReceived?.invoke(error) }
-            return true
-        }
-        return false
-    }
-
-    private fun parseSubtitleMessage(json: String): Boolean {
-        SubtitleProtocol.decodeStatus(json)?.let { status ->
-            handler.post { onSubtitleStatusReceived?.invoke(status) }
-            return true
-        }
-        SubtitleProtocol.decodeTranscript(json)?.let { transcript ->
-            handler.post { onSubtitleTranscriptReceived?.invoke(transcript) }
-            return true
-        }
-        return false
-    }
-
-    /**
-     * Parse image messages from phone.
-     * Format: {"event":"image","fileName":"...","data":"<base64>"}
-     * Returns true if message was an image message.
-     */
-    private fun parseImageMessage(json: String): Boolean {
-        return try {
-            // Check if this is an image event
-            if (!json.contains(""""event":"image"""")) {
-                return false
+            is TransportMessage.Image -> {
+                val bytes = runCatching { Base64.decode(message.base64Data, Base64.NO_WRAP) }
+                    .getOrElse {
+                        Log.w(TAG, "RX rejected kind=${message.kind}: invalid base64 image")
+                        return
+                    }
+                handler.post { onImageReceived?.invoke(bytes, message.fileName) }
             }
-
-            Log.d(TAG, "Parsing image message (${json.length} chars)")
-
-            // Extract file name
-            val fileNameRegex = """"fileName":"([^"\\]*(?:\\.[^"\\]*)*)"""".toRegex()
-            val fileName = fileNameRegex.find(json)?.groupValues?.get(1)
-                ?.replace("\\\"", "\"")
-                ?.replace("\\\\", "\\")
-                ?: "image.jpg"
-
-            // Extract base64 data
-            val dataRegex = """"data":"([^"]+)"""".toRegex()
-            val base64Data = dataRegex.find(json)?.groupValues?.get(1)
-
-            if (base64Data != null) {
-                // Decode base64 to bytes
-                val imageData = Base64.decode(base64Data, Base64.NO_WRAP)
-                Log.d(TAG, "Image received: $fileName (${imageData.size} bytes)")
-
-                handler.post { onImageReceived?.invoke(imageData, fileName) }
-                true
-            } else {
-                Log.w(TAG, "Image message missing data")
-                false
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error parsing image message", e)
-            false
+            else -> Log.w(TAG, "RX unexpected kind=${message.kind} for glasses endpoint")
         }
     }
 
@@ -767,24 +536,25 @@ class RfcommClient(private val context: Context) {
     @Volatile private var lastRxLogAtMs: Long = 0L
     @Volatile private var suppressedRxCount: Int = 0
     @Volatile private var lastRxKind: String = ""
-    @Volatile private var lastRxRaw: String = ""
+    @Volatile private var lastRxSize: Int = 0
     @Volatile private var lastRxSummary: String = ""
 
     /**
      * Logs at most once per RX_LOG_MIN_INTERVAL_MS.
      * If more messages arrive, it aggregates them and logs a summary when allowed.
      */
-    private fun logRxThrottled(kind: String, raw: String, summary: String = "") {
+    private fun logRxThrottled(kind: String, size: Int, summary: String = "") {
         val now = android.os.SystemClock.elapsedRealtime()
 
         synchronized(rxLogLock) {
             // Always keep the latest message info
             lastRxKind = kind
-            lastRxRaw = raw
+            lastRxSize = size
             lastRxSummary = summary
 
             val elapsed = now - lastRxLogAtMs
             if (elapsed >= RX_LOG_MIN_INTERVAL_MS) {
+                Log.d(TAG, "RX kind=$kind bytes=$size suppressed=$suppressedRxCount")
                 suppressedRxCount = 0
                 lastRxLogAtMs = now
             } else {
@@ -793,9 +563,15 @@ class RfcommClient(private val context: Context) {
         }
     }
 
-    /** Call this when disconnecting so you don’t lose the last aggregated RX info. */
+    /** Call this when disconnecting so you donâ€™t lose the last aggregated RX info. */
     private fun flushRxLogOnDisconnect(reason: String) {
         synchronized(rxLogLock) {
+            if (lastRxKind.isNotBlank()) {
+                Log.d(
+                    TAG,
+                    "RX closed reason=$reason lastKind=$lastRxKind bytes=$lastRxSize suppressed=$suppressedRxCount"
+                )
+            }
             suppressedRxCount = 0
         }
     }

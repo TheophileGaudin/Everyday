@@ -259,8 +259,32 @@ class FileBrowserWidget(
                 ))
             }
 
-            // For media files, use MediaStore on Android 10+ (Scoped Storage)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && fileFilter in setOf(FileFilter.IMAGES, FileFilter.VIDEOS, FileFilter.PDF, FileFilter.MEDIA)) {
+            val hasDirectSharedStorageAccess = Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
+                Environment.isExternalStorageManager()
+
+            // All-files access is already required by Everyday's general browser. In that mode
+            // listFiles() is both complete and much faster than repeating several MediaStore
+            // queries on every directory tap.
+            if (hasDirectSharedStorageAccess) {
+                files.orEmpty()
+                    .filter { file ->
+                        !file.isDirectory && when (fileFilter) {
+                            FileFilter.ALL -> true
+                            else -> file.extension.lowercase() in fileFilter.extensions
+                        }
+                    }
+                    .forEach { file ->
+                        resultEntries += FileEntry(
+                            file = file,
+                            uri = Uri.fromFile(file),
+                            name = file.name,
+                            isDirectory = false,
+                            extension = file.extension.lowercase(),
+                            absolutePath = file.absolutePath,
+                        )
+                    }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && fileFilter in setOf(FileFilter.IMAGES, FileFilter.VIDEOS, FileFilter.PDF, FileFilter.MEDIA)) {
+                // Scoped-storage fallback when broad filesystem access is unavailable.
                 val mediaFiles = buildList {
                     if (fileFilter == FileFilter.IMAGES || fileFilter == FileFilter.MEDIA) addAll(queryMediaStoreForImages(directory.absolutePath))
                     if (fileFilter == FileFilter.VIDEOS || fileFilter == FileFilter.MEDIA) addAll(queryMediaStoreForVideos(directory.absolutePath))
@@ -301,6 +325,7 @@ class FileBrowserWidget(
 
         updateScrollBounds()
         Log.d(TAG, "Loaded ${entries.size} entries from ${directory.path}")
+        onStateChanged?.invoke(state)
     }
 
     /**
@@ -354,25 +379,7 @@ class FileBrowserWidget(
                 MediaStore.Images.Media.MIME_TYPE
             )
 
-            // First, let's see ALL images in MediaStore to debug
-            context.contentResolver.query(
-                collection,
-                projection,
-                null,  // No filter - get all images
-                null,
-                "${MediaStore.Images.Media.DATE_ADDED} DESC"
-            )?.use { cursor ->
-                Log.d(TAG, "MediaStore total images on device: ${cursor.count}")
-                // Log first 5 images to see what paths exist
-                var count = 0
-                while (cursor.moveToNext() && count < 5) {
-                    val path = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA))
-                    Log.d(TAG, "  Sample image $count: $path")
-                    count++
-                }
-            }
-
-            // Now query for images in this specific directory
+            // Query only this directory; avoid a full-device diagnostic query in this hot path.
             val selection = "${MediaStore.Images.Media.DATA} LIKE ?"
             val selectionArgs = arrayOf("$directoryPath/%")
 

@@ -3,8 +3,6 @@ package com.everyday.everyday_phone
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import com.everyday.shared.sync.CalendarAccount
-import com.everyday.shared.sync.CalendarEventSnapshot
 import com.everyday.shared.sync.CalendarSnapshot
 import com.everyday.shared.sync.FinanceDataProvider
 import com.everyday.shared.sync.FinanceAssetType
@@ -14,6 +12,7 @@ import com.everyday.shared.sync.FinanceSnapshot
 import com.everyday.shared.sync.FinanceTimeRange
 import com.everyday.shared.sync.FinanceTileSnapshot
 import com.everyday.shared.sync.NewsDataProvider
+import com.everyday.shared.sync.NewsSourceSpec
 import com.everyday.shared.sync.PhoneNotificationsSnapshot
 import com.everyday.shared.sync.SyncCachePolicy
 import com.everyday.shared.sync.SyncChannel
@@ -22,8 +21,8 @@ import com.everyday.shared.sync.SyncOrchestrator
 import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot
 import com.everyday.shared.sync.SyncSnapshotStore
-import com.everyday.shared.sync.SpeedSnapshot
-import com.everyday.shared.sync.LocationWeatherSnapshot
+import com.everyday.shared.sync.LocationFix
+import com.everyday.shared.sync.WeatherSnapshot
 import com.everyday.shared.sync.MapDataProvider
 import com.everyday.shared.sync.isStale
 import com.everyday.shared.transport.SyncMessenger
@@ -31,6 +30,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
 data class PhoneManualRefreshResult(
     val errors: List<String>
@@ -57,6 +60,9 @@ class PhoneDataSyncCoordinator(
     // Bluetooth writes can block behind a large map packet.  Keep them off the
     // phone UI thread and serialize them to preserve protocol framing/order.
     private val outboundSyncExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val refreshExecutor = ThreadPoolExecutor(
+        4, 4, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue(8)
+    )
     private val binanceStreamManager = BinanceFinanceStreamManager(
         onSnapshot = { snapshot ->
             snapshotStore.saveFinance(snapshot)
@@ -68,11 +74,12 @@ class PhoneDataSyncCoordinator(
         onNotificationsSnapshotChanged(snapshot)
     }
     @Volatile private var isGlassesConnected = false
+    @Volatile private var released = false
     @Volatile private var visibleFinanceConfigs: List<FinanceDashboardTileConfig> = emptyList()
 
     init {
-        LocationWeatherService.onLocationWeatherSnapshotChanged = ::onLocationWeatherSnapshotChanged
-        LocationWeatherService.onSpeedSnapshotChanged = ::onSpeedSnapshotChanged
+        LocationWeatherService.onLocationFixChanged = ::onLocationFixChanged
+        LocationWeatherService.onWeatherSnapshotChanged = ::onWeatherSnapshotChanged
         PhoneNotificationRepository.addObserver(notificationObserver, appContext)
     }
 
@@ -120,11 +127,10 @@ class PhoneDataSyncCoordinator(
         pushGoogleState(state)
     }
 
-    fun onCalendarSnapshotChanged(snapshot: PhoneGoogleCalendarSnapshot?) {
+    fun onCalendarSnapshotChanged(snapshot: CalendarSnapshot?) {
         snapshot ?: return
-        val sharedSnapshot = snapshot.toSharedCalendarSnapshot()
-        snapshotStore.saveCalendar(sharedSnapshot)
-        send(SyncSnapshot(calendar = sharedSnapshot))
+        snapshotStore.saveCalendar(snapshot)
+        send(SyncSnapshot(calendar = snapshot))
     }
 
     fun onGoogleDisconnected() {
@@ -168,7 +174,7 @@ class PhoneDataSyncCoordinator(
             val resultErrors = synchronized(errors) { errors.toList() }
             manualRefreshInFlight.set(false)
             mainHandler.post {
-                onComplete(PhoneManualRefreshResult(resultErrors))
+                if (!released) onComplete(PhoneManualRefreshResult(resultErrors))
             }
         }
 
@@ -183,10 +189,14 @@ class PhoneDataSyncCoordinator(
     }
 
     fun release() {
-        LocationWeatherService.onLocationWeatherSnapshotChanged = null
-        LocationWeatherService.onSpeedSnapshotChanged = null
+        released = true
+        isGlassesConnected = false
+        LocationWeatherService.onLocationFixChanged = null
+        LocationWeatherService.onWeatherSnapshotChanged = null
         PhoneNotificationRepository.removeObserver(notificationObserver)
         binanceStreamManager.stopAll()
+        mainHandler.removeCallbacksAndMessages(null)
+        refreshExecutor.shutdownNow()
         outboundSyncExecutor.shutdownNow()
     }
 
@@ -199,27 +209,23 @@ class PhoneDataSyncCoordinator(
             pushGoogleState(googleAuthManager.loadState())
         }
 
-        val serviceSnapshot = LocationWeatherService.instance?.getCurrentLocationData()
-        val speedSnapshot = LocationWeatherService.instance?.getCurrentSpeedSnapshot()
-        if (serviceSnapshot != null) {
-            snapshotStore.saveLocationWeather(serviceSnapshot)
-        }
-        if (speedSnapshot != null) {
-            sendSpeed(speedSnapshot)
-        }
+        val serviceLocation = LocationWeatherService.instance?.getCurrentLocationFix()
+        val serviceWeather = LocationWeatherService.instance?.getCurrentWeatherSnapshot()
+        if (serviceLocation != null) snapshotStore.saveLocation(serviceLocation)
+        if (serviceWeather != null) snapshotStore.saveWeather(serviceWeather)
 
         val sharedCalendarSnapshot = googleAuthManager.loadCachedSnapshot()
-            ?.toSharedCalendarSnapshot()
             ?.takeIf { SyncChannel.CALENDAR in channels }
         val cachedChannels = channels.toMutableSet()
-        if (serviceSnapshot != null) cachedChannels -= SyncChannel.LOCATION_WEATHER
+        if (serviceLocation != null) cachedChannels -= SyncChannel.LOCATION
+        if (serviceWeather != null) cachedChannels -= SyncChannel.WEATHER
         if (sharedCalendarSnapshot != null) cachedChannels -= SyncChannel.CALENDAR
         val cachedSnapshot = syncOrchestrator.cachedSnapshot(cachedChannels)
         val notificationSnapshot = PhoneNotificationRepository.current(appContext)
             .takeIf { SyncChannel.NOTIFICATIONS in channels }
         val snapshot = SyncSnapshot(
-            locationWeather = serviceSnapshot?.takeIf { SyncChannel.LOCATION_WEATHER in channels }
-                ?: cachedSnapshot.locationWeather,
+            location = serviceLocation?.takeIf { SyncChannel.LOCATION in channels } ?: cachedSnapshot.location,
+            weather = serviceWeather?.takeIf { SyncChannel.WEATHER in channels } ?: cachedSnapshot.weather,
             calendar = sharedCalendarSnapshot ?: cachedSnapshot.calendar,
             news = cachedSnapshot.news,
             finance = cachedSnapshot.finance,
@@ -229,7 +235,11 @@ class PhoneDataSyncCoordinator(
     }
 
     private fun refreshChannels(request: SyncRequest) {
-        if (SyncChannel.LOCATION_WEATHER in request.channels) {
+        if (SyncChannel.LOCATION in request.channels) {
+            ensureLocationService()
+            LocationWeatherService.instance?.getCurrentLocationFix()?.let(::onLocationFixChanged)
+        }
+        if (SyncChannel.WEATHER in request.channels) {
             refreshWeather(request.force)
         }
         if (SyncChannel.CALENDAR in request.channels) {
@@ -248,9 +258,22 @@ class PhoneDataSyncCoordinator(
             val lat = request.mapLat
             val lon = request.mapLon
             if (lat != null && lon != null) {
-                Thread {
+                executeRefresh("map", {
+                    sendError(SyncChannel.MAP, "Map fetch skipped: refresh queue is full")
+                }) {
                     fileLog("Fetching phone map proxy for $lat,$lon")
-                    runCatching { MapDataProvider.fetch(lat, lon) }
+                    runCatching {
+                        MapDataProvider.fetch(
+                            lat = lat,
+                            lon = lon,
+                            poiMode = request.mapPoiMode,
+                            poiCategories = request.mapPoiCategories.toSet(),
+                            poiRadiusM = request.mapPoiRadiusM,
+                            importantCategories = request.mapPoiImportantCategories.toSet(),
+                            importantRadiiM = request.mapPoiImportantRadiiM,
+                            normalCategories = request.mapPoiNormalCategories.toSet()
+                        )
+                    }
                         .onSuccess {
                             fileLog("Phone map proxy ready: roads=${it.roads.size} pois=${it.pois.size}")
                             send(SyncSnapshot(map = it))
@@ -259,7 +282,7 @@ class PhoneDataSyncCoordinator(
                             fileLog("Phone map proxy failed: ${it.message}")
                             sendError(SyncChannel.MAP, "Map fetch failed: ${it.message}")
                         }
-                }.start()
+                }
             }
         }
     }
@@ -268,15 +291,15 @@ class PhoneDataSyncCoordinator(
         ensureLocationService()
         val service = LocationWeatherService.instance
         if (service == null) {
-            sendError(SyncChannel.LOCATION_WEATHER, "Location service is not ready")
+            sendError(SyncChannel.WEATHER, "Location service is not ready")
             return
         }
-        if (force || snapshotStore.loadLocationWeather().isStale()) {
-            service.refreshLocationWeatherNow(forceWeatherFetch = force)
+        if (force || snapshotStore.loadWeather().isStale()) {
+            service.refreshWeatherNow(forceWeatherFetch = force)
         }
     }
 
-    private fun refreshWeatherForManual(callback: (Result<LocationWeatherSnapshot>) -> Unit) {
+    private fun refreshWeatherForManual(callback: (Result<WeatherSnapshot>) -> Unit) {
         if (!hasLocationPermission()) {
             callback(Result.failure(SecurityException("Location permission is not granted")))
             return
@@ -306,15 +329,14 @@ class PhoneDataSyncCoordinator(
 
         val cached = googleAuthManager.loadCachedSnapshot()
         if (cached != null) {
-            val shared = cached.toSharedCalendarSnapshot()
-            snapshotStore.saveCalendar(shared)
-            send(SyncSnapshot(calendar = shared))
+            snapshotStore.saveCalendar(cached)
+            send(SyncSnapshot(calendar = cached))
         }
 
         if (state.status != PhoneGoogleAuthState.Status.AUTHORIZED) {
             return
         }
-        if (!force && !cached.toSharedCalendarSnapshotOrNull().isStale()) {
+        if (!force && !cached.isStale()) {
             return
         }
 
@@ -349,49 +371,69 @@ class PhoneDataSyncCoordinator(
     }
 
     private fun refreshNews(request: SyncRequest) {
-        val countryCode = request.countryCode
-            ?: snapshotStore.loadLocationWeather()?.countryCode
-            ?: snapshotStore.loadNews()?.countryCode
-            ?: NewsDataProvider.defaultCountryCode()
         val cached = snapshotStore.loadNews()
-        if (!request.force && cached != null && !cached.isStale() && cached.countryCode == countryCode) {
+        val sourceSpec = request.newsSource
+            ?: cached?.sourceSpec
+            ?: NewsSourceSpec.DEFAULT_LOCATION
+        val countryCode = NewsDataProvider.resolveCountryCode(
+            request.countryCode,
+            snapshotStore.loadWeather(),
+            cached
+        )
+        if (!request.force && cached != null && !cached.isStale() &&
+            cached.countryCode == countryCode && cached.sourceSpec == sourceSpec
+        ) {
             return
         }
         if (!newsRefreshInFlight.compareAndSet(false, true)) return
 
-        Thread {
+        executeRefresh("news", { newsRefreshInFlight.set(false) }) {
             try {
-                val snapshot = NewsDataProvider.fetchNews(countryCode).getOrThrow()
+                val snapshot = NewsDataProvider.fetchNews(
+                    sourceSpec,
+                    countryCode,
+                    snapshotStore.loadWeather()?.town
+                ).getOrThrow()
                     .copy(staleAfterMs = SyncCachePolicy.NEWS_STALE_AFTER_MS)
                 snapshotStore.saveNews(snapshot)
                 send(SyncSnapshot(news = snapshot))
             } catch (error: Throwable) {
                 fileLog("Phone sync news refresh failed: ${error.message}")
-                sendError(SyncChannel.NEWS, "News refresh failed")
+                sendError(SyncChannel.NEWS, "News refresh failed: ${error.message}")
             } finally {
                 newsRefreshInFlight.set(false)
             }
-        }.start()
+        }
     }
 
     private fun refreshNewsForManual(callback: (Result<Unit>) -> Unit) {
-        val countryCode = snapshotStore.loadLocationWeather()?.countryCode
-            ?: snapshotStore.loadNews()?.countryCode
-            ?: NewsDataProvider.defaultCountryCode()
+        val cached = snapshotStore.loadNews()
+        val sourceSpec = cached?.sourceSpec ?: NewsSourceSpec.DEFAULT_LOCATION
+        val countryCode = NewsDataProvider.resolveCountryCode(
+            requestedCountryCode = null,
+            weather = snapshotStore.loadWeather(),
+            cachedNews = cached
+        )
 
-        Thread {
+        executeRefresh("manual news", {
+            callback(Result.failure(RejectedExecutionException("Refresh queue is full")))
+        }) {
             try {
-                val snapshot = NewsDataProvider.fetchNews(countryCode).getOrThrow()
+                val snapshot = NewsDataProvider.fetchNews(
+                    sourceSpec,
+                    countryCode,
+                    snapshotStore.loadWeather()?.town
+                ).getOrThrow()
                     .copy(staleAfterMs = SyncCachePolicy.NEWS_STALE_AFTER_MS)
                 snapshotStore.saveNews(snapshot)
                 send(SyncSnapshot(news = snapshot))
                 callback(Result.success(Unit))
             } catch (error: Throwable) {
                 fileLog("Manual news refresh failed: ${error.message}")
-                sendError(SyncChannel.NEWS, "News refresh failed")
+                sendError(SyncChannel.NEWS, "News refresh failed: ${error.message}")
                 callback(Result.failure(error))
             }
-        }.start()
+        }
     }
 
     private fun refreshFinance(request: SyncRequest) {
@@ -420,7 +462,7 @@ class PhoneDataSyncCoordinator(
         if (configsToFetch.isEmpty()) {
             return
         }
-        Thread {
+        executeRefresh("finance") {
             try {
                 val fetchedTiles = configsToFetch.map { config ->
                     FinanceDataProvider.fetchTile(config).getOrThrow()
@@ -433,28 +475,14 @@ class PhoneDataSyncCoordinator(
                 val tiles = (visibleConfigs.mapNotNull { config ->
                     fetchedTiles.firstOrNull { it.id == config.id } ?: cachedTilesById[config.id]
                 }).ifEmpty { fetchedTiles }
-                val tile = tiles.first()
-                val snapshot = FinanceSnapshot(
-                    symbol = tile.symbol,
-                    displayName = tile.displayName,
-                    country = tile.country,
-                    range = tile.range,
-                    rangeLabel = tile.rangeLabel,
-                    points = tile.points,
-                    percentChange = tile.percentChange,
-                    assetType = tile.assetType,
-                    chartType = tile.chartType,
-                    tiles = tiles,
-                    fetchedAtMs = tile.fetchedAtMs,
-                    staleAfterMs = tile.staleAfterMs
-                )
+                val snapshot = requireNotNull(FinanceSnapshot.fromTiles(tiles))
                 snapshotStore.saveFinance(snapshot)
                 send(SyncSnapshot(finance = snapshot))
             } catch (error: Throwable) {
                 fileLog("Phone sync finance refresh failed: ${error.message}")
                 sendError(SyncChannel.FINANCE, "Finance refresh failed")
             }
-        }.start()
+        }
     }
 
     private fun resolveVisibleFinanceConfigs(request: SyncRequest): List<FinanceDashboardTileConfig> {
@@ -465,10 +493,10 @@ class PhoneDataSyncCoordinator(
         return listOf(
             FinanceDashboardTileConfig(
                 id = request.financeTileId ?: "phone_${symbol}_${range.range}",
-                assetType = request.financeAssetType ?: cached?.assetType ?: FinanceAssetType.INDEX,
+                assetType = request.financeAssetType ?: cached?.tiles?.firstOrNull()?.assetType ?: FinanceAssetType.INDEX,
                 symbol = symbol,
                 range = range.range,
-                chartType = request.financeChartType ?: cached?.chartType ?: FinanceChartType.LINE
+                chartType = request.financeChartType ?: cached?.tiles?.firstOrNull()?.chartType ?: FinanceChartType.LINE
             )
         )
     }
@@ -487,27 +515,15 @@ class PhoneDataSyncCoordinator(
             return
         }
 
-        Thread {
+        executeRefresh("manual finance", {
+            callback(Result.failure(RejectedExecutionException("Refresh queue is full")))
+        }) {
             try {
                 val tiles = configs.map { config ->
                     FinanceDataProvider.fetchTile(config).getOrThrow()
                         .copy(staleAfterMs = SyncCachePolicy.FINANCE_STALE_AFTER_MS)
                 }
-                val tile = tiles.first()
-                val snapshot = FinanceSnapshot(
-                    symbol = tile.symbol,
-                    displayName = tile.displayName,
-                    country = tile.country,
-                    range = tile.range,
-                    rangeLabel = tile.rangeLabel,
-                    points = tile.points,
-                    percentChange = tile.percentChange,
-                    assetType = tile.assetType,
-                    chartType = tile.chartType,
-                    tiles = tiles,
-                    fetchedAtMs = tile.fetchedAtMs,
-                    staleAfterMs = tile.staleAfterMs
-                )
+                val snapshot = requireNotNull(FinanceSnapshot.fromTiles(tiles))
                 snapshotStore.saveFinance(snapshot)
                 send(SyncSnapshot(finance = snapshot))
                 callback(Result.success(Unit))
@@ -516,23 +532,24 @@ class PhoneDataSyncCoordinator(
                 sendError(SyncChannel.FINANCE, "Finance refresh failed")
                 callback(Result.failure(error))
             }
-        }.start()
+        }
     }
 
     private fun ensureLocationService() {
         if (!hasLocationPermission()) return
-        LocationWeatherService.onLocationWeatherSnapshotChanged = ::onLocationWeatherSnapshotChanged
-        LocationWeatherService.onSpeedSnapshotChanged = ::onSpeedSnapshotChanged
+        LocationWeatherService.onLocationFixChanged = ::onLocationFixChanged
+        LocationWeatherService.onWeatherSnapshotChanged = ::onWeatherSnapshotChanged
         LocationWeatherService.start(appContext)
     }
 
-    private fun onLocationWeatherSnapshotChanged(snapshot: LocationWeatherSnapshot) {
-        snapshotStore.saveLocationWeather(snapshot)
-        send(SyncSnapshot(locationWeather = snapshot))
+    private fun onLocationFixChanged(snapshot: LocationFix) {
+        snapshotStore.saveLocation(snapshot)
+        send(SyncSnapshot(location = snapshot))
     }
 
-    private fun onSpeedSnapshotChanged(snapshot: SpeedSnapshot) {
-        sendSpeed(snapshot)
+    private fun onWeatherSnapshotChanged(snapshot: WeatherSnapshot) {
+        snapshotStore.saveWeather(snapshot)
+        send(SyncSnapshot(weather = snapshot))
     }
 
     private fun onNotificationsSnapshotChanged(snapshot: PhoneNotificationsSnapshot) {
@@ -552,12 +569,6 @@ class PhoneDataSyncCoordinator(
         }
     }
 
-    private fun sendSpeed(snapshot: SpeedSnapshot) {
-        if (!isGlassesConnected) return
-        outboundSyncExecutor.execute {
-            if (isGlassesConnected) syncMessengerProvider()?.sendSpeedSnapshot(snapshot)
-        }
-    }
 
     private fun sendError(channel: SyncChannel, message: String) {
         if (!isGlassesConnected) return
@@ -566,27 +577,21 @@ class PhoneDataSyncCoordinator(
         }
     }
 
-    private fun PhoneGoogleCalendarSnapshot.toSharedCalendarSnapshot(): CalendarSnapshot {
-        return CalendarSnapshot(
-            account = CalendarAccount(
-                email = account.email,
-                displayName = account.displayName
-            ),
-            events = events.map { event ->
-                CalendarEventSnapshot(
-                    id = event.id,
-                    summary = event.summary,
-                    startIso = event.startIso,
-                    htmlLink = event.htmlLink
-                )
-            },
-            fetchedAtMs = fetchedAtMs,
-            staleAfterMs = staleAfterMs,
-            sourceMode = "PHONE_FALLBACK"
-        )
+    private fun executeRefresh(
+        label: String,
+        onRejected: () -> Unit = {},
+        action: () -> Unit
+    ) {
+        if (released) {
+            onRejected()
+            return
+        }
+        try {
+            refreshExecutor.execute(action)
+        } catch (_: RejectedExecutionException) {
+            fileLog("Dropped $label refresh because the bounded refresh executor is full")
+            onRejected()
+        }
     }
-
-    private fun PhoneGoogleCalendarSnapshot?.toSharedCalendarSnapshotOrNull(): CalendarSnapshot? =
-        this?.toSharedCalendarSnapshot()
 
 }

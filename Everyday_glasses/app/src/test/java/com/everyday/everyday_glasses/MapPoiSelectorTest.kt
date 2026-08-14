@@ -62,6 +62,158 @@ class MapPoiSelectorTest {
         assertEquals(listOf(MapPoiTier.STATION), selected.important.map { it.tier })
     }
 
+    @Test
+    fun defaultConfigurationMatchesTheLegacySelectorExactly() {
+        val pois = listOf(
+            poi(1, "Station", "railway=station", 3000.0, 0.0),
+            poi(2, "Market", "shop=supermarket", 900.0, 30.0),
+            poi(3, "School", "amenity=school", 1000.0, 60.0),
+            poi(4, "Restaurant", "amenity=restaurant", 25.0, 90.0),
+            poi(5, "Church", "amenity=place_of_worship", 70.0, 180.0)
+        )
+
+        val legacy = MapPoiSelector(Random(8)).select(origin, pois, 160f)
+        val configured = MapPoiSelector(Random(8)).select(origin, pois, PoiDisplayConfig.DEFAULT, 160f)
+
+        assertEquals(PoiDisplayConfigState.DEFAULT, PoiDisplayConfig.DEFAULT.state)
+        assertEquals(PoiDisplayConfig.DEFAULT, PoiDisplayConfig.DEFAULT.copy())
+        assertEquals(legacy, configured)
+    }
+
+    @Test
+    fun customSelectionBalancesCategoriesBeforeFillingByDistance() {
+        val selected = MapPoiSelector(Random(1)).select(
+            origin,
+            listOf(
+                poi(1, "Nearby restaurant", "amenity=restaurant", 100.0, 0.0),
+                poi(2, "Nearby shop", "shop=clothes", 200.0, 90.0),
+                poi(3, "Hospital", "amenity=hospital", 1000.0, 180.0),
+                poi(4, "Far hospital", "amenity=hospital", 1100.0, 270.0)
+            ),
+            PoiDisplayConfig.custom(
+                setOf(MapPoiCategoryCatalog.RESTAURANT, MapPoiCategoryCatalog.SHOP, MapPoiCategoryCatalog.HOSPITAL),
+                radiusM = 1200,
+                maxResults = 4
+            )
+        )
+
+        assertEquals(4, selected.displayed.size)
+        assertEquals(
+            listOf("Nearby restaurant", "Nearby shop", "Hospital", "Far hospital"),
+            selected.displayed.map { it.name }
+        )
+        assertEquals(
+            setOf(MapPoiCategoryCatalog.RESTAURANT, MapPoiCategoryCatalog.SHOP, MapPoiCategoryCatalog.HOSPITAL),
+            selected.displayed.mapNotNull { MapPoiCategoryCatalog.categoryForPoi(it.category) }.toSet()
+        )
+    }
+
+    @Test
+    fun customSelectionAppliesRadiusAndMaximumTogether() {
+        val selected = MapPoiSelector(Random(2)).select(
+            origin,
+            listOf(
+                poi(1, "One", "amenity=restaurant", 100.0, 0.0),
+                poi(2, "Two", "amenity=restaurant", 200.0, 90.0),
+                poi(3, "Outside", "amenity=restaurant", 301.0, 180.0),
+                poi(4, "Other category", "amenity=pharmacy", 50.0, 270.0)
+            ),
+            PoiDisplayConfig.custom(setOf(MapPoiCategoryCatalog.RESTAURANT), radiusM = 300, maxResults = 1)
+        )
+
+        assertEquals(listOf("One"), selected.displayed.map { it.name })
+        assertTrue(selected.displayed.all { MapPoiSelector.distanceM(origin, it.point) <= 300.0 })
+    }
+
+    @Test
+    fun customSelectionUsesDeterministicDistanceOrderingForTies() {
+        val first = poi(1, "A", "amenity=restaurant", 100.0, 0.0)
+        val second = poi(2, "B", "amenity=restaurant", 100.0, 180.0)
+        val config = PoiDisplayConfig.custom(setOf(MapPoiCategoryCatalog.RESTAURANT), 500, 2)
+
+        val selectedForward = MapPoiSelector().select(origin, listOf(second, first), config)
+        val selectedReverse = MapPoiSelector().select(origin, listOf(first, second), config)
+
+        assertEquals(selectedForward.displayed.map { it.id }, selectedReverse.displayed.map { it.id })
+    }
+
+    @Test
+    fun customSelectionReturnsEmptyForNoQualifyingResults() {
+        val selected = MapPoiSelector().select(
+            origin,
+            listOf(poi(1, "Far", "amenity=hospital", 2001.0, 0.0)),
+            PoiDisplayConfig.custom(setOf(MapPoiCategoryCatalog.HOSPITAL), 2000, 8)
+        )
+
+        assertTrue(selected.displayed.isEmpty())
+        assertTrue(selected.visibleInMap.isEmpty())
+        assertNull(selected.immediate)
+    }
+
+    @Test
+    fun tweakedDefaultProfileStillSelectsOneNearestImportantMarkerPerRole() {
+        val config = PoiDisplayConfig.DEFAULT.copy(
+            state = PoiDisplayConfigState.CUSTOM,
+            mode = PoiDisplayMode.DEFAULT,
+            importantCategories = setOf(MapPoiCategoryCatalog.STATION, MapPoiCategoryCatalog.HOSPITAL),
+            importantRadiiM = mapOf(
+                MapPoiCategoryCatalog.STATION to 7_000,
+                MapPoiCategoryCatalog.HOSPITAL to 1_000
+            ),
+            normalCategories = setOf(MapPoiCategoryCatalog.CAFE),
+            normalMaxResults = 0,
+            showClosest = false
+        )
+        val selected = MapPoiSelector().select(
+            origin,
+            listOf(
+                poi(1, "Station", "railway=station", 6_000.0, 0.0),
+                poi(2, "Hospital", "amenity=hospital", 900.0, 90.0),
+                poi(3, "Far hospital", "amenity=hospital", 1_100.0, 180.0),
+                poi(4, "Cafe", "amenity=cafe", 20.0, 270.0)
+            ),
+            config,
+            160f
+        )
+
+        assertEquals(setOf("Station", "Hospital"), selected.important.mapNotNull { it.name }.toSet())
+        assertTrue(selected.midRange.isEmpty())
+        assertNull(selected.immediate)
+    }
+
+    @Test
+    fun nearestModeUsesPureDistanceOrder() {
+        val selected = MapPoiSelector().select(
+            origin,
+            listOf(
+                poi(1, "Restaurant", "amenity=restaurant", 100.0, 0.0),
+                poi(2, "Shop", "shop=clothes", 200.0, 90.0),
+                poi(3, "Hospital", "amenity=hospital", 1_000.0, 180.0)
+            ),
+            PoiDisplayConfig.nearest(
+                setOf(MapPoiCategoryCatalog.RESTAURANT, MapPoiCategoryCatalog.SHOP, MapPoiCategoryCatalog.HOSPITAL),
+                radiusM = 1_200,
+                maxResults = 2
+            )
+        )
+
+        assertEquals(listOf("Restaurant", "Shop"), selected.displayed.map { it.name })
+        assertEquals(PoiDisplayMode.NEAREST, PoiDisplayConfig.nearest(setOf(MapPoiCategoryCatalog.CAFE), 500, 1).mode)
+    }
+
+    @Test
+    fun nearestModeKeepsASelectedPoiOutsideTheCurrentZoomForDirectionalRendering() {
+        val supermarket = poi(1, "Five kilometre supermarket", "shop=supermarket", 4_900.0, 45.0)
+        val selected = MapPoiSelector().select(
+            origin,
+            listOf(supermarket),
+            PoiDisplayConfig.nearest(setOf(MapPoiCategoryCatalog.SUPERMARKET), radiusM = 5_000, maxResults = 1)
+        )
+
+        assertEquals(listOf(supermarket), selected.displayed)
+        assertEquals(supermarket, selected.immediate)
+    }
+
     private fun poi(id: Long, name: String, category: String, distanceM: Double, bearingDeg: Double): MapPoi {
         val angular = distanceM / 6_371_000.0
         val bearing = Math.toRadians(bearingDeg)

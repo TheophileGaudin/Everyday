@@ -13,6 +13,8 @@ import android.util.Log
 import com.everyday.shared.sync.NewsArticle
 import com.everyday.shared.sync.NewsDataProvider
 import com.everyday.shared.sync.NewsSnapshot
+import com.everyday.shared.sync.NewsSourceKind
+import com.everyday.shared.sync.NewsSourceSpec
 import java.util.Locale
 
 /**
@@ -26,7 +28,8 @@ import java.util.Locale
  * - Auto-switches current displayed item every 60s (paused in fullscreen)
  * - Left/right overlay arrows on hover for previous/next item navigation
  * - Header and status chrome only appear on hover
- * - Double-tap opens the font-size popup in windowed mode, and exits fullscreen when expanded
+ * - Double-tap opens the combined font/source options panel in windowed mode, and exits
+ *   fullscreen when expanded
  */
 class NewsWidget(
     x: Float,
@@ -57,6 +60,13 @@ class NewsWidget(
         private const val FONT_MENU_WIDTH = 178f
         private const val FONT_MENU_HEIGHT = 58f
         private const val FONT_MENU_BUTTON_SIZE = 40f
+        private const val OPTIONS_PANEL_WIDTH = 390f
+        private const val OPTIONS_PANEL_MIN_HEIGHT = 246f
+        private const val OPTIONS_PANEL_MAX_HEIGHT = 300f
+        private const val OPTIONS_ROW_HEIGHT = 34f
+        private const val OPTIONS_BUTTON_HEIGHT = 28f
+        private const val SOURCE_INPUT_MAX_LENGTH = 512
+        private const val FULLSCREEN_OPTIONS_SIZE = 44f
     }
 
     private data class FullscreenLayout(
@@ -69,6 +79,7 @@ class NewsWidget(
 
     private enum class ArrowDirection { LEFT, RIGHT }
     private enum class FontMenuAction { DECREASE, INCREASE }
+    private enum class SourcePanelField { QUERY, CUSTOM_RSS }
 
     // ==================== Widget State ====================
 
@@ -80,6 +91,9 @@ class NewsWidget(
     private var currentIndex = 0
 
     private var currentCountryCode = NewsDataProvider.defaultCountryCode()
+    private var sourceSpec: NewsSourceSpec = NewsSourceSpec.DEFAULT_LOCATION
+    private var pendingSourceSpec: NewsSourceSpec? = null
+    private var pendingSourceCompletion: ((Result<NewsSnapshot>) -> Unit)? = null
     private val dataState = WidgetDataState(
         loadingText = "Loading news...",
         emptyText = "No news"
@@ -94,6 +108,14 @@ class NewsWidget(
 
     var onStateChanged: (() -> Unit)? = null
     var onDataRequested: ((countryCode: String, force: Boolean, reason: String) -> Unit)? = null
+    var onSourceDataRequested: ((
+        sourceSpec: NewsSourceSpec,
+        countryCode: String,
+        force: Boolean,
+        reason: String,
+        completion: (Result<NewsSnapshot>) -> Unit
+    ) -> Unit)? = null
+    var onSourceInputFocusChanged: ((Boolean) -> Unit)? = null
 
     // Overlay arrows
     private val leftArrowBounds = RectF()
@@ -105,6 +127,18 @@ class NewsWidget(
     private val increaseFontBounds = RectF()
     private var showFontMenu = false
     private var hoveredFontMenuAction: FontMenuAction? = null
+    private val sourcePanelBounds = RectF()
+    private val defaultSourceBounds = RectF()
+    private val querySourceBounds = RectF()
+    private val customRssSourceBounds = RectF()
+    private val applySourceBounds = RectF()
+    private val cancelSourceBounds = RectF()
+    private val fullscreenOptionsBounds = RectF()
+    private var showSourcePanel = false
+    private var sourcePanelField: SourcePanelField? = null
+    private var sourcePanelQuery = ""
+    private var sourcePanelCustomRss = ""
+    private var sourcePanelError: String? = null
 
     // ==================== Paints ====================
 
@@ -224,6 +258,64 @@ class NewsWidget(
         textAlign = Paint.Align.CENTER
     }
 
+    private val sourcePanelTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 17f
+        textAlign = Paint.Align.CENTER
+    }
+
+    private val sourcePanelRowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#334A6178")
+        style = Paint.Style.FILL
+    }
+
+    private val sourcePanelRowSelectedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#5578A7D5")
+        style = Paint.Style.FILL
+    }
+
+    private val sourcePanelTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 13f
+    }
+
+    private val sourcePanelSecondaryPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#B0BEC5")
+        textSize = 12f
+    }
+
+    private val sourcePanelErrorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#FFB4AB")
+        textSize = 12f
+    }
+
+    private val sourcePanelButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#405D7A96")
+        style = Paint.Style.FILL
+    }
+
+    private val sourcePanelButtonTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 13f
+        textAlign = Paint.Align.CENTER
+    }
+
+    private val fullscreenOptionsPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#CC111827")
+        style = Paint.Style.FILL
+    }
+
+    private val fullscreenOptionsBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#99AECBFF")
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+    }
+
+    private val fullscreenOptionsIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.FILL
+    }
+
     // ==================== Periodic Tasks ====================
 
     private val switchRunnable = object : Runnable {
@@ -258,6 +350,56 @@ class NewsWidget(
     }
 
     fun getCountryCode(): String = currentCountryCode
+
+    fun getSourceSpec(): NewsSourceSpec = sourceSpec
+
+    /** Restore a persisted source without performing a network request. */
+    fun setSourceSpec(spec: NewsSourceSpec) {
+        pendingSourceCompletion?.invoke(
+            Result.failure(IllegalStateException("News source request was replaced"))
+        )
+        pendingSourceCompletion = null
+        pendingSourceSpec = null
+        sourceSpec = spec
+        sourcePanelError = null
+        onStateChanged?.invoke()
+    }
+
+    /** A compact description used by assistant context and diagnostics. */
+    fun getSourceDescription(): String = sourceSpec.description
+
+    /**
+     * Ask the data coordinator to validate and fetch a new source. The current source remains
+     * active until a non-empty RSS/Atom snapshot is returned successfully.
+     */
+    fun requestSource(spec: NewsSourceSpec, completion: (Result<NewsSnapshot>) -> Unit) {
+        if (spec == sourceSpec && pendingSourceSpec == null) {
+            completion(Result.success(NewsSnapshot(currentCountryCode, newsItems.toList(), sourceSpec = sourceSpec)))
+            if (showSourcePanel) closeSourcePanel()
+            return
+        }
+
+        pendingSourceCompletion?.invoke(
+            Result.failure(IllegalStateException("News source request was replaced"))
+        )
+        pendingSourceSpec = spec
+        pendingSourceCompletion = completion
+        sourcePanelError = null
+        dataState.startLoading(clearError = false)
+        onStateChanged?.invoke()
+
+        val callback: (Result<NewsSnapshot>) -> Unit = { result ->
+            handler.post { finishSourceRequest(spec, result) }
+        }
+        val request = onSourceDataRequested
+        if (request == null) {
+            callback(Result.failure(IllegalStateException("News data service is unavailable")))
+        } else {
+            runCatching {
+                request(spec, currentCountryCode, true, "news_source_changed", callback)
+            }.onFailure { callback(Result.failure(it)) }
+        }
+    }
 
     fun setSelectedIndex(index: Int) {
         if (newsItems.isEmpty()) {
@@ -307,25 +449,42 @@ class NewsWidget(
 
     fun release() = onDestroy()
 
-    fun handleFontMenuTapOrDismiss(px: Float, py: Float): Boolean {
-        if (!showFontMenu) return false
+    fun handleFontMenuTapOrDismiss(px: Float, py: Float): Boolean =
+        handleNewsOptionsTapOrDismiss(px, py)
+
+    fun handleNewsOptionsTapOrDismiss(px: Float, py: Float): Boolean {
+        if (!showSourcePanel) return false
 
         when {
             decreaseFontBounds.contains(px, py) -> setFontScale(fontScale - FONT_SCALE_STEP)
             increaseFontBounds.contains(px, py) -> setFontScale(fontScale + FONT_SCALE_STEP)
-            fontMenuBounds.contains(px, py) -> return true
-            else -> {
-                showFontMenu = false
-                hoveredFontMenuAction = null
-                onStateChanged?.invoke()
-            }
+            defaultSourceBounds.contains(px, py) -> requestSourceFromPanel(NewsSourceSpec.DEFAULT_LOCATION)
+            querySourceBounds.contains(px, py) -> selectSourcePanelField(SourcePanelField.QUERY)
+            customRssSourceBounds.contains(px, py) -> selectSourcePanelField(SourcePanelField.CUSTOM_RSS)
+            applySourceBounds.contains(px, py) -> submitSourcePanelField()
+            cancelSourceBounds.contains(px, py) -> closeSourcePanel()
+            sourcePanelBounds.contains(px, py) -> return true
+            else -> closeSourcePanel()
         }
-
         return true
     }
 
     fun onTap(px: Float, py: Float): Boolean {
-        if (handleFontMenuTapOrDismiss(px, py)) return true
+        if (handleNewsOptionsTapOrDismiss(px, py)) return true
+
+        if (NewsInteractionPolicy.isFullscreenOptionsHit(
+                isFullscreen,
+                px,
+                py,
+                fullscreenOptionsBounds.left,
+                fullscreenOptionsBounds.top,
+                fullscreenOptionsBounds.right,
+                fullscreenOptionsBounds.bottom
+            )
+        ) {
+            openSourcePanel()
+            return true
+        }
 
         if (newsItems.isNotEmpty()) {
             when {
@@ -352,13 +511,11 @@ class NewsWidget(
 
     fun onDoubleTap(px: Float, py: Float): Boolean {
         if (!containsPoint(px, py)) return false
-        if (isFullscreen) {
-            toggleFullscreen()
-            return true
+        when (NewsInteractionPolicy.doubleTapAction(isFullscreen, showSourcePanel)) {
+            NewsDoubleTapAction.EXIT_FULLSCREEN -> toggleFullscreen()
+            NewsDoubleTapAction.CLOSE_SOURCE_PANEL -> closeSourcePanel()
+            NewsDoubleTapAction.OPEN_SOURCE_PANEL -> openSourcePanel()
         }
-        showFontMenu = !showFontMenu
-        hoveredFontMenuAction = null
-        onStateChanged?.invoke()
         return true
     }
 
@@ -372,14 +529,14 @@ class NewsWidget(
     override fun enterFullscreen() {
         super.enterFullscreen()
         contentScrollOffset = 0f
-        showFontMenu = false
+        closeSourcePanel()
         restartSwitchTimer()
     }
 
     override fun exitFullscreen() {
         super.exitFullscreen()
         contentScrollOffset = 0f
-        showFontMenu = false
+        closeSourcePanel()
         restartSwitchTimer()
     }
 
@@ -405,7 +562,7 @@ class NewsWidget(
             else -> null
         }
         hoveredFontMenuAction = when {
-            !showFontMenu -> null
+            !showSourcePanel -> null
             decreaseFontBounds.contains(px, py) -> FontMenuAction.DECREASE
             increaseFontBounds.contains(px, py) -> FontMenuAction.INCREASE
             else -> null
@@ -430,6 +587,7 @@ class NewsWidget(
 
         if (newsItems.isEmpty()) {
             drawCenteredState(canvas)
+            if (isFullscreen) drawFullscreenOptionsButton(canvas)
         } else if (isFullscreen) {
             drawFullscreenContent(canvas)
         } else {
@@ -444,8 +602,8 @@ class NewsWidget(
             drawNavigationArrows(canvas)
         }
 
-        if (showFontMenu) {
-            drawFontMenu(canvas)
+        if (showSourcePanel) {
+            drawSourcePanel(canvas)
         }
     }
 
@@ -498,6 +656,8 @@ class NewsWidget(
         val item = newsItems.getOrNull(currentIndex) ?: return
         val layout = buildFullscreenLayout()
 
+        drawFullscreenOptionsButton(canvas)
+
         val left = contentBounds.left + FULLSCREEN_PADDING
         val top = contentBounds.top + FULLSCREEN_PADDING
         val titleLineHeight = lineHeight(titlePaintFullscreen)
@@ -523,6 +683,17 @@ class NewsWidget(
             drawFullscreenFooter(canvas, item)
         }
         drawBodyScrollbar(canvas, layout)
+    }
+
+    private fun drawFullscreenOptionsButton(canvas: Canvas) {
+        canvas.drawRoundRect(fullscreenOptionsBounds, 10f, 10f, fullscreenOptionsPaint)
+        canvas.drawRoundRect(fullscreenOptionsBounds, 10f, 10f, fullscreenOptionsBorderPaint)
+        val centerX = fullscreenOptionsBounds.centerX()
+        val centerY = fullscreenOptionsBounds.centerY()
+        val dotSpacing = 8f
+        canvas.drawCircle(centerX - dotSpacing, centerY, 3f, fullscreenOptionsIconPaint)
+        canvas.drawCircle(centerX, centerY, 3f, fullscreenOptionsIconPaint)
+        canvas.drawCircle(centerX + dotSpacing, centerY, 3f, fullscreenOptionsIconPaint)
     }
 
     private fun drawFullscreenFooter(canvas: Canvas, item: NewsArticle) {
@@ -611,6 +782,107 @@ class NewsWidget(
         canvas.drawText("+", increaseFontBounds.centerX(), increaseY, fontMenuButtonTextPaint)
     }
 
+    private fun drawSourcePanel(canvas: Canvas) {
+        canvas.drawRoundRect(sourcePanelBounds, 12f, 12f, fontMenuBackgroundPaint)
+        canvas.drawRoundRect(sourcePanelBounds, 12f, 12f, fontMenuBorderPaint)
+
+        val titleY = sourcePanelBounds.top + 22f
+        canvas.drawText("News options", sourcePanelBounds.centerX(), titleY, sourcePanelTitlePaint)
+
+        val fontLabelY = fontMenuBounds.centerY() -
+            (fontMenuLabelPaint.descent() + fontMenuLabelPaint.ascent()) / 2f
+        canvas.drawText("Text ${(fontScale * 100f).toInt()}%", fontMenuBounds.centerX(), fontLabelY, fontMenuLabelPaint)
+        canvas.drawRoundRect(decreaseFontBounds, 8f, 8f, fontMenuButtonPaint)
+        canvas.drawRoundRect(increaseFontBounds, 8f, 8f, fontMenuButtonPaint)
+        val decreaseY = decreaseFontBounds.centerY() -
+            (fontMenuButtonTextPaint.descent() + fontMenuButtonTextPaint.ascent()) / 2f
+        val increaseY = increaseFontBounds.centerY() -
+            (fontMenuButtonTextPaint.descent() + fontMenuButtonTextPaint.ascent()) / 2f
+        canvas.drawText("-", decreaseFontBounds.centerX(), decreaseY, fontMenuButtonTextPaint)
+        canvas.drawText("+", increaseFontBounds.centerX(), increaseY, fontMenuButtonTextPaint)
+
+        drawSourcePanelRow(
+            canvas,
+            defaultSourceBounds,
+            "Default",
+            "Location national + world",
+            sourceSpec.kind == NewsSourceKind.DEFAULT_LOCATION && sourcePanelField == null
+        )
+        drawSourcePanelRow(
+            canvas,
+            querySourceBounds,
+            "Query",
+            sourcePanelQuery.ifBlank { "Tap, then type an intent" },
+            sourcePanelField == SourcePanelField.QUERY ||
+                (sourceSpec.kind == NewsSourceKind.QUERY && sourcePanelField == null)
+        )
+        drawSourcePanelRow(
+            canvas,
+            customRssSourceBounds,
+            "RSS URL",
+            sourcePanelCustomRss.ifBlank { "Tap, then type an RSS/Atom URL" },
+            sourcePanelField == SourcePanelField.CUSTOM_RSS ||
+                (sourceSpec.kind == NewsSourceKind.CUSTOM_RSS && sourcePanelField == null)
+        )
+
+        sourcePanelError?.takeIf { it.isNotBlank() }?.let { error ->
+            canvas.drawText(
+                truncateSourceText(error, sourcePanelBounds.width() - 24f, sourcePanelErrorPaint),
+                sourcePanelBounds.left + 12f,
+                applySourceBounds.top - 8f,
+                sourcePanelErrorPaint
+            )
+        }
+
+        canvas.drawRoundRect(applySourceBounds, 8f, 8f, sourcePanelButtonPaint)
+        canvas.drawRoundRect(cancelSourceBounds, 8f, 8f, sourcePanelButtonPaint)
+        val buttonY = applySourceBounds.centerY() -
+            (sourcePanelButtonTextPaint.descent() + sourcePanelButtonTextPaint.ascent()) / 2f
+        canvas.drawText("Apply", applySourceBounds.centerX(), buttonY, sourcePanelButtonTextPaint)
+        canvas.drawText("Cancel", cancelSourceBounds.centerX(), buttonY, sourcePanelButtonTextPaint)
+    }
+
+    private fun drawSourcePanelRow(
+        canvas: Canvas,
+        bounds: RectF,
+        label: String,
+        value: String,
+        selected: Boolean
+    ) {
+        canvas.drawRoundRect(
+            bounds,
+            8f,
+            8f,
+            if (selected) sourcePanelRowSelectedPaint else sourcePanelRowPaint
+        )
+        val labelY = bounds.centerY() - 3f
+        canvas.drawText(label, bounds.left + 10f, labelY, sourcePanelTextPaint)
+        canvas.drawText(
+            truncateSourceText(value, bounds.width() - 94f, sourcePanelSecondaryPaint),
+            bounds.left + 88f,
+            labelY,
+            sourcePanelSecondaryPaint
+        )
+    }
+
+    private fun truncateSourceTextLegacy(value: String, width: Float, paint: Paint): String {
+        if (paint.measureText(value) <= width) return value
+        var result = value
+        while (result.length > 1 && paint.measureText("$result…") > width) {
+            result = result.dropLast(1)
+        }
+        return "$result…"
+    }
+
+    private fun truncateSourceText(value: String, width: Float, paint: Paint): String {
+        if (paint.measureText(value) <= width) return value
+        var result = value
+        while (result.length > 1 && paint.measureText("$result...") > width) {
+            result = result.dropLast(1)
+        }
+        return "$result..."
+    }
+
     private fun drawArrow(canvas: Canvas, bounds: RectF, direction: ArrowDirection, hovered: Boolean) {
         canvas.drawOval(bounds, if (hovered) arrowBackgroundHoverPaint else arrowBackgroundPaint)
 
@@ -633,6 +905,122 @@ class NewsWidget(
 
     // ==================== Data Application ====================
 
+    private fun finishSourceRequest(
+        requestedSpec: NewsSourceSpec,
+        result: Result<NewsSnapshot>
+    ) {
+        if (pendingSourceSpec != requestedSpec) return
+
+        val completion = pendingSourceCompletion
+        pendingSourceSpec = null
+        pendingSourceCompletion = null
+
+        result.fold(
+            onSuccess = { snapshot ->
+                if (snapshot.sourceSpec != requestedSpec ||
+                    snapshot.countryCode != currentCountryCode ||
+                    snapshot.items.isEmpty()
+                ) {
+                    val failure = IllegalStateException("Feed did not return usable news")
+                    sourcePanelError = failure.message
+                    dataState.markError(failure.message ?: "News source failed", showError = false)
+                    onStateChanged?.invoke()
+                    completion?.invoke(Result.failure(failure))
+                } else {
+                    sourceSpec = requestedSpec
+                    sourcePanelError = null
+                    applySnapshotInternal(snapshot)
+                    closeSourcePanel()
+                    completion?.invoke(Result.success(snapshot))
+                }
+            },
+            onFailure = { failure ->
+                sourcePanelError = failure.message ?: "News source validation failed"
+                dataState.markError(sourcePanelError ?: "News source failed", showError = false)
+                onStateChanged?.invoke()
+                completion?.invoke(Result.failure(failure))
+            }
+        )
+    }
+
+    private fun openSourcePanel() {
+        showFontMenu = false
+        showSourcePanel = true
+        sourcePanelField = null
+        sourcePanelError = null
+        sourcePanelQuery = sourceSpec.intent.orEmpty()
+        sourcePanelCustomRss = sourceSpec.url.orEmpty()
+        onStateChanged?.invoke()
+    }
+
+    private fun closeSourcePanel() {
+        val wasOpen = showSourcePanel || sourcePanelField != null
+        val hadInputFocus = sourcePanelField != null
+        showSourcePanel = false
+        sourcePanelField = null
+        sourcePanelError = null
+        if (hadInputFocus) onSourceInputFocusChanged?.invoke(false)
+        if (wasOpen) onStateChanged?.invoke()
+    }
+
+    private fun selectSourcePanelField(field: SourcePanelField) {
+        sourcePanelField = field
+        sourcePanelError = null
+        onSourceInputFocusChanged?.invoke(true)
+        onStateChanged?.invoke()
+    }
+
+    private fun requestSourceFromPanel(spec: NewsSourceSpec) {
+        sourcePanelField = null
+        onSourceInputFocusChanged?.invoke(false)
+        sourcePanelError = null
+        requestSource(spec) { /* The widget owns the result and keeps failures non-destructive. */ }
+    }
+
+    private fun submitSourcePanelField() {
+        val spec = runCatching {
+            when (sourcePanelField) {
+                SourcePanelField.QUERY -> NewsSourceSpec.QUERY(sourcePanelQuery)
+                SourcePanelField.CUSTOM_RSS -> NewsSourceSpec.CUSTOM_RSS(sourcePanelCustomRss)
+                null -> throw IllegalArgumentException("Choose Query or RSS URL first")
+            }
+        }.getOrElse { failure ->
+            sourcePanelError = failure.message ?: "Enter a news source"
+            onStateChanged?.invoke()
+            return
+        }
+        requestSourceFromPanel(spec)
+    }
+
+    /** Route phone/glasses keyboard input to the active source field. */
+    fun handleSourcePanelKeyPress(key: String): Boolean {
+        if (!showSourcePanel) return false
+        val field = sourcePanelField ?: return true
+        when (key.uppercase(Locale.US)) {
+            "BACKSPACE" -> when (field) {
+                SourcePanelField.QUERY -> sourcePanelQuery = sourcePanelQuery.dropLast(1)
+                SourcePanelField.CUSTOM_RSS -> sourcePanelCustomRss = sourcePanelCustomRss.dropLast(1)
+            }
+            "ENTER", "\n", "\r" -> submitSourcePanelField()
+            "SPACE" -> appendSourcePanelText(" ", field)
+            "SHIFT", "123", "ABC", "=/<" -> return true
+            else -> if (key.length == 1) appendSourcePanelText(key, field)
+        }
+        onStateChanged?.invoke()
+        return true
+    }
+
+    private fun appendSourcePanelText(text: String, field: SourcePanelField) {
+        when (field) {
+            SourcePanelField.QUERY -> {
+                if (sourcePanelQuery.length < SOURCE_INPUT_MAX_LENGTH) sourcePanelQuery += text
+            }
+            SourcePanelField.CUSTOM_RSS -> {
+                if (sourcePanelCustomRss.length < SOURCE_INPUT_MAX_LENGTH) sourcePanelCustomRss += text
+            }
+        }
+    }
+
     fun requestData(force: Boolean, reason: String) {
         dataState.startLoading(clearError = newsItems.isEmpty())
         onStateChanged?.invoke()
@@ -643,6 +1031,13 @@ class NewsWidget(
         if (snapshot.countryCode != currentCountryCode) {
             return
         }
+        if (snapshot.sourceSpec != sourceSpec) {
+            return
+        }
+        applySnapshotInternal(snapshot)
+    }
+
+    private fun applySnapshotInternal(snapshot: NewsSnapshot) {
         val previousLink = newsItems.getOrNull(currentIndex)?.link
         newsItems.clear()
         newsItems.addAll(snapshot.items)
@@ -679,27 +1074,80 @@ class NewsWidget(
             cy + arrowSize / 2f
         )
 
-        val menuLeft = contentBounds.centerX() - FONT_MENU_WIDTH / 2f
-        val menuTop = contentBounds.top + WINDOW_PADDING + 6f
+        val panelWidth = minOf(
+            OPTIONS_PANEL_WIDTH,
+            (contentBounds.width() - 8f).coerceAtLeast(160f)
+        )
+        val panelHeight = minOf(
+            OPTIONS_PANEL_MAX_HEIGHT,
+            maxOf(OPTIONS_PANEL_MIN_HEIGHT, contentBounds.height() - 4f)
+        )
+        val panelLeft = contentBounds.centerX() - panelWidth / 2f
+        val panelTop = contentBounds.centerY() - panelHeight / 2f
+        sourcePanelBounds.set(panelLeft, panelTop, panelLeft + panelWidth, panelTop + panelHeight)
+
+        val menuWidth = minOf(FONT_MENU_WIDTH, panelWidth - 20f)
+        val menuLeft = sourcePanelBounds.centerX() - menuWidth / 2f
+        val menuTop = sourcePanelBounds.top + 31f
         fontMenuBounds.set(
             menuLeft,
             menuTop,
-            menuLeft + FONT_MENU_WIDTH,
-            menuTop + FONT_MENU_HEIGHT
+            menuLeft + menuWidth,
+            menuTop + OPTIONS_BUTTON_HEIGHT
         )
 
-        val buttonTop = fontMenuBounds.centerY() - FONT_MENU_BUTTON_SIZE / 2f
+        val buttonSize = (OPTIONS_BUTTON_HEIGHT - 4f).coerceAtLeast(20f)
+        val buttonTop = fontMenuBounds.centerY() - buttonSize / 2f
         decreaseFontBounds.set(
-            fontMenuBounds.left + 10f,
+            fontMenuBounds.left + 6f,
             buttonTop,
-            fontMenuBounds.left + 10f + FONT_MENU_BUTTON_SIZE,
-            buttonTop + FONT_MENU_BUTTON_SIZE
+            fontMenuBounds.left + 6f + buttonSize,
+            buttonTop + buttonSize
         )
         increaseFontBounds.set(
-            fontMenuBounds.right - 10f - FONT_MENU_BUTTON_SIZE,
+            fontMenuBounds.right - 6f - buttonSize,
             buttonTop,
-            fontMenuBounds.right - 10f,
-            buttonTop + FONT_MENU_BUTTON_SIZE
+            fontMenuBounds.right - 6f,
+            buttonTop + buttonSize
+        )
+
+        val rowLeft = sourcePanelBounds.left + 10f
+        val rowRight = sourcePanelBounds.right - 10f
+        val firstRowTop = fontMenuBounds.bottom + 8f
+        defaultSourceBounds.set(rowLeft, firstRowTop, rowRight, firstRowTop + OPTIONS_ROW_HEIGHT)
+        querySourceBounds.set(
+            rowLeft,
+            defaultSourceBounds.bottom + 4f,
+            rowRight,
+            defaultSourceBounds.bottom + 4f + OPTIONS_ROW_HEIGHT
+        )
+        customRssSourceBounds.set(
+            rowLeft,
+            querySourceBounds.bottom + 4f,
+            rowRight,
+            querySourceBounds.bottom + 4f + OPTIONS_ROW_HEIGHT
+        )
+
+        val buttonTopSource = sourcePanelBounds.bottom - OPTIONS_BUTTON_HEIGHT - 10f
+        val buttonWidth = 86f.coerceAtMost((panelWidth - 30f) / 2f)
+        applySourceBounds.set(
+            sourcePanelBounds.right - buttonWidth - 10f,
+            buttonTopSource,
+            sourcePanelBounds.right - 10f,
+            buttonTopSource + OPTIONS_BUTTON_HEIGHT
+        )
+        cancelSourceBounds.set(
+            applySourceBounds.left - 8f - buttonWidth,
+            buttonTopSource,
+            applySourceBounds.left - 8f,
+            buttonTopSource + OPTIONS_BUTTON_HEIGHT
+        )
+
+        fullscreenOptionsBounds.set(
+            contentBounds.right - FULLSCREEN_OPTIONS_SIZE - 8f,
+            contentBounds.top + 8f,
+            contentBounds.right - 8f,
+            contentBounds.top + 8f + FULLSCREEN_OPTIONS_SIZE
         )
     }
 

@@ -11,11 +11,14 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
@@ -39,7 +42,12 @@ import androidx.core.content.ContextCompat
 import com.everyday.shared.sync.SubtitleControl
 import com.everyday.shared.sync.SubtitleControlAction
 import com.everyday.shared.sync.SubtitleOptions
+import com.everyday.shared.transport.AssistantControl
+import com.everyday.shared.transport.AssistantControlAction
+import com.everyday.shared.transport.AssistantSessionState
+import com.everyday.shared.transport.AssistantStatus
 import java.io.ByteArrayOutputStream
+import java.util.UUID
 
 /**
  * Phone app with trackpad for cursor control on glasses.
@@ -64,6 +72,7 @@ class MainActivity : AppCompatActivity() {
         private const val REQUEST_SUBTITLE_AUDIO_PERMISSION = 2004
         private const val PREFS_NAME = "everyday_phone"
         private const val KEY_NOTIFICATION_ACCESS_PROMPT_DISMISSED = "notification_access_prompt_dismissed"
+        private const val ASSISTANT_RELEASE_TIMEOUT_MS = 4_000L
     }
 
     private enum class ProjectionPurpose {
@@ -88,8 +97,27 @@ class MainActivity : AppCompatActivity() {
     private lateinit var openOnGlassesButton: ImageButton
     private var mirrorButton: Button? = null
     private var imagePickerButton: Button? = null
+    private lateinit var assistantPushToTalkButton: Button
+    private val assistantHandler = Handler(Looper.getMainLooper())
+    private var assistantStatus: AssistantStatus? = null
+    private var assistantSessionId: String? = null
+    private var assistantStopPendingSessionId: String? = null
+    private var assistantStopTimeout: Runnable? = null
+    private val assistantKeepalive = object : Runnable {
+        override fun run() {
+            val id = assistantSessionId ?: return
+            if (sendAssistantControl(id, AssistantControlAction.KEEPALIVE)) {
+                assistantHandler.postDelayed(this, 2_000L)
+            } else {
+                fileLog("Assistant keepalive could not be sent; resetting local push-to-talk state")
+                cancelAssistantPushToTalk()
+            }
+        }
+    }
     private lateinit var phoneGoogleAuthManager: PhoneGoogleAuthManager
     private lateinit var dataSyncCoordinator: PhoneDataSyncCoordinator
+    private lateinit var phoneRouteCoordinator: PhoneRouteCalculationCoordinator
+    private lateinit var phoneDestinationSearchCoordinator: PhoneDestinationSearchCoordinator
     
     private var rfcommServer: RfcommServer? = null
     private lateinit var transportManager: TransportManager
@@ -172,6 +200,7 @@ class MainActivity : AppCompatActivity() {
         closeButton = findViewById(R.id.closeButton)
         linkInput = findViewById(R.id.linkInput)
         openOnGlassesButton = findViewById(R.id.openOnGlassesButton)
+        assistantPushToTalkButton = findViewById(R.id.assistantPushToTalkButton)
 
         transportManager = TransportManager(
             rfcommServerProvider = { rfcommServer },
@@ -182,10 +211,18 @@ class MainActivity : AppCompatActivity() {
 
         dataSyncCoordinator = PhoneDataSyncCoordinator(
             context = this,
-            syncMessengerProvider = { transportManager },
-            googleAuthStateSender = { state -> transportManager.sendGoogleAuthState(state) },
+            syncMessengerProvider = { rfcommServer },
+            googleAuthStateSender = { state ->
+                rfcommServer?.sendGoogleAuthState(state.status, state.account, state.detail)
+            },
             googleAuthManager = phoneGoogleAuthManager,
             hasLocationPermission = { hasLocationPermission() }
+        )
+        phoneRouteCoordinator = PhoneRouteCalculationCoordinator(
+            transportProvider = { rfcommServer }
+        )
+        phoneDestinationSearchCoordinator = PhoneDestinationSearchCoordinator(
+            transportProvider = { rfcommServer }
         )
 
         setupRefreshButton()
@@ -204,6 +241,8 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             onConnectionChanged = { connected ->
+                phoneRouteCoordinator.onConnectionChanged(connected)
+                phoneDestinationSearchCoordinator.onConnectionChanged(connected)
                 // Connection and location/sync startup must not wait for a
                 // potentially busy UI thread.  The foreground service is what
                 // keeps live phone location available behind the lock screen.
@@ -215,6 +254,7 @@ class MainActivity : AppCompatActivity() {
                     if (!connected) {
                         glassesBatteryPercent = null
                         lastSentClipboard = null  // Reset on disconnect
+                        assistantStatus = null
                     } else {
                         // Also send current clipboard so glasses have it
                         sendCurrentClipboardToGlasses()
@@ -225,6 +265,8 @@ class MainActivity : AppCompatActivity() {
                     updateMirrorButton()
                     updateImagePickerButton()
                     updateOpenOnGlassesButton()
+                    if (!connected) cancelAssistantPushToTalk()
+                    updateAssistantPushToTalk()
 
                     if (!connected) {
                         hideKeyboard()
@@ -282,14 +324,35 @@ class MainActivity : AppCompatActivity() {
             }
 
             onSyncRequested = { request ->
-                Thread {
-                    dataSyncCoordinator.onSyncRequest(request)
-                }.start()
+                dataSyncCoordinator.onSyncRequest(request)
             }
+
+            onRouteRequestReceived = phoneRouteCoordinator::onRouteRequest
+            onRouteCancellationReceived = phoneRouteCoordinator::onRouteCancellation
+            onDestinationSearchRequestReceived = phoneDestinationSearchCoordinator::onSearchRequest
+            onDestinationSearchCancellationReceived = phoneDestinationSearchCoordinator::onSearchCancellation
 
             onSubtitleControlRequested = { control ->
                 runOnUiThread {
                     phoneSubtitleCoordinator?.onControl(control)
+                }
+            }
+            onAssistantStatusReceived = { status ->
+                runOnUiThread {
+                    assistantStatus = status
+                    if (status.sessionId == assistantSessionId && status.state != AssistantSessionState.LISTENING) {
+                        assistantHandler.removeCallbacks(assistantKeepalive)
+                        assistantSessionId = null
+                    }
+                    val pendingStop = assistantStopPendingSessionId
+                    if (
+                        pendingStop != null &&
+                        status.state != AssistantSessionState.LISTENING &&
+                        (status.sessionId == pendingStop || status.state == AssistantSessionState.IDLE)
+                    ) {
+                        clearAssistantStopPending(pendingStop)
+                    }
+                    updateAssistantPushToTalk()
                 }
             }
         }
@@ -344,6 +407,7 @@ class MainActivity : AppCompatActivity() {
         setupKeyboard()
         setupImagePickerButton()
         setupMirrorButton()
+        setupAssistantPushToTalk()
         setupClipboardMonitoring()
         
         if (hasPermissions()) {
@@ -614,6 +678,7 @@ class MainActivity : AppCompatActivity() {
     }
     
     override fun onDestroy() {
+        cancelAssistantPushToTalk()
         super.onDestroy()
         fileLog("MainActivity onDestroy isFinishing=$isFinishing isChangingConfigurations=$isChangingConfigurations")
 
@@ -621,6 +686,12 @@ class MainActivity : AppCompatActivity() {
         clipboardManager?.removePrimaryClipChangedListener(clipboardListener)
 
         rfcommServer?.stop()
+        if (::phoneRouteCoordinator.isInitialized) {
+            phoneRouteCoordinator.release()
+        }
+        if (::phoneDestinationSearchCoordinator.isInitialized) {
+            phoneDestinationSearchCoordinator.release()
+        }
         phoneSubtitleCoordinator?.release()
         screenStreamServer?.release()
         wifiDirectManager?.release()
@@ -1078,6 +1149,161 @@ class MainActivity : AppCompatActivity() {
             alpha = if (isGlassesConnected) 1.0f else 0.5f
         }
     }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupAssistantPushToTalk() {
+        assistantPushToTalkButton.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (!assistantPushToTalkButton.isEnabled) return@setOnTouchListener false
+                    if (assistantSessionId == null) {
+                        val id = UUID.randomUUID().toString()
+                        assistantSessionId = id
+                        val sent = sendAssistantControl(id, AssistantControlAction.START)
+                        if (sent) {
+                            assistantHandler.postDelayed(assistantKeepalive, 2_000L)
+                        } else {
+                            fileLog("Assistant start was not delivered; clearing local session=$id")
+                            assistantSessionId = null
+                        }
+                        updateAssistantPushToTalk()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    finishAssistantPushToTalk(AssistantControlAction.STOP)
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    finishAssistantPushToTalk(AssistantControlAction.CANCEL)
+                    true
+                }
+                else -> true
+            }
+        }
+        updateAssistantPushToTalk()
+    }
+
+    private fun sendAssistantControl(sessionId: String, action: AssistantControlAction): Boolean {
+        val sent = rfcommServer?.sendAssistantControl(
+            AssistantControl(sessionId, action, System.currentTimeMillis())
+        ) == true
+        if (action != AssistantControlAction.KEEPALIVE) {
+            fileLog(
+                "Assistant control TX action=${action.wireName} session=$sessionId " +
+                    "sent=$sent connected=$isGlassesConnected"
+            )
+        }
+        return sent
+    }
+
+    /**
+     * Ends the local gesture immediately, then waits briefly for the glasses to acknowledge the
+     * stop/cancel.  The old implementation kept assistantSessionId until that acknowledgement,
+     * so a lost control or status packet left the button permanently rendered as LISTEN.
+     */
+    private fun finishAssistantPushToTalk(action: AssistantControlAction) {
+        assistantHandler.removeCallbacks(assistantKeepalive)
+        val id = assistantSessionId ?: run {
+            updateAssistantPushToTalk()
+            return
+        }
+
+        assistantSessionId = null
+        assistantStopPendingSessionId = id
+        assistantStopTimeout?.let(assistantHandler::removeCallbacks)
+
+        val sent = sendAssistantControl(id, action)
+        if (!sent) {
+            fileLog("Assistant release was not delivered; clearing pending session=$id")
+            clearAssistantStopPending(id)
+            if (assistantStatus?.sessionId == id && assistantStatus?.state == AssistantSessionState.LISTENING) {
+                assistantStatus = assistantStatus?.copy(
+                    state = AssistantSessionState.IDLE,
+                    sessionId = null,
+                    origin = null,
+                    detail = "Voice control disconnected"
+                )
+            }
+            updateAssistantPushToTalk()
+            return
+        }
+
+        val timeout = Runnable {
+            if (assistantStopPendingSessionId != id) return@Runnable
+            fileLog("Assistant release acknowledgement timed out for session=$id")
+            clearAssistantStopPending(id)
+            if (assistantStatus?.sessionId == id && assistantStatus?.state == AssistantSessionState.LISTENING) {
+                assistantStatus = assistantStatus?.copy(
+                    state = AssistantSessionState.IDLE,
+                    sessionId = null,
+                    origin = null,
+                    detail = "Voice session reset"
+                )
+            }
+            updateAssistantPushToTalk()
+        }
+        assistantStopTimeout = timeout
+        assistantHandler.postDelayed(timeout, ASSISTANT_RELEASE_TIMEOUT_MS)
+        updateAssistantPushToTalk()
+    }
+
+    private fun clearAssistantStopPending(sessionId: String) {
+        if (assistantStopPendingSessionId != sessionId) return
+        assistantStopPendingSessionId = null
+        assistantStopTimeout?.let(assistantHandler::removeCallbacks)
+        assistantStopTimeout = null
+    }
+
+    private fun cancelAssistantPushToTalk() {
+        assistantHandler.removeCallbacks(assistantKeepalive)
+        assistantStopTimeout?.let(assistantHandler::removeCallbacks)
+        val id = assistantSessionId
+        if (id != null && isGlassesConnected) {
+            sendAssistantControl(id, AssistantControlAction.CANCEL)
+        }
+        assistantSessionId = null
+        assistantStopPendingSessionId = null
+        assistantStopTimeout = null
+        updateAssistantPushToTalk()
+    }
+
+    private fun updateAssistantPushToTalk() {
+        if (!::assistantPushToTalkButton.isInitialized) return
+        val remote = assistantStatus
+        // Keep the view enabled for the lifetime of our own gesture. Disabling a pressed Android
+        // view when LISTENING arrives prevents it from receiving ACTION_UP, which would strand the
+        // glasses recorder in listening mode while keepalives continue indefinitely.
+        val waitingForRelease = assistantStopPendingSessionId != null
+        val enabled = assistantSessionId != null ||
+            (!waitingForRelease && isGlassesConnected && remote?.ready == true && remote.state == AssistantSessionState.IDLE)
+        assistantPushToTalkButton.isEnabled = enabled
+        assistantPushToTalkButton.alpha = if (enabled) 1f else .5f
+        val state = when {
+            assistantSessionId != null -> AssistantSessionState.LISTENING
+            waitingForRelease -> AssistantSessionState.PROCESSING
+            !isGlassesConnected -> null
+            remote?.state == AssistantSessionState.LISTENING -> AssistantSessionState.LISTENING
+            remote?.state == AssistantSessionState.PROCESSING -> AssistantSessionState.PROCESSING
+            else -> remote?.state
+        }
+        val color = when (state) {
+            AssistantSessionState.LISTENING -> Color.rgb(210, 45, 45)
+            AssistantSessionState.PROCESSING -> Color.rgb(224, 148, 20)
+            AssistantSessionState.SUCCESS -> Color.rgb(45, 170, 90)
+            AssistantSessionState.ERROR -> Color.rgb(190, 65, 65)
+            else -> Color.rgb(90, 90, 90)
+        }
+        assistantPushToTalkButton.backgroundTintList = android.content.res.ColorStateList.valueOf(color)
+        val presentation = assistantPushToTalkPresentation(state)
+        assistantPushToTalkButton.text = presentation.label
+        assistantPushToTalkButton.setCompoundDrawablesWithIntrinsicBounds(
+            0,
+            if (presentation.showVoiceIcon) R.drawable.ic_voice_speaking else 0,
+            0,
+            0
+        )
+    }
     
     private fun toggleMirroring() {
         if (isMirroringEnabled) {
@@ -1251,7 +1477,7 @@ class MainActivity : AppCompatActivity() {
         
         val clipboardText = getClipboardText()
         if (clipboardText != null && clipboardText != lastSentClipboard) {
-            fileLog("Clipboard changed, sending to glasses: ${clipboardText.take(50)}...")
+            fileLog("Clipboard changed, sending to glasses: characters=${clipboardText.length}")
             lastSentClipboard = clipboardText
             rfcommServer?.sendClipboardUpdate(clipboardText)
             
@@ -1272,7 +1498,7 @@ class MainActivity : AppCompatActivity() {
         val clipboardText = getClipboardText()
         if (clipboardText != null) {
             // Always send when requested, even if same as last sent
-            fileLog("Sending current clipboard on request: ${clipboardText.take(50)}...")
+            fileLog("Sending current clipboard on request: characters=${clipboardText.length}")
             lastSentClipboard = clipboardText
             rfcommServer?.sendClipboardUpdate(clipboardText)
         }

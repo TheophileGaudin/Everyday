@@ -5,10 +5,11 @@ import org.json.JSONObject
 
 class SyncSnapshotStore(context: Context) : SyncSnapshotCache {
     companion object {
-        private const val PREFS_NAME = "sync_snapshots"
+        private const val PREFS_NAME = "sync_snapshots_v2"
     }
 
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val cacheLock = Any()
 
     // In-memory cache keyed by channel. A channel present in [loaded] has been
@@ -36,9 +37,11 @@ class SyncSnapshotStore(context: Context) : SyncSnapshotCache {
 
     // ==================== Typed accessors ====================
 
-    fun saveLocationWeather(snapshot: LocationWeatherSnapshot) = storeValue(SyncProtocol.LOCATION_WEATHER_CODEC, snapshot)
-    fun loadLocationWeather(): LocationWeatherSnapshot? =
-        loadValue(SyncProtocol.LOCATION_WEATHER_CODEC) as LocationWeatherSnapshot?
+    fun saveLocation(snapshot: LocationFix) = storeValue(SyncProtocol.LOCATION_CODEC, snapshot)
+    fun loadLocation(): LocationFix? = loadValue(SyncProtocol.LOCATION_CODEC) as LocationFix?
+
+    fun saveWeather(snapshot: WeatherSnapshot) = storeValue(SyncProtocol.WEATHER_CODEC, snapshot)
+    fun loadWeather(): WeatherSnapshot? = loadValue(SyncProtocol.WEATHER_CODEC) as WeatherSnapshot?
 
     fun saveCalendar(snapshot: CalendarSnapshot) = storeValue(SyncProtocol.CALENDAR_CODEC, snapshot)
     fun loadCalendar(): CalendarSnapshot? = loadValue(SyncProtocol.CALENDAR_CODEC) as CalendarSnapshot?

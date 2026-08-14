@@ -3,9 +3,11 @@ package com.everyday.everyday_glasses
 import com.everyday.shared.sync.PhoneNotificationItem
 import com.everyday.shared.sync.PhoneNotificationsSnapshot
 import com.everyday.shared.sync.SyncChannel
-import com.everyday.shared.sync.SyncProtocol
 import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot
+import com.everyday.shared.transport.TransportDecodeResult
+import com.everyday.shared.transport.TransportMessage
+import com.everyday.shared.transport.TransportProtocol
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -35,19 +37,23 @@ class NotificationSyncProtocolTest {
             )
         )
 
-        val decoded = SyncProtocol.decodeSnapshot(SyncProtocol.encodeSnapshot(snapshot))
+        val decoded = (TransportProtocol.decode(
+            TransportProtocol.encode(TransportMessage.SyncSnapshotMessage(snapshot))
+        ) as TransportDecodeResult.Success).message as TransportMessage.SyncSnapshotMessage
 
-        assertEquals(snapshot.notifications, decoded?.notifications)
-        assertFalse(decoded?.isEmpty ?: true)
+        assertEquals(snapshot.notifications, decoded.snapshot.notifications)
+        assertFalse(decoded.snapshot.isEmpty)
     }
 
     @Test
     fun `notification channel decodes in sync requests`() {
         val request = SyncRequest(channels = setOf(SyncChannel.NOTIFICATIONS), reason = "test")
 
-        val decoded = SyncProtocol.decodeRequest(SyncProtocol.encodeRequest(request))
+        val decoded = (TransportProtocol.decode(
+            TransportProtocol.encode(TransportMessage.SyncRequestMessage(request))
+        ) as TransportDecodeResult.Success).message as TransportMessage.SyncRequestMessage
 
-        assertEquals(setOf(SyncChannel.NOTIFICATIONS), decoded?.channels)
-        assertTrue(decoded?.channels?.contains(SyncChannel.NOTIFICATIONS) == true)
+        assertEquals(setOf(SyncChannel.NOTIFICATIONS), decoded.request.channels)
+        assertTrue(decoded.request.channels.contains(SyncChannel.NOTIFICATIONS))
     }
 }

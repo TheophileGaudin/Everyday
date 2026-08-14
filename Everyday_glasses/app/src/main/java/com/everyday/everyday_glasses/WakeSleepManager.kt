@@ -55,6 +55,7 @@ class WakeSleepManager(
     // Handler for timeout management
     private val handler = Handler(Looper.getMainLooper())
     private var sleepRunnable: Runnable? = null
+    private var keepAwake = false
     
     // Callback to check if there are any pinned widgets
     // This is used to determine if SLEEP mode has any visible content
@@ -74,6 +75,17 @@ class WakeSleepManager(
         if (_state == DisplayState.WAKE) {
             // Reset the sleep timer
             resetSleepTimer()
+        }
+    }
+
+    /** Prevent the app's own ten-second sleep state while visible media is active. */
+    fun setKeepAwake(enabled: Boolean) {
+        if (keepAwake == enabled) return
+        keepAwake = enabled
+        if (enabled) {
+            if (_state != DisplayState.WAKE) transitionTo(DisplayState.WAKE) else cancelSleepTimer()
+        } else if (_state == DisplayState.WAKE) {
+            startSleepTimer()
         }
     }
     
@@ -155,6 +167,7 @@ class WakeSleepManager(
      */
     private fun startSleepTimer() {
         cancelSleepTimer()
+        if (keepAwake) return
         
         sleepRunnable = Runnable {
             Log.d(TAG, "Sleep timer expired after ${sleepTimeoutMs}ms")

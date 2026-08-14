@@ -1,0 +1,14 @@
+New feature
+
+Added voice control agent
+
+Improvement
+
+Completed port of x3player in file browser
+
+Plans
+
+=> Improve agent
+=> Turn by turn navigation
+=> configurable POI
+=> configurable RSS feed

@@ -7,17 +7,41 @@ import java.net.URLEncoder
 
 /** Phone-side OSM proxy for glasses that have Bluetooth but no direct internet. */
 object MapDataProvider {
-    fun fetch(lat: Double, lon: Double): MapSnapshot {
-        val q = """
-            [out:json][timeout:12];
-            (way(around:400,$lat,$lon)["highway"]["highway"!~"construction|proposed|platform|corridor|elevator"];);out geom;
-            (nw(around:8000,$lat,$lon)["railway"="station"];
+    fun fetch(
+        lat: Double,
+        lon: Double,
+        poiMode: String? = null,
+        poiCategories: Set<String> = emptySet(),
+        poiRadiusM: Int? = null,
+        importantCategories: Set<String> = emptySet(),
+        importantRadiiM: Map<String, Int> = emptyMap(),
+        normalCategories: Set<String> = emptySet()
+    ): MapSnapshot {
+        val poiQuery = if (poiMode.equals("DEFAULT", ignoreCase = true) &&
+            (importantCategories.isNotEmpty() || normalCategories.isNotEmpty())
+        ) {
+            buildDefaultPoiQuery(lat, lon, importantCategories, importantRadiiM, normalCategories)
+        } else if (poiCategories.isNotEmpty() && poiRadiusM != null) {
+            poiCategories.sorted().mapNotNull { category ->
+                val selector = selectorFor(category)
+                selector?.let { "nw(around:$poiRadiusM,$lat,$lon)$it;" }
+            }.joinToString("\n")
+        } else {
+            // Keep the phone proxy's default request aligned with the legacy glasses query.
+            """
+             nw(around:8000,$lat,$lon)["railway"="station"];
              nw(around:1700,$lat,$lon)["shop"="supermarket"];
              nw(around:1700,$lat,$lon)["amenity"~"^(kindergarten|school|college|university)${'$'}"];
              nw(around:400,$lat,$lon)["amenity"~"^(hospital|police|bus_station|ferry_terminal|place_of_worship|cafe|restaurant|pharmacy|fuel|library|marketplace)${'$'}"];
              nw(around:400,$lat,$lon)["historic"~"^(cathedral|church|monument|castle)${'$'}"];
              nw(around:400,$lat,$lon)["shop"];
              nw(around:400,$lat,$lon)["tourism"~"^(museum|attraction|viewpoint)${'$'}"];
+            """.trimIndent()
+        }
+        val q = """
+            [out:json][timeout:12];
+            (way(around:400,$lat,$lon)["highway"]["highway"!~"construction|proposed|platform|corridor|elevator"];);out geom;
+            ($poiQuery
             );out center;
         """.trimIndent()
         var failure: Throwable? = null
@@ -26,6 +50,46 @@ object MapDataProvider {
         }
         throw failure ?: IllegalStateException("No Overpass endpoint")
     }
+
+    private fun buildDefaultPoiQuery(
+        lat: Double,
+        lon: Double,
+        importantCategories: Set<String>,
+        importantRadiiM: Map<String, Int>,
+        normalCategories: Set<String>
+    ): String {
+        val queries = buildList {
+            importantCategories.sorted().forEach { category ->
+                selectorFor(category)?.let { selector ->
+                    val radius = importantRadiiM[category] ?: DEFAULT_IMPORTANT_RADIUS_M
+                    add("nw(around:$radius,$lat,$lon)$selector;")
+                }
+            }
+            normalCategories.sorted().forEach { category ->
+                selectorFor(category)?.let { selector ->
+                    add("nw(around:$DEFAULT_NORMAL_RADIUS_M,$lat,$lon)$selector;")
+                }
+            }
+        }
+        return queries.takeIf { it.isNotEmpty() }?.joinToString("\n")
+            ?: "nw(around:1,$lat,$lon)[\"__everyday_no_poi__\"];"
+    }
+
+    private fun selectorFor(category: String): String? = when (category) {
+        "station" -> "[\"railway\"=\"station\"]"
+        "supermarket" -> "[\"shop\"=\"supermarket\"]"
+        "school" -> "[\"amenity\"~\"^(kindergarten|school|college|university)${'$'}\"]"
+        "hospital", "police", "bus_station", "ferry_terminal", "place_of_worship",
+        "cafe", "restaurant", "pharmacy", "fuel", "library", "marketplace" ->
+            "[\"amenity\"=\"$category\"]"
+        "shop" -> "[\"shop\"]"
+        "tourism" -> "[\"tourism\"]"
+        "historic" -> "[\"historic\"]"
+        else -> null
+    }
+
+    private const val DEFAULT_NORMAL_RADIUS_M = 400
+    private const val DEFAULT_IMPORTANT_RADIUS_M = 1_609
 
     private fun post(endpoint: String, query: String): JSONObject {
         val con = URL(endpoint).openConnection() as HttpURLConnection

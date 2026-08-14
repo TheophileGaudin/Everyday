@@ -536,6 +536,24 @@ class TextBoxWidget(
         clearSelection()
         updateTextLayout()
     }
+
+    /**
+     * Set assistant-authored content directly. This intentionally bypasses [onKeyPress] so a
+     * factual answer is not treated as simulated user typing and does not depend on focus.
+     */
+    fun setAssistantContent(newText: String) {
+        richText = SpannableStringBuilder(newText)
+        cursorPosition = richText.length
+        isSelecting = false
+        clearSelection()
+        activeBold = false
+        activeItalic = false
+        activeUnderline = false
+        horizontalScrollOffset = 0f
+        scrollOffset = 0f
+        updateTextLayout()
+        onStateChanged?.invoke(state)
+    }
     
     fun setHtmlContent(html: String) {
         try {

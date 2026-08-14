@@ -30,6 +30,7 @@ import android.widget.FrameLayout
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.net.URLEncoder
 
 /**
@@ -209,6 +210,217 @@ class BrowserWidget(
     fun getWebView(): WebView? = webView
 
     fun getUrl(): String? = webView?.url ?: currentTab()?.url
+
+    fun getTitle(): String? = webView?.title ?: currentTab()?.title
+
+    /** Active tab identity used when binding a Page Agent run. */
+    fun pageAgentActiveTabId(): Int? = currentTab()?.id
+
+    /** True only while this exact tab and WebView are still owned by this widget. */
+    fun pageAgentIsBoundTo(tabId: Int, webView: WebView): Boolean =
+        currentTab()?.id == tabId && this.webView === webView && !isMinimized
+
+    fun pageAgentPageRevision(): Long = pageAgentRevision
+
+    /** Capture only the bound page viewport, excluding browser chrome. */
+    fun capturePageAgentSnapshot(): PageAgentPageSnapshot? {
+        val source = customView ?: webView ?: return null
+        val captureWidth = source.width
+        val captureHeight = source.height
+        if (captureWidth <= 0 || captureHeight <= 0) return null
+
+        val bitmap = runCatching {
+            Bitmap.createBitmap(captureWidth, captureHeight, Bitmap.Config.ARGB_8888)
+        }.getOrNull() ?: return null
+        val output = ByteArrayOutputStream()
+        return try {
+            source.draw(Canvas(bitmap))
+            if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) return null
+            PageAgentPageSnapshot(
+                screenshot = PageAgentScreenshot(
+                    bytes = output.toByteArray(),
+                    width = captureWidth,
+                    height = captureHeight
+                ),
+                url = getUrl().orEmpty(),
+                title = getTitle().orEmpty(),
+                viewportWidth = captureWidth,
+                viewportHeight = captureHeight
+            )
+        } finally {
+            bitmap.recycle()
+            output.close()
+        }
+    }
+
+    /** Deliver a model tap expressed in WebView-local viewport coordinates. */
+    fun dispatchPageAgentTap(viewportX: Float, viewportY: Float): Boolean {
+        if (!viewportX.isFinite() || !viewportY.isFinite()) return false
+        val activeVideoView = customView
+        if (isVideoFullscreen && activeVideoView != null) {
+            if (viewportX < 0f || viewportY < 0f ||
+                viewportX >= activeVideoView.width || viewportY >= activeVideoView.height
+            ) return false
+            val downTime = android.os.SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(
+                downTime,
+                downTime,
+                MotionEvent.ACTION_DOWN,
+                viewportX,
+                viewportY,
+                0
+            )
+            val up = MotionEvent.obtain(
+                downTime,
+                downTime + 40L,
+                MotionEvent.ACTION_UP,
+                viewportX,
+                viewportY,
+                0
+            )
+            try {
+                activeVideoView.dispatchTouchEvent(down)
+                activeVideoView.dispatchTouchEvent(up)
+            } finally {
+                down.recycle()
+                up.recycle()
+            }
+            return true
+        }
+
+        val activeWebView = webView ?: return false
+        if (viewportX < 0f || viewportY < 0f ||
+            viewportX >= activeWebView.width || viewportY >= activeWebView.height
+        ) return false
+
+        // dispatchTouchEvent expects widget coordinates. The Page Agent adapter has
+        // already scaled screenshot coordinates to this WebView viewport; add the
+        // navigation/tab chrome offset exactly once here.
+        val widgetX = contentBounds.left + viewportX
+        val widgetY = contentBounds.top + NAV_BAR_HEIGHT + TAB_BAR_HEIGHT + viewportY
+        dispatchTouchEvent(widgetX, widgetY, MotionEvent.ACTION_DOWN)
+        dispatchTouchEvent(widgetX, widgetY, MotionEvent.ACTION_UP)
+        return true
+    }
+
+    /** Replace the active page element without using the app URL editor. */
+    fun replacePageAgentFocusedText(text: String): Boolean {
+        val activeWebView = webView ?: return false
+        setFocused(true)
+        val quoted = JSONObject.quote(text)
+        activeWebView.evaluateJavascript(
+            """
+            (function() {
+                var el = document.activeElement;
+                if (!el) return false;
+                var tag = (el.tagName || '').toUpperCase();
+                if (el.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA') {
+                    try { el.focus(); } catch (e) {}
+                    if (el.isContentEditable) {
+                        try {
+                            var range = document.createRange();
+                            range.selectNodeContents(el);
+                            var selection = window.getSelection();
+                            selection.removeAllRanges();
+                            selection.addRange(range);
+                        } catch (e) {}
+                        if (document.execCommand) {
+                            document.execCommand('insertText', false, $quoted);
+                        }
+                    } else {
+                        try { el.setSelectionRange(0, (el.value || '').length); } catch (e) {}
+                        if (typeof el.setRangeText === 'function') {
+                            el.setRangeText($quoted, 0, (el.value || '').length, 'end');
+                        } else {
+                            el.value = $quoted;
+                        }
+                        el.dispatchEvent(new Event('input', {bubbles:true}));
+                        el.dispatchEvent(new Event('change', {bubbles:true}));
+                    }
+                    return true;
+                }
+                return false;
+            })()
+            """.trimIndent(),
+            null
+        )
+        // evaluateJavascript is asynchronous; dispatching it successfully is the
+        // actionable result. The next screenshot reports whether the page accepted it.
+        return true
+    }
+
+    /** Submit the focused page field after a Computer Use `type(..., press_enter=true)`. */
+    fun submitPageAgentFocusedElement(): Boolean {
+        val activeWebView = webView ?: return false
+        activeWebView.evaluateJavascript(
+            """
+            (function() {
+                var el = document.activeElement;
+                if (!el) return false;
+                try {
+                    ['keydown', 'keypress', 'keyup'].forEach(function(type) {
+                        el.dispatchEvent(new KeyboardEvent(type, {
+                            key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true
+                        }));
+                    });
+                    if (el.form) {
+                        if (typeof el.form.requestSubmit === 'function') el.form.requestSubmit();
+                        else el.form.submit();
+                    }
+                    return true;
+                } catch (e) { return false; }
+            })()
+            """.trimIndent(),
+            null
+        )
+        return true
+    }
+
+    fun scrollPageAgent(deltaX: Float, deltaY: Float): Boolean {
+        val activeWebView = webView ?: return false
+        if (!deltaX.isFinite() || !deltaY.isFinite()) return false
+        activeWebView.scrollBy(deltaX.toInt(), deltaY.toInt())
+        return true
+    }
+
+    fun goBackForPageAgent(): Boolean {
+        val activeWebView = webView ?: return false
+        if (!activeWebView.canGoBack()) return false
+        activeWebView.goBack()
+        return true
+    }
+
+    fun navigateForPageAgent(address: String): Boolean {
+        if (address.trim().isBlank()) return false
+        val activeWebView = ensureActiveWebView() ?: return false
+        navigateToAddress(address, autoFullscreenVideo = false)
+        return activeWebView.isAttachedToWindow || activeWebView.parent != null
+    }
+
+    fun requestPageAgentFullscreen(mode: PageAgentFullscreenMode): Boolean {
+        return when (mode) {
+            PageAgentFullscreenMode.PAGE -> {
+                if (isVideoFullscreen) true
+                else {
+                    if (!isFullscreen) toggleFullscreen()
+                    isFullscreen
+                }
+            }
+            PageAgentFullscreenMode.VIDEO -> requestPageAgentVideoFullscreen()
+        }
+    }
+
+    private fun requestPageAgentVideoFullscreen(): Boolean {
+        if (isVideoFullscreen) return true
+        val activeWebView = webView ?: return false
+        autoFullscreenGestureAttempts = 0
+        cancelAutoFullscreenGestureAttempts()
+        autoFullscreenVideoUntilMs = android.os.SystemClock.uptimeMillis() + AUTO_FULLSCREEN_VIDEO_WINDOW_MS
+        injectMediaPlaybackDefaults(activeWebView)
+        dispatchAutoFullscreenGestureIfCandidate()
+        scheduleAutoFullscreenGestureAttempt(0L)
+        return true
+    }
 
     fun isEditingAddress(): Boolean = isEditingUrl
 
@@ -440,6 +652,7 @@ class BrowserWidget(
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var isVideoFullscreen = false
+    private var pageAgentRevision = 0L
     private val loadingAnimationHandler = Handler(Looper.getMainLooper())
     private var loadingAnimationRunnable: Runnable? = null
     private var loadingSpinnerStartMs: Long = 0L
@@ -1075,6 +1288,7 @@ class BrowserWidget(
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
                 tabs.find { it.id == tabId }?.url = url ?: ""
+                pageAgentRevision++
                 setTabLoading(tabId, isLoading = true, progress = 0)
             }
 
@@ -1083,6 +1297,7 @@ class BrowserWidget(
                 Log.d(TAG, "Page loaded: $url")
                 // Update tab URL
                 tabs.find { it.id == tabId }?.url = url ?: ""
+                pageAgentRevision++
                 injectMediaPlaybackDefaults(view)
                 setTabLoading(tabId, isLoading = false, progress = 100)
             }
@@ -1091,9 +1306,10 @@ class BrowserWidget(
                 view: WebView?,
                 detail: RenderProcessGoneDetail?
             ): Boolean {
+                val didCrash = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && detail?.didCrash() == true
                 Log.w(
                     TAG,
-                    "WebView render process gone for tab=$tabId, didCrash=${detail?.didCrash() == true}"
+                    "WebView render process gone for tab=$tabId, didCrash=$didCrash"
                 )
                 setTabLoading(tabId, isLoading = false, progress = 100)
                 recreateTabWebView(tabId, tabs.find { it.id == tabId }?.url)
@@ -1106,6 +1322,7 @@ class BrowserWidget(
                 super.onReceivedTitle(view, title)
                 // Update tab title
                 tabs.find { it.id == tabId }?.title = title ?: "Untitled"
+                pageAgentRevision++
             }
 
             override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {

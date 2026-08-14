@@ -48,8 +48,8 @@ class ScreenStreamServer(private val context: Context) {
         // Capture dimensions (must be multiples of 16 for encoder compatibility)
         // Using square capture for orientation-agnostic streaming
         private const val CAPTURE_SIZE = 640  // 640 = 40 * 16, square capture
-        private const val CAPTURE_SHORT_SIDE = 480   // Legacy, used when manual orientation is set
-        private const val CAPTURE_LONG_SIDE = 848    // Legacy, used when manual orientation is set
+        private const val ORIENTED_CAPTURE_SHORT_SIDE = 480
+        private const val ORIENTED_CAPTURE_LONG_SIDE = 848
         private const val FRAME_RATE = 30
         private const val BIT_RATE = 1_000_000  // 1 Mbps
         
@@ -199,11 +199,6 @@ class ScreenStreamServer(private val context: Context) {
         }
     }
 
-    // Keep the old method for backwards compatibility, but have it use the new one
-    fun getWifiIpAddress(): String? {
-        return getBestStreamingIp()?.first
-    }
-    
     /**
      * Request screen capture permission from the user.
      */
@@ -300,11 +295,11 @@ class ScreenStreamServer(private val context: Context) {
      */
     private fun getCaptureWidth(landscape: Boolean): Int = 
         if (useSquareCapture) CAPTURE_SIZE
-        else if (landscape) CAPTURE_LONG_SIDE else CAPTURE_SHORT_SIDE
+        else if (landscape) ORIENTED_CAPTURE_LONG_SIDE else ORIENTED_CAPTURE_SHORT_SIDE
     
     private fun getCaptureHeight(landscape: Boolean): Int = 
         if (useSquareCapture) CAPTURE_SIZE
-        else if (landscape) CAPTURE_SHORT_SIDE else CAPTURE_LONG_SIDE
+        else if (landscape) ORIENTED_CAPTURE_SHORT_SIDE else ORIENTED_CAPTURE_LONG_SIDE
     
     /**
      * Start the stream server.

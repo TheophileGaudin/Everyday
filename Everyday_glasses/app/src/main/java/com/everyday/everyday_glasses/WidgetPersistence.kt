@@ -7,6 +7,7 @@ import com.everyday.shared.sync.FinanceAssetType
 import com.everyday.shared.sync.FinanceChartType
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.FinanceTimeRange
+import com.everyday.shared.sync.NewsSourceSpec
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -25,8 +26,7 @@ object WidgetPersistence {
     private const val TAG = "WidgetPersistence"
     private const val FILENAME = "everyday_widgets.json"
     private const val LAYOUTS_FILENAME = "everyday_widget_layouts.json"
-    const val DEFAULT_LAYOUT_NAME = ShortcutAction.BUILTIN_LAYOUT_STANDARD
-    private const val LEGACY_DEFAULT_LAYOUT_NAME = "Default"
+    const val DEFAULT_LAYOUT_NAME = BuiltInLayouts.STANDARD
 
     // JSON keys
     private const val KEY_TEXT_WIDGETS = "text_widgets"
@@ -324,6 +324,7 @@ object WidgetPersistence {
         val zoom: String = MapZoom.MEDIUM.name,
         val showLocation: Boolean = true,
         val showCountry: Boolean = true,
+        val poiConfig: PoiDisplayConfig = PoiDisplayConfig.DEFAULT,
         override val isMinimized: Boolean = false,
         override val isFullscreen: Boolean = false,
         override val savedMinX: Float = 0f,
@@ -387,6 +388,7 @@ object WidgetPersistence {
         override val width: Float,
         override val height: Float,
         val countryCode: String = "US",
+        val sourceSpec: NewsSourceSpec = NewsSourceSpec.DEFAULT_LOCATION,
         val selectedIndex: Int = 0,
         val fontScale: Float = 1f,
         override val isMinimized: Boolean = false,
@@ -725,8 +727,7 @@ object WidgetPersistence {
 
     fun isDefaultLayoutName(name: String?): Boolean {
         val trimmed = name?.trim() ?: return false
-        return trimmed.equals(DEFAULT_LAYOUT_NAME, ignoreCase = true) ||
-                trimmed.equals(LEGACY_DEFAULT_LAYOUT_NAME, ignoreCase = true)
+        return trimmed.equals(DEFAULT_LAYOUT_NAME, ignoreCase = true)
     }
 
     private fun sanitizeLayoutName(name: String?): String? =
@@ -867,7 +868,29 @@ object WidgetPersistence {
             put("zoom", state.zoom)
             put("showLocation", state.showLocation)
             put("showCountry", state.showCountry)
+            put("poiConfig", poiConfigToJson(state.poiConfig))
         }
+
+    private fun poiConfigToJson(config: PoiDisplayConfig): JSONObject = JSONObject().apply {
+        put("state", config.state.name)
+        put("mode", config.mode.name)
+        put("categories", JSONArray().apply { config.categories.sorted().forEach(::put) })
+        put("radiusM", config.radiusM)
+        put("maxResults", config.maxResults)
+        put("importantCategories", JSONArray().apply {
+            config.importantCategories.sorted().forEach(::put)
+        })
+        put("importantRadiiM", JSONObject().apply {
+            config.importantRadiiM.toSortedMap().forEach { (category, radius) -> put(category, radius) }
+        })
+        put("normalCategories", JSONArray().apply {
+            config.normalCategories.sorted().forEach(::put)
+        })
+        put("normalMaxResults", config.normalMaxResults)
+        put("showClosest", config.showClosest)
+        put("closestRadiusM", config.closestRadiusM)
+        put("balanceCategories", config.balanceCategories)
+    }
 
     private fun calendarWidgetToJson(state: CalendarWidgetState): JSONObject =
         JSONObject().apply {
@@ -904,6 +927,8 @@ object WidgetPersistence {
         JSONObject().apply {
             putCommonFields(state)
             put("countryCode", state.countryCode)
+            put("sourceKind", state.sourceSpec.kind.name)
+            state.sourceSpec.value?.let { put("sourceValue", it) }
             put("selectedIndex", state.selectedIndex)
             put("fontScale", state.fontScale)
         }
@@ -1042,6 +1067,7 @@ object WidgetPersistence {
                         zoom = item.optString("zoom", MapZoom.MEDIUM.name),
                         showLocation = item.optBoolean("showLocation", true),
                         showCountry = item.optBoolean("showCountry", true),
+                        poiConfig = parsePoiConfig(item.optJSONObject("poiConfig")),
                         isMinimized = c.isMinimized, isFullscreen = c.isFullscreen,
                         savedMinX = c.savedMinX, savedMinY = c.savedMinY,
                         savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
@@ -1084,6 +1110,7 @@ object WidgetPersistence {
                     NewsWidgetState(
                         x = c.x, y = c.y, width = w, height = h,
                         countryCode = item.optString("countryCode", "US"),
+                        sourceSpec = parseNewsSource(item),
                         selectedIndex = item.optInt("selectedIndex", 0),
                         fontScale = item.optDouble("fontScale", 1.0).toFloat(),
                         isMinimized = c.isMinimized,
@@ -1326,12 +1353,99 @@ object WidgetPersistence {
                 zoom = obj.optString("zoom", MapZoom.MEDIUM.name),
                 showLocation = obj.optBoolean("showLocation", true),
                 showCountry = obj.optBoolean("showCountry", true),
+                poiConfig = parsePoiConfig(obj.optJSONObject("poiConfig")),
                 isMinimized = c.isMinimized, isFullscreen = c.isFullscreen,
                 savedMinX = c.savedMinX, savedMinY = c.savedMinY,
                 savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
                 isPinned = c.isPinned
             )
         }
+
+    private fun parsePoiConfig(obj: JSONObject?): PoiDisplayConfig {
+        if (obj == null) return PoiDisplayConfig.DEFAULT
+        return runCatching {
+            val state = runCatching {
+                PoiDisplayConfigState.valueOf(obj.optString("state", PoiDisplayConfigState.CUSTOM.name))
+            }.getOrDefault(PoiDisplayConfigState.CUSTOM)
+            // Legacy Default records have no mode/profile fields and can be restored directly.
+            // New records are parsed below so a caller that copied Default and changed a single
+            // variable cannot have that change discarded merely because its old state flag stayed
+            // DEFAULT.
+            if (state == PoiDisplayConfigState.DEFAULT && !obj.has("mode")) {
+                return@runCatching PoiDisplayConfig.DEFAULT
+            }
+            val categoriesJson = obj.optJSONArray("categories") ?: error("POI categories missing")
+            val categories = buildSet {
+                for (index in 0 until categoriesJson.length()) add(categoriesJson.getString(index))
+            }
+            // Files written before the two-mode menu only contain the nearest-profile fields.
+            // Recreate them through the compatibility factory so the previous voice behavior
+            // remains stable.
+            if (!obj.has("mode")) {
+                return@runCatching PoiDisplayConfig.custom(
+                    categories = categories,
+                    radiusM = obj.optInt("radiusM", PoiDisplayConfig.DEFAULT_RADIUS_M),
+                    maxResults = obj.optInt("maxResults", PoiDisplayConfig.DEFAULT_MAX_RESULTS)
+                )
+            }
+            val mode = runCatching {
+                PoiDisplayMode.valueOf(obj.optString("mode", PoiDisplayMode.NEAREST.name))
+            }.getOrDefault(PoiDisplayMode.NEAREST)
+            fun stringSet(key: String, fallback: Set<String>): Set<String> {
+                val json = obj.optJSONArray(key) ?: return fallback
+                return buildSet {
+                    for (index in 0 until json.length()) add(json.getString(index))
+                }
+            }
+            val importantCategories = stringSet(
+                "importantCategories",
+                PoiDisplayConfig.DEFAULT_IMPORTANT_CATEGORIES
+            )
+            val importantRadii = buildMap {
+                val json = obj.optJSONObject("importantRadiiM")
+                if (json == null) {
+                    putAll(PoiDisplayConfig.DEFAULT_IMPORTANT_RADII_M)
+                } else {
+                    json.keys().forEach { category -> put(category, json.getInt(category)) }
+                }
+            }
+            val normalCategories = stringSet(
+                "normalCategories",
+                PoiDisplayConfig.DEFAULT_NORMAL_CATEGORIES
+            )
+            val candidate = PoiDisplayConfig(
+                categories = categories,
+                radiusM = obj.optInt("radiusM", PoiDisplayConfig.DEFAULT_RADIUS_M),
+                maxResults = obj.optInt("maxResults", PoiDisplayConfig.DEFAULT_MAX_RESULTS),
+                state = PoiDisplayConfigState.CUSTOM,
+                mode = mode,
+                importantCategories = importantCategories,
+                importantRadiiM = importantRadii,
+                normalCategories = normalCategories,
+                normalMaxResults = obj.optInt("normalMaxResults", PoiDisplayConfig.DEFAULT_NORMAL_MAX_RESULTS),
+                showClosest = obj.optBoolean("showClosest", PoiDisplayConfig.DEFAULT_SHOW_CLOSEST),
+                closestRadiusM = obj.optInt("closestRadiusM", PoiDisplayConfig.DEFAULT_CLOSEST_RADIUS_M),
+                balanceCategories = obj.optBoolean("balanceCategories", false)
+            )
+            if (
+                candidate.mode == PoiDisplayMode.DEFAULT &&
+                candidate.categories == PoiDisplayConfig.DEFAULT.categories &&
+                candidate.radiusM == PoiDisplayConfig.DEFAULT.radiusM &&
+                candidate.maxResults == PoiDisplayConfig.DEFAULT.maxResults &&
+                candidate.importantCategories == PoiDisplayConfig.DEFAULT.importantCategories &&
+                candidate.importantRadiiM == PoiDisplayConfig.DEFAULT.importantRadiiM &&
+                candidate.normalCategories == PoiDisplayConfig.DEFAULT.normalCategories &&
+                candidate.normalMaxResults == PoiDisplayConfig.DEFAULT.normalMaxResults &&
+                candidate.showClosest == PoiDisplayConfig.DEFAULT.showClosest &&
+                candidate.closestRadiusM == PoiDisplayConfig.DEFAULT.closestRadiusM &&
+                !candidate.balanceCategories
+            ) {
+                PoiDisplayConfig.DEFAULT
+            } else {
+                candidate
+            }
+        }.getOrDefault(PoiDisplayConfig.DEFAULT)
+    }
 
     private fun parseCalendar(rootJson: JSONObject): CalendarWidgetState? =
         parseSizedWidget(rootJson, KEY_CALENDAR_WIDGET) { obj, c, w, h ->
@@ -1408,11 +1522,18 @@ object WidgetPersistence {
         )
     }
 
+    private fun parseNewsSource(obj: JSONObject): NewsSourceSpec =
+        NewsSourceSpec.fromWire(
+            obj.optString("sourceKind").takeIf { it.isNotBlank() },
+            obj.optString("sourceValue").takeIf { it.isNotBlank() }
+        ) ?: NewsSourceSpec.DEFAULT_LOCATION
+
     private fun parseNews(rootJson: JSONObject): NewsWidgetState? =
         parseSizedWidget(rootJson, KEY_NEWS_WIDGET) { obj, c, w, h ->
             NewsWidgetState(
                 x = c.x, y = c.y, width = w, height = h,
                 countryCode = obj.optString("countryCode", "US"),
+                sourceSpec = parseNewsSource(obj),
                 selectedIndex = obj.optInt("selectedIndex", 0),
                 fontScale = obj.optDouble("fontScale", 1.0).toFloat(),
                 isMinimized = c.isMinimized,

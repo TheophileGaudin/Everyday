@@ -1,5 +1,6 @@
 package com.everyday.everyday_glasses
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -11,6 +12,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
+import androidx.core.content.ContextCompat
 
 class GlassesService : Service() {
 
@@ -189,6 +191,13 @@ class GlassesService : Service() {
         }
 
         // Show the notification - this will trigger the full-screen intent
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.w(TAG, "Wake notification skipped because notification permission is not granted")
+            return
+        }
         notificationManager.notify(WAKE_NOTIFICATION_ID, notification)
         Log.d(TAG, "Full-screen intent notification posted")
 

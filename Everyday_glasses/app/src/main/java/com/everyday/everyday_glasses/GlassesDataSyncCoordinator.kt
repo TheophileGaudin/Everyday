@@ -15,6 +15,7 @@ import com.everyday.shared.sync.FinanceTimeRange
 import com.everyday.shared.sync.SyncCachePolicy
 import com.everyday.shared.sync.NewsDataProvider
 import com.everyday.shared.sync.NewsSnapshot
+import com.everyday.shared.sync.NewsSourceSpec
 import com.everyday.shared.sync.SyncChannel
 import com.everyday.shared.sync.SyncError
 import com.everyday.shared.sync.SyncOrchestrator
@@ -22,9 +23,14 @@ import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot
 import com.everyday.shared.sync.SyncSnapshotStore
 import com.everyday.shared.sync.WeatherDataProvider
-import com.everyday.shared.sync.LocationWeatherSnapshot
+import com.everyday.shared.sync.LocationFix
+import com.everyday.shared.sync.WeatherSnapshot
 import com.everyday.shared.sync.isStale
 import com.everyday.shared.transport.SyncMessenger
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 class GlassesDataSyncCoordinator(
@@ -35,6 +41,7 @@ class GlassesDataSyncCoordinator(
     private val googleAuthCoordinatorProvider: () -> GoogleAuthCoordinator?,
     private val googleCalendarClientProvider: () -> GoogleCalendarClient?,
     private val localLocationProvider: () -> Location?,
+    private val onPhoneLocationFix: (LocationFix) -> Unit,
     private val notifyContentChanged: () -> Unit,
     private val notifyTransientContentChanged: () -> Unit
 ) {
@@ -55,12 +62,22 @@ class GlassesDataSyncCoordinator(
     private val localNewsInFlight = AtomicBoolean(false)
     private val localCalendarInFlight = AtomicBoolean(false)
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val refreshExecutor = ThreadPoolExecutor(
+        4, 4, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue(4)
+    )
+    @Volatile private var released = false
     private var phoneConnected = false
     private var lastAppliedMapLatitude = Double.NaN
     private var lastAppliedMapLongitude = Double.NaN
     private var lastAppliedMapTimestampMs = Long.MIN_VALUE
     private var hasSessionLocationCountry = false
     private var lastUnitCountryRefreshAttemptMs = 0L
+    private var pendingNewsSourceRequest: PendingNewsSourceRequest? = null
+
+    private data class PendingNewsSourceRequest(
+        val sourceSpec: NewsSourceSpec,
+        val callback: (Result<NewsSnapshot>) -> Unit
+    )
 
     fun restoreCachedSnapshots() {
         syncOrchestrator.restoreCachedSnapshots(notify = false)
@@ -69,7 +86,7 @@ class GlassesDataSyncCoordinator(
     fun clearCalendarSnapshot() {
         snapshotStore.clearCalendar()
         postUi {
-            widgetContainer.setGoogleCalendarSnapshot(null)
+            widgetContainer.setCalendarSnapshot(null)
             notifyContentChanged()
         }
     }
@@ -86,6 +103,7 @@ class GlassesDataSyncCoordinator(
                 reason = "phone_connected"
             )
         } else {
+            completePendingNewsSourceRequest(Result.failure(IllegalStateException("Phone disconnected")))
             syncOrchestrator.refresh(
                 channels = SyncChannel.ALL,
                 force = false,
@@ -115,7 +133,7 @@ class GlassesDataSyncCoordinator(
         val needsInitialCountry = !hasSessionLocationCountry &&
             now - lastUnitCountryRefreshAttemptMs >= UNIT_COUNTRY_RETRY_MS
         if (phoneConnected || !networkStatusProvider.isConnected()) return
-        val weatherIsStale = snapshotStore.loadLocationWeather().isStale()
+        val weatherIsStale = snapshotStore.loadWeather().isStale()
         when {
             needsInitialCountry && weatherIsStale -> {
                 lastUnitCountryRefreshAttemptMs = now
@@ -132,7 +150,7 @@ class GlassesDataSyncCoordinator(
     private fun refreshLocalLocationContext() {
         val location = localLocationProvider() ?: return
         if (!localLocationContextInFlight.compareAndSet(false, true)) return
-        Thread {
+        executeRefresh("location context", { localLocationContextInFlight.set(false) }) {
             try {
                 WeatherDataProvider
                     .resolveLocationName(location.latitude, location.longitude, GEOCODE_MAPS_CO_API_KEY)
@@ -148,7 +166,7 @@ class GlassesDataSyncCoordinator(
             } finally {
                 localLocationContextInFlight.set(false)
             }
-        }.start()
+        }
     }
 
     fun onFinanceDataRequested(
@@ -183,19 +201,81 @@ class GlassesDataSyncCoordinator(
             channels = setOf(SyncChannel.NEWS),
             force = force,
             reason = reason,
-            countryCode = countryCode
+            countryCode = countryCode,
+            newsSource = widgetContainer.currentNewsSourceSpec()
         )
     }
 
-    fun onMapDataRequested(point: MapGeoPoint) {
+    fun requestNewsSource(
+        sourceSpec: NewsSourceSpec,
+        countryCode: String,
+        callback: (Result<NewsSnapshot>) -> Unit
+    ) {
+        val request = SyncRequest(
+            channels = setOf(SyncChannel.NEWS),
+            force = true,
+            reason = "news_source_changed",
+            countryCode = countryCode,
+            newsSource = sourceSpec
+        )
+        pendingNewsSourceRequest?.callback?.invoke(
+            Result.failure(IllegalStateException("News source request was replaced"))
+        )
+        pendingNewsSourceRequest = PendingNewsSourceRequest(sourceSpec, callback)
+
+        if (phoneConnected) {
+            if (!requestPhoneSync(request)) {
+                completePendingNewsSourceRequest(
+                    Result.failure(IllegalStateException("Phone is unavailable"))
+                )
+            }
+            return
+        }
+
+        if (!networkStatusProvider.isConnected()) {
+            completePendingNewsSourceRequest(
+                Result.failure(IllegalStateException("Network is unavailable"))
+            )
+            return
+        }
+
+        refreshNewsLocally(
+            force = true,
+            reason = "news_source_changed",
+            countryCode = countryCode,
+            sourceSpec = sourceSpec,
+            completion = { result -> completePendingNewsSourceRequest(result) }
+        )
+    }
+
+    fun onMapDataRequested(point: MapGeoPoint, poiConfig: PoiDisplayConfig = PoiDisplayConfig.DEFAULT) {
         if (!phoneConnected) {
             Log.d(TAG, "Map proxy skipped: phone is not connected")
             return
         }
-        Log.d(TAG, "Requesting phone map proxy for ${point.lat},${point.lon}")
+        Log.d(TAG, "Requesting phone map proxy for ${point.lat},${point.lon} mode=${poiConfig.mode} config=${poiConfig.state}")
+        val defaultProfile = poiConfig
+            .takeUnless(PoiDisplayConfig::isDefault)
+            ?.takeIf(PoiDisplayConfig::isDefaultMode)
+        val nearestProfile = poiConfig.takeUnless(PoiDisplayConfig::isDefaultMode)
         requestPhoneSync(SyncRequest(
             channels = setOf(SyncChannel.MAP), force = true, reason = "map_proxy",
-            mapLat = point.lat, mapLon = point.lon
+            mapLat = point.lat,
+            mapLon = point.lon,
+            mapPoiMode = poiConfig.mode.name,
+            // The phone's empty-category request is the legacy superset query used by every
+            // older phone build. Current builds also receive the Default profile's query
+            // categories/radii so changing an important radius remains effective through the
+            // phone proxy.
+            mapPoiCategories = nearestProfile?.categories?.sorted().orEmpty(),
+            mapPoiRadiusM = nearestProfile?.radiusM,
+            mapPoiMaxResults = nearestProfile?.maxResults,
+            mapPoiImportantCategories = defaultProfile?.importantCategories?.sorted().orEmpty(),
+            mapPoiImportantRadiiM = defaultProfile?.importantRadiiM.orEmpty(),
+            mapPoiNormalCategories = defaultProfile?.normalCategories?.sorted().orEmpty(),
+            mapPoiNormalMaxResults = defaultProfile?.normalMaxResults,
+            mapPoiShowClosest = defaultProfile?.showClosest,
+            mapPoiClosestRadiusM = defaultProfile?.closestRadiusM
         ))
     }
 
@@ -208,15 +288,16 @@ class GlassesDataSyncCoordinator(
     }
 
     fun onSyncSnapshotReceived(snapshot: SyncSnapshot) {
-        snapshot.locationWeather?.let { locationWeather ->
+        snapshot.weather?.let { weather ->
             postUi {
-                if (widgetContainer.observeLiveLocationCountry(locationWeather.countryCode)) {
+                if (widgetContainer.observeLiveLocationCountry(weather.countryCode)) {
                     hasSessionLocationCountry = true
                 }
             }
         }
         val financeOnly = snapshot.finance != null &&
-            snapshot.locationWeather == null &&
+            snapshot.location == null &&
+            snapshot.weather == null &&
             snapshot.calendar == null &&
             snapshot.news == null &&
             snapshot.notifications == null
@@ -228,17 +309,33 @@ class GlassesDataSyncCoordinator(
         } else {
             syncOrchestrator.cacheAndApplySnapshot(snapshot, notify = true)
         }
+        snapshot.news?.let { news ->
+            val pending = pendingNewsSourceRequest
+            if (pending != null && pending.sourceSpec == news.sourceSpec) {
+                pendingNewsSourceRequest = null
+                pending.callback(Result.success(news))
+            }
+        }
     }
 
     fun onSyncErrorReceived(error: SyncError) {
         postUi {
             when (error.channel) {
-                SyncChannel.NEWS -> widgetContainer.applyNewsError(error.message)
+                SyncChannel.NEWS -> {
+                    widgetContainer.applyNewsError(error.message)
+                    completePendingNewsSourceRequest(Result.failure(IllegalStateException(error.message)))
+                }
                 SyncChannel.FINANCE -> widgetContainer.applyFinanceError(error.message)
                 else -> Log.w(TAG, "Sync error ${error.channel}: ${error.message}")
             }
             notifyContentChanged()
         }
+    }
+
+    private fun completePendingNewsSourceRequest(result: Result<NewsSnapshot>) {
+        val pending = pendingNewsSourceRequest ?: return
+        pendingNewsSourceRequest = null
+        pending.callback(result)
     }
 
     private fun dispatchSyncRequest(request: SyncRequest) {
@@ -249,36 +346,32 @@ class GlassesDataSyncCoordinator(
         }
     }
 
-    private fun requestPhoneSync(request: SyncRequest) {
+    private fun requestPhoneSync(request: SyncRequest): Boolean {
         val visibleFinanceConfigs = resolveVisibleFinanceConfigs(request)
         val financeSelection = visibleFinanceConfigs.firstOrNull()
         val requestCountry = request.countryCode
+            ?: snapshotStore.loadWeather()?.countryCode
             ?: widgetContainer.currentNewsCountryCode()
-            ?: snapshotStore.loadLocationWeather()?.countryCode
             ?: snapshotStore.loadNews()?.countryCode
         val financeLiveEnabled = if (SyncChannel.FINANCE in request.channels) {
             request.financeLiveEnabled ?: visibleFinanceConfigs.isNotEmpty()
         } else {
             request.financeLiveEnabled
         }
-        syncMessengerProvider()?.sendSyncRequest(
+        return syncMessengerProvider()?.sendSyncRequest(
             request.copy(
-                channels = request.channels,
-                force = request.force,
-                reason = request.reason,
                 countryCode = requestCountry,
+                newsSource = request.newsSource ?: widgetContainer.currentNewsSourceSpec()
+                    ?: snapshotStore.loadNews()?.sourceSpec,
                 financeTiles = visibleFinanceConfigs,
-                financeRefreshTileIds = request.financeRefreshTileIds,
                 financeSymbol = request.financeSymbol ?: financeSelection?.symbol,
                 financeRange = request.financeRange ?: financeSelection?.range,
                 financeAssetType = request.financeAssetType ?: financeSelection?.assetType,
                 financeChartType = request.financeChartType ?: financeSelection?.chartType,
                 financeTileId = request.financeTileId ?: financeSelection?.id,
-                financeLiveEnabled = financeLiveEnabled,
-                mapLat = request.mapLat,
-                mapLon = request.mapLon
+                financeLiveEnabled = financeLiveEnabled
             )
-        )
+        ) == true
     }
 
     private fun refreshLocally(request: SyncRequest) {
@@ -289,10 +382,15 @@ class GlassesDataSyncCoordinator(
         if (request.financeLiveEnabled == false && SyncChannel.FINANCE in request.channels) {
             return
         }
-        if (SyncChannel.LOCATION_WEATHER in request.channels) refreshWeatherLocally(request.force)
+        if (SyncChannel.WEATHER in request.channels) refreshWeatherLocally(request.force)
         if (SyncChannel.CALENDAR in request.channels) refreshCalendarLocally(request.force)
         if (SyncChannel.NEWS in request.channels) {
-            refreshNewsLocally(request.force, request.reason, request.countryCode)
+            refreshNewsLocally(
+                request.force,
+                request.reason,
+                request.countryCode,
+                request.newsSource
+            )
         }
         if (SyncChannel.FINANCE in request.channels) {
             refreshFinanceLocally(request)
@@ -300,12 +398,12 @@ class GlassesDataSyncCoordinator(
     }
 
     private fun refreshWeatherLocally(force: Boolean) {
-        val cached = snapshotStore.loadLocationWeather()
+        val cached = snapshotStore.loadWeather()
         if (!force && !cached.isStale()) return
         val location = localLocationProvider() ?: return
         if (!localWeatherInFlight.compareAndSet(false, true)) return
 
-        Thread {
+        executeRefresh("weather", { localWeatherInFlight.set(false) }) {
             try {
                 val locationName = WeatherDataProvider
                     .resolveLocationName(location.latitude, location.longitude, GEOCODE_MAPS_CO_API_KEY)
@@ -314,55 +412,78 @@ class GlassesDataSyncCoordinator(
                     .fetchWeather(location.latitude, location.longitude)
                     .getOrNull()
                 if (locationName != null || weather != null) {
-                    val snapshot = LocationWeatherSnapshot(
+                    val snapshot = WeatherSnapshot(
                         town = locationName?.town ?: cached?.town ?: "Current location",
                         countryCode = locationName?.countryCode ?: cached?.countryCode ?: "Unknown",
                         weather = weather ?: cached?.weather,
-                        timestampMs = System.currentTimeMillis(),
-                        lat = location.latitude,
-                        lon = location.longitude,
-                        accuracyM = if (location.hasAccuracy()) location.accuracy else null,
-                        bearingDeg = if (location.hasBearing()) location.bearing else null,
-                        speedMps = null
+                        fetchedAtMs = System.currentTimeMillis(),
+                        forecastLat = location.latitude,
+                        forecastLon = location.longitude
                     )
-                    snapshotStore.saveLocationWeather(snapshot)
-                    applyLocationWeather(snapshot, updateUnitCountry = true)
+                    snapshotStore.saveWeather(snapshot)
+                    applyWeather(snapshot, updateUnitCountry = true)
                 }
             } catch (error: Throwable) {
                 Log.w(TAG, "Local weather refresh failed", error)
             } finally {
                 localWeatherInFlight.set(false)
             }
-        }.start()
+        }
     }
 
-    private fun refreshNewsLocally(force: Boolean, reason: String, countryCode: String?) {
-        val resolvedCountry = countryCode
-            ?: widgetContainer.currentNewsCountryCode()
-            ?: snapshotStore.loadLocationWeather()?.countryCode
-            ?: NewsDataProvider.defaultCountryCode()
+    private fun refreshNewsLocally(
+        force: Boolean,
+        reason: String,
+        countryCode: String?,
+        sourceSpec: NewsSourceSpec? = null,
+        completion: ((Result<NewsSnapshot>) -> Unit)? = null
+    ) {
+        val resolvedCountry = NewsDataProvider.resolveCountryCode(
+            requestedCountryCode = countryCode,
+            weather = snapshotStore.loadWeather(),
+            cachedNews = snapshotStore.loadNews()
+        )
         val cached = snapshotStore.loadNews()
-        if (!force && cached != null && !cached.isStale() && cached.countryCode == resolvedCountry) {
+        val resolvedSource = sourceSpec
+            ?: widgetContainer.currentNewsSourceSpec()
+            ?: cached?.sourceSpec
+            ?: NewsSourceSpec.DEFAULT_LOCATION
+        if (!force && cached != null && !cached.isStale() &&
+            cached.countryCode == resolvedCountry && cached.sourceSpec == resolvedSource
+        ) {
+            completion?.invoke(Result.success(cached))
             return
         }
-        if (!localNewsInFlight.compareAndSet(false, true)) return
+        if (!localNewsInFlight.compareAndSet(false, true)) {
+            completion?.invoke(Result.failure(IllegalStateException("News refresh already in progress")))
+            return
+        }
 
-        Thread {
+        executeRefresh("news", {
+            localNewsInFlight.set(false)
+            completion?.invoke(Result.failure(RejectedExecutionException("Refresh queue is full")))
+        }) {
             try {
-                val snapshot = NewsDataProvider.fetchNews(resolvedCountry).getOrThrow()
+                val snapshot = NewsDataProvider.fetchNews(
+                    resolvedSource,
+                    resolvedCountry,
+                    snapshotStore.loadWeather()?.town
+                ).getOrThrow()
                 snapshotStore.saveNews(snapshot)
                 applyNews(snapshot)
                 Log.d(TAG, "Local news refresh success: reason=$reason country=$resolvedCountry")
+                completion?.invoke(Result.success(snapshot))
             } catch (error: Throwable) {
                 Log.w(TAG, "Local news refresh failed", error)
                 postUi {
                     widgetContainer.applyNewsError("No news available")
                     notifyContentChanged()
                 }
+                completion?.invoke(Result.failure(error))
             } finally {
                 localNewsInFlight.set(false)
             }
-        }.start()
+        }
     }
 
     private fun refreshFinanceLocally(request: SyncRequest) {
@@ -383,7 +504,7 @@ class GlassesDataSyncCoordinator(
                 } ?: true
         }
         if (configsToFetch.isEmpty()) return
-        Thread {
+        executeRefresh("finance") {
             try {
                 val fetchedTiles = configsToFetch.map { config ->
                     FinanceDataProvider.fetchTile(config).getOrThrow()
@@ -391,21 +512,7 @@ class GlassesDataSyncCoordinator(
                 val tiles = (visibleConfigs.mapNotNull { config ->
                     fetchedTiles.firstOrNull { it.id == config.id } ?: cachedTilesById[config.id]
                 }).ifEmpty { fetchedTiles }
-                val tile = tiles.first()
-                val snapshot = FinanceSnapshot(
-                    symbol = tile.symbol,
-                    displayName = tile.displayName,
-                    country = tile.country,
-                    range = tile.range,
-                    rangeLabel = tile.rangeLabel,
-                    points = tile.points,
-                    percentChange = tile.percentChange,
-                    assetType = tile.assetType,
-                    chartType = tile.chartType,
-                    tiles = tiles,
-                    fetchedAtMs = tile.fetchedAtMs,
-                    staleAfterMs = tile.staleAfterMs
-                )
+                val snapshot = requireNotNull(FinanceSnapshot.fromTiles(tiles))
                 snapshotStore.saveFinance(snapshot)
                 applyFinance(snapshot)
                 Log.d(TAG, "Local finance refresh success: reason=${request.reason} tiles=${fetchedTiles.size}")
@@ -416,7 +523,7 @@ class GlassesDataSyncCoordinator(
                     notifyContentChanged()
                 }
             }
-        }.start()
+        }
     }
 
     private fun resolveVisibleFinanceConfigs(request: SyncRequest): List<FinanceDashboardTileConfig> {
@@ -429,10 +536,10 @@ class GlassesDataSyncCoordinator(
             return listOf(
                 FinanceDashboardTileConfig(
                     id = request.financeTileId ?: "finance_${symbol}_${range.range}",
-                    assetType = request.financeAssetType ?: snapshotStore.loadFinance()?.assetType ?: com.everyday.shared.sync.FinanceAssetType.INDEX,
+                    assetType = request.financeAssetType ?: snapshotStore.loadFinance()?.tiles?.firstOrNull()?.assetType ?: com.everyday.shared.sync.FinanceAssetType.INDEX,
                     symbol = symbol,
                     range = range.range,
-                    chartType = request.financeChartType ?: snapshotStore.loadFinance()?.chartType ?: com.everyday.shared.sync.FinanceChartType.LINE
+                    chartType = request.financeChartType ?: snapshotStore.loadFinance()?.tiles?.firstOrNull()?.chartType ?: com.everyday.shared.sync.FinanceChartType.LINE
                 )
             )
         }
@@ -475,7 +582,8 @@ class GlassesDataSyncCoordinator(
 
     private fun applySnapshot(snapshot: SyncSnapshot, notify: Boolean) {
         postUi {
-            snapshot.locationWeather?.let { applyLocationWeather(it, updateUnitCountry = false) }
+            snapshot.location?.let(::applyLocation)
+            snapshot.weather?.let { applyWeather(it, updateUnitCountry = false) }
             snapshot.calendar?.let(::applyCalendar)
             snapshot.news?.let(::applyNews)
             snapshot.finance?.let { applyFinance(it, notify = false) }
@@ -488,16 +596,12 @@ class GlassesDataSyncCoordinator(
         }
     }
 
-    private fun applyLocationWeather(snapshot: LocationWeatherSnapshot, updateUnitCountry: Boolean) {
+    private fun applyLocation(snapshot: LocationFix) {
         postUi {
-            if (updateUnitCountry && widgetContainer.observeLiveLocationCountry(snapshot.countryCode)) {
-                hasSessionLocationCountry = true
-            }
-            widgetContainer.applyLocationMetadata(snapshot.town, snapshot.countryCode)
-            widgetContainer.applyWeatherData(snapshot.weather)
             val lat = snapshot.lat
             val lon = snapshot.lon
-            if (lat != null && lon != null && lat.isFinite() && lon.isFinite()) {
+            onPhoneLocationFix(snapshot)
+            if (lat.isFinite() && lon.isFinite()) {
                 if (lat == lastAppliedMapLatitude && lon == lastAppliedMapLongitude &&
                     snapshot.timestampMs == lastAppliedMapTimestampMs) {
                     return@postUi
@@ -529,41 +633,53 @@ class GlassesDataSyncCoordinator(
 
     private fun applyCalendar(snapshot: CalendarSnapshot) {
         postUi {
-            val googleSnapshot = snapshot.toGoogleCalendarSnapshot()
-            widgetContainer.setGoogleCalendarSnapshot(googleSnapshot)
-            if (googleSnapshot.sourceMode == GoogleAuthState.AuthMode.PHONE_FALLBACK) {
-                googleAuthCoordinatorProvider()?.onPhoneCalendarSnapshotReceived(googleSnapshot)
+            widgetContainer.setCalendarSnapshot(snapshot)
+            if (snapshot.sourceMode == GoogleAuthState.AuthMode.PHONE_FALLBACK.name) {
+                googleAuthCoordinatorProvider()?.onPhoneCalendarSnapshotReceived(snapshot)
             }
         }
     }
 
     private fun postUi(action: () -> Unit) {
+        if (released) return
         if (Looper.myLooper() == Looper.getMainLooper()) {
             action()
         } else {
-            mainHandler.post { action() }
+            mainHandler.post { if (!released) action() }
         }
     }
 
-    private fun CalendarSnapshot.toGoogleCalendarSnapshot(): GoogleCalendarSnapshot {
-        return GoogleCalendarSnapshot(
-            account = account?.let {
-                GoogleAccountSummary(email = it.email, displayName = it.displayName)
-            },
-            events = events.map {
-                GoogleCalendarEvent(
-                    id = it.id,
-                    summary = it.summary,
-                    startIso = it.startIso,
-                    htmlLink = it.htmlLink
-                )
-            },
-            fetchedAtMs = fetchedAtMs,
-            staleAfterMs = staleAfterMs,
-            sourceMode = runCatching {
-                GoogleAuthState.AuthMode.valueOf(sourceMode)
-            }.getOrDefault(GoogleAuthState.AuthMode.PHONE_FALLBACK)
-        )
+    private fun applyWeather(snapshot: WeatherSnapshot, updateUnitCountry: Boolean) {
+        postUi {
+            if (updateUnitCountry && widgetContainer.observeLiveLocationCountry(snapshot.countryCode)) {
+                hasSessionLocationCountry = true
+            }
+            widgetContainer.applyLocationMetadata(snapshot.town, snapshot.countryCode)
+            widgetContainer.applyWeatherData(snapshot.weather)
+        }
+    }
+
+    fun release() {
+        released = true
+        mainHandler.removeCallbacksAndMessages(null)
+        refreshExecutor.shutdownNow()
+    }
+
+    private fun executeRefresh(
+        label: String,
+        onRejected: () -> Unit = {},
+        action: () -> Unit
+    ) {
+        if (released) {
+            onRejected()
+            return
+        }
+        try {
+            refreshExecutor.execute(action)
+        } catch (_: RejectedExecutionException) {
+            onRejected()
+            Log.w(TAG, "Dropped $label refresh because the bounded refresh executor is full")
+        }
     }
 
 }

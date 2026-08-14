@@ -3,6 +3,7 @@ package com.everyday.everyday_glasses
 import android.content.Context
 import android.icu.util.LocaleData
 import android.icu.util.ULocale
+import android.os.Build
 import java.util.Locale
 
 enum class UnitSystemMode(val code: String) {
@@ -74,8 +75,6 @@ class UnitSettings(context: Context) {
         private const val KEY_UNIT_SYSTEM_MODE = "unit_system_mode"
         private const val KEY_SPEED_OVERRIDE = "speed_unit_override"
         private const val KEY_TEMPERATURE_OVERRIDE = "temperature_unit_override"
-        private const val KEY_MIGRATION_COMPLETE = "unit_settings_migration_complete"
-        private const val LEGACY_SPEED_UNIT = "speed_unit"
 
         fun normalizeCountryCode(raw: String?): String? {
             val normalized = raw?.trim()?.uppercase(Locale.US) ?: return null
@@ -96,7 +95,6 @@ class UnitSettings(context: Context) {
         get() = sessionLocationCountry.countryCode
 
     init {
-        migrateLegacySpeedPreference()
         globalMode = UnitSystemMode.fromCode(prefs.getString(KEY_UNIT_SYSTEM_MODE, null))
         speedOverride = prefs.getString(KEY_SPEED_OVERRIDE, null)?.let(SpeedometerWidget.SpeedUnit::fromCode)
         temperatureOverride = TemperatureUnit.fromCode(prefs.getString(KEY_TEMPERATURE_OVERRIDE, null))
@@ -148,6 +146,13 @@ class UnitSettings(context: Context) {
 
     private fun currentMeasurementSystem(): LocationMeasurementSystem? {
         val country = sessionLocationCountryCode ?: return null
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            return when (country.uppercase(Locale.ROOT)) {
+                "US", "LR", "MM" -> LocationMeasurementSystem.US
+                "GB" -> LocationMeasurementSystem.UK
+                else -> LocationMeasurementSystem.SI
+            }
+        }
         return runCatching {
             val locale = Locale.Builder().setRegion(country).build()
             when (LocaleData.getMeasurementSystem(ULocale.forLocale(locale))) {
@@ -158,15 +163,6 @@ class UnitSettings(context: Context) {
         }.getOrDefault(LocationMeasurementSystem.SI)
     }
 
-    private fun migrateLegacySpeedPreference() {
-        if (prefs.getBoolean(KEY_MIGRATION_COMPLETE, false)) return
-        val editor = prefs.edit().putBoolean(KEY_MIGRATION_COMPLETE, true)
-        if (!prefs.contains(KEY_SPEED_OVERRIDE) && prefs.contains(LEGACY_SPEED_UNIT)) {
-            val legacy = SpeedometerWidget.SpeedUnit.fromCode(prefs.getString(LEGACY_SPEED_UNIT, null))
-            editor.putString(KEY_SPEED_OVERRIDE, legacy.code)
-        }
-        editor.apply()
-    }
 }
 
 internal object UnitDisplayFormatter {

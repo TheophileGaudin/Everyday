@@ -15,7 +15,11 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Small, dependency-free OpenStreetMap/Overpass cache used by the glasses map. */
-class MapRoadRepository(context: Context, private val changed: (List<MapRoad>, List<MapPoi>) -> Unit, private val proxy: (MapGeoPoint) -> Unit) {
+class MapRoadRepository(
+    context: Context,
+    private val changed: (List<MapRoad>, List<MapPoi>) -> Unit,
+    private val proxy: (MapGeoPoint, PoiDisplayConfig) -> Unit
+) {
     private val connectivity = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val executor = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
@@ -24,73 +28,113 @@ class MapRoadRepository(context: Context, private val changed: (List<MapRoad>, L
     private var fetchedAt = 0L
     private var roads = emptyList<MapRoad>()
     private var pois = emptyList<MapPoi>()
+    @Volatile private var requestedConfig = PoiDisplayConfig.DEFAULT
+    private var fetchedConfig = PoiDisplayConfig.DEFAULT
     private var preferPhoneProxyUntilMs = 0L
     private var lastPhoneProxyRequestMs = 0L
+    @Volatile private var pendingRefresh: PendingRefresh? = null
 
-    fun refresh(point: MapGeoPoint) {
+    private data class PendingRefresh(val point: MapGeoPoint, val config: PoiDisplayConfig)
+
+    fun refresh(
+        point: MapGeoPoint,
+        config: PoiDisplayConfig = requestedConfig,
+        force: Boolean = false
+    ) {
+        requestedConfig = config
         val now = System.currentTimeMillis()
         val moved = center?.let { distance(it, point) } ?: Float.MAX_VALUE
-        if (roads.isNotEmpty() && moved < 45f && now - fetchedAt < 120_000) return
+        if (!force && roads.isNotEmpty() && fetchedConfig == config && moved < 45f && now - fetchedAt < 120_000) return
         if (now < preferPhoneProxyUntilMs) {
-            requestPhoneProxy(point, now)
+            requestPhoneProxy(point, now, config, force)
             return
         }
         // The phone is the preferred internet route: it remains usable through
         // cellular data even when the glasses have a nominal but unusable Wi-Fi
         // connection.  A direct glasses fetch below is only a parallel fallback.
-        requestPhoneProxy(point, now)
+        requestPhoneProxy(point, now, config, force)
         val network = connectivity.activeNetwork
         val caps = network?.let(connectivity::getNetworkCapabilities)
         if (caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) != true) {
-            requestPhoneProxy(point, now)
+            requestPhoneProxy(point, now, config, force)
             return
         }
-        if (!busy.compareAndSet(false, true)) return
+        if (!busy.compareAndSet(false, true)) {
+            // A category/radius change while Overpass is in flight used to be lost here. Keep
+            // the latest request and start it as soon as the older response is discarded.
+            pendingRefresh = PendingRefresh(point, config)
+            return
+        }
         executor.execute {
-            runCatching { fetch(point) }.onSuccess { (r, p) ->
-                center = point; fetchedAt = System.currentTimeMillis(); roads = r; pois = p
-                Log.d(TAG, "OSM fetch complete: roads=${r.size} pois=${p.size}")
-                main.post { changed(r, p) }
-            }.onFailure {
-                Log.e(TAG, "OSM fetch failed; requesting phone proxy", it)
-                // A glasses network can be marked validated while captive,
-                // restricted, or unable to reach Overpass.  Prefer the phone's
-                // mobile connectivity for a short period after such a failure.
-                preferPhoneProxyUntilMs = System.currentTimeMillis() + 120_000L
-                requestPhoneProxy(point, System.currentTimeMillis())
+            try {
+                runCatching { fetch(point, config) }.onSuccess { (r, p) ->
+                    if (requestedConfig == config) {
+                        center = point
+                        fetchedAt = System.currentTimeMillis()
+                        roads = r
+                        pois = p
+                        fetchedConfig = config
+                        Log.d(TAG, "OSM fetch complete: roads=${r.size} pois=${p.size}")
+                        main.post { changed(r, p) }
+                    } else {
+                        Log.d(TAG, "Discarding stale OSM response for ${config.mode}")
+                    }
+                }.onFailure {
+                    if (requestedConfig == config) {
+                        Log.e(TAG, "OSM fetch failed; requesting phone proxy", it)
+                        // A glasses network can be marked validated while captive,
+                        // restricted, or unable to reach Overpass.  Prefer the phone's
+                        // mobile connectivity for a short period after such a failure.
+                        preferPhoneProxyUntilMs = System.currentTimeMillis() + 120_000L
+                        requestPhoneProxy(point, System.currentTimeMillis(), config, force = true)
+                    }
+                }
+            } finally {
+                busy.set(false)
+                val pending = pendingRefresh
+                pendingRefresh = null
+                pending?.let {
+                    main.post { refresh(it.point, it.config, force = true) }
+                }
             }
-            busy.set(false)
         }
     }
 
-    fun acceptProxy(centerPoint: MapGeoPoint, newRoads: List<MapRoad>, newPois: List<MapPoi>) {
-        center = centerPoint; fetchedAt = System.currentTimeMillis(); roads = newRoads; pois = newPois
+    fun refreshNow(point: MapGeoPoint, config: PoiDisplayConfig = requestedConfig) {
+        lastPhoneProxyRequestMs = 0L
+        refresh(point, config, force = true)
+    }
+
+    fun acceptProxy(
+        centerPoint: MapGeoPoint,
+        newRoads: List<MapRoad>,
+        newPois: List<MapPoi>,
+        config: PoiDisplayConfig = requestedConfig
+    ) {
+        requestedConfig = config
+        center = centerPoint; fetchedAt = System.currentTimeMillis(); roads = newRoads; pois = newPois; fetchedConfig = config
         changed(newRoads, newPois)
     }
 
-    fun refreshFromPhone(point: MapGeoPoint) {
+    fun refreshFromPhone(point: MapGeoPoint, config: PoiDisplayConfig = requestedConfig) {
+        requestedConfig = config
         // A prior attempt may have happened before RFCOMM connected, so do not
         // let the normal request throttle suppress this connection retry.
         lastPhoneProxyRequestMs = 0L
-        requestPhoneProxy(point, System.currentTimeMillis())
+        requestPhoneProxy(point, System.currentTimeMillis(), config, force = true)
     }
 
-    private fun requestPhoneProxy(point: MapGeoPoint, now: Long) {
-        if (now - lastPhoneProxyRequestMs < 15_000L) return
+    private fun requestPhoneProxy(point: MapGeoPoint, now: Long, config: PoiDisplayConfig, force: Boolean = false) {
+        if (!force && now - lastPhoneProxyRequestMs < 15_000L) return
         lastPhoneProxyRequestMs = now
-        proxy(point)
+        proxy(point, config)
     }
 
-    private fun fetch(c: MapGeoPoint): Pair<List<MapRoad>, List<MapPoi>> {
-        // Stations remain useful from several miles away. Supermarkets and all
-        // school levels are fetched to the one-mile importance threshold.
-        val q = """
-            [out:json][timeout:12];
-            (
-              way(around:400,${c.lat},${c.lon})["highway"]["highway"!~"construction|proposed|platform|corridor|elevator"];
-            );
-            out geom;
-            (
+    private fun fetch(c: MapGeoPoint, config: PoiDisplayConfig): Pair<List<MapRoad>, List<MapPoi>> {
+        val poiQuery = if (config.isDefault) {
+            // Preserve the legacy category-specific radii exactly: stations at 8 km,
+            // supermarkets/schools at 1.7 km, and ordinary POIs at 400 m.
+            """
               nw(around:8000,${c.lat},${c.lon})["railway"="station"];
               nw(around:1700,${c.lat},${c.lon})["shop"="supermarket"];
               nw(around:1700,${c.lat},${c.lon})["amenity"~"^(kindergarten|school|college|university)${'$'}"];
@@ -98,6 +142,32 @@ class MapRoadRepository(context: Context, private val changed: (List<MapRoad>, L
               nw(around:400,${c.lat},${c.lon})["historic"~"^(cathedral|church|monument|castle)${'$'}"];
               nw(around:400,${c.lat},${c.lon})["shop"];
               nw(around:400,${c.lat},${c.lon})["tourism"~"^(museum|attraction|viewpoint)${'$'}"];
+            """.trimIndent()
+        } else if (config.isDefaultMode) {
+            buildDefaultModePoiQuery(c, config)
+        } else {
+            config.categories
+                .sorted()
+                .joinToString("\n") { category ->
+                    val definition = MapPoiCategoryCatalog.definition(category)
+                    val selector = when {
+                        definition.exactValue != null ->
+                            "[\"${definition.overpassTag}\"=\"${definition.exactValue}\"]"
+                        definition.valuesRegex != null ->
+                            "[\"${definition.overpassTag}\"~\"^(${definition.valuesRegex})${'$'}\"]"
+                        else -> "[\"${definition.overpassTag}\"]"
+                    }
+                    "nw(around:${config.radiusM},${c.lat},${c.lon})$selector;"
+                }
+        }
+        val q = """
+            [out:json][timeout:12];
+            (
+              way(around:400,${c.lat},${c.lon})["highway"]["highway"!~"construction|proposed|platform|corridor|elevator"];
+            );
+            out geom;
+            (
+              $poiQuery
             );
             out center;
         """.trimIndent()
@@ -106,6 +176,32 @@ class MapRoadRepository(context: Context, private val changed: (List<MapRoad>, L
             try { return request(endpoint, q) } catch (t: Throwable) { failure = t }
         }
         throw failure ?: IllegalStateException("No Overpass endpoint")
+    }
+
+    private fun buildDefaultModePoiQuery(c: MapGeoPoint, config: PoiDisplayConfig): String {
+        val queries = buildList {
+            config.importantCategories.sorted().forEach { category ->
+                val radius = config.importantRadiiM[category] ?: return@forEach
+                add(overpassPoiQuery(c, category, radius))
+            }
+            config.normalCategories.sorted().forEach { category ->
+                add(overpassPoiQuery(c, category, PoiDisplayConfig.DEFAULT_RADIUS_M))
+            }
+        }
+        return queries.takeIf { it.isNotEmpty() }?.joinToString("\n")
+            ?: "nw(around:1,${c.lat},${c.lon})[\"__everyday_no_poi__\"];"
+    }
+
+    private fun overpassPoiQuery(c: MapGeoPoint, category: String, radiusM: Int): String {
+        val definition = MapPoiCategoryCatalog.definition(category)
+        val selector = when {
+            definition.exactValue != null ->
+                "[\"${definition.overpassTag}\"=\"${definition.exactValue}\"]"
+            definition.valuesRegex != null ->
+                "[\"${definition.overpassTag}\"~\"^(${definition.valuesRegex})${'$'}\"]"
+            else -> "[\"${definition.overpassTag}\"]"
+        }
+        return "nw(around:$radiusM,${c.lat},${c.lon})$selector;"
     }
 
     private fun request(endpoint: String, query: String): Pair<List<MapRoad>, List<MapPoi>> {

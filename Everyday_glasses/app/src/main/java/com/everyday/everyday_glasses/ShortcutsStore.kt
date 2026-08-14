@@ -6,9 +6,10 @@ import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import com.everyday.shared.command.AppCommandInvocation
 
 /**
- * Persists the ordered list of [ShortcutAction]s assigned to the lemon hover control.
+ * Persists the ordered command IDs assigned to the lemon hover control.
  *
  * Storage location mirrors [WidgetPersistence]: app-specific external Documents directory
  * when available, falling back to `filesDir`.
@@ -18,42 +19,33 @@ object ShortcutsStore {
     private const val FILENAME = "everyday_shortcuts.json"
     private const val KEY_LEMON = "lemon"
 
-    fun load(context: Context): List<ShortcutAction> {
+    fun load(context: Context, registry: AppCommandRegistry): List<AppCommandInvocation> {
         val file = file(context)
-        if (!file.exists()) return ShortcutAction.DEFAULT_LEMON_SHORTCUTS
+        if (!file.exists()) return registry.defaultShortcutInvocations
 
         return try {
             val text = file.readText()
-            if (text.isBlank()) return ShortcutAction.DEFAULT_LEMON_SHORTCUTS
-            val root = JSONObject(text)
-            val array = root.optJSONArray(KEY_LEMON) ?: return ShortcutAction.DEFAULT_LEMON_SHORTCUTS
-            val result = mutableListOf<ShortcutAction>()
-            for (i in 0 until array.length()) {
-                val id = array.optString(i) ?: continue
-                val action = ShortcutAction.fromId(id) ?: continue
-                if (result.none { it.id == action.id }) result.add(action)
-            }
-            if (result.isEmpty()) ShortcutAction.DEFAULT_LEMON_SHORTCUTS else result
+            if (text.isBlank()) return registry.defaultShortcutInvocations
+            decode(text, registry)
         } catch (e: Exception) {
             Log.e(TAG, "Error reading shortcuts", e)
-            ShortcutAction.DEFAULT_LEMON_SHORTCUTS
+            registry.defaultShortcutInvocations
         }
     }
 
-    fun save(context: Context, actions: List<ShortcutAction>): Boolean {
+    fun save(context: Context, registry: AppCommandRegistry, invocations: List<AppCommandInvocation>): Boolean {
         return try {
-            val deduped = mutableListOf<ShortcutAction>()
-            for (action in actions) {
-                if (deduped.none { it.id == action.id }) deduped.add(action)
-                if (deduped.size >= ShortcutAction.MAX_LEMON_SLICES) break
-            }
-            val root = JSONObject().apply {
-                put(KEY_LEMON, JSONArray().apply { deduped.forEach { put(it.id) } })
+            val deduped = mutableListOf<AppCommandInvocation>()
+            for (invocation in invocations) {
+                val definition = registry.find(invocation.commandId) ?: continue
+                if (!definition.shortcutEligible || registry.validate(invocation) !is CommandValidationResult.Valid) continue
+                if (deduped.none { it.commandId == invocation.commandId }) deduped.add(invocation)
+                if (deduped.size >= AppCommandRegistry.MAX_LEMON_COMMANDS) break
             }
             val target = file(context)
             target.parentFile?.mkdirs()
             val tmp = File(target.parentFile, "${target.name}.tmp")
-            tmp.writeText(root.toString(2))
+            tmp.writeText(encode(deduped))
             if (!tmp.renameTo(target)) {
                 if (target.exists()) target.delete()
                 tmp.renameTo(target)
@@ -63,6 +55,23 @@ object ShortcutsStore {
             Log.e(TAG, "Error writing shortcuts", e)
             false
         }
+    }
+
+    internal fun encode(invocations: List<AppCommandInvocation>): String = JSONObject().apply {
+        put(KEY_LEMON, JSONArray().apply { invocations.forEach { put(it.commandId) } })
+    }.toString(2)
+
+    internal fun decode(raw: String, registry: AppCommandRegistry): List<AppCommandInvocation> {
+        val array = JSONObject(raw).optJSONArray(KEY_LEMON) ?: return registry.defaultShortcutInvocations
+        val result = mutableListOf<AppCommandInvocation>()
+        for (i in 0 until array.length()) {
+            val id = array.optString(i) ?: continue
+            val definition = registry.find(id) ?: continue
+            if (!definition.shortcutEligible || result.any { it.commandId == id }) continue
+            result += registry.invocation(definition)
+            if (result.size >= AppCommandRegistry.MAX_LEMON_COMMANDS) break
+        }
+        return result.ifEmpty { registry.defaultShortcutInvocations }
     }
 
     private fun file(context: Context): File {

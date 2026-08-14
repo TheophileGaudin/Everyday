@@ -10,6 +10,7 @@ import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
 import android.media.projection.MediaProjection
 import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import com.everyday.shared.sync.SubtitleControl
 import com.everyday.shared.sync.SubtitleControlAction
@@ -189,6 +190,7 @@ class PhoneSubtitleCoordinator(
     }
 
     @SuppressLint("MissingPermission")
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun startAudioCapture(projection: MediaProjection, engine: SubtitleTranscriber) {
         if (!running.compareAndSet(false, true)) return
         fileLog("Subtitle audio capture setup")

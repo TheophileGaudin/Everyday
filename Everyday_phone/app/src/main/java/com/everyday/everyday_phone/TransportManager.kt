@@ -1,18 +1,14 @@
 package com.everyday.everyday_phone
 
 import android.util.DisplayMetrics
-import com.everyday.shared.sync.SyncError
-import com.everyday.shared.sync.SyncRequest
-import com.everyday.shared.sync.SyncSnapshot
-import com.everyday.shared.sync.SpeedSnapshot
-import com.everyday.shared.transport.SyncMessenger
 
+/** Owns screen-mirroring route selection and Wi-Fi/Wi-Fi Direct arbitration. */
 class TransportManager(
     private val rfcommServerProvider: () -> RfcommServer?,
     private val screenStreamServerProvider: () -> ScreenStreamServer?,
     private val wifiDirectManagerProvider: () -> WifiDirectManager?,
     private val log: (String) -> Unit
-) : SyncMessenger {
+) {
 
     enum class MirrorStartAction {
         REQUEST_PROJECTION,
@@ -26,40 +22,6 @@ class TransportManager(
     }
 
     private var pendingMirrorRoute: MirrorRoute? = null
-
-    override fun isConnected(): Boolean =
-        rfcommServerProvider()?.isConnected() == true
-
-    override fun sendSyncRequest(request: SyncRequest): Boolean = false
-
-    override fun sendSyncSnapshot(snapshot: SyncSnapshot): Boolean {
-        if (!isConnected() || snapshot.isEmpty) return false
-        rfcommServerProvider()?.sendSyncSnapshot(snapshot) ?: return false
-        return true
-    }
-
-    override fun sendSyncError(error: SyncError): Boolean {
-        if (!isConnected()) return false
-        rfcommServerProvider()?.sendSyncError(error) ?: return false
-        return true
-    }
-
-    override fun sendSpeedSnapshot(snapshot: SpeedSnapshot): Boolean {
-        if (!isConnected()) return false
-        rfcommServerProvider()?.sendSpeedSnapshot(snapshot) ?: return false
-        return true
-    }
-
-    fun sendGoogleAuthState(state: PhoneGoogleAuthState): Boolean {
-        val server = rfcommServerProvider() ?: return false
-        if (!server.isConnected()) return false
-        server.sendGoogleAuthState(
-            status = state.status,
-            account = state.account,
-            detail = state.detail
-        )
-        return true
-    }
 
     fun prepareMirrorStart(): MirrorStartAction {
         val bestIp = screenStreamServerProvider()?.getBestStreamingIp()

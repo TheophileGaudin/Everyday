@@ -2,16 +2,24 @@ package com.everyday.everyday_glasses.binocular
 
 import android.app.Activity
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Rect
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.AttributeSet
 import android.util.Log
+import android.view.PixelCopy
 import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import com.everyday.everyday_glasses.AssistantScreenshot
 import com.everyday.everyday_glasses.CursorView
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.CompletableFuture
 
 /**
  * BinocularView - A ViewGroup that handles binocular display for AR glasses.
@@ -404,7 +412,86 @@ class BinocularView @JvmOverloads constructor(
      * Get the content container for direct access if needed.
      */
     fun getContentContainer(): FrameLayout = contentContainer
-    
+
+    /**
+     * Capture the composited glasses view only for an explicit caller request.
+     *
+     * PixelCopy includes WebView/SurfaceView content when the platform supports it. The draw
+     * fallback keeps the path usable on older devices and in simple dispatch-draw mode.
+     */
+    fun captureAssistantScreenshot(): CompletableFuture<AssistantScreenshot> {
+        val result = CompletableFuture<AssistantScreenshot>()
+        val capture = Runnable {
+            val captureWidth = width.takeIf { it > 0 } ?: DisplayConfig.SCREEN_WIDTH
+            val captureHeight = height.takeIf { it > 0 } ?: DisplayConfig.EYE_HEIGHT
+            val bitmap = runCatching {
+                Bitmap.createBitmap(captureWidth, captureHeight, Bitmap.Config.ARGB_8888)
+            }.getOrElse { failure ->
+                result.completeExceptionally(failure)
+                return@Runnable
+            }
+
+            fun complete(bitmapToEncode: Bitmap) {
+                try {
+                    val bytes = ByteArrayOutputStream().use { output ->
+                        check(bitmapToEncode.compress(Bitmap.CompressFormat.PNG, 100, output)) {
+                            "Could not encode glasses screenshot"
+                        }
+                        output.toByteArray()
+                    }
+                    result.complete(AssistantScreenshot(bytes, captureWidth, captureHeight))
+                } catch (failure: Throwable) {
+                    result.completeExceptionally(failure)
+                } finally {
+                    bitmapToEncode.recycle()
+                }
+            }
+
+            fun drawFallback() {
+                runCatching {
+                    bitmap.eraseColor(Color.BLACK)
+                    draw(Canvas(bitmap))
+                    complete(bitmap)
+                }.onFailure { failure ->
+                    bitmap.recycle()
+                    result.completeExceptionally(failure)
+                }
+            }
+
+            val act = activity
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && act != null) {
+                runCatching {
+                    val location = IntArray(2)
+                    getLocationInWindow(location)
+                    val source = Rect(
+                        location[0],
+                        location[1],
+                        location[0] + captureWidth,
+                        location[1] + captureHeight
+                    )
+                    PixelCopy.request(
+                        act.window,
+                        source,
+                        bitmap,
+                        { copyResult -> if (copyResult == PixelCopy.SUCCESS) complete(bitmap) else drawFallback() },
+                        Handler(Looper.getMainLooper())
+                    )
+                }.onFailure {
+                    drawFallback()
+                }
+            } else {
+                drawFallback()
+            }
+        }
+
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            capture.run()
+        } else if (!post(capture)) {
+            result.completeExceptionally(IllegalStateException("Glasses view is not attached"))
+        }
+        return result
+    }
+
     // ==================== Layout ====================
     
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {

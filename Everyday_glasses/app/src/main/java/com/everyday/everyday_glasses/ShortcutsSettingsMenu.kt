@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import kotlin.math.max
 import kotlin.math.min
+import com.everyday.shared.command.AppCommandInvocation
 
 /**
  * Modal full-screen overlay for configuring the lemon hover control's shortcut list.
@@ -20,20 +21,20 @@ import kotlin.math.min
 class ShortcutsSettingsMenu(
     private val screenWidth: Float,
     private val screenHeight: Float,
-    private val savedLayoutsProvider: () -> List<String>,
-    private val initialShortcuts: List<ShortcutAction>
+    private val registry: AppCommandRegistry,
+    private val initialShortcuts: List<AppCommandInvocation>
 ) {
 
     var isVisible: Boolean = false
         private set
 
-    private val available = mutableListOf<ShortcutAction>()
-    private val onLemon = mutableListOf<ShortcutAction>()
+    private val available = mutableListOf<AppCommandDefinition>()
+    private val onLemon = mutableListOf<AppCommandDefinition>()
 
     private var leftScroll: Float = 0f
     private var rightScroll: Float = 0f
 
-    var onChanged: ((List<ShortcutAction>) -> Unit)? = null
+    var onChanged: ((List<AppCommandInvocation>) -> Unit)? = null
     var onDismissed: (() -> Unit)? = null
 
     private val backdropRect = RectF()
@@ -45,8 +46,8 @@ class ShortcutsSettingsMenu(
     private val rightHeaderRect = RectF()
     private val previewRect = RectF()
 
-    private data class Row(val rect: RectF, val action: ShortcutAction, val isOnLemon: Boolean, val index: Int)
-    private data class ArrowHit(val rect: RectF, val action: ShortcutAction, val delta: Int)
+    private data class Row(val rect: RectF, val action: AppCommandDefinition, val isOnLemon: Boolean, val index: Int)
+    private data class ArrowHit(val rect: RectF, val action: AppCommandDefinition, val delta: Int)
 
     private val leftRows = mutableListOf<Row>()
     private val rightRows = mutableListOf<Row>()
@@ -128,9 +129,10 @@ class ShortcutsSettingsMenu(
 
     private fun loadInitial() {
         onLemon.clear()
-        for (a in initialShortcuts) {
-            if (onLemon.none { it.id == a.id }) onLemon.add(a)
-            if (onLemon.size >= ShortcutAction.MAX_LEMON_SLICES) break
+        for (invocation in initialShortcuts) {
+            val definition = registry.find(invocation.commandId) ?: continue
+            if (onLemon.none { it.id == definition.id }) onLemon.add(definition)
+            if (onLemon.size >= AppCommandRegistry.MAX_LEMON_COMMANDS) break
         }
         rebuildAvailable()
     }
@@ -138,16 +140,8 @@ class ShortcutsSettingsMenu(
     private fun rebuildAvailable() {
         available.clear()
         val onIds = onLemon.map { it.id }.toSet()
-        for (action in ShortcutAction.BUILTIN) {
+        for (action in registry.shortcutDefinitions()) {
             if (action.id !in onIds) available.add(action)
-        }
-        // Discovered saved layouts (filenames the user saved at runtime).
-        for (name in savedLayoutsProvider()) {
-            if (name.isBlank()) continue
-            val candidate = ShortcutAction.Layout(name)
-            if (candidate.id !in onIds && available.none { it.id == candidate.id }) {
-                available.add(candidate)
-            }
         }
     }
 
@@ -235,7 +229,7 @@ class ShortcutsSettingsMenu(
         canvas.drawRoundRect(rightRect, 8f, 8f, columnBgPaint)
         canvas.drawText("Available", leftHeaderRect.left + 10f, leftHeaderRect.bottom - 6f, headerPaint)
         canvas.drawText("On the lemon", rightHeaderRect.left + 10f, rightHeaderRect.bottom - 6f, headerPaint)
-        val capacity = "${onLemon.size} / ${ShortcutAction.MAX_LEMON_SLICES}"
+        val capacity = "${onLemon.size} / ${AppCommandRegistry.MAX_LEMON_COMMANDS}"
         canvas.drawText(capacity, rightHeaderRect.right - 10f, rightHeaderRect.bottom - 6f, capacityPaint)
 
         canvas.save()
@@ -245,7 +239,7 @@ class ShortcutsSettingsMenu(
 
         canvas.save()
         canvas.clipRect(rightRect.left, rightHeaderRect.bottom, rightRect.right, rightRect.bottom)
-        val full = onLemon.size >= ShortcutAction.MAX_LEMON_SLICES
+        val full = onLemon.size >= AppCommandRegistry.MAX_LEMON_COMMANDS
         for ((i, row) in rightRows.withIndex()) drawRow(canvas, row, alt = i % 2 == 1, full = false)
         for (arrow in rightArrows) drawArrowButton(canvas, arrow.rect, up = arrow.delta < 0)
         if (full) {
@@ -336,8 +330,8 @@ class ShortcutsSettingsMenu(
         }
     }
 
-    private fun moveToLemon(action: ShortcutAction) {
-        if (onLemon.size >= ShortcutAction.MAX_LEMON_SLICES) return
+    private fun moveToLemon(action: AppCommandDefinition) {
+        if (onLemon.size >= AppCommandRegistry.MAX_LEMON_COMMANDS) return
         if (onLemon.any { it.id == action.id }) return
         onLemon.add(action)
         rebuildAvailable()
@@ -345,7 +339,7 @@ class ShortcutsSettingsMenu(
         notifyChanged()
     }
 
-    private fun moveToAvailable(action: ShortcutAction) {
+    private fun moveToAvailable(action: AppCommandDefinition) {
         if (onLemon.removeAll { it.id == action.id }) {
             rebuildAvailable()
             updateLayout()
@@ -353,7 +347,7 @@ class ShortcutsSettingsMenu(
         }
     }
 
-    private fun reorder(action: ShortcutAction, delta: Int) {
+    private fun reorder(action: AppCommandDefinition, delta: Int) {
         val idx = onLemon.indexOfFirst { it.id == action.id }
         if (idx < 0) return
         val target = (idx + delta).coerceIn(0, onLemon.size - 1)
@@ -365,6 +359,6 @@ class ShortcutsSettingsMenu(
     }
 
     private fun notifyChanged() {
-        onChanged?.invoke(onLemon.toList())
+        onChanged?.invoke(onLemon.map(registry::invocation))
     }
 }

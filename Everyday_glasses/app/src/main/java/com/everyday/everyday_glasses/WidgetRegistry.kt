@@ -13,8 +13,8 @@ import android.view.ViewGroup
  * - Hit-testing (finding widget at coordinates)
  * - Drawing order (sorted by z-order)
  * 
- * The WidgetRegistry does NOT own the widgets - it only manages their organization.
- * Widgets are still created and destroyed by WidgetContainer.
+ * The registry owns membership and ordering; [WidgetLifecycleController] owns creation
+ * and teardown.
  */
 class WidgetRegistry {
 
@@ -22,25 +22,38 @@ class WidgetRegistry {
         private const val TAG = "WidgetRegistry"
     }
 
-    // Widget collections
-    val textWidgets = mutableListOf<TextBoxWidget>()
-    val browserWidgets = mutableListOf<BrowserWidget>()
-    val imageWidgets = mutableListOf<ImageWidget>()
-    val videoWidgets = mutableListOf<VideoWidget>()
-    val pdfWidgets = mutableListOf<PdfWidget>()
-    val fileBrowserWidgets = mutableListOf<FileBrowserWidget>()
+    private val hitTestCache = WidgetHitTestCache<BaseWidget>(::allWidgets) { it.zOrder }
+
+    // Widget collections invalidate the ordering cache on every membership change,
+    // including direct bulk changes made while applying a persisted layout.
+    val textWidgets: MutableList<TextBoxWidget> = InvalidatingMutableList(::invalidateHitTestOrder)
+    val browserWidgets: MutableList<BrowserWidget> = InvalidatingMutableList(::invalidateHitTestOrder)
+    val imageWidgets: MutableList<ImageWidget> = InvalidatingMutableList(::invalidateHitTestOrder)
+    val videoWidgets: MutableList<VideoWidget> = InvalidatingMutableList(::invalidateHitTestOrder)
+    val pdfWidgets: MutableList<PdfWidget> = InvalidatingMutableList(::invalidateHitTestOrder)
+    val fileBrowserWidgets: MutableList<FileBrowserWidget> = InvalidatingMutableList(::invalidateHitTestOrder)
     
     // Special widgets (managed separately, always present)
     var statusBarWidget: StatusBarWidget? = null
+        set(value) { if (field !== value) { field = value; invalidateHitTestOrder() } }
     var locationWidget: LocationWidget? = null
+        set(value) { if (field !== value) { field = value; invalidateHitTestOrder() } }
     var mapWidget: MapWidget? = null
+        set(value) { if (field !== value) { field = value; invalidateHitTestOrder() } }
     var calendarWidget: CalendarWidget? = null
+        set(value) { if (field !== value) { field = value; invalidateHitTestOrder() } }
     var screenMirrorWidget: ScreenMirrorWidget? = null
+        set(value) { if (field !== value) { field = value; invalidateHitTestOrder() } }
     var financeWidget: FinanceWidget? = null
+        set(value) { if (field !== value) { field = value; invalidateHitTestOrder() } }
     var newsWidget: NewsWidget? = null
+        set(value) { if (field !== value) { field = value; invalidateHitTestOrder() } }
     var notificationsWidget: NotificationsWidget? = null
+        set(value) { if (field !== value) { field = value; invalidateHitTestOrder() } }
     var speedometerWidget: SpeedometerWidget? = null
+        set(value) { if (field !== value) { field = value; invalidateHitTestOrder() } }
     var subtitleWidget: SubtitleWidget? = null
+        set(value) { if (field !== value) { field = value; invalidateHitTestOrder() } }
     
     // Global z-order counter for unified widget layering
     private var nextZOrder = 0
@@ -59,6 +72,7 @@ class WidgetRegistry {
     fun bringToFront(widget: BaseWidget, rootView: ViewGroup? = null, containerView: View? = null) {
         val oldZOrder = widget.zOrder
         widget.zOrder = nextZOrder++
+        invalidateHitTestOrder()
         Log.d(TAG, "Brought ${widget::class.simpleName} to front: zOrder $oldZOrder -> ${widget.zOrder}")
         
         // For browser widgets, also update WebView z-order in the View hierarchy
@@ -108,24 +122,26 @@ class WidgetRegistry {
      * the previous hand-rolled getMinimizedWidgets() implementation.
      */
     fun allWidgets(): List<BaseWidget> {
-        val result = mutableListOf<BaseWidget>()
-        statusBarWidget?.let { result.add(it) }
-        locationWidget?.let { result.add(it) }
-        mapWidget?.let { result.add(it) }
-        calendarWidget?.let { result.add(it) }
-        financeWidget?.let { result.add(it) }
-        newsWidget?.let { result.add(it) }
-        notificationsWidget?.let { result.add(it) }
-        speedometerWidget?.let { result.add(it) }
-        subtitleWidget?.let { result.add(it) }
-        screenMirrorWidget?.let { result.add(it) }
-        result.addAll(browserWidgets)
-        result.addAll(textWidgets)
-        result.addAll(imageWidgets)
-        result.addAll(videoWidgets)
-        result.addAll(pdfWidgets)
-        result.addAll(fileBrowserWidgets)
-        return result
+        return WidgetDescriptors.all.flatMap { widgets(it.type) }
+    }
+
+    fun widgets(type: WidgetTypeId): List<BaseWidget> = when (type) {
+        WidgetTypeId.STATUS -> listOfNotNull(statusBarWidget)
+        WidgetTypeId.LOCATION -> listOfNotNull(locationWidget)
+        WidgetTypeId.MAP -> listOfNotNull(mapWidget)
+        WidgetTypeId.CALENDAR -> listOfNotNull(calendarWidget)
+        WidgetTypeId.FINANCE -> listOfNotNull(financeWidget)
+        WidgetTypeId.NEWS -> listOfNotNull(newsWidget)
+        WidgetTypeId.NOTIFICATIONS -> listOfNotNull(notificationsWidget)
+        WidgetTypeId.SPEEDOMETER -> listOfNotNull(speedometerWidget)
+        WidgetTypeId.SUBTITLE -> listOfNotNull(subtitleWidget)
+        WidgetTypeId.MIRROR -> listOfNotNull(screenMirrorWidget)
+        WidgetTypeId.BROWSER -> browserWidgets
+        WidgetTypeId.TEXT -> textWidgets
+        WidgetTypeId.IMAGE -> imageWidgets
+        WidgetTypeId.VIDEO -> videoWidgets
+        WidgetTypeId.PDF -> pdfWidgets
+        WidgetTypeId.FILES -> fileBrowserWidgets
     }
 
     /** Returns all pinned widgets in the same stable order as allWidgets(). */
@@ -159,15 +175,7 @@ class WidgetRegistry {
      * Returns the topmost widget (highest z-order) at the point.
      */
     fun getWidgetAt(x: Float, y: Float): BaseWidget? {
-        // Get all widgets sorted by z-order descending (topmost first)
-        val allWidgets = getAllSortedByZOrder().reversed()
-        
-        for (widget in allWidgets) {
-            if (widget.containsPoint(x, y)) {
-                return widget
-            }
-        }
-        return null
+        return hitTestCache.findFirstEligible { it.containsPoint(x, y) }
     }
 
     // ==================== Widget Management ====================
@@ -260,6 +268,16 @@ class WidgetRegistry {
         videoWidgets.clear()
         pdfWidgets.clear()
         fileBrowserWidgets.clear()
+        statusBarWidget = null
+        locationWidget = null
+        mapWidget = null
+        calendarWidget = null
+        financeWidget = null
+        newsWidget = null
+        notificationsWidget = null
+        speedometerWidget = null
+        subtitleWidget = null
+        screenMirrorWidget = null
         nextZOrder = 0
     }
 
@@ -267,4 +285,45 @@ class WidgetRegistry {
      * Get all minimized widgets for position management.
      */
     fun getMinimizedWidgets(): List<BaseWidget> = allWidgets().filter { it.isMinimized }
+
+    private fun invalidateHitTestOrder() {
+        hitTestCache.invalidate()
+    }
+
+    private class InvalidatingMutableList<T>(
+        private val onChanged: () -> Unit
+    ) : AbstractMutableList<T>() {
+        private val values = ArrayList<T>()
+
+        override val size: Int
+            get() = values.size
+
+        override fun get(index: Int): T = values[index]
+
+        override fun add(index: Int, element: T) {
+            values.add(index, element)
+            onChanged()
+        }
+
+        override fun removeAt(index: Int): T = values.removeAt(index).also { onChanged() }
+
+        override fun set(index: Int, element: T): T = values.set(index, element).also { onChanged() }
+
+        override fun clear() {
+            if (values.isEmpty()) return
+            values.clear()
+            onChanged()
+        }
+    }
+
+    /** Restore a previously captured z-order without making future assignments collide. */
+    fun restoreZOrder(widget: BaseWidget, zOrder: Int, rootView: ViewGroup? = null, containerView: View? = null) {
+        if (!allWidgets().any { it === widget }) return
+        widget.zOrder = zOrder
+        nextZOrder = maxOf(nextZOrder, zOrder + 1)
+        invalidateHitTestOrder()
+        if (widget is BrowserWidget && rootView != null && containerView != null) {
+            updateBrowserWebViewZOrder(widget, rootView, containerView)
+        }
+    }
 }

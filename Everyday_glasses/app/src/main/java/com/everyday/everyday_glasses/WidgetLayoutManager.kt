@@ -5,7 +5,7 @@ import android.util.Log
 
 class WidgetLayoutManager(
     private val context: Context,
-    private val persistenceManager: PersistenceManager,
+    private val stateStore: WidgetStateStore,
     private val canApplyLayout: () -> Boolean,
     private val captureState: () -> WidgetPersistence.PersistedState,
     private val applyState: (WidgetPersistence.PersistedState) -> Unit,
@@ -23,24 +23,8 @@ class WidgetLayoutManager(
 
     var activeLayoutName: String? = null
 
-    fun layoutSubmenuItems(): List<ContextMenu.SubMenuItem> {
-        val actions = listOf(
-            ContextMenu.SubMenuItem("layout_save", "Save"),
-            ContextMenu.SubMenuItem("layout_save_as", "Save As...")
-        )
-        val savedLayouts = persistenceManager.listLayouts()
-            .filterNot { BuiltInLayouts.isDelivered(it.name) }
-            .map { layout ->
-                ContextMenu.SubMenuItem("layout_load:${layout.name}", layout.name)
-            }
-        val deliveredLayouts = BuiltInLayouts.DELIVERED_LAYOUTS
-            .map { name -> ContextMenu.SubMenuItem("layout_load:$name", name) }
-        val loadItems = deliveredLayouts + savedLayouts
-        return actions + ContextMenu.SubMenuItem("layout_load_menu", "Load", submenu = loadItems)
-    }
-
     private fun loadLayoutByNameOrDelivered(name: String): WidgetPersistence.PersistedState? {
-        return buildDeliveredLayout(name) ?: persistenceManager.loadLayout(name)
+        return buildDeliveredLayout(name) ?: stateStore.loadLayout(name)
     }
 
     private fun isDeliveredWithoutSavedOverride(name: String): Boolean = BuiltInLayouts.isDelivered(name)
@@ -51,26 +35,7 @@ class WidgetLayoutManager(
             ?: trimmed
     }
 
-    fun handleSubmenuItemSelected(subItem: ContextMenu.SubMenuItem): Boolean {
-        when (subItem.id) {
-            "layout_save" -> saveCurrentLayout()
-            "layout_save_as" -> showSaveLayoutAsPrompt()
-            else -> {
-                if (subItem.id.startsWith("layout_load:")) {
-                    loadLayoutByName(subItem.id.removePrefix("layout_load:"))
-                } else {
-                    return false
-                }
-            }
-        }
-        return true
-    }
-
-    fun handleSubmenuItemDoubleTapped(subItem: ContextMenu.SubMenuItem): Boolean {
-        if (!subItem.id.startsWith("layout_load:")) {
-            return false
-        }
-        val name = subItem.id.removePrefix("layout_load:")
+    fun requestDeleteLayout(name: String): Boolean {
         if (isDeliveredWithoutSavedOverride(name)) {
             return false
         }
@@ -94,7 +59,7 @@ class WidgetLayoutManager(
             notifyContentChanged()
             return
         }
-        val saved = persistenceManager.saveLayout(trimmedName, capturePersistedState())
+        val saved = stateStore.saveLayout(trimmedName, capturePersistedState())
         if (saved) {
             activeLayoutName = trimmedName
             dismissNamePrompt()
@@ -106,7 +71,7 @@ class WidgetLayoutManager(
     }
 
     fun deleteLayoutByName(name: String) {
-        if (persistenceManager.deleteLayout(name)) {
+        if (stateStore.deleteLayout(name)) {
             if (activeLayoutName.equals(name.trim(), ignoreCase = true)) {
                 activeLayoutName = null
             }
@@ -115,7 +80,7 @@ class WidgetLayoutManager(
         notifyContentChanged()
     }
 
-    private fun saveCurrentLayout() {
+    fun saveCurrentLayout() {
         val layoutName = activeLayoutName?.trim().orEmpty()
         if (layoutName.isBlank() || BuiltInLayouts.isDelivered(layoutName)) {
             showSaveLayoutAsPrompt(initialName = "")
@@ -124,7 +89,7 @@ class WidgetLayoutManager(
         saveLayoutWithName(layoutName)
     }
 
-    private fun showSaveLayoutAsPrompt(initialName: String? = null) {
+    fun showSaveLayoutAsPrompt(initialName: String? = null) {
         val suggestedName = initialName
             ?: activeLayoutName
                 ?.takeUnless { BuiltInLayouts.isDelivered(it) }

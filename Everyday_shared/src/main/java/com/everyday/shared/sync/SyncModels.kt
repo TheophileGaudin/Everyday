@@ -1,7 +1,8 @@
 package com.everyday.shared.sync
 
 enum class SyncChannel(val wireName: String) {
-    LOCATION_WEATHER("weather"),
+    LOCATION("location"),
+    WEATHER("weather"),
     CALENDAR("calendar"),
     NEWS("news"),
     FINANCE("finance"),
@@ -29,9 +30,21 @@ data class SyncRequest(
     val financeAssetType: FinanceAssetType? = null,
     val financeChartType: FinanceChartType? = null,
     val financeTileId: String? = null,
-    val financeLiveEnabled: Boolean? = null
-    ,val mapLat: Double? = null
-    ,val mapLon: Double? = null
+    val financeLiveEnabled: Boolean? = null,
+    val mapLat: Double? = null,
+    val mapLon: Double? = null,
+    /** Active map algorithm name; kept as a string so the shared wire model stays app-agnostic. */
+    val mapPoiMode: String? = null,
+    val mapPoiCategories: List<String> = emptyList(),
+    val mapPoiRadiusM: Int? = null,
+    val mapPoiMaxResults: Int? = null,
+    val mapPoiImportantCategories: List<String> = emptyList(),
+    val mapPoiImportantRadiiM: Map<String, Int> = emptyMap(),
+    val mapPoiNormalCategories: List<String> = emptyList(),
+    val mapPoiNormalMaxResults: Int? = null,
+    val mapPoiShowClosest: Boolean? = null,
+    val mapPoiClosestRadiusM: Int? = null,
+    val newsSource: NewsSourceSpec? = null
 )
 
 data class WeatherData(
@@ -50,23 +63,42 @@ data class LocationName(
     val countryCode: String
 )
 
-data class LocationWeatherSnapshot(
+enum class LocationFixQuality {
+    VALID,
+    MISSING,
+    STALE,
+    INACCURATE,
+    IMPLAUSIBLE
+}
+
+/** Phone/location-provider owned fast stream; source time drives its short TTL. */
+data class LocationFix(
+    val lat: Double,
+    val lon: Double,
+    val accuracyM: Float?,
+    val bearingDeg: Float?,
+    val speedMps: Float?,
+    val quality: LocationFixQuality,
+    val timestampMs: Long = System.currentTimeMillis()
+)
+
+/** Returns speed only while this physical fix is both valid and fresh. */
+fun LocationFix.usableSpeedMps(nowMs: Long = System.currentTimeMillis()): Float? =
+    speedMps?.takeIf {
+        quality == LocationFixQuality.VALID &&
+            !SyncCachePolicy.isStale(timestampMs, SyncCachePolicy.LOCATION_STALE_AFTER_MS, nowMs) &&
+            it.isFinite() && it >= 0f
+    }
+
+/** Forecast/place-provider owned slow stream; fetchedAtMs drives weather cache expiry. */
+data class WeatherSnapshot(
     val town: String,
     val countryCode: String,
     val weather: WeatherData?,
-    val timestampMs: Long = System.currentTimeMillis(),
-    val lat: Double? = null,
-    val lon: Double? = null,
-    val accuracyM: Float? = null,
-    val bearingDeg: Float? = null,
-    val speedMps: Float? = null,
+    val fetchedAtMs: Long = System.currentTimeMillis(),
+    val forecastLat: Double? = null,
+    val forecastLon: Double? = null,
     val staleAfterMs: Long = SyncCachePolicy.WEATHER_STALE_AFTER_MS
-)
-
-data class SpeedSnapshot(
-    val speedMps: Float?,
-    val qualityOk: Boolean,
-    val timestampMs: Long = System.currentTimeMillis()
 )
 
 data class MapPointSnapshot(val lat: Double, val lon: Double)
@@ -99,6 +131,80 @@ data class CalendarSnapshot(
     val sourceMode: String = "PHONE_FALLBACK"
 )
 
+enum class NewsSourceKind {
+    DEFAULT_LOCATION,
+    QUERY,
+    CUSTOM_RSS;
+
+    companion object {
+        fun fromWireName(value: String?): NewsSourceKind? =
+            values().firstOrNull { it.name.equals(value, ignoreCase = true) }
+    }
+}
+
+/**
+ * The user-selected source for the news widget.
+ *
+ * The uppercase factories intentionally mirror the wire-facing names used by the assistant
+ * tool and persistence format while the lower-case helpers keep normal Kotlin call sites
+ * readable.
+ */
+data class NewsSourceSpec(
+    val kind: NewsSourceKind,
+    val value: String? = null
+) {
+    init {
+        when (kind) {
+            NewsSourceKind.DEFAULT_LOCATION -> require(value.isNullOrBlank()) {
+                "Default news source must not have a value"
+            }
+            NewsSourceKind.QUERY,
+            NewsSourceKind.CUSTOM_RSS -> require(!value.isNullOrBlank()) {
+                "News source value must not be blank"
+            }
+        }
+    }
+
+    val intent: String?
+        get() = value.takeIf { kind == NewsSourceKind.QUERY }
+
+    val url: String?
+        get() = value.takeIf { kind == NewsSourceKind.CUSTOM_RSS }
+
+    val description: String
+        get() = when (kind) {
+            NewsSourceKind.DEFAULT_LOCATION -> "Default location headlines"
+            NewsSourceKind.QUERY -> "Query: ${intent.orEmpty()}"
+            NewsSourceKind.CUSTOM_RSS -> "Custom RSS: ${url.orEmpty()}"
+        }
+
+    val sourceKind: NewsSourceKind
+        get() = kind
+
+    companion object {
+        val DEFAULT_LOCATION: NewsSourceSpec = NewsSourceSpec(NewsSourceKind.DEFAULT_LOCATION)
+
+        fun QUERY(intent: String): NewsSourceSpec =
+            NewsSourceSpec(NewsSourceKind.QUERY, intent.trim())
+
+        fun CUSTOM_RSS(url: String): NewsSourceSpec =
+            NewsSourceSpec(NewsSourceKind.CUSTOM_RSS, url.trim())
+
+        fun query(intent: String): NewsSourceSpec = QUERY(intent)
+
+        fun customRss(url: String): NewsSourceSpec = CUSTOM_RSS(url)
+
+        fun fromWire(kind: String?, value: String?): NewsSourceSpec? = runCatching {
+            when (NewsSourceKind.fromWireName(kind)) {
+                NewsSourceKind.DEFAULT_LOCATION -> DEFAULT_LOCATION
+                NewsSourceKind.QUERY -> QUERY(value.orEmpty())
+                NewsSourceKind.CUSTOM_RSS -> CUSTOM_RSS(value.orEmpty())
+                null -> null
+            }
+        }.getOrNull()
+    }
+}
+
 data class NewsArticle(
     val title: String,
     val content: String,
@@ -111,7 +217,8 @@ data class NewsSnapshot(
     val countryCode: String,
     val items: List<NewsArticle>,
     val fetchedAtMs: Long = System.currentTimeMillis(),
-    val staleAfterMs: Long = SyncCachePolicy.NEWS_STALE_AFTER_MS
+    val staleAfterMs: Long = SyncCachePolicy.NEWS_STALE_AFTER_MS,
+    val sourceSpec: NewsSourceSpec = NewsSourceSpec.DEFAULT_LOCATION
 )
 
 data class FinanceStockIndex(
@@ -202,21 +309,15 @@ data class FinanceTileSnapshot(
 )
 
 data class FinanceSnapshot(
-    val symbol: String,
-    val displayName: String,
-    val country: String,
-    val range: String,
-    val rangeLabel: String,
-    val points: List<Float>,
-    val candles: List<FinanceCandle> = emptyList(),
-    val percentChange: Float,
-    val assetType: FinanceAssetType = FinanceAssetType.INDEX,
-    val chartType: FinanceChartType = FinanceChartType.LINE,
-    val tiles: List<FinanceTileSnapshot> = emptyList(),
-    val navigationIndex: Int = 0,
-    val fetchedAtMs: Long = System.currentTimeMillis(),
-    val staleAfterMs: Long = SyncCachePolicy.FINANCE_STALE_AFTER_MS
-)
+    val tiles: List<FinanceTileSnapshot>
+) {
+    companion object {
+        fun fromTiles(tiles: List<FinanceTileSnapshot>): FinanceSnapshot? {
+            if (tiles.isEmpty()) return null
+            return FinanceSnapshot(tiles)
+        }
+    }
+}
 
 data class PhoneNotificationItem(
     val key: String,
@@ -246,7 +347,8 @@ data class PhoneNotificationsSnapshot(
 )
 
 data class SyncSnapshot(
-    val locationWeather: LocationWeatherSnapshot? = null,
+    val location: LocationFix? = null,
+    val weather: WeatherSnapshot? = null,
     val calendar: CalendarSnapshot? = null,
     val news: NewsSnapshot? = null,
     val finance: FinanceSnapshot? = null,
@@ -254,7 +356,8 @@ data class SyncSnapshot(
     val map: MapSnapshot? = null
 ) {
     val isEmpty: Boolean
-        get() = locationWeather == null &&
+        get() = location == null &&
+            weather == null &&
             calendar == null &&
             news == null &&
             finance == null &&

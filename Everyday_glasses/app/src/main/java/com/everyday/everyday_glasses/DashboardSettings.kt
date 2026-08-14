@@ -33,7 +33,7 @@ class DashboardSettings(
         private const val BASE_MENU_WIDTH = 320f
         private const val MAIN_MENU_BASE_HEIGHT = 176f
         private const val HEADSUP_MENU_HEIGHT = 350f  // Heads-up submenu: 3 sliders + toggle + back button
-        private const val GOOGLE_MENU_HEIGHT = 360f
+        private const val GOOGLE_MENU_HEIGHT = 470f
         private const val MORE_MENU_HEIGHT = 210f
         private const val CORNER_RADIUS = 12f
         private const val CLOSE_BUTTON_SIZE = 40f
@@ -124,6 +124,11 @@ class DashboardSettings(
             field = value
         }
 
+    var geminiConfigured = false
+    var geminiReady = false
+    var geminiModelLabel = "Recommended - automatic"
+    var geminiDetail = "Paste an API key to enable voice"
+
     // Callbacks when sliders change
     var onBrightnessChanged: ((Float) -> Unit)? = null
     var onAdaptiveBrightnessChanged: ((Boolean) -> Unit)? = null
@@ -137,6 +142,9 @@ class DashboardSettings(
     var onGrantCalendarAccess: (() -> Unit)? = null
     var onDisconnectGoogle: (() -> Unit)? = null
     var onRetryGoogleAuth: (() -> Unit)? = null
+    var onPasteGeminiKey: (() -> Unit)? = null
+    var onRemoveGeminiKey: (() -> Unit)? = null
+    var onCycleGeminiModel: (() -> Unit)? = null
     var onAppearanceRequested: (() -> Unit)? = null
     var onShortcutsRequested: (() -> Unit)? = null
     var onDismissed: (() -> Unit)? = null
@@ -148,15 +156,6 @@ class DashboardSettings(
         unitSystemMode = mode
         if (notify) onUnitSystemModeChanged?.invoke(mode)
     }
-
-    // Backwards-compatible aliases for brightness
-    var sliderValue: Float
-        get() = brightnessValue
-        set(value) { brightnessValue = value }
-
-    var onValueChanged: ((Float) -> Unit)?
-        get() = onBrightnessChanged
-        set(value) { onBrightnessChanged = value }
 
     /**
      * Set head-up hold time from milliseconds.
@@ -250,6 +249,9 @@ class DashboardSettings(
     private val googleStatusRect = RectF()
     private val googlePrimaryButtonRect = RectF()
     private val googleSecondaryButtonRect = RectF()
+    private val geminiKeyButtonRect = RectF()
+    private val geminiModelButtonRect = RectF()
+    private val geminiRemoveButtonRect = RectF()
 
     // State - which slider is being dragged
     private enum class ActiveSlider { NONE, BRIGHTNESS, HEAD_UP_TIME, WAKE_DURATION, ANGLE_THRESHOLD }
@@ -506,6 +508,11 @@ class DashboardSettings(
 
             val secondaryTop = googlePrimaryButtonRect.bottom + 12f
             googleSecondaryButtonRect.set(trackLeft, secondaryTop, trackRight, secondaryTop + BUTTON_HEIGHT)
+
+            val geminiTop = googleSecondaryButtonRect.bottom + 8f
+            geminiKeyButtonRect.set(trackLeft, geminiTop, trackRight, geminiTop + 38f)
+            geminiModelButtonRect.set(trackLeft, geminiKeyButtonRect.bottom + 6f, trackRight, geminiKeyButtonRect.bottom + 44f)
+            geminiRemoveButtonRect.set(trackLeft, geminiModelButtonRect.bottom + 6f, trackRight, geminiModelButtonRect.bottom + 44f)
 
             val backButtonLeft = menuRect.left + CLOSE_BUTTON_MARGIN
             val backButtonTop = menuRect.top + CLOSE_BUTTON_MARGIN
@@ -1079,6 +1086,33 @@ class DashboardSettings(
             canvas.drawRoundRect(googleSecondaryButtonRect, BUTTON_CORNER_RADIUS, BUTTON_CORNER_RADIUS, secondaryButtonPaint)
             canvas.drawText(label, googleSecondaryButtonRect.centerX(), googleSecondaryButtonRect.centerY() + 6f, buttonTextPaint)
         }
+
+        canvas.drawRoundRect(
+            geminiKeyButtonRect, BUTTON_CORNER_RADIUS, BUTTON_CORNER_RADIUS,
+            if (geminiReady) buttonPaint else secondaryButtonPaint
+        )
+        canvas.drawText(
+            if (geminiConfigured) "Gemini key: ********  (Paste to replace)" else "Paste Gemini API key",
+            geminiKeyButtonRect.centerX(), geminiKeyButtonRect.centerY() + 6f, buttonTextPaint
+        )
+        canvas.drawRoundRect(geminiModelButtonRect, BUTTON_CORNER_RADIUS, BUTTON_CORNER_RADIUS, secondaryButtonPaint)
+        canvas.drawText(
+            fitText(geminiModelLabel, buttonTextPaint, geminiModelButtonRect.width() - 16f),
+            geminiModelButtonRect.centerX(), geminiModelButtonRect.centerY() + 6f, buttonTextPaint
+        )
+        if (geminiConfigured) {
+            canvas.drawRoundRect(geminiRemoveButtonRect, BUTTON_CORNER_RADIUS, BUTTON_CORNER_RADIUS, closeButtonPaint)
+            canvas.drawText(
+                fitText("Remove key - $geminiDetail", buttonTextPaint, geminiRemoveButtonRect.width() - 16f),
+                geminiRemoveButtonRect.centerX(), geminiRemoveButtonRect.centerY() + 6f, buttonTextPaint
+            )
+        } else {
+            val centeredDetail = Paint(googleDetailPaint).apply { textAlign = Paint.Align.CENTER }
+            canvas.drawText(
+                fitText(geminiDetail, centeredDetail, geminiRemoveButtonRect.width()),
+                geminiRemoveButtonRect.centerX(), geminiRemoveButtonRect.centerY() + 5f, centeredDetail
+            )
+        }
     }
 
     private fun drawBackButton(canvas: Canvas) {
@@ -1209,6 +1243,8 @@ class DashboardSettings(
             if (googleSecondaryActionLabel() != null && googleSecondaryButtonRect.contains(x, y)) {
                 return true
             }
+            if (geminiKeyButtonRect.contains(x, y) || geminiModelButtonRect.contains(x, y) ||
+                geminiRemoveButtonRect.contains(x, y)) return true
         } else {
             if (backButtonRect.contains(x, y)) {
                 return true
@@ -1353,6 +1389,18 @@ class DashboardSettings(
                     GoogleAction.DISCONNECT -> onDisconnectGoogle?.invoke()
                     GoogleAction.NONE -> Unit
                 }
+                return true
+            }
+            if (geminiKeyButtonRect.contains(x, y)) {
+                onPasteGeminiKey?.invoke()
+                return true
+            }
+            if (geminiConfigured && geminiModelButtonRect.contains(x, y)) {
+                onCycleGeminiModel?.invoke()
+                return true
+            }
+            if (geminiConfigured && geminiRemoveButtonRect.contains(x, y)) {
+                onRemoveGeminiKey?.invoke()
                 return true
             }
         } else {

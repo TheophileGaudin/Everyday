@@ -8,12 +8,12 @@ import com.everyday.everyday_glasses.WidgetPersistence.PersistedState
  * way a user-saved layout would be restored.
  */
 object BuiltInLayouts {
-    val DELIVERED_LAYOUTS: List<String> = listOf(
-        ShortcutAction.BUILTIN_LAYOUT_STANDARD,
-        ShortcutAction.BUILTIN_LAYOUT_GROCERIES,
-        ShortcutAction.BUILTIN_LAYOUT_SUBTITLES,
-        ShortcutAction.BUILTIN_LAYOUT_MIRROR
-    )
+    const val STANDARD = "Standard"
+    const val GROCERIES = "Groceries"
+    const val SUBTITLES = "Subtitles"
+    const val MIRROR = "Mirror"
+    val NAMES: List<String> = listOf(STANDARD, GROCERIES, SUBTITLES, MIRROR)
+    val DELIVERED_LAYOUTS: List<String> = NAMES
 
     /**
      * Builds a layout by name. Returns null when the name is not one of the recognised
@@ -22,10 +22,10 @@ object BuiltInLayouts {
     fun build(name: String, screenWidth: Float, screenHeight: Float): PersistedState? {
         if (screenWidth <= 0f || screenHeight <= 0f) return null
         return when (canonicalBuiltinName(name)) {
-            ShortcutAction.BUILTIN_LAYOUT_STANDARD -> standardLayout(screenWidth, screenHeight)
-            ShortcutAction.BUILTIN_LAYOUT_GROCERIES -> groceriesLayout(screenWidth, screenHeight)
-            ShortcutAction.BUILTIN_LAYOUT_SUBTITLES -> subtitlesLayout(screenWidth, screenHeight)
-            ShortcutAction.BUILTIN_LAYOUT_MIRROR -> mirrorLayout(screenWidth, screenHeight)
+            STANDARD -> standardLayout(screenWidth, screenHeight)
+            GROCERIES -> groceriesLayout(screenWidth, screenHeight)
+            SUBTITLES -> subtitlesLayout(screenWidth, screenHeight)
+            MIRROR -> mirrorLayout(screenWidth, screenHeight)
             else -> null
         }
     }
@@ -35,7 +35,7 @@ object BuiltInLayouts {
 
     private fun canonicalBuiltinName(name: String): String? {
         val trimmed = name.trim()
-        return ShortcutAction.BUILTIN_LAYOUTS.firstOrNull { it.equals(trimmed, ignoreCase = true) }
+        return NAMES.firstOrNull { it.equals(trimmed, ignoreCase = true) }
     }
 
     private fun emptyState(name: String): PersistedState = PersistedState(
@@ -113,7 +113,7 @@ object BuiltInLayouts {
             isPinned = true
         )
 
-        return emptyState(ShortcutAction.BUILTIN_LAYOUT_STANDARD).copy(
+        return emptyState(STANDARD).copy(
             status = status,
             speedometer = speedometer,
             location = location,
@@ -166,7 +166,7 @@ object BuiltInLayouts {
             isPinned = true
         )
 
-        return emptyState(ShortcutAction.BUILTIN_LAYOUT_GROCERIES).copy(
+        return emptyState(GROCERIES).copy(
             text = listOf(textWidget),
             status = status,
             speedometer = speedometer,
@@ -190,7 +190,7 @@ object BuiltInLayouts {
             translationEnabled = false,
             isPinned = true
         )
-        return emptyState(ShortcutAction.BUILTIN_LAYOUT_SUBTITLES).copy(subtitle = subtitle)
+        return emptyState(SUBTITLES).copy(subtitle = subtitle)
     }
 
     // -----------------------------------------------------------------------------------
@@ -205,6 +205,6 @@ object BuiltInLayouts {
             isFullscreen = true,
             isPinned = true
         )
-        return emptyState(ShortcutAction.BUILTIN_LAYOUT_MIRROR).copy(mirror = mirror)
+        return emptyState(MIRROR).copy(mirror = mirror)
     }
 }

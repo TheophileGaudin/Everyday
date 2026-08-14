@@ -20,9 +20,9 @@ object ImageWidgetStorage {
         if (path.isBlank()) return false
 
         return runCatching {
-            val managedDirPath = getManagedDir(context).canonicalFile.toPath().normalize()
-            val filePath = File(path).canonicalFile.toPath().normalize()
-            filePath.startsWith(managedDirPath)
+            val managedDir = getManagedDir(context).canonicalFile
+            val file = File(path).canonicalFile
+            file == managedDir || file.path.startsWith(managedDir.path + File.separator)
         }.getOrElse { false }
     }
 

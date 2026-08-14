@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import kotlin.math.abs
+import com.everyday.shared.command.AppCommandInvocation
 
 /**
  * A hover control shaped like a lemon slice that exposes user-configurable shortcuts.
@@ -17,12 +18,13 @@ import kotlin.math.abs
  *    multiple steps clockwise, a slow drag advances one step at a time. Vertical motion is
  *    ignored.
  * 3. Release → the selection locks in; the lemon stays magnified.
- * 4. Tap inside the highlighted slice → the matching [ShortcutAction] runs and the lemon
+ * 4. Tap inside the highlighted slice runs the matching application command and the lemon
  *    collapses back. Tap anywhere else → the lemon collapses without running anything.
  */
 class LemonHoverControl(
-    private val shortcutsProvider: () -> List<ShortcutAction>,
-    private val onActionSelected: (ShortcutAction) -> Unit,
+    private val commandRegistry: AppCommandRegistry,
+    private val shortcutsProvider: () -> List<AppCommandInvocation>,
+    private val onActionSelected: (AppCommandInvocation) -> Unit,
     private val invalidate: () -> Unit
 ) : BaseHoverControl(ID, "Lemon shortcuts", DEFAULT_SIZE) {
 
@@ -143,7 +145,7 @@ class LemonHoverControl(
     }
 
     private fun slicesCount(): Int =
-        shortcutsProvider().size.coerceIn(1, ShortcutAction.MAX_LEMON_SLICES)
+        shortcutsProvider().size.coerceIn(1, AppCommandRegistry.MAX_LEMON_COMMANDS)
 
     // ==================== Hit-testing ====================
 
@@ -240,21 +242,8 @@ class LemonHoverControl(
         canvas.drawText("Tap to run. Double tap to cancel.", rect.centerX(), rect.top + 43f, confirmationHintPaint)
     }
 
-    private fun shortLabel(action: ShortcutAction): String = when (action) {
-        is ShortcutAction.Layout -> action.name
-        ShortcutAction.CreateText -> "Text"
-        ShortcutAction.CreateBrowser -> "Browser"
-        ShortcutAction.OpenYouTubeHistory -> "YouTube"
-        ShortcutAction.ToggleStatus -> "System"
-        ShortcutAction.ToggleLocation -> "Weather"
-        ShortcutAction.ToggleCalendar -> "Calendar"
-        ShortcutAction.ToggleFinance -> "Finance"
-        ShortcutAction.ToggleNews -> "News"
-        ShortcutAction.ToggleNotifications -> "Alerts"
-        ShortcutAction.ToggleSpeedometer -> "Speed"
-        ShortcutAction.ToggleSubtitle -> "Subs"
-        ShortcutAction.ToggleMirror -> "Mirror"
-    }
+    private fun shortLabel(invocation: AppCommandInvocation): String =
+        commandRegistry.find(invocation.commandId)?.shortLabel ?: invocation.commandId
 
     private fun fitText(text: String, paint: Paint, maxWidth: Float): String {
         if (paint.measureText(text) <= maxWidth) return text

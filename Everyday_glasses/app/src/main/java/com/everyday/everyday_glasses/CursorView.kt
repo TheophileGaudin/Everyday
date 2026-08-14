@@ -22,7 +22,7 @@ class CursorView @JvmOverloads constructor(
 ) : View(context, attrs, defStyleAttr) {
     
     companion object {
-        private const val CURSOR_HIDE_DELAY_MS = 5000L  // 5 seconds
+        private const val CURSOR_HIDE_DELAY_MS = InteractionTimeouts.USER_ACTIVITY_HIDE_DELAY_MS
     }
     
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -54,6 +54,9 @@ class CursorView @JvmOverloads constructor(
     
     // Callback for visibility changes
     var onVisibilityChanged: ((Boolean) -> Unit)? = null
+
+    /** Called for every input activity, including activity while the cursor is already visible. */
+    var onUserActivity: (() -> Unit)? = null
     
     fun setCursorPosition(x: Float, y: Float) {
         cursorX = x.coerceIn(0f, maxX)
@@ -74,6 +77,8 @@ class CursorView @JvmOverloads constructor(
      * Resets the auto-hide timer.
      */
     fun onActivity() {
+        onUserActivity?.invoke()
+
         // Show cursor if hidden
         if (!cursorVisible) {
             cursorVisible = true
@@ -109,8 +114,7 @@ class CursorView @JvmOverloads constructor(
      *
      * @param hidden Whether to force hide the cursor
      * @param useGentleRedraw If true, uses single invalidate() to avoid power spikes
-     *                        during display state transitions. Default is false for
-     *                        backwards compatibility.
+     *                        during display state transitions.
      */
     fun setForceHidden(hidden: Boolean, useGentleRedraw: Boolean = false) {
         if (forceHidden != hidden) {

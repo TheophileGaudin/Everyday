@@ -2,7 +2,6 @@ package com.everyday.everyday_glasses
 
 import android.app.Activity
 import android.util.Log
-import java.util.Base64
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -238,8 +237,9 @@ class GoogleAuthCoordinator(
         }
     }
 
-    fun onPhoneCalendarSnapshotReceived(snapshot: GoogleCalendarSnapshot) {
-        val account = snapshot.account ?: currentState.account ?: return
+    fun onPhoneCalendarSnapshotReceived(snapshot: com.everyday.shared.sync.CalendarSnapshot) {
+        val account = snapshot.account?.let { GoogleAccountSummary(it.email, it.displayName) }
+            ?: currentState.account ?: return
         saveStableState(
             GoogleAuthState.calendarAuthorized(
                 account,
@@ -550,7 +550,7 @@ class GoogleAuthCoordinator(
         }
 
         val payload = String(
-            Base64.getUrlDecoder().decode(parts[1]),
+            decodeBase64Url(parts[1]),
             Charsets.UTF_8
         )
         return GoogleIdTokenProfile(
@@ -562,6 +562,34 @@ class GoogleAuthCoordinator(
     private fun extractJsonField(json: String, fieldName: String): String? {
         val match = Regex("\"$fieldName\"\\s*:\\s*\"([^\"]*)\"").find(json) ?: return null
         return match.groupValues[1].takeIf { it.isNotBlank() }
+    }
+
+    /** Decodes JWT's unpadded Base64URL form without depending on an Android or API-26 codec. */
+    private fun decodeBase64Url(value: String): ByteArray {
+        val input = value.trim().trimEnd('=')
+        require(input.length % 4 != 1) { "Invalid Base64URL length" }
+        val output = ByteArray(input.length * 6 / 8)
+        var buffer = 0
+        var bufferedBits = 0
+        var outputIndex = 0
+        for (character in input) {
+            val digit = when (character) {
+                in 'A'..'Z' -> character - 'A'
+                in 'a'..'z' -> character - 'a' + 26
+                in '0'..'9' -> character - '0' + 52
+                '-', '+' -> 62
+                '_', '/' -> 63
+                else -> throw IllegalArgumentException("Invalid Base64URL character")
+            }
+            buffer = (buffer shl 6) or digit
+            bufferedBits += 6
+            if (bufferedBits >= 8) {
+                bufferedBits -= 8
+                output[outputIndex++] = (buffer shr bufferedBits).toByte()
+                buffer = if (bufferedBits == 0) 0 else buffer and ((1 shl bufferedBits) - 1)
+            }
+        }
+        return output.copyOf(outputIndex)
     }
 
     private fun currentValidAccessToken(): String? {

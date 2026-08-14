@@ -2,15 +2,9 @@ package com.everyday.shared.sync
 
 import org.json.JSONObject
 
-object SubtitleProtocol {
-    private const val FIELD_EVENT = "event"
-    private const val EVENT_CONTROL = "subtitle_control"
-    private const val EVENT_STATUS = "subtitle_status"
-    private const val EVENT_TRANSCRIPT = "subtitle_transcript"
-
-    fun encodeControl(control: SubtitleControl): String {
+internal object SubtitleProtocol {
+    internal fun controlToJson(control: SubtitleControl): JSONObject {
         return JSONObject()
-            .put(FIELD_EVENT, EVENT_CONTROL)
             .put("action", control.action.wireName)
             .put("source", control.options.source.wireName)
             .put("language", control.options.languageTag)
@@ -18,33 +12,28 @@ object SubtitleProtocol {
             .put("microphoneEnabled", control.options.microphoneEnabled)
             .put("translationEnabled", control.options.translationEnabled)
             .put("requestedAtMs", control.requestedAtMs)
-            .toString()
     }
 
-    fun encodeStatus(status: SubtitleStatus): String {
+    internal fun statusToJson(status: SubtitleStatus): JSONObject {
         val json = JSONObject()
-            .put(FIELD_EVENT, EVENT_STATUS)
             .put("state", status.state.wireName)
             .put("timestampMs", status.timestampMs)
 
         status.message?.let { json.put("message", it) }
         status.sessionId?.let { json.put("sessionId", it) }
-        return json.toString()
+        return json
     }
 
-    fun encodeTranscript(transcript: SubtitleTranscript): String {
+    internal fun transcriptToJson(transcript: SubtitleTranscript): JSONObject {
         return JSONObject()
-            .put(FIELD_EVENT, EVENT_TRANSCRIPT)
             .put("sessionId", transcript.sessionId)
             .put("segmentId", transcript.segmentId)
             .put("text", transcript.text)
             .put("isFinal", transcript.isFinal)
             .put("timestampMs", transcript.timestampMs)
-            .toString()
     }
 
-    fun decodeControl(raw: String): SubtitleControl? {
-        val json = parseEvent(raw, EVENT_CONTROL) ?: return null
+    internal fun controlFromJson(json: JSONObject): SubtitleControl? {
         val action = SubtitleControlAction.fromWireName(json.optString("action")) ?: return null
         return SubtitleControl(
             action = action,
@@ -59,8 +48,7 @@ object SubtitleProtocol {
         )
     }
 
-    fun decodeStatus(raw: String): SubtitleStatus? {
-        val json = parseEvent(raw, EVENT_STATUS) ?: return null
+    internal fun statusFromJson(json: JSONObject): SubtitleStatus? {
         val state = SubtitleStatusState.fromWireName(json.optString("state")) ?: return null
         return SubtitleStatus(
             state = state,
@@ -70,8 +58,7 @@ object SubtitleProtocol {
         )
     }
 
-    fun decodeTranscript(raw: String): SubtitleTranscript? {
-        val json = parseEvent(raw, EVENT_TRANSCRIPT) ?: return null
+    internal fun transcriptFromJson(json: JSONObject): SubtitleTranscript? {
         val sessionId = json.optString("sessionId").takeIf { it.isNotBlank() } ?: return null
         val text = json.optString("text")
         return SubtitleTranscript(
@@ -83,12 +70,4 @@ object SubtitleProtocol {
         )
     }
 
-    private fun parseEvent(raw: String, expectedEvent: String): JSONObject? {
-        return try {
-            val json = JSONObject(raw)
-            if (json.optString(FIELD_EVENT) == expectedEvent) json else null
-        } catch (_: Exception) {
-            null
-        }
-    }
 }

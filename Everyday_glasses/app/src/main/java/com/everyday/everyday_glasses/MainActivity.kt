@@ -23,6 +23,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.os.Environment
+import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import android.view.KeyEvent
@@ -36,10 +37,12 @@ import com.everyday.everyday_glasses.binocular.BinocularContentClass
 import com.everyday.everyday_glasses.binocular.DisplayConfig
 import com.everyday.everyday_glasses.binocular.BinocularUpdateType
 import com.everyday.everyday_glasses.binocular.BinocularView
-import com.everyday.shared.sync.SpeedSnapshot
+import com.everyday.shared.sync.LocationFix
+import com.everyday.shared.sync.usableSpeedMps
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.CompletableFuture
 import kotlin.math.abs
 import kotlin.math.ln
 
@@ -57,7 +60,6 @@ import kotlin.math.ln
 class MainActivity : AppCompatActivity() {
 
     private var rfcommClient: RfcommClient? = null
-    private lateinit var transportManager: TransportManager
     
     // Wake lock to prevent display from sleeping
     private var wakeLock: PowerManager.WakeLock? = null
@@ -65,7 +67,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binocularView: BinocularView
     private lateinit var cursorView: CursorView
     private lateinit var widgetContainer: WidgetContainer
-    private lateinit var persistenceManager: PersistenceManager
+    private lateinit var persistenceManager: WidgetStateStore
     
     // Wake/Sleep state manager
     private lateinit var wakeSleepManager: WakeSleepManager
@@ -73,6 +75,8 @@ class MainActivity : AppCompatActivity() {
     // Head-up wake manager for hands-free screen wake
     private lateinit var headUpWakeManager: HeadUpWakeManager
     private lateinit var inputCoordinator: InputCoordinator
+    private lateinit var userInputActivity: UserInputActivity
+    private lateinit var assistantNetworkLease: AssistantNetworkLease
 
     // Track if this session was started by head-up wake (for auto-finish)
     private var isHeadUpWakeSession = false
@@ -89,6 +93,7 @@ class MainActivity : AppCompatActivity() {
 
     // Flag to prevent aggressive invalidation during display state transitions
     private var isTransitioningDisplayState = false
+    private val keepAwakeMediaSources = mutableSetOf<String>()
 
     // Brightness management
     private var requestedBrightness = 1.0f
@@ -170,11 +175,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var googleAuthCoordinator: GoogleAuthCoordinator
     private lateinit var googleCalendarClient: GoogleCalendarClient
     private lateinit var dataSyncCoordinator: GlassesDataSyncCoordinator
+    private lateinit var voiceAssistantCoordinator: VoiceAssistantCoordinator
+    private lateinit var browserRoutingCoordinator: BrowserRoutingCoordinator
 
     companion object {
         private const val TAG = "Everyday_glasses"
         private const val REQUEST_PERMISSIONS = 1
         private const val REQUEST_STORAGE_PERMISSION = 2
+        private const val REQUEST_ASSISTANT_AUDIO_PERMISSION = 3
         
         // Battery update interval
         private const val BATTERY_UPDATE_INTERVAL_MS = 30000L  // 30 seconds
@@ -323,6 +331,8 @@ class MainActivity : AppCompatActivity() {
 
         cursorView = findViewById(R.id.cursorView)
         widgetContainer = findViewById(R.id.widgetContainer)
+        userInputActivity = UserInputActivity { widgetContainer.cancelPresentationForUserInput() }
+        widgetContainer.userInputActivity = userInputActivity
         setupAmbientLightSensor()
 
         // Initialize file picker for opening images, PDFs, etc.
@@ -334,6 +344,7 @@ class MainActivity : AppCompatActivity() {
             val cursorX = cursorView.getCursorX()
             val cursorY = cursorView.getCursorY()
             widgetContainer.updateCursor(cursorX, cursorY, isVisible)
+            widgetContainer.onCursorVisibilityChanged(isVisible)
 
             // Skip aggressive invalidation during display state transitions
             // to prevent power spikes that cause flashes on battery power
@@ -342,14 +353,17 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        cursorView.onUserActivity = {
+            widgetContainer.onCursorActivity()
+        }
+
         // Setup widget container
         setupWidgetContainer()
-        persistenceManager = PersistenceManager(
+        persistenceManager = WidgetStateStore(
             context = this,
             handler = handler,
             captureState = { widgetContainer.capturePersistedState() }
         )
-        transportManager = TransportManager { rfcommClient }
         inputCoordinator = InputCoordinator(
             cursorView = cursorView,
             widgetContainer = widgetContainer,
@@ -361,7 +375,8 @@ class MainActivity : AppCompatActivity() {
             wakeDisplay = { wakeDisplayFromUserAction("input") },
             notifyUserActivity = ::notifyUserActivity,
             notifyTransientChange = ::notifyTransientBinocularChange,
-            onTripleTap = ::handleTripleTap
+            onTripleTap = ::handleTripleTap,
+            userInputActivity = userInputActivity
         )
         updateCursorRedrawMode()
         registerBatteryStateReceiver()
@@ -390,10 +405,19 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             
-            onDataReceived = { data ->
+            onPointerReceived = { data ->
                 runOnUiThread {
                     if (isPhoneMode) {
-                        handlePhoneData(data)
+                        handlePhonePointer(data)
+                    }
+                }
+            }
+
+            onDeviceStatusReceived = { status ->
+                status.phoneBatteryPercent?.let { battery ->
+                    runOnUiThread {
+                        latestPhoneBatteryPercent = battery
+                        updateStatusBar(isPhoneConnected = true, phoneBattery = battery)
                     }
                 }
             }
@@ -406,6 +430,11 @@ class MainActivity : AppCompatActivity() {
             
             onConnectionChanged = { connected ->
                 runOnUiThread {
+                    widgetContainer.onPhoneRouteConnectionChanged(connected)
+                    if (::voiceAssistantCoordinator.isInitialized) {
+                        if (connected) rfcommClient?.sendAssistantStatus(voiceAssistantCoordinator.currentStatus())
+                        else voiceAssistantCoordinator.onPhoneDisconnected()
+                    }
                     if (::dataSyncCoordinator.isInitialized) {
                         dataSyncCoordinator.onPhoneConnectionChanged(connected)
                     }
@@ -456,7 +485,8 @@ class MainActivity : AppCompatActivity() {
             
             onLongPressWithClipboard = { clipboardContent ->
                 runOnUiThread {
-                    Log.d(TAG, "Phone clipboard received: ${clipboardContent?.take(30) ?: "(empty)"}")
+                    userInputActivity.onUserInput(UserInputKind.LONG_PRESS)
+                    Log.d(TAG, "Phone clipboard received: available=${clipboardContent != null}")
                     // Store phone clipboard content for paste operations
                     // Note: Text selection is now handled by glasses-side long-press detection
                     // Double-tap on focused text shows the text edit menu
@@ -467,7 +497,7 @@ class MainActivity : AppCompatActivity() {
             
             onClipboardReceived = { clipboardContent ->
                 runOnUiThread {
-                    Log.d(TAG, "Phone clipboard updated: ${clipboardContent.take(30)}...")
+                    Log.d(TAG, "Phone clipboard updated: chars=${clipboardContent.length}")
                     // Store phone clipboard content for paste operations
                     widgetContainer.setPhoneClipboard(clipboardContent)
                     binocularView.notifyContentChanged()
@@ -484,7 +514,7 @@ class MainActivity : AppCompatActivity() {
             onOpenBrowserRequested = { address ->
                 runOnUiThread {
                     Log.d(TAG, "Open browser requested from phone: ${address.take(80)}")
-                    widgetContainer.openBrowserAddress(address)
+                    widgetContainer.executeOpenUrlCommand(address)
                     binocularView.notifyContentChanged()
                 }
             }
@@ -511,10 +541,17 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            onSpeedSnapshotReceived = { snapshot ->
-                runOnUiThread {
-                    applyPhoneSpeedSnapshot(snapshot)
-                }
+            onRouteResultReceived = { result ->
+                runOnUiThread { widgetContainer.onPhoneRouteResult(result) }
+            }
+            onRouteErrorReceived = { error ->
+                runOnUiThread { widgetContainer.onPhoneRouteError(error) }
+            }
+            onDestinationSearchResultReceived = { result ->
+                runOnUiThread { widgetContainer.onPhoneDestinationSearchResult(result) }
+            }
+            onDestinationSearchErrorReceived = { error ->
+                runOnUiThread { widgetContainer.onPhoneDestinationSearchError(error) }
             }
 
             onSubtitleStatusReceived = { status ->
@@ -530,7 +567,69 @@ class MainActivity : AppCompatActivity() {
                     binocularView.notifyContentChanged()
                 }
             }
+
+            onAssistantControlReceived = { control ->
+                if (::voiceAssistantCoordinator.isInitialized) voiceAssistantCoordinator.handleControl(control)
+            }
         }
+        widgetContainer.configurePhoneRouteTransport(rfcommClient)
+
+        val assistantPreferences = AssistantPreferencesStore(this)
+        assistantNetworkLease = AssistantNetworkLease(this)
+        browserRoutingCoordinator = BrowserRoutingCoordinator(
+            pageAgent = PageAgentCoordinator.usingPreferences(
+                preferences = assistantPreferences,
+                provider = GeminiPageAgentProvider()
+            ),
+            host = WidgetContainerBrowserRoutingHost(widgetContainer),
+            showApproval = widgetContainer::showPageAgentApproval,
+            dismissApproval = widgetContainer::dismissPageAgentApproval
+        )
+        widgetContainer.configureBrowserRouting(browserRoutingCoordinator)
+        voiceAssistantCoordinator = VoiceAssistantCoordinator(
+            preferences = assistantPreferences,
+            provider = GeminiVoiceAssistantProvider(),
+            recorder = AssistantAudioRecorder(this),
+            hasMicrophonePermission = {
+                ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            },
+            requestMicrophonePermission = {
+                ActivityCompat.requestPermissions(
+                    this, arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_ASSISTANT_AUDIO_PERMISSION
+                )
+            },
+            toolCatalog = widgetContainer::assistantToolCatalog,
+            captureUiContext = widgetContainer::assistantUiContext,
+            onStatus = { status ->
+                runOnUiThread {
+                    assistantNetworkLease.update(status.state, status.sessionId != null)
+                    widgetContainer.setAssistantStatus(status)
+                    rfcommClient?.sendAssistantStatus(status)
+                    binocularView.notifyContentChanged()
+                }
+            },
+            onConfiguration = { configuration, models, detail ->
+                runOnUiThread {
+                    widgetContainer.setAssistantConfiguration(configuration, models, detail)
+                    binocularView.notifyContentChanged()
+                }
+            },
+            captureUiContextOnDemand = ::captureAssistantUiContextOnDemand,
+            requestScreenshot = binocularView::captureAssistantScreenshot,
+            presentText = widgetContainer::presentAssistantText,
+            browserRouting = browserRoutingCoordinator
+        )
+
+        // On-demand inspection is marshalled to the UI thread; ordinary context capture
+        // remains the small snapshot taken when the voice request is submitted.
+
+        widgetContainer.onAssistantVoiceToggle = voiceAssistantCoordinator::toggleLocal
+        widgetContainer.configureAssistantSettings(
+            voiceAssistantCoordinator::configureApiKey,
+            voiceAssistantCoordinator::removeApiKey,
+            voiceAssistantCoordinator::selectModel
+        )
+        voiceAssistantCoordinator.initialize()
 
         googleAuthCoordinator.refreshStateSilently(this)
 
@@ -681,7 +780,7 @@ class MainActivity : AppCompatActivity() {
             Log.d(TAG, "Widget focus changed: $focused")
             
             // Notify phone to show/hide keyboard
-            transportManager.sendTextFieldFocus(focused)
+            rfcommClient?.sendTextFieldFocus(focused)
             
             notifyTransientBinocularChange()
         }
@@ -705,6 +804,12 @@ class MainActivity : AppCompatActivity() {
 
         widgetContainer.onBinocularContentSourceChanged = { sourceId, contentClass, active ->
             binocularView.setContentClass(sourceId, contentClass, active)
+            if (contentClass == BinocularContentClass.MEDIA) {
+                if (active) keepAwakeMediaSources += sourceId else keepAwakeMediaSources -= sourceId
+                if (::wakeSleepManager.isInitialized) {
+                    wakeSleepManager.setKeepAwake(keepAwakeMediaSources.isNotEmpty())
+                }
+            }
             refreshBinocularRenderingStrategy()
             notifyStructuralBinocularChange(
                 contentClass = if (active && contentClass == BinocularContentClass.MEDIA) {
@@ -722,12 +827,12 @@ class MainActivity : AppCompatActivity() {
         
         widgetContainer.onMirrorRequest = { start ->
             Log.d(TAG, "Mirror request from widget: start=$start")
-            transportManager.sendMirrorRequest(start)
+            rfcommClient?.sendMirrorRequest(start)
         }
 
         widgetContainer.onSubtitleControlRequested = { control ->
             Log.d(TAG, "Subtitle control from widget: action=${control.action.wireName}")
-            if (!transportManager.sendSubtitleControl(control)) {
+            if (rfcommClient?.sendSubtitleControl(control) != true) {
                 widgetContainer.onSubtitlePhoneDisconnected()
             }
         }
@@ -735,12 +840,12 @@ class MainActivity : AppCompatActivity() {
         widgetContainer.onBrowserKeyboardRequest = { show ->
             Log.d(TAG, "Browser keyboard request: show=$show")
             // Send keyboard focus request to phone for browser input fields
-            transportManager.sendTextFieldFocus(show)
+            rfcommClient?.sendTextFieldFocus(show)
         }
         
         widgetContainer.onClipboardRequest = {
             Log.d(TAG, "Clipboard request from widget - asking phone for current clipboard")
-            transportManager.requestClipboard()
+            rfcommClient?.requestClipboard()
         }
 
         widgetContainer.onFilePickerRequest = {
@@ -872,7 +977,7 @@ class MainActivity : AppCompatActivity() {
             networkStatusProvider = DefaultNetworkStatusProvider(this),
             phoneFallbackBridge = object : GooglePhoneFallbackBridge {
                 override fun requestPhoneAuthorization() {
-                    transportManager.requestGooglePhoneAuthorization()
+                    rfcommClient?.requestGooglePhoneAuthorization()
                 }
 
                 override fun requestCalendarSnapshot() {
@@ -882,7 +987,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 override fun disconnectPhoneAuthorization() {
-                    transportManager.disconnectGooglePhoneAuth()
+                    rfcommClient?.disconnectGooglePhoneAuth()
                 }
             }
         ).apply {
@@ -905,7 +1010,7 @@ class MainActivity : AppCompatActivity() {
             if (::dataSyncCoordinator.isInitialized) {
                 dataSyncCoordinator.clearCalendarSnapshot()
             } else {
-                widgetContainer.setGoogleCalendarSnapshot(null)
+                widgetContainer.setCalendarSnapshot(null)
             }
             googleAuthCoordinator.disconnect()
         }
@@ -921,7 +1026,7 @@ class MainActivity : AppCompatActivity() {
         dataSyncCoordinator = GlassesDataSyncCoordinator(
             context = this,
             widgetContainer = widgetContainer,
-            syncMessengerProvider = { transportManager },
+            syncMessengerProvider = { rfcommClient },
             networkStatusProvider = DefaultNetworkStatusProvider(this),
             googleAuthCoordinatorProvider = {
                 if (::googleAuthCoordinator.isInitialized) googleAuthCoordinator else null
@@ -930,6 +1035,7 @@ class MainActivity : AppCompatActivity() {
                 if (::googleCalendarClient.isInitialized) googleCalendarClient else null
             },
             localLocationProvider = { previousSpeedLocation },
+            onPhoneLocationFix = ::applyPhoneLocationFix,
             notifyContentChanged = {
                 binocularView.notifyContentChanged()
             },
@@ -945,6 +1051,9 @@ class MainActivity : AppCompatActivity() {
         }
         widgetContainer.onNewsDataRequested = { countryCode, force, reason ->
             dataSyncCoordinator.onNewsDataRequested(countryCode, force, reason)
+        }
+        widgetContainer.onNewsSourceDataRequested = { sourceSpec, countryCode, _, _, completion ->
+            dataSyncCoordinator.requestNewsSource(sourceSpec, countryCode, completion)
         }
         widgetContainer.onMapDataRequested = dataSyncCoordinator::onMapDataRequested
         dataSyncCoordinator.restoreCachedSnapshots()
@@ -1546,8 +1655,9 @@ class MainActivity : AppCompatActivity() {
      * Handle key press from phone keyboard.
      */
     private fun handleKeyFromPhone(key: String) {
-        Log.d(TAG, "Received key from phone: $key")
-        widgetContainer.onKeyPress(key)
+        Log.d(TAG, "Received key input from phone: chars=${key.length}")
+        userInputActivity.onUserInput(UserInputKind.KEYBOARD)
+        widgetContainer.onKeyPress(key, userInitiated = true)
     }
 
     /**
@@ -1703,6 +1813,17 @@ class MainActivity : AppCompatActivity() {
             time = getCurrentTime(),
             date = getCurrentDate()
         )
+    }
+
+    private fun captureAssistantUiContextOnDemand(): CompletableFuture<AssistantUiContext> {
+        val result = CompletableFuture<AssistantUiContext>()
+        val capture = Runnable {
+            runCatching { widgetContainer.assistantUiContext() }
+                .onSuccess(result::complete)
+                .onFailure(result::completeExceptionally)
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) capture.run() else runOnUiThread(capture)
+        return result
     }
 
     override fun onResume() {
@@ -1875,6 +1996,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        if (::voiceAssistantCoordinator.isInitialized) voiceAssistantCoordinator.release()
+        if (::browserRoutingCoordinator.isInitialized) browserRoutingCoordinator.release()
+        if (::assistantNetworkLease.isInitialized) assistantNetworkLease.close()
         super.onDestroy()
         rfcommClient?.stop()
         wifiDirectClient?.release()
@@ -1917,6 +2041,10 @@ class MainActivity : AppCompatActivity() {
         if (::inputCoordinator.isInitialized) {
             inputCoordinator.release()
         }
+
+        if (::dataSyncCoordinator.isInitialized) {
+            dataSyncCoordinator.release()
+        }
         
         // Clean up widget container resources
         widgetContainer.release()
@@ -1956,14 +2084,7 @@ class MainActivity : AppCompatActivity() {
 
     // ==================== Phone Data Handling ====================
 
-    private fun handlePhoneData(data: RfcommClient.PhoneData) {
-        if (data.battery >= 0) {
-            latestPhoneBatteryPercent = data.battery
-            updateStatusBar(
-                isPhoneConnected = true,
-                phoneBattery = latestPhoneBatteryPercent
-            )
-        }
+    private fun handlePhonePointer(data: com.everyday.shared.transport.TransportMessage.Pointer) {
         inputCoordinator.handlePhoneData(data)
     }
 
@@ -2027,8 +2148,19 @@ class MainActivity : AppCompatActivity() {
         // Only process key events if we're in WAKE state
         if (::wakeSleepManager.isInitialized && !wakeSleepManager.isAwake()) {
             Log.d(TAG, "Key event while display not awake - waking display")
+            if (::userInputActivity.isInitialized) {
+                userInputActivity.onUserInput(UserInputKind.KEYBOARD)
+            }
             wakeDisplayFromUserAction("key_event")
             return true  // Consume but don't process
+        }
+
+        if (::userInputActivity.isInitialized) {
+            userInputActivity.onUserInput(UserInputKind.KEYBOARD)
+        }
+
+        if (::widgetContainer.isInitialized && event != null && widgetContainer.handleKeyEvent(keyCode, event)) {
+            return true
         }
 
         when (keyCode) {
@@ -2230,9 +2362,9 @@ class MainActivity : AppCompatActivity() {
                 androidx.core.location.LocationManagerCompat.getCurrentLocation(
                     locationManager,
                     provider,
-                    null,
+                    null as android.os.CancellationSignal?,
                     androidx.core.content.ContextCompat.getMainExecutor(this)
-                ) { location ->
+                ) { location: Location? ->
                     if (location == null) {
                         speedLog { "Fallback current location returned null for provider=$provider" }
                         return@getCurrentLocation
@@ -2253,7 +2385,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun applyPhoneSpeedSnapshot(snapshot: SpeedSnapshot) {
+    private fun applyPhoneLocationFix(snapshot: LocationFix) {
         val nowElapsed = android.os.SystemClock.elapsedRealtime()
         val localFresh = lastSpeedLocationUpdateElapsedMs != 0L &&
                 (nowElapsed - lastSpeedLocationUpdateElapsedMs) < SPEED_STALE_UPDATE_WINDOW_MS &&
@@ -2261,7 +2393,7 @@ class MainActivity : AppCompatActivity() {
         if (localFresh) {
             return
         }
-        val safeSpeedMps = snapshot.speedMps?.takeIf { snapshot.qualityOk && it.isFinite() } ?: run {
+        val safeSpeedMps = snapshot.usableSpeedMps() ?: run {
             val now = System.currentTimeMillis()
             if (now - lastMissingPhoneSpeedLogMs >= SPEED_LOG_INTERVAL_MS) {
                 lastMissingPhoneSpeedLogMs = now
@@ -2459,6 +2591,9 @@ class MainActivity : AppCompatActivity() {
         val permissionsList = mutableListOf<String>()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                permissionsList.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
             // Android 13+ uses granular media permissions
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
                 permissionsList.add(Manifest.permission.READ_MEDIA_IMAGES)
@@ -2789,6 +2924,10 @@ class MainActivity : AppCompatActivity() {
                     Log.d(TAG, "Storage permission result: denied, opening file browser anyway (will show permission message)")
                     openFileBrowser()
                 }
+            }
+            REQUEST_ASSISTANT_AUDIO_PERMISSION -> {
+                val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+                if (::voiceAssistantCoordinator.isInitialized) voiceAssistantCoordinator.onPermissionResult(granted)
             }
         }
     }

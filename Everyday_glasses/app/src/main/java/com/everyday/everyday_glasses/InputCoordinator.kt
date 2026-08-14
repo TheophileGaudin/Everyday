@@ -5,6 +5,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.MotionEvent
+import com.everyday.shared.transport.PointerAction
+import com.everyday.shared.transport.TransportMessage
 import kotlin.math.sqrt
 
 class InputCoordinator(
@@ -16,7 +18,8 @@ class InputCoordinator(
     private val wakeDisplay: () -> Unit,
     private val notifyUserActivity: () -> Unit,
     private val notifyTransientChange: () -> Unit,
-    private val onTripleTap: () -> Unit
+    private val onTripleTap: () -> Unit,
+    private val userInputActivity: UserInputActivity = UserInputActivity { }
 ) {
     companion object {
         private const val TAG = "InputCoordinator"
@@ -42,36 +45,68 @@ class InputCoordinator(
     private var lastTempleTapTime = 0L
     private var pendingTempleTap: Runnable? = null
 
-    fun handlePhoneData(data: RfcommClient.PhoneData) {
+    private fun markUserInput(kind: UserInputKind) {
+        userInputActivity.onUserInput(kind)
+    }
+
+    private fun isMeaningfulMovement(dx: Float, dy: Float): Boolean =
+        sqrt(dx * dx + dy * dy) >= MIN_MOVEMENT_THRESHOLD
+
+    fun handlePhoneData(data: TransportMessage.Pointer) {
         if (!isAwake()) {
-            if (data.event == "down" || data.event == "tap" || data.event == "doubletap") {
-                Log.d(TAG, "Wake from sleep via phone ${data.event}")
+            when (data.action) {
+                PointerAction.DOWN -> markUserInput(UserInputKind.PHONE_DOWN)
+                PointerAction.MOVE -> if (isMeaningfulMovement(data.dx.toFloat(), data.dy.toFloat())) {
+                    markUserInput(
+                        if (data.pointerCount >= 2) UserInputKind.SCROLL else UserInputKind.PHONE_MOVE
+                    )
+                }
+                PointerAction.UP -> markUserInput(UserInputKind.PHONE_UP)
+                PointerAction.TAP -> markUserInput(UserInputKind.TAP)
+                PointerAction.DOUBLE_TAP -> markUserInput(UserInputKind.DOUBLE_TAP)
+                PointerAction.TRIPLE_TAP -> markUserInput(UserInputKind.TAP)
+                PointerAction.POINTER_COUNT -> if (data.pointerCount >= 2) {
+                    markUserInput(UserInputKind.SCROLL)
+                }
+            }
+            if (data.action == PointerAction.DOWN || data.action == PointerAction.TAP ||
+                data.action == PointerAction.DOUBLE_TAP || data.action == PointerAction.TRIPLE_TAP) {
+                Log.d(TAG, "Wake from sleep via phone ${data.action.wireName}")
                 wakeDisplay()
             }
             return
         }
 
-        when (data.event) {
-            "down" -> {
+        when (data.action) {
+            PointerAction.DOWN -> {
+                markUserInput(UserInputKind.PHONE_DOWN)
                 notifyUserActivity()
                 Log.d(TAG, "Phone DOWN at ${cursorView.getCursorX()}, ${cursorView.getCursorY()} pointerCount=${data.pointerCount}")
                 handlePointerDown(data.pointerCount.coerceAtLeast(1))
                 notifyTransientChange()
             }
-            "up" -> {
+            PointerAction.UP -> {
+                markUserInput(UserInputKind.PHONE_UP)
                 Log.d(TAG, "Phone UP at ${cursorView.getCursorX()}, ${cursorView.getCursorY()}")
                 handlePointerUp()
             }
-            "move" -> {
+            PointerAction.MOVE -> {
+                if (isMeaningfulMovement(data.dx.toFloat(), data.dy.toFloat())) {
+                    markUserInput(
+                        if (data.pointerCount >= 2) UserInputKind.SCROLL else UserInputKind.PHONE_MOVE
+                    )
+                }
                 notifyUserActivity()
                 handlePointerMove(
                     WidgetContainer.InputSource.PHONE_TRACKPAD,
                     data.pointerCount.coerceAtLeast(1),
                     data.dx * PHONE_SENSITIVITY,
-                    data.dy * PHONE_SENSITIVITY
+                    data.dy * PHONE_SENSITIVITY,
+                    userInitiated = isMeaningfulMovement(data.dx.toFloat(), data.dy.toFloat())
                 )
             }
-            "tap" -> {
+            PointerAction.TAP -> {
+                markUserInput(UserInputKind.TAP)
                 notifyUserActivity()
                 cursorView.onActivity()
                 Log.d(TAG, "Phone tap at ${cursorView.getCursorX()}, ${cursorView.getCursorY()}")
@@ -82,22 +117,25 @@ class InputCoordinator(
                 }
                 notifyTransientChange()
             }
-            "doubletap" -> {
+            PointerAction.DOUBLE_TAP -> {
+                markUserInput(UserInputKind.DOUBLE_TAP)
                 notifyUserActivity()
                 cursorView.onActivity()
                 Log.d(TAG, "Phone double-tap at ${cursorView.getCursorX()}, ${cursorView.getCursorY()}")
                 handleDoubleTapAtCoordinates(cursorView.getCursorX(), cursorView.getCursorY())
                 notifyTransientChange()
             }
-            "tripletap" -> {
+            PointerAction.TRIPLE_TAP -> {
+                markUserInput(UserInputKind.TAP)
                 notifyUserActivity()
                 cursorView.onActivity()
                 Log.d(TAG, "Phone triple-tap")
                 onTripleTap()
                 notifyTransientChange()
             }
-            "pointercount" -> {
+            PointerAction.POINTER_COUNT -> {
                 val pointerCount = data.pointerCount.coerceAtLeast(1)
+                if (pointerCount >= 2) markUserInput(UserInputKind.SCROLL)
                 notifyUserActivity()
                 cursorView.onActivity()
                 Log.d(TAG, "Phone pointer count changed: $pointerCount")
@@ -148,6 +186,7 @@ class InputCoordinator(
         if (!isAwake()) {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN, MotionEvent.ACTION_HOVER_ENTER -> {
+                    markUserInput(UserInputKind.GLASSES_DOWN)
                     Log.d(TAG, "Temple touch detected while sleeping - waking up")
                     wakeDisplay()
                     resetTempleTracking(event.x, event.y)
@@ -161,6 +200,7 @@ class InputCoordinator(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN,
             MotionEvent.ACTION_HOVER_ENTER -> {
+                markUserInput(UserInputKind.GLASSES_DOWN)
                 resetTempleTracking(event.x, event.y)
                 Log.d(TAG, "Temple DOWN/ENTER at ($templeDownX, $templeDownY)")
                 handlePointerDown(1)
@@ -173,6 +213,7 @@ class InputCoordinator(
             }
             MotionEvent.ACTION_UP,
             MotionEvent.ACTION_HOVER_EXIT -> {
+                markUserInput(UserInputKind.GLASSES_UP)
                 val currentTime = System.currentTimeMillis()
                 val duration = currentTime - templeDownTime
                 val timeSinceLastMove = currentTime - lastTempleMovementTime
@@ -191,6 +232,7 @@ class InputCoordinator(
     fun onTouchEvent(event: MotionEvent): Boolean {
         if (!isAwake()) {
             if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                markUserInput(UserInputKind.GLASSES_DOWN)
                 Log.d(TAG, "Touch detected while sleeping - waking up")
                 wakeDisplay()
                 resetTempleTracking(event.x, event.y)
@@ -202,12 +244,14 @@ class InputCoordinator(
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                markUserInput(UserInputKind.GLASSES_DOWN)
                 resetTempleTracking(event.x, event.y)
                 Log.d(TAG, "Trackpad DOWN at ($templeDownX, $templeDownY) pointerCount=${event.pointerCount}")
                 handlePointerDown(event.pointerCount)
                 return true
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
+                markUserInput(UserInputKind.SCROLL)
                 Log.d(TAG, "Second finger down - entering scroll mode, pointerCount=${event.pointerCount}")
                 handlePointerCountChanged(event.pointerCount)
                 return true
@@ -223,6 +267,7 @@ class InputCoordinator(
                 return true
             }
             MotionEvent.ACTION_UP -> {
+                markUserInput(UserInputKind.GLASSES_UP)
                 val currentTime = System.currentTimeMillis()
                 val duration = currentTime - templeDownTime
                 handlePointerUp()
@@ -246,12 +291,23 @@ class InputCoordinator(
         widgetContainer.onCursorDown(cursorView.getCursorX(), cursorView.getCursorY(), pointerCount)
     }
 
-    private fun handlePointerMove(source: WidgetContainer.InputSource, pointerCount: Int, dx: Float, dy: Float) {
+    private fun handlePointerMove(
+        source: WidgetContainer.InputSource,
+        pointerCount: Int,
+        dx: Float,
+        dy: Float,
+        userInitiated: Boolean
+    ) {
         if (pointerCount != lastPointerCount) {
             handlePointerCountChanged(pointerCount)
         }
         if (pointerCount >= 2) {
-            widgetContainer.scrollWidgetAtCursor(cursorView.getCursorX(), cursorView.getCursorY(), dy)
+            widgetContainer.scrollWidgetAtCursor(
+                cursorView.getCursorX(),
+                cursorView.getCursorY(),
+                dy,
+                userInitiated = userInitiated
+            )
             cursorView.onActivity()
         } else {
             val isScrollbarDrag = widgetContainer.isScrollbarDragActive()
@@ -304,7 +360,14 @@ class InputCoordinator(
         lastTempleMovementTime = System.currentTimeMillis()
         val movementMagnitude = sqrt(dx * dx + dy * dy)
         if (movementMagnitude >= MIN_MOVEMENT_THRESHOLD) {
-            handlePointerMove(WidgetContainer.InputSource.GLASSES_TEMPLE, pointerCount, dx, dy)
+            markUserInput(if (pointerCount >= 2) UserInputKind.SCROLL else UserInputKind.GLASSES_MOVE)
+            handlePointerMove(
+                WidgetContainer.InputSource.GLASSES_TEMPLE,
+                pointerCount,
+                dx,
+                dy,
+                userInitiated = true
+            )
         }
     }
 

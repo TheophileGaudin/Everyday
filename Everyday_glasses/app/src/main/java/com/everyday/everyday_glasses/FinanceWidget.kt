@@ -11,6 +11,7 @@ import com.everyday.shared.sync.FinanceCandle
 import com.everyday.shared.sync.FinanceChartType
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.FinanceDataProvider
+import com.everyday.shared.sync.FinanceInstrument
 import com.everyday.shared.sync.FinanceSnapshot
 import com.everyday.shared.sync.FinanceTileSnapshot
 import com.everyday.shared.sync.FinanceTimeRange
@@ -32,6 +33,7 @@ class FinanceWidget(
         const val DEFAULT_WIDTH = 360f
         const val DEFAULT_HEIGHT = 220f
         const val MAX_TILES = 9
+        const val STABLE_ID = "finance"
 
         private const val HEADER_HEIGHT = 0f
         private const val TILE_GAP = 6f
@@ -212,6 +214,120 @@ class FinanceWidget(
     fun getVisibleTileConfigs(): List<FinanceDashboardTileConfig> = visibleTileConfigs()
     fun getNavigationIndex(): Int = navigationIndex
     fun getTilingSpan(): Int = tilingSpan
+    fun getSelectedTileConfig(): FinanceDashboardTileConfig? = tiles.getOrNull(selectedTileIndex)
+
+    /**
+     * Return the finance facts needed by semantic assistant tools. The widget ID is supplied by
+     * the container so the state stays aligned with the container's stable-widget identity.
+     */
+    fun semanticState(widgetId: String = STABLE_ID): FinanceWidgetSemanticState {
+        val visibleConfigs = if (isMinimized) emptyList() else visibleTileConfigs()
+        val visibleIds = visibleConfigs.map { it.id }
+        val visibleOrderById = visibleIds.withIndex().associate { it.value to it.index }
+        val selectedId = tiles.getOrNull(selectedTileIndex)?.id
+        val semanticTiles = orderedTileIndices().mapNotNull { index ->
+            val config = tiles.getOrNull(index) ?: return@mapNotNull null
+            FinanceTileSemanticState(
+                id = config.id,
+                visible = config.id in visibleIds,
+                visibleOrder = visibleOrderById[config.id],
+                slot = slotForIndex(index),
+                selected = index == selectedTileIndex,
+                assetType = config.assetType,
+                symbol = config.symbol,
+                displayName = FinanceDataProvider.instrumentFor(config.assetType, config.symbol).displayName,
+                range = FinanceTimeRange.fromRange(config.range),
+                chartStyle = config.chartType
+            )
+        }
+        val topLeftId = FinanceTileTargetResolver.resolve(
+            target = FinanceTileTarget.topLeftVisible(),
+            tiles = semanticTiles,
+            visibleTileIds = visibleIds,
+            selectedTileId = selectedId
+        )
+        return FinanceWidgetSemanticState(
+            widgetId = widgetId,
+            minimized = isMinimized,
+            fullscreen = isFullscreen,
+            tiles = semanticTiles,
+            visibleTileIds = visibleIds,
+            selectedTileId = selectedId,
+            topLeftVisibleTileId = topLeftId
+        )
+    }
+
+    fun getSemanticState(widgetId: String = STABLE_ID): FinanceWidgetSemanticState =
+        semanticState(widgetId)
+
+    /**
+     * Update one existing tile without replacing the widget or its layout. Omitted range and
+     * chart style values deliberately keep the tile's current settings.
+     */
+    fun updateTileInstrument(
+        target: FinanceTileTarget,
+        instrument: FinanceInstrument,
+        range: FinanceTimeRange? = null,
+        chartType: FinanceChartType? = null,
+        slot: Int? = null
+    ): Result<FinanceDashboardTileConfig> {
+        if (slot != null && slot !in 0 until MAX_TILES) {
+            return Result.failure(
+                IllegalArgumentException("Finance tile slot must be between 0 and ${MAX_TILES - 1}")
+            )
+        }
+        val state = semanticState()
+        val targetId = FinanceTileTargetResolver.resolve(
+            target = target,
+            tiles = state.tiles,
+            visibleTileIds = state.visibleTileIds,
+            selectedTileId = state.selectedTileId
+        ) ?: return Result.failure(
+            IllegalArgumentException("Requested finance tile is not present")
+        )
+        val tileIndex = tiles.indexOfFirst { it.id == targetId }
+        if (tileIndex < 0) {
+            return Result.failure(IllegalArgumentException("Requested finance tile is not present"))
+        }
+
+        val current = tiles[tileIndex]
+        val previousSlot = slotForIndex(tileIndex)
+        val displacedIndex = slot
+            ?.takeIf { it != previousSlot }
+            ?.let { requestedSlot ->
+                tiles.indices.firstOrNull { index ->
+                    index != tileIndex && slotForIndex(index) == requestedSlot
+                }
+            }
+        val updated = current.copy(
+            assetType = instrument.assetType,
+            symbol = instrument.symbol,
+            range = range?.range ?: current.range,
+            chartType = chartType ?: current.chartType,
+            slot = slot ?: current.slot
+        )
+        tiles[tileIndex] = updated
+        if (displacedIndex != null) {
+            tiles[displacedIndex] = tiles[displacedIndex].copy(slot = previousSlot)
+        }
+        updateLegacySelection()
+        navigationIndex = navigationIndex.coerceIn(
+            0,
+            (tiles.size - visibleTileCapacity()).coerceAtLeast(0)
+        )
+        updateInternalBounds()
+
+        // Keep the existing data/sync pipeline. This deliberately requests even a non-visible
+        // explicitly targeted tile so its cache is ready when the user navigates to it.
+        onDataRequested?.invoke(
+            listOf(updated),
+            listOf(updated.id),
+            true,
+            "assistant_finance_tile_updated"
+        )
+        onStateChanged?.invoke()
+        return Result.success(updated)
+    }
 
     fun restoreDashboard(
         configs: List<FinanceDashboardTileConfig>,
@@ -249,29 +365,7 @@ class FinanceWidget(
     }
 
     fun applySnapshot(snapshot: FinanceSnapshot) {
-        val snapshots = if (snapshot.tiles.isNotEmpty()) {
-            snapshot.tiles
-        } else {
-            listOf(
-                FinanceTileSnapshot(
-                    id = tileIdFor(snapshot.assetType, snapshot.symbol, snapshot.range),
-                    assetType = snapshot.assetType,
-                    symbol = snapshot.symbol,
-                    displayName = snapshot.displayName,
-                    country = snapshot.country,
-                    range = snapshot.range,
-                    rangeLabel = snapshot.rangeLabel,
-                    chartType = snapshot.chartType,
-                    points = snapshot.points,
-                    candles = snapshot.candles,
-                    percentChange = snapshot.percentChange,
-                    source = "YAHOO",
-                    fetchedAtMs = snapshot.fetchedAtMs,
-                    staleAfterMs = snapshot.staleAfterMs
-                )
-            )
-        }
-        snapshots.forEach { tile ->
+        snapshot.tiles.forEach { tile ->
             chartCache[seriesKey(tile.assetType, tile.symbol, tile.range)] = tile
             lastErrorByKey.remove(seriesKey(tile.assetType, tile.symbol, tile.range))
         }

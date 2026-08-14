@@ -3,6 +3,7 @@ package com.everyday.everyday_glasses
 import android.content.res.Resources
 import android.graphics.Canvas
 import android.util.Log
+import com.everyday.shared.command.AppCommandInvocation
 
 class SettingsController(
     private val resources: Resources,
@@ -13,6 +14,7 @@ class SettingsController(
     private val isSmartAlignmentEnabled: () -> Boolean,
     private val setSmartAlignmentEnabled: (Boolean) -> Unit,
     private val notifyBrightnessChanged: (Float) -> Unit,
+    private val executeBrightnessCommand: (Float) -> Unit,
     private val notifyAdaptiveBrightnessChanged: (Boolean) -> Unit,
     private val notifyHeadUpTimeChanged: (Long) -> Unit,
     private val notifyWakeDurationChanged: (Long) -> Unit,
@@ -25,9 +27,9 @@ class SettingsController(
     private val grantCalendarAccess: () -> Unit,
     private val disconnectGoogle: () -> Unit,
     private val retryGoogleAuth: () -> Unit,
-    private val shortcutsProvider: () -> List<ShortcutAction> = { ShortcutAction.DEFAULT_LEMON_SHORTCUTS },
-    private val onShortcutsChanged: (List<ShortcutAction>) -> Unit = {},
-    private val savedLayoutNamesProvider: () -> List<String> = { emptyList() }
+    private val commandRegistry: AppCommandRegistry,
+    private val shortcutsProvider: () -> List<AppCommandInvocation>,
+    private val onShortcutsChanged: (List<AppCommandInvocation>) -> Unit = {}
 ) {
     companion object {
         private const val TAG = "SettingsController"
@@ -49,6 +51,12 @@ class SettingsController(
     private var angleThresholdDegrees = HeadUpWakeManager.DEFAULT_PITCH_CHANGE_THRESHOLD
     private var headsUpEnabled = true
     private var googleAuthState = GoogleAuthState.signedOut()
+    private var assistantConfiguration: AssistantConfiguration? = null
+    private var assistantModels: List<AssistantModel> = emptyList()
+    private var assistantDetail: String = "Paste an API key to enable voice"
+    var onPasteGeminiKey: (() -> Unit)? = null
+    var onRemoveGeminiKey: (() -> Unit)? = null
+    var onSelectGeminiModel: ((String?) -> Unit)? = null
     private var speedVisibilityThresholdKmh = defaultSpeedVisibilityThresholdKmh
     private var unitSystemMode = UnitSystemMode.AUTO
     private var speedUnit = SpeedometerWidget.SpeedUnit.KMH
@@ -90,9 +98,14 @@ class SettingsController(
             ?: hoverControlPlacements.takeIf { hasHoverControlPlacements }
 
     fun applyHoverControlPlacements(placements: List<WidgetPersistence.HoverControlPlacementState>?) {
-        hoverControlPlacements = placements
+        val migrated = placements?.map { placement ->
+            if (placement.controlId == AssistantVoiceHoverControl.LEGACY_ID) {
+                placement.copy(controlId = AssistantVoiceHoverControl.ID)
+            } else placement
+        }
+        hoverControlPlacements = migrated
         hasHoverControlPlacements = true
-        hoverControlsLayoutEditor?.applyPersistedPlacements(placements)
+        hoverControlsLayoutEditor?.applyPersistedPlacements(migrated)
         invalidateView()
         notifyContentChanged()
     }
@@ -215,7 +228,7 @@ class SettingsController(
         val menu = ShortcutsSettingsMenu(
             screenWidth = screenWidth,
             screenHeight = screenHeight,
-            savedLayoutsProvider = savedLayoutNamesProvider,
+            registry = commandRegistry,
             initialShortcuts = shortcutsProvider()
         ).apply {
             onChanged = { actions ->
@@ -410,6 +423,35 @@ class SettingsController(
         notifyContentChanged()
     }
 
+    fun setAssistantConfiguration(configuration: AssistantConfiguration?, models: List<AssistantModel>, detail: String) {
+        assistantConfiguration = configuration
+        assistantModels = models
+        assistantDetail = detail
+        dashboardSettings?.apply {
+            geminiConfigured = configuration != null
+            geminiReady = detail == "Gemini ready"
+            geminiModelLabel = modelLabel(configuration)
+            geminiDetail = detail
+        }
+        invalidateView()
+        notifyContentChanged()
+    }
+
+    private fun modelLabel(configuration: AssistantConfiguration?): String = when {
+        configuration == null -> "Recommended - automatic"
+        configuration.selectionMode == AssistantModelSelectionMode.AUTO_RECOMMENDED ->
+            "Recommended - ${configuration.modelId.removePrefix("gemini-")}"
+        else -> configuration.modelId.removePrefix("gemini-")
+    }
+
+    private fun cycleAssistantModel() {
+        val current = assistantConfiguration ?: return
+        val choices = listOf<String?>(null) + assistantModels.map { it.id }
+        val currentChoice: String? = if (current.selectionMode == AssistantModelSelectionMode.AUTO_RECOMMENDED) null else current.modelId
+        val next = choices[(choices.indexOf(currentChoice).coerceAtLeast(0) + 1) % choices.size]
+        onSelectGeminiModel?.invoke(next)
+    }
+
     private fun createDashboardSettings(screenWidth: Float, screenHeight: Float) {
         dashboardSettings = DashboardSettings(resources, screenWidth, screenHeight).apply {
             brightnessValue = this@SettingsController.brightnessValue
@@ -420,11 +462,14 @@ class SettingsController(
             headsUpEnabled = this@SettingsController.headsUpEnabled
             smartAlignmentEnabled = isSmartAlignmentEnabled()
             googleAuthState = this@SettingsController.googleAuthState
+            geminiConfigured = assistantConfiguration != null
+            geminiReady = assistantDetail == "Gemini ready"
+            geminiModelLabel = modelLabel(assistantConfiguration)
+            geminiDetail = assistantDetail
             setUnitSystemMode(this@SettingsController.unitSystemMode, notify = false)
 
             onBrightnessChanged = { value ->
-                this@SettingsController.brightnessValue = value
-                notifyBrightnessChanged(value)
+                executeBrightnessCommand(value)
                 invalidateView()
             }
 
@@ -476,6 +521,10 @@ class SettingsController(
                 connectGoogle()
                 invalidateView()
             }
+
+            onPasteGeminiKey = { this@SettingsController.onPasteGeminiKey?.invoke() }
+            onRemoveGeminiKey = { this@SettingsController.onRemoveGeminiKey?.invoke() }
+            onCycleGeminiModel = { cycleAssistantModel() }
 
             onGrantCalendarAccess = {
                 grantCalendarAccess()

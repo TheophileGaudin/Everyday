@@ -27,9 +27,25 @@ class WidgetLayoutPersistenceTest {
     fun `default layout name is reserved case-insensitively`() {
         assertTrue(WidgetPersistence.isDefaultLayoutName("Standard"))
         assertTrue(WidgetPersistence.isDefaultLayoutName(" standard "))
-        assertTrue(WidgetPersistence.isDefaultLayoutName("Default"))
-        assertTrue(WidgetPersistence.isDefaultLayoutName(" default "))
+        assertFalse(WidgetPersistence.isDefaultLayoutName("Default"))
+        assertFalse(WidgetPersistence.isDefaultLayoutName(" default "))
         assertFalse(WidgetPersistence.isDefaultLayoutName("Work"))
+    }
+
+    @Test
+    fun `all news source kinds survive widget persistence`() {
+        val baseline = BuiltInLayouts.build(WidgetPersistence.DEFAULT_LAYOUT_NAME, 640f, 480f)!!
+        val sources = listOf(
+            com.everyday.shared.sync.NewsSourceSpec.DEFAULT_LOCATION,
+            com.everyday.shared.sync.NewsSourceSpec.QUERY("local technology"),
+            com.everyday.shared.sync.NewsSourceSpec.CUSTOM_RSS("https://example.com/feed.xml")
+        )
+
+        sources.forEach { source ->
+            val state = baseline.copy(news = baseline.news!!.copy(sourceSpec = source))
+            val restored = WidgetPersistence.stateFromJson(WidgetPersistence.stateToJson(state))
+            assertEquals(source, restored.news!!.sourceSpec)
+        }
     }
 
     @Test
@@ -71,6 +87,28 @@ class WidgetLayoutPersistenceTest {
                     width = 100f,
                     height = 120f,
                     imagePath = "/tmp/image.png"
+                )
+            ),
+            video = listOf(
+                WidgetPersistence.VideoWidgetState(
+                    uri = "content://media/video/1",
+                    displayName = "clip.mp4",
+                    x = 21f,
+                    y = 22f,
+                    width = 260f,
+                    height = 180f
+                )
+            ),
+            pdf = listOf(
+                WidgetPersistence.PdfWidgetState(
+                    uri = "content://documents/report",
+                    displayName = "report.pdf",
+                    x = 23f,
+                    y = 24f,
+                    width = 280f,
+                    height = 200f,
+                    page = 4,
+                    zoom = 1.5f
                 )
             ),
             status = WidgetPersistence.StatusBarState(
@@ -201,6 +239,9 @@ class WidgetLayoutPersistenceTest {
         assertEquals("https://example.com", restored.browser.single().url)
         assertTrue(restored.browser.single().isFullscreen)
         assertEquals("/tmp/image.png", restored.image.single().imagePath)
+        assertEquals("clip.mp4", restored.video.single().displayName)
+        assertEquals(4, restored.pdf.single().page)
+        assertEquals(1.5f, restored.pdf.single().zoom, 0.001f)
         assertFalse(restored.status!!.showDate)
         assertFalse(restored.location!!.showWeather)
         assertEquals(MapViewMode.PROJECTED.name, restored.map!!.mode)

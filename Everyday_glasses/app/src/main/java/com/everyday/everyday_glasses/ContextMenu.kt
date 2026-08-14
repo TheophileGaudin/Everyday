@@ -16,7 +16,8 @@ import kotlin.math.min
  */
 class ContextMenu(
     private val screenWidth: Float,
-    private val screenHeight: Float
+    private val screenHeight: Float,
+    private val commandRegistry: AppCommandRegistry
 ) {
     companion object {
         private const val TAG = "ContextMenu"
@@ -76,7 +77,6 @@ class ContextMenu(
         private set
 
     var onItemSelected: ((MenuItem) -> Unit)? = null
-    var onSubmenuItemSelected: ((MenuItem, SubMenuItem) -> Unit)? = null
     var onSubmenuItemDoubleTapped: ((MenuItem, SubMenuItem) -> Boolean)? = null
     var onDismissed: (() -> Unit)? = null
 
@@ -151,15 +151,15 @@ class ContextMenu(
     }
 
     init {
-        addItem(MenuItem("layout_lock", "Lock", "lock_icon"))
+        addItem(MenuItem(commandRegistry.toggleLayoutLock.id, "Lock", "lock_icon"))
         addItem(
             MenuItem(
                 "create",
                 "Create",
                 "+",
                 submenu = listOf(
-                    SubMenuItem("create_textbox", "Text Box"),
-                    SubMenuItem("create_browser", "Browser")
+                    SubMenuItem(commandRegistry.createText.id, "Text Box"),
+                    SubMenuItem(commandRegistry.createBrowser.id, "Browser")
                 )
             )
         )
@@ -169,14 +169,14 @@ class ContextMenu(
                 "Widgets",
                 null,
                 submenu = listOf(
-                    SubMenuItem("toggle_status", "System", false),
-                    SubMenuItem("toggle_location", "Location/Weather", false),
-                    SubMenuItem("toggle_calendar", "Calendar", false),
-                    SubMenuItem("toggle_speedometer", "Speedometer", false),
-                    SubMenuItem("toggle_finance", "Finance", false),
-                    SubMenuItem("toggle_news", "News", false),
-                    SubMenuItem("toggle_subtitle", "Subtitles", false),
-                    SubMenuItem("toggle_mirror", "Screen Mirror", false)
+                    SubMenuItem(commandRegistry.toggleStatus.id, "System", false),
+                    SubMenuItem(commandRegistry.toggleLocation.id, "Location/Weather", false),
+                    SubMenuItem(commandRegistry.toggleCalendar.id, "Calendar", false),
+                    SubMenuItem(commandRegistry.toggleSpeedometer.id, "Speedometer", false),
+                    SubMenuItem(commandRegistry.toggleFinance.id, "Finance", false),
+                    SubMenuItem(commandRegistry.toggleNews.id, "News", false),
+                    SubMenuItem(commandRegistry.toggleSubtitle.id, "Subtitles", false),
+                    SubMenuItem(commandRegistry.toggleMirror.id, "Screen Mirror", false)
                 )
             )
         )
@@ -186,8 +186,8 @@ class ContextMenu(
                 "Layouts",
                 null,
                 submenu = listOf(
-                    SubMenuItem("layout_save", "Save"),
-                    SubMenuItem("layout_save_as", "Save As...")
+                    SubMenuItem(commandRegistry.saveLayout.id, "Save"),
+                    SubMenuItem(commandRegistry.saveLayoutAs.id, "Save As...")
                 )
             )
         )
@@ -196,11 +196,11 @@ class ContextMenu(
                 "files",
                 "Files",
                 null,
-                submenu = listOf(SubMenuItem("open_file", "Open..."))
+                submenu = listOf(SubMenuItem(commandRegistry.openFile.id, "Open..."))
             )
         )
-        addItem(MenuItem("settings", "Settings", null))
-        addItem(MenuItem("close_app", "Close", null))
+        addItem(MenuItem(commandRegistry.openSettings.id, "Settings", null))
+        addItem(MenuItem(commandRegistry.closeApp.id, "Close", null))
     }
 
     fun addItem(item: MenuItem) {
@@ -209,7 +209,7 @@ class ContextMenu(
 
     fun setLayoutLockState(isLocked: Boolean) {
         val lockItem = MenuItem(
-            id = "layout_lock",
+            id = commandRegistry.toggleLayoutLock.id,
             label = if (isLocked) "Unlock" else "Lock",
             icon = if (isLocked) "unlock_icon" else "lock_icon"
         )
@@ -415,13 +415,8 @@ class ContextMenu(
 
         if (!isSelectable(item)) return
 
-        when (item.id) {
-            "create_textbox", "create_browser", "open_file" -> {
-                onItemSelected?.invoke(MenuItem(item.id, item.label))
-            }
-            else -> {
-                onSubmenuItemSelected?.invoke(parent, item)
-            }
+        if (commandRegistry.find(item.id) != null) {
+            onItemSelected?.invoke(MenuItem(item.id, item.label))
         }
         dismiss()
     }
@@ -701,6 +696,6 @@ class ContextMenu(
     }
 
     private fun isSelectable(item: SubMenuItem): Boolean {
-        return item.isEnabled || item.id.startsWith("toggle_")
+        return item.isEnabled || item.id.startsWith("toggle:")
     }
 }

@@ -1,33 +1,26 @@
 package com.everyday.everyday_glasses
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Rect
-import android.graphics.RectF
-import android.media.MediaMetadataRetriever
 import android.net.Uri
-import android.os.Handler
-import android.os.Looper
-import android.view.LayoutInflater
+import android.os.SystemClock
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import androidx.media3.common.AudioAttributes
-import androidx.media3.common.C
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.exoplayer.DefaultRenderersFactory
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
-import java.security.MessageDigest
-import kotlin.math.max
+import android.widget.FrameLayout
+import com.everyday.everyday_glasses.video.VideoItem
+import com.everyday.everyday_glasses.video.VideoPlayerController
+import com.everyday.everyday_glasses.video.VideoPlayerUi
+import kotlin.math.roundToInt
 
 /**
- * Lightweight dashboard placeholder backed by a single, short-lived fullscreen player.
- * No decoder or TextureView remains attached while this widget is windowed/minimized.
+ * X3player's complete player UI hosted inside an Everyday widget.
+ *
+ * The native view hierarchy is kept below WidgetContainer's canvas so the existing widget
+ * chrome remains the interaction layer for moving, resizing, pinning, minimizing and closing.
+ * Cursor taps are translated into synthetic touch events for the native controls.
  */
 class VideoWidget(
     private val context: Context,
@@ -39,189 +32,150 @@ class VideoWidget(
     y: Float,
     width: Float = 360f,
     height: Float = 220f,
+    queueItems: List<VideoItem> = emptyList(),
 ) : BaseWidget(x, y, width, height) {
 
-    companion object {
-        private const val POSITION_UPDATE_MS = 500L
-        private const val SEEK_INCREMENT_MS = 10_000L
-        private const val PREFS_NAME = "video_playback_progress"
+    private val host = FrameLayout(context).apply {
+        setBackgroundColor(Color.BLACK)
+        clipChildren = false
+        clipToPadding = false
     }
 
-    private val mainHandler = Handler(Looper.getMainLooper())
-    private val progressPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    private val progressKey = MessageDigest.getInstance("SHA-256")
-        .digest(contentUri.toString().toByteArray())
-        .take(12)
-        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    private val controller = VideoPlayerController(
+        context = context,
+        initialUri = contentUri,
+        initialDisplayName = displayName,
+        queueItems = queueItems,
+    )
 
-    private val thumbnailSource = Rect()
-    private var thumbnail: Bitmap? = null
-    private var playerView: PlayerView? = null
-    private var player: ExoPlayer? = null
-    private var durationMs = C.TIME_UNSET
-    private var positionMs = progressPreferences.getLong(progressKey, 0L).coerceAtLeast(0L)
-    private var playbackError: String? = null
+    private val playerUi = VideoPlayerUi(
+        context = context,
+        host = host,
+        controller = controller,
+        onExitRequested = {
+            if (isFullscreen) {
+                toggleFullscreen()
+            } else {
+                onCloseRequested?.invoke()
+            }
+        },
+    )
 
+    private var playbackStarted = false
+    private var released = false
+    private var displayVisible = true
+    private var mediaSourceActive = false
     var onStateChanged: (() -> Unit)? = null
     var onPlaybackVisibilityChanged: ((Boolean) -> Unit)? = null
 
     override val minimizeLabel: String = "V"
-
-    private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        textSize = 18f
-    }
-    private val secondaryPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(190, 200, 215)
-        textSize = 14f
-    }
-    private val overlayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(210, 12, 18, 30)
-    }
-    private val progressTrackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(70, 78, 92)
-    }
-    private val progressPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = WidgetTheme.ColorValue.hoverBorder
-    }
-    private val controlPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(35, 64, 96)
-    }
-    private val controlTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        textSize = 18f
-        textAlign = Paint.Align.CENTER
-    }
-
-    private val seekBackBounds = RectF()
-    private val playPauseBounds = RectF()
-    private val seekForwardBounds = RectF()
-    private val progressBounds = RectF()
-
-    private val positionUpdate = object : Runnable {
-        override fun run() {
-            val activePlayer = player ?: return
-            positionMs = activePlayer.currentPosition.coerceAtLeast(0L)
-            durationMs = activePlayer.duration
-            onStateChanged?.invoke()
-            mainHandler.postDelayed(this, POSITION_UPDATE_MS)
-        }
-    }
-
-    private val playerListener = object : Player.Listener {
-        override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_READY) {
-                durationMs = player?.duration ?: C.TIME_UNSET
-                playbackError = null
-            } else if (playbackState == Player.STATE_ENDED) {
-                positionMs = 0L
-                persistPosition()
-            }
-            onStateChanged?.invoke()
-        }
-
-        override fun onIsPlayingChanged(isPlaying: Boolean) {
-            onStateChanged?.invoke()
-        }
-
-        override fun onPlayerError(error: PlaybackException) {
-            playbackError = error.errorCodeName
-            onStateChanged?.invoke()
-        }
-    }
+    override val minWidth: Float = 320f
+    override val minHeight: Float = 180f
 
     init {
-        backgroundPaint.color = Color.rgb(12, 18, 30)
-        loadThumbnail()
-    }
+        backgroundPaint.color = Color.BLACK
+        playerUi.onStateChanged = {
+            onStateChanged?.invoke()
+        }
 
-    private fun loadThumbnail() {
-        Thread {
-            val loaded = runCatching {
-                MediaMetadataRetriever().use { retriever ->
-                    retriever.setDataSource(context, contentUri)
-                    retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                }
-            }.getOrNull()
-            mainHandler.post {
-                thumbnail = loaded
-                loaded?.let { thumbnailSource.set(0, 0, it.width, it.height) }
-                onStateChanged?.invoke()
-            }
-        }.start()
-    }
-
-    fun startFullscreenPlayback() {
-        if (!isFullscreen || player != null) return
-
-        val view = LayoutInflater.from(context)
-            .inflate(R.layout.view_video_player, rootLayout, false) as PlayerView
         val insertIndex = rootLayout.indexOfChild(containerView).let { if (it >= 0) it else 0 }
-        rootLayout.addView(view, insertIndex)
-        playerView = view
+        rootLayout.addView(host, insertIndex, FrameLayout.LayoutParams(1, 1))
+        syncHostLayout()
+    }
 
-        val renderersFactory = DefaultRenderersFactory(context)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
-            .setEnableDecoderFallback(true)
-        val newPlayer = ExoPlayer.Builder(context, renderersFactory)
-            .setSeekBackIncrementMs(SEEK_INCREMENT_MS)
-            .setSeekForwardIncrementMs(SEEK_INCREMENT_MS)
-            .build()
-            .also {
-                it.setAudioAttributes(AudioAttributes.DEFAULT, true)
-                it.addListener(playerListener)
-                it.setMediaItem(MediaItem.fromUri(contentUri), positionMs)
-                it.prepare()
-                it.playWhenReady = true
-            }
-        player = newPlayer
-        view.player = newPlayer
-        playbackError = null
-        mainHandler.removeCallbacks(positionUpdate)
-        mainHandler.post(positionUpdate)
-        onPlaybackVisibilityChanged?.invoke(true)
+    override fun updateBaseBounds() {
+        super.updateBaseBounds()
+        syncHostLayout()
+    }
+
+    /** Start playback and keep the player attached while the widget remains alive. */
+    fun startPlayback(autoPlay: Boolean = true) {
+        if (released) return
+        playbackStarted = true
+        displayVisible = true
+        syncHostLayout()
+        controller.start(autoPlay)
+        setMediaSourceActive(true)
         onStateChanged?.invoke()
     }
 
-    fun stopFullscreenPlayback() {
-        mainHandler.removeCallbacks(positionUpdate)
-        player?.let {
-            positionMs = it.currentPosition.coerceAtLeast(0L)
-            durationMs = it.duration
-            it.removeListener(playerListener)
-        }
-        persistPosition()
-        playerView?.player = null
-        player?.release()
-        player = null
-        playerView?.let { view -> (view.parent as? ViewGroup)?.removeView(view) }
-        playerView = null
-        onPlaybackVisibilityChanged?.invoke(false)
-        onStateChanged?.invoke()
+    fun setWindowedMode() {
+        playerUi.setWindowedMode()
+        syncHostLayout()
     }
 
+    fun onCursorActivity() {
+        if (!isMinimized && !released) playerUi.onUserActivity()
+    }
+
+    fun onCursorVisibilityChanged(visible: Boolean) {
+        if (!isMinimized && !released) playerUi.onCursorVisibilityChanged(visible)
+    }
+
+    override fun toggleMinimize() {
+        super.toggleMinimize()
+        // BaseWidget changes isMinimized directly, so refresh the native host after the
+        // callback-driven chrome transition has completed.
+        syncHostLayout()
+    }
+
+    /** Whether playback should resume automatically after a lifecycle/display pause. */
+    private val shouldAutoplayOnResume: Boolean
+        get() = controller.shouldAutoplayOnResume
+
+    /** Forward a cursor tap in WidgetContainer content coordinates to X3player's controls. */
     fun handleContentTap(px: Float, py: Float): Boolean {
-        if (!isFullscreen) {
-            toggleFullscreen()
-            return true
-        }
-        when {
-            seekBackBounds.contains(px, py) -> player?.seekBack()
-            playPauseBounds.contains(px, py) -> player?.let { if (it.isPlaying) it.pause() else it.play() }
-            seekForwardBounds.contains(px, py) -> player?.seekForward()
-            else -> player?.let { if (it.isPlaying) it.pause() else it.play() }
-        }
-        onStateChanged?.invoke()
+        if (isMinimized || released) return true
+        val localX = (px - x).coerceIn(0f, widgetWidth.coerceAtLeast(1f) - 1f)
+        val localY = (py - y).coerceIn(0f, widgetHeight.coerceAtLeast(1f) - 1f)
+        dispatchSyntheticTap(localX, localY)
         return true
     }
 
-    /** Fullscreen minimize returns to the useful placeholder, not directly to the icon tray. */
-    override fun minimize() {
-        if (isFullscreen) {
-            toggleFullscreen()
-        } else {
-            super.minimize()
-        }
+    /** Forward an Everyday double tap to X3player's progress/overlay behavior. */
+    fun handleContentDoubleTap(px: Float, py: Float): Boolean {
+        if (isMinimized || released) return true
+        val localX = (px - x).coerceIn(0f, widgetWidth.coerceAtLeast(1f) - 1f)
+        val localY = (py - y).coerceIn(0f, widgetHeight.coerceAtLeast(1f) - 1f)
+        return playerUi.handleDoubleTap(localX, localY)
+    }
+
+    fun handleKeyEvent(keyCode: Int, event: KeyEvent): Boolean = playerUi.handleKeyEvent(keyCode, event)
+
+    private fun dispatchSyntheticTap(localX: Float, localY: Float) {
+        val target = playerUi.root
+        val now = SystemClock.uptimeMillis()
+        val downTime = now
+        val down = MotionEvent.obtain(downTime, now, MotionEvent.ACTION_DOWN, localX, localY, 0)
+        down.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+        target.dispatchTouchEvent(down)
+        down.recycle()
+
+        val up = MotionEvent.obtain(downTime, now + 40L, MotionEvent.ACTION_UP, localX, localY, 0)
+        up.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+        target.dispatchTouchEvent(up)
+        up.recycle()
+    }
+
+    private fun syncHostLayout() {
+        val params = (host.layoutParams as? FrameLayout.LayoutParams)
+            ?: FrameLayout.LayoutParams(1, 1)
+        params.width = widgetWidth.roundToInt().coerceAtLeast(1)
+        params.height = widgetHeight.roundToInt().coerceAtLeast(1)
+        params.leftMargin = x.roundToInt()
+        params.topMargin = y.roundToInt()
+        host.layoutParams = params
+        host.scaleX = 1f
+        host.scaleY = 1f
+        host.translationX = 0f
+        host.translationY = 0f
+        host.visibility = if (!isMinimized && displayVisible) View.VISIBLE else View.GONE
+    }
+
+    private fun setMediaSourceActive(active: Boolean) {
+        if (mediaSourceActive == active) return
+        mediaSourceActive = active
+        onPlaybackVisibilityChanged?.invoke(active)
     }
 
     override fun draw(canvas: Canvas) {
@@ -229,11 +183,11 @@ class VideoWidget(
             drawMinimized(canvas)
             return
         }
-        updateControlBounds()
-        if (isFullscreen) {
-            drawFullscreenControls(canvas)
-        } else {
-            drawPlaceholder(canvas)
+
+        // The native player is opaque. A fallback fill prevents a frame of transparency while
+        // its surface is being attached or when the display lifecycle has hidden the host.
+        if (host.visibility != View.VISIBLE) {
+            canvas.drawRect(widgetBounds, backgroundPaint)
         }
 
         if (shouldShowBorder()) {
@@ -243,92 +197,44 @@ class VideoWidget(
         }
     }
 
-    private fun drawPlaceholder(canvas: Canvas) {
-        canvas.drawRect(widgetBounds, backgroundPaint)
-        thumbnail?.let { bitmap -> canvas.drawBitmap(bitmap, thumbnailSource, contentBounds, null) }
-        canvas.drawRect(
-            contentBounds.left,
-            max(contentBounds.top, contentBounds.bottom - 58f),
-            contentBounds.right,
-            contentBounds.bottom,
-            overlayPaint,
-        )
-        canvas.drawText(ellipsize(displayName, titlePaint, contentBounds.width() - 24f), contentBounds.left + 12f, contentBounds.bottom - 32f, titlePaint)
-        canvas.drawText("Resume ${formatTime(positionMs)}", contentBounds.left + 12f, contentBounds.bottom - 12f, secondaryPaint)
-        drawProgress(canvas, contentBounds.left, contentBounds.bottom - 4f, contentBounds.right)
-    }
-
-    private fun drawFullscreenControls(canvas: Canvas) {
-        val panelTop = widgetBounds.bottom - 82f
-        canvas.drawRect(widgetBounds.left, panelTop, widgetBounds.right, widgetBounds.bottom, overlayPaint)
-        canvas.drawText(ellipsize(displayName, titlePaint, widgetBounds.width() - 32f), widgetBounds.left + 16f, panelTop + 20f, titlePaint)
-        canvas.drawText("${formatTime(positionMs)} / ${formatTime(durationMs)}", widgetBounds.left + 16f, panelTop + 42f, secondaryPaint)
-        drawProgress(canvas, progressBounds.left, progressBounds.centerY(), progressBounds.right)
-        drawControl(canvas, seekBackBounds, "-10")
-        drawControl(canvas, playPauseBounds, if (player?.isPlaying == true) "Pause" else "Play")
-        drawControl(canvas, seekForwardBounds, "+10")
-        playbackError?.let { canvas.drawText("Playback error: $it", widgetBounds.left + 16f, panelTop - 12f, secondaryPaint) }
-    }
-
-    private fun drawControl(canvas: Canvas, bounds: RectF, label: String) {
-        canvas.drawRoundRect(bounds, 8f, 8f, controlPaint)
-        val baseline = bounds.centerY() - (controlTextPaint.ascent() + controlTextPaint.descent()) / 2f
-        canvas.drawText(label, bounds.centerX(), baseline, controlTextPaint)
-    }
-
-    private fun drawProgress(canvas: Canvas, left: Float, centerY: Float, right: Float) {
-        canvas.drawRect(left, centerY - 2f, right, centerY + 2f, progressTrackPaint)
-        val fraction = if (durationMs > 0 && durationMs != C.TIME_UNSET) {
-            (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
-        } else 0f
-        canvas.drawRect(left, centerY - 3f, left + (right - left) * fraction, centerY + 3f, progressPaint)
-    }
-
-    private fun updateControlBounds() {
-        val bottom = widgetBounds.bottom - 10f
-        val top = bottom - 34f
-        val buttonWidth = 74f
-        val gap = 10f
-        val totalWidth = buttonWidth * 3f + gap * 2f
-        val start = widgetBounds.centerX() - totalWidth / 2f
-        seekBackBounds.set(start, top, start + buttonWidth, bottom)
-        playPauseBounds.set(seekBackBounds.right + gap, top, seekBackBounds.right + gap + buttonWidth, bottom)
-        seekForwardBounds.set(playPauseBounds.right + gap, top, playPauseBounds.right + gap + buttonWidth, bottom)
-        progressBounds.set(widgetBounds.left + 190f, widgetBounds.bottom - 47f, widgetBounds.right - 16f, widgetBounds.bottom - 39f)
-    }
-
-    private fun persistPosition() {
-        progressPreferences.edit().putLong(progressKey, positionMs.coerceAtLeast(0L)).apply()
-    }
-
-    private fun ellipsize(value: String, paint: Paint, maxWidth: Float): String {
-        if (paint.measureText(value) <= maxWidth) return value
-        var end = value.length
-        while (end > 1 && paint.measureText(value.substring(0, end) + "…") > maxWidth) end--
-        return value.substring(0, end) + "…"
-    }
-
-    private fun formatTime(timeMs: Long): String {
-        if (timeMs < 0 || timeMs == C.TIME_UNSET) return "--:--"
-        val seconds = timeMs / 1000L
-        return "%d:%02d".format(seconds / 60L, seconds % 60L)
-    }
-
     override fun onPause() {
-        stopFullscreenPlayback()
+        if (!playbackStarted || released) return
+        controller.releaseForPause()
+        setMediaSourceActive(false)
+        onStateChanged?.invoke()
     }
 
     override fun onResume() {
-        if (isFullscreen) startFullscreenPlayback()
+        if (!playbackStarted || released || !displayVisible) return
+        controller.start(shouldAutoplayOnResume)
+        setMediaSourceActive(true)
+        syncHostLayout()
     }
 
     override fun onDisplayVisibilityChanged(visible: Boolean) {
-        if (visible && isFullscreen) startFullscreenPlayback() else stopFullscreenPlayback()
+        displayVisible = visible
+        syncHostLayout()
+        if (!playbackStarted || released) return
+
+        if (visible) {
+            controller.start(shouldAutoplayOnResume)
+            setMediaSourceActive(true)
+        } else {
+            controller.releaseForPause()
+            setMediaSourceActive(false)
+        }
+        onStateChanged?.invoke()
     }
 
     override fun onDestroy() {
-        stopFullscreenPlayback()
-        thumbnail?.recycle()
-        thumbnail = null
+        if (released) return
+        released = true
+        playbackStarted = false
+        setMediaSourceActive(false)
+        playerUi.release()
+        controller.release()
+        (host.parent as? ViewGroup)?.removeView(host)
+        onStateChanged = null
+        onPlaybackVisibilityChanged = null
     }
 }

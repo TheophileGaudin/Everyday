@@ -7,6 +7,8 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.text.TextPaint
 import android.text.TextUtils
+import com.everyday.shared.sync.CalendarEventSnapshot
+import com.everyday.shared.sync.CalendarSnapshot
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -51,7 +53,7 @@ class CalendarWidget(
     private data class ParsedEventTime(val startMs: Long, val isAllDay: Boolean)
 
     private data class ParsedEvent(
-        val event: GoogleCalendarEvent,
+        val event: CalendarEventSnapshot,
         val startMs: Long,
         val isAllDay: Boolean
     )
@@ -185,7 +187,7 @@ class CalendarWidget(
         textAlign = Paint.Align.CENTER
     }
 
-    private var snapshot: GoogleCalendarSnapshot? = null
+    private var snapshot: CalendarSnapshot? = null
     private var parsedEvents: List<ParsedEvent> = emptyList()
     private var fontScale = 1f
     private var contentScrollOffset = 0f
@@ -229,7 +231,7 @@ class CalendarWidget(
         updateInternalBounds()
     }
 
-    fun setSnapshot(snapshot: GoogleCalendarSnapshot?) {
+    fun setSnapshot(snapshot: CalendarSnapshot?) {
         this.snapshot = snapshot
         parsedEvents = snapshot?.events
             ?.mapNotNull { event ->
@@ -738,13 +740,13 @@ class CalendarWidget(
         return true
     }
 
-    private fun snapshotFreshnessBoundary(snapshot: GoogleCalendarSnapshot?, nowMs: Long): Long {
+    private fun snapshotFreshnessBoundary(snapshot: CalendarSnapshot?, nowMs: Long): Long {
         if (snapshot == null || snapshot.staleAfterMs <= 0L) return Long.MAX_VALUE
         val staleAtMs = snapshot.fetchedAtMs + snapshot.staleAfterMs
         return if (nowMs <= staleAtMs) staleAtMs + 1L else Long.MAX_VALUE
     }
 
-    private fun isSnapshotStale(snapshot: GoogleCalendarSnapshot, nowMs: Long): Boolean {
+    private fun isSnapshotStale(snapshot: CalendarSnapshot, nowMs: Long): Boolean {
         return snapshot.staleAfterMs > 0L && nowMs > snapshot.fetchedAtMs + snapshot.staleAfterMs
     }
 
