@@ -8,7 +8,7 @@ import android.util.Log
 class WidgetStateStore(
     private val context: Context,
     private val handler: Handler,
-    private val captureDashboard: () -> WidgetPersistenceV2.PersistedDashboard,
+    private val captureDashboard: () -> WidgetDocument.PersistedDashboard,
     private val debounceMs: Long = DEFAULT_DEBOUNCE_MS
 ) {
     companion object {
@@ -18,7 +18,7 @@ class WidgetStateStore(
 
     private var saveRunnable: Runnable? = null
 
-    fun loadDashboard(): WidgetPersistenceV2.PersistedDashboard =
+    fun loadDashboard(): WidgetDocument.PersistedDashboard =
         WidgetPersistence.loadDashboard(context)
 
     fun saveNow(): Boolean {
@@ -35,13 +35,13 @@ class WidgetStateStore(
         handler.postDelayed(saveRunnable!!, debounceMs)
     }
 
-    fun listLayouts(): List<WidgetPersistence.PersistedDashboardLayoutRecord> =
+    fun listLayouts(): List<WidgetDocument.PersistedDashboardLayoutRecord> =
         WidgetPersistence.listDashboardLayouts(context)
 
-    fun saveLayout(name: String, dashboard: WidgetPersistenceV2.PersistedDashboard): Boolean =
+    fun saveLayout(name: String, dashboard: WidgetDocument.PersistedDashboard): Boolean =
         WidgetPersistence.saveDashboardLayout(context, name, dashboard)
 
-    fun loadLayout(name: String): WidgetPersistenceV2.PersistedDashboard? =
+    fun loadLayout(name: String): WidgetDocument.PersistedDashboard? =
         WidgetPersistence.loadDashboardLayout(context, name)
 
     fun deleteLayout(name: String): Boolean =
@@ -52,7 +52,7 @@ class WidgetStateStore(
         saveRunnable = null
     }
 
-    private fun saveDashboard(dashboard: WidgetPersistenceV2.PersistedDashboard): Boolean {
+    private fun saveDashboard(dashboard: WidgetDocument.PersistedDashboard): Boolean {
         val saved = WidgetPersistence.saveDashboard(context, dashboard)
         if (saved) {
             pruneUnreferencedImages(dashboard)
@@ -60,7 +60,7 @@ class WidgetStateStore(
         return saved
     }
 
-    private fun pruneUnreferencedImages(dashboard: WidgetPersistenceV2.PersistedDashboard) {
+    private fun pruneUnreferencedImages(dashboard: WidgetDocument.PersistedDashboard) {
         val layoutImagePaths = listLayouts()
             .flatMap { imagePaths(it.dashboard) }
         ImageWidgetStorage.pruneUnreferenced(
@@ -70,10 +70,10 @@ class WidgetStateStore(
         Log.d(TAG, "Persisted widget state")
     }
 
-    private fun imagePaths(dashboard: WidgetPersistenceV2.PersistedDashboard): List<String> =
+    private fun imagePaths(dashboard: WidgetDocument.PersistedDashboard): List<String> =
         dashboard.widgets.mapNotNull { record ->
             if (record.type != WidgetTypeId.IMAGE) return@mapNotNull null
-            (WidgetPersistenceV2.codecs[WidgetTypeId.IMAGE]?.decode(record.state)
+            (WidgetDocument.codecs[WidgetTypeId.IMAGE]?.decode(record.state)
                 as? WidgetPersistence.ImageWidgetState)
                 ?.imagePath
         }

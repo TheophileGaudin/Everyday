@@ -1,5 +1,6 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.roundTrip
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -18,16 +19,7 @@ class PdfWidgetPersistenceTest {
             zoom = 1.8f,
             isPinned = true,
         )
-        val state = WidgetPersistence.createPersistedState(
-            textWidgets = emptyList(),
-            browserWidgets = emptyList(),
-            imageWidgets = emptyList(),
-            statusBarState = null,
-            pdfWidgets = listOf(pdf),
-        )
 
-        val restored = WidgetPersistence.stateFromJson(WidgetPersistence.stateToJson(state))
-
-        assertEquals(listOf(pdf), restored.pdf)
+        assertEquals(pdf, roundTrip(WidgetTypeId.PDF, pdf))
     }
 }

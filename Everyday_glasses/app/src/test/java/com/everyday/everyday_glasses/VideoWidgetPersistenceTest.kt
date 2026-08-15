@@ -1,5 +1,6 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.roundTrip
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -16,16 +17,7 @@ class VideoWidgetPersistenceTest {
             displayName = "sample.mp4",
             isPinned = true,
         )
-        val state = WidgetPersistence.createPersistedState(
-            textWidgets = emptyList(),
-            browserWidgets = emptyList(),
-            imageWidgets = emptyList(),
-            statusBarState = null,
-            videoWidgets = listOf(video),
-        )
 
-        val restored = WidgetPersistence.stateFromJson(WidgetPersistence.stateToJson(state))
-
-        assertEquals(listOf(video), restored.video)
+        assertEquals(video, roundTrip(WidgetTypeId.VIDEO, video))
     }
 }

@@ -7,9 +7,9 @@ class WidgetLayoutManager(
     private val context: Context,
     private val stateStore: WidgetStateStore,
     private val canApplyLayout: () -> Boolean,
-    private val captureDashboard: () -> WidgetPersistenceV2.PersistedDashboard,
-    private val applyDashboard: (WidgetPersistenceV2.PersistedDashboard) -> Unit,
-    private val buildDeliveredLayout: (String) -> WidgetPersistenceV2.PersistedDashboard?,
+    private val captureDashboard: () -> WidgetDocument.PersistedDashboard,
+    private val applyDashboard: (WidgetDocument.PersistedDashboard) -> Unit,
+    private val buildDeliveredLayout: (String) -> WidgetDocument.PersistedDashboard?,
     private val showNamePrompt: (String) -> Unit,
     private val showNameError: (String) -> Unit,
     private val dismissNamePrompt: () -> Unit,
@@ -24,7 +24,7 @@ class WidgetLayoutManager(
 
     var activeLayoutName: String? = null
 
-    private fun loadLayoutByNameOrDelivered(name: String): WidgetPersistenceV2.PersistedDashboard? {
+    private fun loadLayoutByNameOrDelivered(name: String): WidgetDocument.PersistedDashboard? {
         return buildDeliveredLayout(name) ?: stateStore.loadLayout(name)
     }
 
@@ -46,7 +46,7 @@ class WidgetLayoutManager(
         return true
     }
 
-    fun capturePersistedDashboard(): WidgetPersistenceV2.PersistedDashboard =
+    fun capturePersistedDashboard(): WidgetDocument.PersistedDashboard =
         captureDashboard().copy(activeLayoutName = activeLayoutName?.trim()?.takeIf { it.isNotBlank() })
 
     fun saveLayoutWithName(name: String) {

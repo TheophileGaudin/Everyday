@@ -57,7 +57,7 @@ class WidgetLifecycleControllerTest {
                 unregister = { registry.remove(it) }
             )
         )
-        val record = WidgetPersistenceV2.PersistedWidgetRecord(
+        val record = WidgetDocument.PersistedWidgetRecord(
             type = WidgetTypeId.TEXT,
             instanceId = "text#12",
             state = JSONObject().put("value", "restored")
@@ -142,7 +142,7 @@ class WidgetLifecycleControllerTest {
     private fun controller(registry: WidgetRegistry, onChanged: () -> Unit) =
         WidgetLifecycleController({ action -> action() }, onChanged, registry)
 
-    private class StringCodec(override val type: WidgetTypeId) : WidgetPersistenceV2.WidgetStateCodec {
+    private class StringCodec(override val type: WidgetTypeId) : WidgetDocument.WidgetStateCodec {
         override val stateClass = String::class
         override fun encode(state: Any): JSONObject = JSONObject().put("value", state as String)
         override fun decode(payload: JSONObject): Any = payload.getString("value")

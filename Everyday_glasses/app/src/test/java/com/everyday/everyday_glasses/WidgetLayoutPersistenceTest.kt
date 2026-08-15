@@ -1,5 +1,6 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.stateOf
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -9,16 +10,17 @@ import org.junit.Test
 class WidgetLayoutPersistenceTest {
     @Test
     fun `standard layout includes compact weather map and speedometer cluster`() {
-        val state = BuiltInLayouts.build(WidgetPersistence.DEFAULT_LAYOUT_NAME, 640f, 480f)!!
-        val map = state.map!!
-        val weather = state.location!!
-        val speed = state.speedometer!!
+        val dashboard = BuiltInLayouts.buildDashboard(WidgetPersistence.DEFAULT_LAYOUT_NAME, 640f, 480f)!!
+        val map: WidgetPersistence.MapWidgetState = dashboard.stateOf(WidgetTypeId.MAP)
+        val weather: WidgetPersistence.LocationWidgetState = dashboard.stateOf(WidgetTypeId.LOCATION)
+        val speed: WidgetPersistence.SpeedometerWidgetState = dashboard.stateOf(WidgetTypeId.SPEEDOMETER)
+        val news: WidgetPersistence.NewsWidgetState = dashboard.stateOf(WidgetTypeId.NEWS)
         assertTrue(map.x > 400f)
         assertTrue(weather.width < 200f)
         assertEquals(134.9f, speed.width, 0.1f)
-        assertEquals(0.75f, state.news!!.fontScale, 0.001f)
-        assertFalse(state.location!!.showLocation)
-        assertFalse(state.location!!.showCountry)
+        assertEquals(0.75f, news.fontScale, 0.001f)
+        assertFalse(weather.showLocation)
+        assertFalse(weather.showCountry)
         assertTrue(map.showLocation)
         assertTrue(map.showCountry)
     }
@@ -34,7 +36,9 @@ class WidgetLayoutPersistenceTest {
 
     @Test
     fun `all news source kinds survive widget persistence`() {
-        val baseline = BuiltInLayouts.build(WidgetPersistence.DEFAULT_LAYOUT_NAME, 640f, 480f)!!
+        val dashboard = BuiltInLayouts.buildDashboard(WidgetPersistence.DEFAULT_LAYOUT_NAME, 640f, 480f)!!
+        val baseline: WidgetPersistence.NewsWidgetState = dashboard.stateOf(WidgetTypeId.NEWS)
+        val codec = WidgetDocument.codecs.getValue(WidgetTypeId.NEWS)
         val sources = listOf(
             com.everyday.shared.sync.NewsSourceSpec.DEFAULT_LOCATION,
             com.everyday.shared.sync.NewsSourceSpec.QUERY("local technology"),
@@ -42,226 +46,162 @@ class WidgetLayoutPersistenceTest {
         )
 
         sources.forEach { source ->
-            val state = baseline.copy(news = baseline.news!!.copy(sourceSpec = source))
-            val restored = WidgetPersistence.stateFromJson(WidgetPersistence.stateToJson(state))
-            assertEquals(source, restored.news!!.sourceSpec)
+            val state = baseline.copy(sourceSpec = source)
+            val restored = codec.decode(codec.encode(state)) as WidgetPersistence.NewsWidgetState
+            assertEquals(source, restored.sourceSpec)
         }
     }
 
     @Test
-    fun `persisted state survives layout json round trip`() {
-        val original = WidgetPersistence.PersistedState(
-            text = listOf(
-                WidgetPersistence.TextWidgetState(
-                    x = 10f,
-                    y = 20f,
-                    width = 180f,
-                    height = 90f,
-                    text = "plain",
-                    html = "<b>rich</b>",
-                    fontSize = 30f,
-                    isTextWrap = false,
-                    columnCount = 2,
-                    isMinimized = true,
-                    savedMinX = 11f,
-                    savedMinY = 22f,
-                    savedMinWidth = 181f,
-                    savedMinHeight = 91f,
-                    isPinned = true
-                )
-            ),
-            browser = listOf(
-                WidgetPersistence.BrowserWidgetState(
-                    x = 30f,
-                    y = 40f,
-                    width = 220f,
-                    height = 160f,
-                    url = "https://example.com",
-                    isFullscreen = true
-                )
-            ),
-            image = listOf(
-                WidgetPersistence.ImageWidgetState(
-                    x = 1f,
-                    y = 2f,
-                    width = 100f,
-                    height = 120f,
-                    imagePath = "/tmp/image.png"
-                )
-            ),
-            video = listOf(
-                WidgetPersistence.VideoWidgetState(
-                    uri = "content://media/video/1",
-                    displayName = "clip.mp4",
-                    x = 21f,
-                    y = 22f,
-                    width = 260f,
-                    height = 180f
-                )
-            ),
-            pdf = listOf(
-                WidgetPersistence.PdfWidgetState(
-                    uri = "content://documents/report",
-                    displayName = "report.pdf",
-                    x = 23f,
-                    y = 24f,
-                    width = 280f,
-                    height = 200f,
-                    page = 4,
-                    zoom = 1.5f
-                )
-            ),
-            status = WidgetPersistence.StatusBarState(
-                x = 100f,
-                y = 200f,
-                showTime = true,
-                showDate = false,
-                showPhoneBattery = true,
-                showGlassesBattery = false
-            ),
-            location = WidgetPersistence.LocationWidgetState(
-                x = 3f,
-                y = 4f,
-                width = 150f,
-                height = 80f,
-                showWeather = false,
-                showTemperature = true,
-                showLocation = false,
-                showCountry = true
-            ),
-            map = WidgetPersistence.MapWidgetState(
-                x = 410f, y = 12f, width = 176f, height = 176f,
-                mode = MapViewMode.PROJECTED.name,
-                zoom = MapZoom.FAR.name,
-                isFullscreen = true,
-                isPinned = true
-            ),
-            calendar = WidgetPersistence.CalendarWidgetState(
-                x = 5f,
-                y = 6f,
-                width = 200f,
-                height = 100f,
-                fontScale = 1.25f
-            ),
-            finance = WidgetPersistence.FinanceWidgetState(
-                x = 7f,
-                y = 8f,
-                width = 210f,
-                height = 120f,
-                selectedSymbol = "AAPL",
-                selectedRange = "1M"
-            ),
-            news = WidgetPersistence.NewsWidgetState(
-                x = 9f,
-                y = 10f,
-                width = 230f,
-                height = 150f,
-                countryCode = "GB",
-                selectedIndex = 3,
-                fontScale = 0.9f
-            ),
-            notifications = WidgetPersistence.NotificationsWidgetState(
-                x = 10f,
-                y = 11f,
-                width = 240f,
-                height = 160f,
-                widgetFontScale = 1.2f,
-                toastFontScale = 1.3f,
-                scrollIndex = 2
-            ),
-            speedometer = WidgetPersistence.SpeedometerWidgetState(
-                x = 11f,
-                y = 12f,
-                width = 160f,
-                height = 80f
-            ),
-            subtitle = WidgetPersistence.SubtitleWidgetState(
-                x = 13f,
-                y = 14f,
-                width = 250f,
-                height = 90f,
-                phonePlaybackEnabled = false,
-                microphoneEnabled = true,
-                translationEnabled = true
-            ),
-            mirror = WidgetPersistence.MirrorWidgetState(
-                x = 15f,
-                y = 16f,
-                width = 120f,
-                height = 180f,
-                isPinned = true
-            ),
-            closedTemplates = WidgetPersistence.ClosedWidgetTemplates(
-                text = WidgetPersistence.TextWidgetState(
-                    x = 17f,
-                    y = 18f,
-                    width = 110f,
-                    height = 70f,
-                    text = "closed"
-                ),
-                browser = WidgetPersistence.BrowserWidgetState(
-                    x = 19f,
-                    y = 20f,
-                    width = 210f,
-                    height = 130f,
-                    url = "https://closed.example"
-                ),
-                map = WidgetPersistence.MapWidgetState(
-                    x = 420f, y = 20f, width = 150f, height = 150f,
-                    mode = MapViewMode.TOP_DOWN.name,
-                    zoom = MapZoom.NEAR.name
-                )
-            ),
-            hoverControls = listOf(
-                WidgetPersistence.HoverControlPlacementState(
-                    controlId = CloseAppHoverControl.ID,
-                    col = 2,
-                    row = 1
-                ),
-                WidgetPersistence.HoverControlPlacementState(
-                    controlId = YouTubeHistoryHoverControl.ID,
-                    col = 7,
-                    row = 4
-                )
-            ),
-            isFirstRun = false,
-            activeLayoutName = "Work",
-            isLayoutLocked = true
+    fun `a full dashboard survives a json round trip`() {
+        val text = WidgetPersistence.TextWidgetState(
+            x = 10f, y = 20f, width = 180f, height = 90f,
+            text = "plain", html = "<b>rich</b>", fontSize = 30f,
+            isTextWrap = false, columnCount = 2, isMinimized = true,
+            savedMinX = 11f, savedMinY = 22f, savedMinWidth = 181f, savedMinHeight = 91f,
+            isPinned = true
+        )
+        val browser = WidgetPersistence.BrowserWidgetState(
+            x = 30f, y = 40f, width = 220f, height = 160f,
+            url = "https://example.com", isFullscreen = true
+        )
+        val image = WidgetPersistence.ImageWidgetState(
+            x = 1f, y = 2f, width = 100f, height = 120f, imagePath = "/tmp/image.png"
+        )
+        val video = WidgetPersistence.VideoWidgetState(
+            uri = "content://media/video/1", displayName = "clip.mp4",
+            x = 21f, y = 22f, width = 260f, height = 180f
+        )
+        val pdf = WidgetPersistence.PdfWidgetState(
+            uri = "content://documents/report", displayName = "report.pdf",
+            x = 23f, y = 24f, width = 280f, height = 200f, page = 4, zoom = 1.5f
+        )
+        val status = WidgetPersistence.StatusBarState(
+            x = 100f, y = 200f, showTime = true, showDate = false,
+            showPhoneBattery = true, showGlassesBattery = false
+        )
+        val location = WidgetPersistence.LocationWidgetState(
+            x = 3f, y = 4f, width = 150f, height = 80f,
+            showWeather = false, showTemperature = true,
+            showLocation = false, showCountry = true
+        )
+        val map = WidgetPersistence.MapWidgetState(
+            x = 410f, y = 12f, width = 176f, height = 176f,
+            mode = MapViewMode.PROJECTED.name, zoom = MapZoom.FAR.name,
+            isFullscreen = true, isPinned = true
+        )
+        val calendar = WidgetPersistence.CalendarWidgetState(
+            x = 5f, y = 6f, width = 200f, height = 100f, fontScale = 1.25f
+        )
+        val finance = WidgetPersistence.FinanceWidgetState(
+            x = 7f, y = 8f, width = 210f, height = 120f,
+            selectedSymbol = "AAPL", selectedRange = "1M"
+        )
+        val news = WidgetPersistence.NewsWidgetState(
+            x = 9f, y = 10f, width = 230f, height = 150f,
+            countryCode = "GB", selectedIndex = 3, fontScale = 0.9f
+        )
+        val notifications = WidgetPersistence.NotificationsWidgetState(
+            x = 10f, y = 11f, width = 240f, height = 160f,
+            widgetFontScale = 1.2f, toastFontScale = 1.3f, scrollIndex = 2
+        )
+        val speedometer = WidgetPersistence.SpeedometerWidgetState(
+            x = 11f, y = 12f, width = 160f, height = 80f
+        )
+        val subtitle = WidgetPersistence.SubtitleWidgetState(
+            x = 13f, y = 14f, width = 250f, height = 90f,
+            phonePlaybackEnabled = false, microphoneEnabled = true, translationEnabled = true
+        )
+        val mirror = WidgetPersistence.MirrorWidgetState(
+            x = 15f, y = 16f, width = 120f, height = 180f, isPinned = true
+        )
+        val closedText = WidgetPersistence.TextWidgetState(
+            x = 17f, y = 18f, width = 110f, height = 70f, text = "closed"
+        )
+        val closedBrowser = WidgetPersistence.BrowserWidgetState(
+            x = 19f, y = 20f, width = 210f, height = 130f, url = "https://closed.example"
+        )
+        val closedMap = WidgetPersistence.MapWidgetState(
+            x = 420f, y = 20f, width = 150f, height = 150f,
+            mode = MapViewMode.TOP_DOWN.name, zoom = MapZoom.NEAR.name
         )
 
-        val restored = WidgetPersistence.stateFromJson(WidgetPersistence.stateToJson(original))
+        val original = WidgetDocument.PersistedDashboard(
+            widgets = listOf(
+                record(WidgetTypeId.TEXT, text, "text#1"),
+                record(WidgetTypeId.BROWSER, browser, "browser#1"),
+                record(WidgetTypeId.IMAGE, image, "image#1"),
+                record(WidgetTypeId.VIDEO, video, "video#1"),
+                record(WidgetTypeId.PDF, pdf, "pdf#1"),
+                record(WidgetTypeId.STATUS, status),
+                record(WidgetTypeId.LOCATION, location),
+                record(WidgetTypeId.MAP, map),
+                record(WidgetTypeId.CALENDAR, calendar),
+                record(WidgetTypeId.FINANCE, finance),
+                record(WidgetTypeId.NEWS, news),
+                record(WidgetTypeId.NOTIFICATIONS, notifications),
+                record(WidgetTypeId.SPEEDOMETER, speedometer),
+                record(WidgetTypeId.SUBTITLE, subtitle),
+                record(WidgetTypeId.MIRROR, mirror)
+            ),
+            closedTemplates = listOf(
+                record(WidgetTypeId.TEXT, closedText, "text#template"),
+                record(WidgetTypeId.BROWSER, closedBrowser, "browser#template"),
+                record(WidgetTypeId.MAP, closedMap, "map#template")
+            ),
+            hoverControls = listOf(
+                WidgetPersistence.HoverControlPlacementState(CloseAppHoverControl.ID, 2, 1),
+                WidgetPersistence.HoverControlPlacementState(YouTubeHistoryHoverControl.ID, 7, 4)
+            ),
+            activeLayoutName = "Work",
+            isLayoutLocked = true,
+            isFirstRun = false
+        )
 
-        assertEquals(1, restored.text.size)
-        assertEquals("<b>rich</b>", restored.text.single().html)
-        assertEquals(2, restored.text.single().columnCount)
-        assertTrue(restored.text.single().isMinimized)
-        assertTrue(restored.text.single().isPinned)
-        assertEquals("https://example.com", restored.browser.single().url)
-        assertTrue(restored.browser.single().isFullscreen)
-        assertEquals("/tmp/image.png", restored.image.single().imagePath)
-        assertEquals("clip.mp4", restored.video.single().displayName)
-        assertEquals(4, restored.pdf.single().page)
-        assertEquals(1.5f, restored.pdf.single().zoom, 0.001f)
-        assertFalse(restored.status!!.showDate)
-        assertFalse(restored.location!!.showWeather)
-        assertEquals(MapViewMode.PROJECTED.name, restored.map!!.mode)
-        assertEquals(MapZoom.FAR.name, restored.map!!.zoom)
-        assertTrue(restored.map!!.isFullscreen)
-        assertEquals(1.25f, restored.calendar!!.fontScale, 0.001f)
-        assertEquals("AAPL", restored.finance!!.selectedSymbol)
-        assertEquals("1M", restored.finance!!.selectedRange)
-        assertEquals("GB", restored.news!!.countryCode)
-        assertEquals(3, restored.news!!.selectedIndex)
-        assertEquals(1.2f, restored.notifications!!.widgetFontScale, 0.001f)
-        assertEquals(1.3f, restored.notifications!!.toastFontScale, 0.001f)
-        assertEquals(2, restored.notifications!!.scrollIndex)
-        assertEquals(160f, restored.speedometer!!.width, 0.001f)
-        assertFalse(restored.subtitle!!.phonePlaybackEnabled)
-        assertTrue(restored.subtitle!!.microphoneEnabled)
-        assertTrue(restored.mirror!!.isPinned)
-        assertEquals("closed", restored.closedTemplates.text!!.text)
-        assertEquals("https://closed.example", restored.closedTemplates.browser!!.url)
-        assertEquals(MapZoom.NEAR.name, restored.closedTemplates.map!!.zoom)
+        val restored = WidgetDocument.dashboardFromJson(
+            WidgetDocument.dashboardToJson(original)
+        )
+
+        // Every widget comes back with its payload intact.
+        assertEquals(text, restored.stateOf<WidgetPersistence.TextWidgetState>(WidgetTypeId.TEXT))
+        assertEquals(browser, restored.stateOf<WidgetPersistence.BrowserWidgetState>(WidgetTypeId.BROWSER))
+        assertEquals(image, restored.stateOf<WidgetPersistence.ImageWidgetState>(WidgetTypeId.IMAGE))
+        assertEquals(video, restored.stateOf<WidgetPersistence.VideoWidgetState>(WidgetTypeId.VIDEO))
+        assertEquals(pdf, restored.stateOf<WidgetPersistence.PdfWidgetState>(WidgetTypeId.PDF))
+        assertEquals(status, restored.stateOf<WidgetPersistence.StatusBarState>(WidgetTypeId.STATUS))
+        assertEquals(location, restored.stateOf<WidgetPersistence.LocationWidgetState>(WidgetTypeId.LOCATION))
+        assertEquals(map, restored.stateOf<WidgetPersistence.MapWidgetState>(WidgetTypeId.MAP))
+        assertEquals(calendar, restored.stateOf<WidgetPersistence.CalendarWidgetState>(WidgetTypeId.CALENDAR))
+        // Finance is the one type that does not round trip identically: a widget saved
+        // with no tiles is rehydrated with one derived from its symbol and range.
+        val restoredFinance = restored.stateOf<WidgetPersistence.FinanceWidgetState>(WidgetTypeId.FINANCE)
+        assertEquals(finance.selectedSymbol, restoredFinance.selectedSymbol)
+        assertEquals(finance.selectedRange, restoredFinance.selectedRange)
+        assertEquals(finance.copy(tiles = restoredFinance.tiles), restoredFinance)
+        assertEquals("AAPL", restoredFinance.tiles.single().symbol)
+        assertEquals(news, restored.stateOf<WidgetPersistence.NewsWidgetState>(WidgetTypeId.NEWS))
+        assertEquals(
+            notifications,
+            restored.stateOf<WidgetPersistence.NotificationsWidgetState>(WidgetTypeId.NOTIFICATIONS)
+        )
+        assertEquals(
+            speedometer,
+            restored.stateOf<WidgetPersistence.SpeedometerWidgetState>(WidgetTypeId.SPEEDOMETER)
+        )
+        assertEquals(subtitle, restored.stateOf<WidgetPersistence.SubtitleWidgetState>(WidgetTypeId.SUBTITLE))
+        assertEquals(mirror, restored.stateOf<WidgetPersistence.MirrorWidgetState>(WidgetTypeId.MIRROR))
+
+        // Instance ids identify repeatable widgets across a reload.
+        assertEquals(
+            listOf("text#1", "browser#1", "image#1", "video#1", "pdf#1"),
+            restored.widgets.map { it.instanceId }.filter { id -> id.contains("#") }
+        )
+
+        // Closed templates and dashboard-level settings survive too.
+        assertEquals(closedText, restored.templateOf<WidgetPersistence.TextWidgetState>(WidgetTypeId.TEXT))
+        assertEquals(closedBrowser, restored.templateOf<WidgetPersistence.BrowserWidgetState>(WidgetTypeId.BROWSER))
+        assertEquals(closedMap, restored.templateOf<WidgetPersistence.MapWidgetState>(WidgetTypeId.MAP))
+        assertNull(restored.closedTemplates.firstOrNull { it.type == WidgetTypeId.STATUS })
         assertEquals(2, restored.hoverControls!!.size)
         assertEquals(CloseAppHoverControl.ID, restored.hoverControls!![0].controlId)
         assertEquals(2, restored.hoverControls!![0].col)
@@ -271,6 +211,25 @@ class WidgetLayoutPersistenceTest {
         assertEquals(4, restored.hoverControls!![1].row)
         assertEquals("Work", restored.activeLayoutName)
         assertTrue(restored.isLayoutLocked)
-        assertNull(restored.closedTemplates.status)
+        assertFalse(restored.isFirstRun)
+    }
+
+    private fun record(
+        type: WidgetTypeId,
+        state: Any,
+        instanceId: String = type.persistedId
+    ): WidgetDocument.PersistedWidgetRecord = WidgetDocument.PersistedWidgetRecord(
+        type = type,
+        instanceId = instanceId,
+        state = WidgetDocument.codecs.getValue(type).encode(state)
+    )
+
+    private inline fun <reified S : Any> WidgetDocument.PersistedDashboard.templateOf(
+        type: WidgetTypeId
+    ): S {
+        val record = requireNotNull(closedTemplates.firstOrNull { it.type == type }) {
+            "Dashboard has no " + type.persistedId + " closed template"
+        }
+        return WidgetDocument.codecs.getValue(type).decode(record.state) as S
     }
 }

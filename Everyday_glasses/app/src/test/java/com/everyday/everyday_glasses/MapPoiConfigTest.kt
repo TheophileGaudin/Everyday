@@ -1,7 +1,8 @@
 package com.everyday.everyday_glasses
 
-import org.json.JSONObject
+import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.roundTrip
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -13,41 +14,27 @@ class MapPoiConfigTest {
             radiusM = 300,
             maxResults = 5
         )
-        val state = WidgetPersistence.createPersistedState(
-            textWidgets = emptyList(),
-            browserWidgets = emptyList(),
-            imageWidgets = emptyList(),
-            statusBarState = null,
-            mapWidgetState = WidgetPersistence.MapWidgetState(
-                x = 10f,
-                y = 20f,
-                width = 210f,
-                height = 210f,
-                poiConfig = config
-            )
+        val map = WidgetPersistence.MapWidgetState(
+            x = 10f,
+            y = 20f,
+            width = 210f,
+            height = 210f,
+            poiConfig = config
         )
 
-        val restored = WidgetPersistence.stateFromJson(WidgetPersistence.stateToJson(state))
-
-        assertEquals(config, restored.map?.poiConfig)
+        assertEquals(config, roundTrip(WidgetTypeId.MAP, map).poiConfig)
     }
 
     @Test
     fun `missing persisted poi config means legacy Default`() {
-        val state = WidgetPersistence.createPersistedState(
-            textWidgets = emptyList(),
-            browserWidgets = emptyList(),
-            imageWidgets = emptyList(),
-            statusBarState = null,
-            mapWidgetState = WidgetPersistence.MapWidgetState(10f, 20f, 210f, 210f)
-        )
-        val json = WidgetPersistence.stateToJson(state)
-        json.getJSONObject("map_widget").remove("poiConfig")
+        val codec = WidgetDocument.codecs.getValue(WidgetTypeId.MAP)
+        val payload = codec.encode(WidgetPersistence.MapWidgetState(10f, 20f, 210f, 210f))
+        payload.remove("poiConfig")
 
-        val restored = WidgetPersistence.stateFromJson(json)
+        val restored = codec.decode(payload) as WidgetPersistence.MapWidgetState
 
-        assertEquals(PoiDisplayConfig.DEFAULT, restored.map?.poiConfig)
-        assertEquals(PoiDisplayConfigState.DEFAULT, restored.map?.poiConfig?.state)
+        assertEquals(PoiDisplayConfig.DEFAULT, restored.poiConfig)
+        assertEquals(PoiDisplayConfigState.DEFAULT, restored.poiConfig.state)
     }
 
     @Test
@@ -107,18 +94,12 @@ class MapPoiConfigTest {
             showClosest = false,
             closestRadiusM = 300
         )
-        val state = WidgetPersistence.createPersistedState(
-            textWidgets = emptyList(),
-            browserWidgets = emptyList(),
-            imageWidgets = emptyList(),
-            statusBarState = null,
-            mapWidgetState = WidgetPersistence.MapWidgetState(10f, 20f, 210f, 210f, poiConfig = config)
-        )
+        val map = WidgetPersistence.MapWidgetState(10f, 20f, 210f, 210f, poiConfig = config)
 
-        val restored = WidgetPersistence.stateFromJson(WidgetPersistence.stateToJson(state))
+        val restored = roundTrip(WidgetTypeId.MAP, map)
 
-        assertEquals(config, restored.map?.poiConfig)
-        assertTrue(restored.map?.poiConfig?.isDefaultMode == true)
-        assertTrue(restored.map?.poiConfig?.isDefault == false)
+        assertEquals(config, restored.poiConfig)
+        assertTrue(restored.poiConfig.isDefaultMode)
+        assertFalse(restored.poiConfig.isDefault)
     }
 }

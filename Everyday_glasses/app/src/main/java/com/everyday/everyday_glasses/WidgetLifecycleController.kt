@@ -15,7 +15,7 @@ class WidgetLifecycleRegistration<W : BaseWidget, S : Any>(
     val descriptor: WidgetDescriptor,
     val widgetType: KClass<W>,
     val stateType: KClass<S>,
-    val stateCodec: WidgetPersistenceV2.WidgetStateCodec? = null,
+    val stateCodec: WidgetDocument.WidgetStateCodec? = null,
     val current: () -> W? = { null },
     val createDefault: (() -> W?)? = null,
     val restore: ((S) -> W?)? = null,
@@ -286,14 +286,14 @@ class WidgetLifecycleController(
     /** Captures a registered widget state for the persistence codec migration. */
     fun capture(widget: BaseWidget): Any? = registrationByWidget[widget]?.captureState(widget)
 
-    fun captureRecord(widget: BaseWidget, instanceId: String): WidgetPersistenceV2.PersistedWidgetRecord? {
+    fun captureRecord(widget: BaseWidget, instanceId: String): WidgetDocument.PersistedWidgetRecord? {
         val registration = registrationByWidget[widget] ?: return null
         val state = registration.captureState(widget) ?: return null
         val codec = registration.stateCodec ?: return null
-        return WidgetPersistenceV2.PersistedWidgetRecord(widget.type, instanceId, codec.encode(state))
+        return WidgetDocument.PersistedWidgetRecord(widget.type, instanceId, codec.encode(state))
     }
 
-    fun restore(record: WidgetPersistenceV2.PersistedWidgetRecord): BaseWidget? {
+    fun restore(record: WidgetDocument.PersistedWidgetRecord): BaseWidget? {
         val registration = requireNotNull(registrations[record.type]) { "No lifecycle registration for ${record.type}" }
         val codec = requireNotNull(registration.stateCodec) { "No persistence codec for ${record.type}" }
         val state = requireNotNull(codec.decode(record.state)) { "Invalid state for ${record.type}" }

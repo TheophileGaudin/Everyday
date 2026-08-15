@@ -105,7 +105,7 @@ class WidgetContainer @JvmOverloads constructor(
     private val smartAlignmentRenderer = SmartAlignmentRenderer()
     private val unitSettings = UnitSettings(context)
     /** Runtime source of truth for reopenable widget templates. */
-    private val closedTemplateRecords = LinkedHashMap<WidgetTypeId, WidgetPersistenceV2.PersistedWidgetRecord>()
+    private val closedTemplateRecords = LinkedHashMap<WidgetTypeId, WidgetDocument.PersistedWidgetRecord>()
 
     // ==================== 3DOF State ====================
 
@@ -345,7 +345,7 @@ class WidgetContainer @JvmOverloads constructor(
         captureDashboard = ::captureWidgetDashboardWithoutLayoutName,
         applyDashboard = ::applyPersistedDashboardReplacingCurrent,
         buildDeliveredLayout = { name ->
-            BuiltInLayouts.build(name, width.toFloat(), height.toFloat())?.let(WidgetPersistenceV2::fromLegacy)
+            BuiltInLayouts.buildDashboard(name, width.toFloat(), height.toFloat())
         },
         showNamePrompt = { suggestedName ->
             dismissMenu()
@@ -523,7 +523,7 @@ class WidgetContainer @JvmOverloads constructor(
             descriptor = WidgetDescriptors[WidgetTypeId.BROWSER],
             widgetType = BrowserWidget::class,
             stateType = WidgetPersistence.BrowserWidgetState::class,
-            stateCodec = WidgetPersistenceV2.codecs[WidgetTypeId.BROWSER],
+            stateCodec = WidgetDocument.codecs[WidgetTypeId.BROWSER],
             capture = persistenceHelper::getBrowserWidgetState,
             restore = ::restoreBrowserWidget,
             configure = ::configureBrowserWidget,
@@ -551,7 +551,7 @@ class WidgetContainer @JvmOverloads constructor(
             descriptor = WidgetDescriptors[WidgetTypeId.TEXT],
             widgetType = TextBoxWidget::class,
             stateType = WidgetPersistence.TextWidgetState::class,
-            stateCodec = WidgetPersistenceV2.codecs[WidgetTypeId.TEXT],
+            stateCodec = WidgetDocument.codecs[WidgetTypeId.TEXT],
             capture = persistenceHelper::getTextWidgetState,
             restore = ::restoreTextWidget,
             register = { registry.add(it) },
@@ -572,7 +572,7 @@ class WidgetContainer @JvmOverloads constructor(
             descriptor = WidgetDescriptors[WidgetTypeId.IMAGE],
             widgetType = ImageWidget::class,
             stateType = WidgetPersistence.ImageWidgetState::class,
-            stateCodec = WidgetPersistenceV2.codecs[WidgetTypeId.IMAGE],
+            stateCodec = WidgetDocument.codecs[WidgetTypeId.IMAGE],
             capture = persistenceHelper::getImageWidgetState,
             restore = ::restoreImageWidget,
             register = { registry.add(it) },
@@ -594,7 +594,7 @@ class WidgetContainer @JvmOverloads constructor(
             descriptor = WidgetDescriptors[WidgetTypeId.VIDEO],
             widgetType = VideoWidget::class,
             stateType = WidgetPersistence.VideoWidgetState::class,
-            stateCodec = WidgetPersistenceV2.codecs[WidgetTypeId.VIDEO],
+            stateCodec = WidgetDocument.codecs[WidgetTypeId.VIDEO],
             capture = persistenceHelper::getVideoWidgetState,
             restore = ::restoreVideoWidget,
             register = { registry.add(it) },
@@ -615,7 +615,7 @@ class WidgetContainer @JvmOverloads constructor(
             descriptor = WidgetDescriptors[WidgetTypeId.PDF],
             widgetType = PdfWidget::class,
             stateType = WidgetPersistence.PdfWidgetState::class,
-            stateCodec = WidgetPersistenceV2.codecs[WidgetTypeId.PDF],
+            stateCodec = WidgetDocument.codecs[WidgetTypeId.PDF],
             capture = persistenceHelper::getPdfWidgetState,
             restore = ::restorePdfWidget,
             register = { registry.add(it) },
@@ -737,7 +737,7 @@ class WidgetContainer @JvmOverloads constructor(
                     descriptor = WidgetDescriptors[type],
                     widgetType = widgetType,
                     stateType = stateType,
-                    stateCodec = WidgetPersistenceV2.codecs[type],
+                    stateCodec = WidgetDocument.codecs[type],
                     current = current,
                     createDefault = createWidget,
                     restore = restoreWidget,
@@ -4918,15 +4918,11 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Persistence ====================
 
-    /** Compatibility boundary retained for callers not yet moved to the v2 dashboard. */
-    fun capturePersistedState(): WidgetPersistence.PersistedState =
-        WidgetPersistenceV2.toLegacy(capturePersistedDashboard())
-
-    fun capturePersistedDashboard(): WidgetPersistenceV2.PersistedDashboard =
+    fun capturePersistedDashboard(): WidgetDocument.PersistedDashboard =
         layoutManager.capturePersistedDashboard()
 
-    private fun captureWidgetDashboardWithoutLayoutName(): WidgetPersistenceV2.PersistedDashboard =
-        WidgetPersistenceV2.PersistedDashboard(
+    private fun captureWidgetDashboardWithoutLayoutName(): WidgetDocument.PersistedDashboard =
+        WidgetDocument.PersistedDashboard(
             widgets = registry.allWidgets().mapNotNull { widget ->
                 lifecycleController.captureRecord(widget, registry.stableId(widget))
             },
@@ -4937,11 +4933,11 @@ class WidgetContainer @JvmOverloads constructor(
         )
 
     private fun storeClosedTemplate(type: WidgetTypeId, state: Any?) {
-        val codec = WidgetPersistenceV2.codecs[type]
+        val codec = WidgetDocument.codecs[type]
         if (state == null || codec == null) {
             closedTemplateRecords.remove(type)
         } else {
-            closedTemplateRecords[type] = WidgetPersistenceV2.PersistedWidgetRecord(
+            closedTemplateRecords[type] = WidgetDocument.PersistedWidgetRecord(
                 type = type,
                 instanceId = "${type.persistedId}#template",
                 state = codec.encode(state)
@@ -4949,7 +4945,7 @@ class WidgetContainer @JvmOverloads constructor(
         }
     }
 
-    private fun replaceClosedTemplates(records: List<WidgetPersistenceV2.PersistedWidgetRecord>) {
+    private fun replaceClosedTemplates(records: List<WidgetDocument.PersistedWidgetRecord>) {
         closedTemplateRecords.clear()
         records.forEach { record ->
             if (WidgetDescriptors[record.type].storesClosedTemplate) {
@@ -4960,7 +4956,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     private inline fun <reified S : Any> closedTemplateState(type: WidgetTypeId): S? {
         val record = closedTemplateRecords[type] ?: return null
-        val codec = WidgetPersistenceV2.codecs[type] ?: return null
+        val codec = WidgetDocument.codecs[type] ?: return null
         return codec.decode(record.state) as? S
     }
 
@@ -5352,10 +5348,10 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun loadCommandLayout(name: String): Boolean {
         if (!isReady()) return false
-        val builtIn = BuiltInLayouts.build(name, width.toFloat(), height.toFloat())
+        val builtIn = BuiltInLayouts.buildDashboard(name, width.toFloat(), height.toFloat())
         if (builtIn != null) {
             requestLayoutSwitchBrightness()
-            applyPersistedStateReplacingCurrent(builtIn, notifyRestored = false)
+            applyPersistedDashboardReplacingCurrent(builtIn, notifyRestored = false)
             layoutManager.activeLayoutName = name
             notifyPersistentContentChanged()
             return true
@@ -5372,16 +5368,8 @@ class WidgetContainer @JvmOverloads constructor(
         AppCommandInvocation(commandRegistry.openUrl.id, AppCommandArguments.Url(address))
     )
 
-    /** Compatibility boundary for delivered layouts and legacy callers. */
-    fun applyPersistedStateReplacingCurrent(
-        state: WidgetPersistence.PersistedState,
-        notifyRestored: Boolean = true
-    ) {
-        applyPersistedDashboardReplacingCurrent(WidgetPersistenceV2.fromLegacy(state), notifyRestored)
-    }
-
     fun applyPersistedDashboardReplacingCurrent(
-        dashboard: WidgetPersistenceV2.PersistedDashboard,
+        dashboard: WidgetDocument.PersistedDashboard,
         notifyRestored: Boolean = true
     ) {
         if (!isReady()) return
@@ -5407,7 +5395,7 @@ class WidgetContainer @JvmOverloads constructor(
         if (notifyRestored) notifyDashboardRestored()
     }
 
-    private fun applyPersistedContents(dashboard: WidgetPersistenceV2.PersistedDashboard) {
+    private fun applyPersistedContents(dashboard: WidgetDocument.PersistedDashboard) {
         shouldCreateDefaultSingletons = false
         replaceClosedTemplates(dashboard.closedTemplates)
 
@@ -5425,13 +5413,13 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun applyDefaultLayoutReplacingCurrent() {
-        val defaultState = BuiltInLayouts.build(
+        val defaultDashboard = BuiltInLayouts.buildDashboard(
             WidgetPersistence.DEFAULT_LAYOUT_NAME,
             width.toFloat(),
             height.toFloat()
         ) ?: return
         settingsController.resetHoverControlPlacementsToDefault(notify = false)
-        applyPersistedStateReplacingCurrent(defaultState)
+        applyPersistedDashboardReplacingCurrent(defaultDashboard)
     }
 
     private fun dismissAllTransientOverlays() {

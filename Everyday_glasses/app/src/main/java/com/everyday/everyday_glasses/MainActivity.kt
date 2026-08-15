@@ -1637,7 +1637,7 @@ class MainActivity : AppCompatActivity() {
      *
      * @param state The pre-loaded persisted state (loaded before layout to set isReturningUser flag)
      */
-    private fun restoreWidgetState(state: WidgetPersistenceV2.PersistedDashboard) {
+    private fun restoreWidgetState(state: WidgetDocument.PersistedDashboard) {
         Log.d(TAG, "Restoring widget dashboard: isFirstRun=${state.isFirstRun}, widgets=${state.widgets.size}, templates=${state.closedTemplates.size}")
 
         if (state.isFirstRun) {
@@ -1646,8 +1646,7 @@ class MainActivity : AppCompatActivity() {
 
         val delivered = state.activeLayoutName
             ?.takeIf(BuiltInLayouts::isDelivered)
-            ?.let { BuiltInLayouts.build(it, widgetContainer.width.toFloat(), widgetContainer.height.toFloat()) }
-            ?.let(WidgetPersistenceV2::fromLegacy)
+            ?.let { BuiltInLayouts.buildDashboard(it, widgetContainer.width.toFloat(), widgetContainer.height.toFloat()) }
         widgetContainer.applyPersistedDashboardReplacingCurrent(delivered ?: state)
     }
     

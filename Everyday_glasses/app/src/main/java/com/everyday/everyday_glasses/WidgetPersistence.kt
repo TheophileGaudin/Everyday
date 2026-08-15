@@ -28,47 +28,6 @@ object WidgetPersistence {
     private const val LAYOUTS_FILENAME = "everyday_widget_layouts.json"
     const val DEFAULT_LAYOUT_NAME = BuiltInLayouts.STANDARD
 
-    // JSON keys
-    private const val KEY_TEXT_WIDGETS = "text_widgets"
-    private const val KEY_BROWSER_WIDGETS = "browser_widgets"
-    private const val KEY_IMAGE_WIDGETS = "image_widgets"
-    private const val KEY_VIDEO_WIDGETS = "video_widgets"
-    private const val KEY_PDF_WIDGETS = "pdf_widgets"
-    private const val KEY_STATUS_BAR = "status_bar"
-    private const val KEY_LOCATION_WIDGET = "location_widget"
-    private const val KEY_MAP_WIDGET = "map_widget"
-    private const val KEY_CALENDAR_WIDGET = "calendar_widget"
-    private const val KEY_MIRROR_WIDGET = "mirror_widget"
-    private const val KEY_FINANCE_WIDGET = "finance_widget"
-    private const val KEY_NEWS_WIDGET = "news_widget"
-    private const val KEY_NOTIFICATIONS_WIDGET = "notifications_widget"
-    private const val KEY_SPEEDOMETER_WIDGET = "speedometer_widget"
-    private const val KEY_SUBTITLE_WIDGET = "subtitle_widget"
-    private const val KEY_CLOSED_TEMPLATES = "closed_templates"
-    private const val KEY_CLOSED_TEXT_WIDGET = "text_widget"
-    private const val KEY_CLOSED_BROWSER_WIDGET = "browser_widget"
-    private const val KEY_CLOSED_STATUS_BAR = "status_bar"
-    private const val KEY_CLOSED_LOCATION_WIDGET = "location_widget"
-    private const val KEY_CLOSED_MAP_WIDGET = "map_widget"
-    private const val KEY_CLOSED_CALENDAR_WIDGET = "calendar_widget"
-    private const val KEY_CLOSED_MIRROR_WIDGET = "mirror_widget"
-    private const val KEY_CLOSED_FINANCE_WIDGET = "finance_widget"
-    private const val KEY_CLOSED_NEWS_WIDGET = "news_widget"
-    private const val KEY_CLOSED_NOTIFICATIONS_WIDGET = "notifications_widget"
-    private const val KEY_CLOSED_SPEEDOMETER_WIDGET = "speedometer_widget"
-    private const val KEY_CLOSED_SUBTITLE_WIDGET = "subtitle_widget"
-    private const val KEY_HOVER_CONTROLS = "hover_controls"
-    private const val KEY_HOVER_CONTROL_ID = "id"
-    private const val KEY_HOVER_CONTROL_COL = "col"
-    private const val KEY_HOVER_CONTROL_ROW = "row"
-    private const val KEY_LAYOUT_LOCKED = "layoutLocked"
-    private const val KEY_LAYOUTS = "layouts"
-    private const val KEY_LAYOUT_NAME = "name"
-    private const val KEY_LAYOUT_CREATED_AT = "createdAt"
-    private const val KEY_LAYOUT_UPDATED_AT = "updatedAt"
-    private const val KEY_LAYOUT_STATE = "state"
-    private const val KEY_ACTIVE_LAYOUT_NAME = "activeLayoutName"
-
     // Avoid spamming logcat if something goes wrong during load.
     @Volatile private var hasLoggedLoadError = false
     @Volatile private var hasLoggedSaveError = false
@@ -144,61 +103,6 @@ object WidgetPersistence {
     }
 
     // ==================== Persisted state ====================
-
-    data class PersistedState(
-        val text: List<TextWidgetState>,
-        val browser: List<BrowserWidgetState>,
-        val image: List<ImageWidgetState>,
-        val status: StatusBarState?,
-        val location: LocationWidgetState?,
-        val map: MapWidgetState? = null,
-        val calendar: CalendarWidgetState?,
-        val finance: FinanceWidgetState?,
-        val news: NewsWidgetState?,
-        val notifications: NotificationsWidgetState?,
-        val speedometer: SpeedometerWidgetState?,
-        val subtitle: SubtitleWidgetState?,
-        val mirror: MirrorWidgetState?,
-        val video: List<VideoWidgetState> = emptyList(),
-        val pdf: List<PdfWidgetState> = emptyList(),
-        /** Runtime IDs carried by v2 records; absent for an unversioned v1 document. */
-        val instanceIds: Map<WidgetTypeId, List<String>> = emptyMap(),
-        val closedTemplates: ClosedWidgetTemplates = ClosedWidgetTemplates(),
-        val hoverControls: List<HoverControlPlacementState>? = null,
-        val isFirstRun: Boolean = true,  // True if no saved state exists (create default widgets)
-        val activeLayoutName: String? = null,
-        val isLayoutLocked: Boolean = false
-    )
-
-    data class WidgetLayoutRecord(
-        val name: String,
-        val createdAt: Long,
-        val updatedAt: Long,
-        val state: PersistedState
-    )
-
-    /** Versioned layout record used by the current runtime persistence path. */
-    data class PersistedDashboardLayoutRecord(
-        val name: String,
-        val createdAt: Long,
-        val updatedAt: Long,
-        val dashboard: WidgetPersistenceV2.PersistedDashboard
-    )
-
-    data class ClosedWidgetTemplates(
-        val text: TextWidgetState? = null,
-        val browser: BrowserWidgetState? = null,
-        val status: StatusBarState? = null,
-        val location: LocationWidgetState? = null,
-        val map: MapWidgetState? = null,
-        val calendar: CalendarWidgetState? = null,
-        val finance: FinanceWidgetState? = null,
-        val news: NewsWidgetState? = null,
-        val notifications: NotificationsWidgetState? = null,
-        val speedometer: SpeedometerWidgetState? = null,
-        val subtitle: SubtitleWidgetState? = null,
-        val mirror: MirrorWidgetState? = null
-    )
 
     data class HoverControlPlacementState(
         val controlId: String,
@@ -472,160 +376,6 @@ object WidgetPersistence {
         return file
     }
 
-    fun createPersistedState(
-        textWidgets: List<TextWidgetState>,
-        browserWidgets: List<BrowserWidgetState>,
-        imageWidgets: List<ImageWidgetState>,
-        statusBarState: StatusBarState?,
-        locationWidgetState: LocationWidgetState? = null,
-        mapWidgetState: MapWidgetState? = null,
-        calendarWidgetState: CalendarWidgetState? = null,
-        mirrorWidgetState: MirrorWidgetState? = null,
-        financeWidgetState: FinanceWidgetState? = null,
-        newsWidgetState: NewsWidgetState? = null,
-        notificationsWidgetState: NotificationsWidgetState? = null,
-        speedometerWidgetState: SpeedometerWidgetState? = null,
-        subtitleWidgetState: SubtitleWidgetState? = null,
-        videoWidgets: List<VideoWidgetState> = emptyList(),
-        pdfWidgets: List<PdfWidgetState> = emptyList(),
-        instanceIds: Map<WidgetTypeId, List<String>> = emptyMap(),
-        closedTemplates: ClosedWidgetTemplates = ClosedWidgetTemplates(),
-        hoverControls: List<HoverControlPlacementState>? = null,
-        isFirstRun: Boolean = false,
-        activeLayoutName: String? = null,
-        isLayoutLocked: Boolean = false
-    ): PersistedState = PersistedState(
-        text = textWidgets,
-        browser = browserWidgets,
-        image = imageWidgets,
-        status = statusBarState,
-        location = locationWidgetState,
-        map = mapWidgetState,
-        calendar = calendarWidgetState,
-        finance = financeWidgetState,
-        news = newsWidgetState,
-        notifications = notificationsWidgetState,
-        speedometer = speedometerWidgetState,
-        subtitle = subtitleWidgetState,
-        mirror = mirrorWidgetState,
-        video = videoWidgets,
-        pdf = pdfWidgets,
-        instanceIds = instanceIds,
-        closedTemplates = closedTemplates,
-        hoverControls = hoverControls,
-        isFirstRun = isFirstRun,
-        activeLayoutName = sanitizeLayoutName(activeLayoutName),
-        isLayoutLocked = isLayoutLocked
-    )
-
-    fun stateToJson(state: PersistedState): JSONObject {
-        val rootJson = JSONObject()
-
-        rootJson.put(KEY_TEXT_WIDGETS, JSONArray().apply {
-            state.text.forEach { put(textWidgetToJson(it)) }
-        })
-        rootJson.put(KEY_BROWSER_WIDGETS, JSONArray().apply {
-            state.browser.forEach { put(browserWidgetToJson(it)) }
-        })
-        rootJson.put(KEY_IMAGE_WIDGETS, JSONArray().apply {
-            state.image.forEach {
-                put(JSONObject().apply {
-                    putCommonFields(it)
-                    put("imagePath", it.imagePath)
-                })
-            }
-        })
-        rootJson.put(KEY_VIDEO_WIDGETS, JSONArray().apply {
-            state.video.forEach {
-                put(JSONObject().apply {
-                    putCommonFields(it)
-                    put("uri", it.uri)
-                    put("displayName", it.displayName)
-                })
-            }
-        })
-        rootJson.put(KEY_PDF_WIDGETS, JSONArray().apply {
-            state.pdf.forEach {
-                put(JSONObject().apply {
-                    putCommonFields(it)
-                    put("uri", it.uri)
-                    put("displayName", it.displayName)
-                    put("page", it.page)
-                    put("zoom", it.zoom)
-                })
-            }
-        })
-
-        state.status?.let { rootJson.put(KEY_STATUS_BAR, statusBarToJson(it)) }
-        state.location?.let { rootJson.put(KEY_LOCATION_WIDGET, locationWidgetToJson(it)) }
-        state.map?.let { rootJson.put(KEY_MAP_WIDGET, mapWidgetToJson(it)) }
-        state.calendar?.let { rootJson.put(KEY_CALENDAR_WIDGET, calendarWidgetToJson(it)) }
-        state.mirror?.let { rootJson.put(KEY_MIRROR_WIDGET, mirrorWidgetToJson(it)) }
-        state.finance?.let { rootJson.put(KEY_FINANCE_WIDGET, financeWidgetToJson(it)) }
-        state.news?.let { rootJson.put(KEY_NEWS_WIDGET, newsWidgetToJson(it)) }
-        state.notifications?.let { rootJson.put(KEY_NOTIFICATIONS_WIDGET, notificationsWidgetToJson(it)) }
-        state.speedometer?.let { rootJson.put(KEY_SPEEDOMETER_WIDGET, speedometerWidgetToJson(it)) }
-        state.subtitle?.let { rootJson.put(KEY_SUBTITLE_WIDGET, subtitleWidgetToJson(it)) }
-
-        val closedTemplatesJson = JSONObject()
-        state.closedTemplates.text?.let { closedTemplatesJson.put(KEY_CLOSED_TEXT_WIDGET, textWidgetToJson(it)) }
-        state.closedTemplates.browser?.let { closedTemplatesJson.put(KEY_CLOSED_BROWSER_WIDGET, browserWidgetToJson(it)) }
-        state.closedTemplates.status?.let { closedTemplatesJson.put(KEY_CLOSED_STATUS_BAR, statusBarToJson(it)) }
-        state.closedTemplates.location?.let { closedTemplatesJson.put(KEY_CLOSED_LOCATION_WIDGET, locationWidgetToJson(it)) }
-        state.closedTemplates.map?.let { closedTemplatesJson.put(KEY_CLOSED_MAP_WIDGET, mapWidgetToJson(it)) }
-        state.closedTemplates.calendar?.let { closedTemplatesJson.put(KEY_CLOSED_CALENDAR_WIDGET, calendarWidgetToJson(it)) }
-        state.closedTemplates.mirror?.let { closedTemplatesJson.put(KEY_CLOSED_MIRROR_WIDGET, mirrorWidgetToJson(it)) }
-        state.closedTemplates.finance?.let { closedTemplatesJson.put(KEY_CLOSED_FINANCE_WIDGET, financeWidgetToJson(it)) }
-        state.closedTemplates.news?.let { closedTemplatesJson.put(KEY_CLOSED_NEWS_WIDGET, newsWidgetToJson(it)) }
-        state.closedTemplates.notifications?.let { closedTemplatesJson.put(KEY_CLOSED_NOTIFICATIONS_WIDGET, notificationsWidgetToJson(it)) }
-        state.closedTemplates.speedometer?.let { closedTemplatesJson.put(KEY_CLOSED_SPEEDOMETER_WIDGET, speedometerWidgetToJson(it)) }
-        state.closedTemplates.subtitle?.let { closedTemplatesJson.put(KEY_CLOSED_SUBTITLE_WIDGET, subtitleWidgetToJson(it)) }
-        if (closedTemplatesJson.length() > 0) {
-            rootJson.put(KEY_CLOSED_TEMPLATES, closedTemplatesJson)
-        }
-        state.hoverControls?.let { placements ->
-            rootJson.put(KEY_HOVER_CONTROLS, JSONArray().apply {
-                placements.forEach { placement ->
-                    put(JSONObject().apply {
-                        put(KEY_HOVER_CONTROL_ID, placement.controlId)
-                        put(KEY_HOVER_CONTROL_COL, placement.col)
-                        put(KEY_HOVER_CONTROL_ROW, placement.row)
-                    })
-                }
-            })
-        }
-        sanitizeLayoutName(state.activeLayoutName)?.let {
-            rootJson.put(KEY_ACTIVE_LAYOUT_NAME, it)
-        }
-        rootJson.put(KEY_LAYOUT_LOCKED, state.isLayoutLocked)
-
-        return rootJson
-    }
-
-    fun stateFromJson(rootJson: JSONObject, isFirstRun: Boolean = false): PersistedState =
-        PersistedState(
-            text = parseTextWidgets(rootJson),
-            browser = parseBrowserWidgets(rootJson),
-            image = parseImageWidgets(rootJson),
-            status = parseStatusBar(rootJson),
-            location = parseLocation(rootJson),
-            map = parseMap(rootJson),
-            calendar = parseCalendar(rootJson),
-            finance = parseFinance(rootJson),
-            news = parseNews(rootJson),
-            notifications = parseNotifications(rootJson),
-            speedometer = parseSpeedometer(rootJson),
-            subtitle = parseSubtitle(rootJson),
-            mirror = parseMirror(rootJson),
-            video = parseVideoWidgets(rootJson),
-            pdf = parsePdfWidgets(rootJson),
-            closedTemplates = parseClosedTemplates(rootJson),
-            hoverControls = parseHoverControls(rootJson),
-            isFirstRun = isFirstRun,
-            activeLayoutName = sanitizeLayoutName(rootJson.optString(KEY_ACTIVE_LAYOUT_NAME, "")),
-            isLayoutLocked = rootJson.optBoolean(KEY_LAYOUT_LOCKED, false)
-        )
-
     /**
      * Encodes one state object using the established v1 field representation.
      *
@@ -686,16 +436,11 @@ object WidgetPersistence {
         WidgetTypeId.FILES -> null
     }
 
-    fun saveState(context: Context, state: PersistedState): Boolean {
-        return saveDashboard(context, WidgetPersistenceV2.fromLegacy(state))
-    }
-
-    /** Saves the runtime record envelope without first converting to fixed v1 fields. */
-    fun saveDashboard(context: Context, dashboard: WidgetPersistenceV2.PersistedDashboard): Boolean {
+    fun saveDashboard(context: Context, dashboard: WidgetDocument.PersistedDashboard): Boolean {
         try {
             writeTextAtomic(
                 getStorageFile(context),
-                WidgetPersistenceV2.dashboardToJson(dashboard.copy(isFirstRun = false)).toString(2)
+                WidgetDocument.dashboardToJson(dashboard.copy(isFirstRun = false)).toString(2)
             )
             hasLoggedSaveError = false
             return true
@@ -709,51 +454,30 @@ object WidgetPersistence {
     }
 
     /**
-     * Public API: load everything in one pass (single file read).
-     * Returns isFirstRun=true if no save file exists (fresh install),
-     * isFirstRun=false if a save file was loaded (returning user).
+     * Loads everything in one pass (single file read).
+     *
+     * Returns isFirstRun=true when there is nothing usable to restore, which makes
+     * the app build its default layout. That covers a fresh install and also a save
+     * file this version cannot read — documents older than the current schema are not
+     * migrated, they are ignored. The file itself is left untouched, so an unreadable
+     * document is only replaced when the user saves a layout of their own.
      */
-    fun loadAll(context: Context): PersistedState {
-        return WidgetPersistenceV2.toLegacy(loadDashboard(context))
-    }
-
-    /** Loads the v2 record envelope; unversioned documents are migrated once on read. */
-    fun loadDashboard(context: Context): WidgetPersistenceV2.PersistedDashboard {
+    fun loadDashboard(context: Context): WidgetDocument.PersistedDashboard {
         val rootJson = loadRootJson(context)
-            ?: return WidgetPersistenceV2.PersistedDashboard(
+        if (rootJson == null || !WidgetDocument.isCurrentSchema(rootJson)) {
+            if (rootJson != null) {
+                Log.w(TAG, "Ignoring widget document written by an older schema; starting from defaults")
+            }
+            return WidgetDocument.PersistedDashboard(
                 widgets = emptyList(),
                 isFirstRun = true,
                 activeLayoutName = DEFAULT_LAYOUT_NAME
             )
-
-        return when {
-            WidgetPersistenceV2.isCurrentSchema(rootJson) ->
-                WidgetPersistenceV2.dashboardFromJson(rootJson).copy(isFirstRun = false)
-            WidgetPersistenceV2.isLegacySchema(rootJson) -> {
-                val migrated = LegacyWidgetStateV1Migrator.migrateDashboard(rootJson)
-                // Successful v1 loads are immediately committed as v2. A failed
-                // commit leaves the original file intact because writes are atomic.
-                saveDashboard(context, migrated)
-                migrated.copy(isFirstRun = false)
-            }
-            else -> {
-                Log.e(TAG, "Unsupported widget persistence schema; leaving file untouched")
-                WidgetPersistenceV2.PersistedDashboard(
-                    widgets = emptyList(),
-                    isFirstRun = false,
-                    activeLayoutName = DEFAULT_LAYOUT_NAME
-                )
-            }
         }
+        return WidgetDocument.dashboardFromJson(rootJson).copy(isFirstRun = false)
     }
 
-    fun listLayouts(context: Context): List<WidgetLayoutRecord> {
-        return listDashboardLayouts(context).map { record ->
-            WidgetLayoutRecord(record.name, record.createdAt, record.updatedAt, WidgetPersistenceV2.toLegacy(record.dashboard))
-        }
-    }
-
-    fun listDashboardLayouts(context: Context): List<PersistedDashboardLayoutRecord> {
+    fun listDashboardLayouts(context: Context): List<WidgetDocument.PersistedDashboardLayoutRecord> {
         val file = getLayoutsStorageFile(context)
         if (!file.exists()) return emptyList()
 
@@ -761,36 +485,23 @@ object WidgetPersistence {
             val jsonText = file.readText()
             if (jsonText.isBlank()) return emptyList()
             val rootJson = JSONObject(jsonText)
-            when {
-                WidgetPersistenceV2.isCurrentSchema(rootJson) -> WidgetPersistenceV2.dashboardLayoutRecordsFromJson(rootJson).map {
-                    PersistedDashboardLayoutRecord(it.name, it.createdAt, it.updatedAt, it.dashboard)
-                }
-                WidgetPersistenceV2.isLegacySchema(rootJson) -> LegacyWidgetStateV1Migrator.migrateLayoutRecords(rootJson).map { legacy ->
-                    PersistedDashboardLayoutRecord(legacy.name, legacy.createdAt, legacy.updatedAt, WidgetPersistenceV2.fromLegacy(legacy.state))
-                }.also { migratedRecords ->
-                    // Named layouts follow the same one-time migration rule as the
-                    // active dashboard.
-                    writeDashboardLayoutRecords(context, migratedRecords)
-                }
-                else -> {
-                    Log.e(TAG, "Unsupported widget layout schema; leaving file untouched")
-                    emptyList()
-                }
+            if (!WidgetDocument.isCurrentSchema(rootJson)) {
+                // Same rule as the active dashboard: unreadable layouts are ignored
+                // rather than migrated, and the file is left for the user to overwrite.
+                Log.w(TAG, "Ignoring layouts written by an older schema")
+                return emptyList()
             }
+            WidgetDocument.dashboardLayoutRecordsFromJson(rootJson)
         } catch (e: Exception) {
             Log.e(TAG, "Error reading widget layouts", e)
             emptyList()
         }
     }
 
-    fun saveLayout(context: Context, name: String, state: PersistedState): Boolean {
-        return saveDashboardLayout(context, name, WidgetPersistenceV2.fromLegacy(state))
-    }
-
     fun saveDashboardLayout(
         context: Context,
         name: String,
-        dashboard: WidgetPersistenceV2.PersistedDashboard
+        dashboard: WidgetDocument.PersistedDashboard
     ): Boolean {
         val trimmedName = name.trim()
         if (trimmedName.isBlank() || isDefaultLayoutName(trimmedName)) return false
@@ -800,7 +511,7 @@ object WidgetPersistence {
             val existing = listDashboardLayouts(context).toMutableList()
             val existingIndex = existing.indexOfFirst { it.name.equals(trimmedName, ignoreCase = true) }
             val createdAt = existing.getOrNull(existingIndex)?.createdAt ?: now
-            val record = PersistedDashboardLayoutRecord(
+            val record = WidgetDocument.PersistedDashboardLayoutRecord(
                 name = trimmedName,
                 createdAt = createdAt,
                 updatedAt = now,
@@ -820,11 +531,7 @@ object WidgetPersistence {
         }
     }
 
-    fun loadLayout(context: Context, name: String): PersistedState? {
-        return loadDashboardLayout(context, name)?.let(WidgetPersistenceV2::toLegacy)
-    }
-
-    fun loadDashboardLayout(context: Context, name: String): WidgetPersistenceV2.PersistedDashboard? {
+    fun loadDashboardLayout(context: Context, name: String): WidgetDocument.PersistedDashboard? {
         val trimmedName = name.trim()
         if (trimmedName.isBlank()) return null
         return listDashboardLayouts(context)
@@ -856,53 +563,12 @@ object WidgetPersistence {
         name?.trim()?.takeIf { it.isNotBlank() }
 
 
-    private fun parseLayoutRecords(rootJson: JSONObject): List<WidgetLayoutRecord> {
-        val layoutsJson = rootJson.optJSONArray(KEY_LAYOUTS) ?: return emptyList()
-        val records = mutableListOf<WidgetLayoutRecord>()
-
-        for (i in 0 until layoutsJson.length()) {
-            val obj = layoutsJson.optJSONObject(i) ?: continue
-            val name = obj.optString(KEY_LAYOUT_NAME, "").trim()
-            val stateJson = obj.optJSONObject(KEY_LAYOUT_STATE)
-            if (name.isBlank() || stateJson == null) continue
-
-            val createdAt = obj.optLong(KEY_LAYOUT_CREATED_AT, 0L)
-            val updatedAt = obj.optLong(KEY_LAYOUT_UPDATED_AT, createdAt)
-            records.add(
-                WidgetLayoutRecord(
-                    name = name,
-                    createdAt = createdAt,
-                    updatedAt = updatedAt,
-                    state = stateFromJson(stateJson, isFirstRun = false)
-                )
-            )
-        }
-
-        return records.sortedBy { it.createdAt }
-    }
-
-    internal fun legacyLayoutRecordsFromJson(rootJson: JSONObject): List<WidgetLayoutRecord> =
-        parseLayoutRecords(rootJson)
-
-    private fun writeLayoutRecords(context: Context, records: List<WidgetLayoutRecord>): Boolean {
-        return writeDashboardLayoutRecords(context, records.map { record ->
-            PersistedDashboardLayoutRecord(record.name, record.createdAt, record.updatedAt, WidgetPersistenceV2.fromLegacy(record.state))
-        })
-    }
-
     private fun writeDashboardLayoutRecords(
         context: Context,
-        records: List<PersistedDashboardLayoutRecord>
+        records: List<WidgetDocument.PersistedDashboardLayoutRecord>
     ): Boolean {
         return try {
-            val rootJson = WidgetPersistenceV2.dashboardLayoutRecordsToJson(records.map { record ->
-                WidgetPersistenceV2.PersistedDashboardLayoutRecord(
-                    record.name,
-                    record.createdAt,
-                    record.updatedAt,
-                    record.dashboard
-                )
-            })
+            val rootJson = WidgetDocument.dashboardLayoutRecordsToJson(records)
             writeTextAtomic(getLayoutsStorageFile(context), rootJson.toString(2))
             true
         } catch (e: Exception) {
@@ -1163,301 +829,70 @@ object WidgetPersistence {
         }
     }
 
-    private fun parseClosedTemplates(rootJson: JSONObject): ClosedWidgetTemplates {
-        val obj = rootJson.optJSONObject(KEY_CLOSED_TEMPLATES) ?: return ClosedWidgetTemplates()
+    private fun parseImageWidget(obj: JSONObject): ImageWidgetState? = runCatching {
+        val c = parseCommonFields(obj)
+        val imagePath = obj.optString("imagePath", "")
+        if (imagePath.isBlank()) return null
 
-        return ClosedWidgetTemplates(
-            text = obj.optJSONObject(KEY_CLOSED_TEXT_WIDGET)?.let(::parseTextWidget),
-            browser = obj.optJSONObject(KEY_CLOSED_BROWSER_WIDGET)?.let(::parseBrowserWidget),
-            status = obj.optJSONObject(KEY_CLOSED_STATUS_BAR)?.let(::parseStatusBarObject),
-            location = obj.optJSONObject(KEY_CLOSED_LOCATION_WIDGET)?.let {
-                parseSizedWidgetObject(it) { item, c, w, h ->
-                    LocationWidgetState(
-                        x = c.x, y = c.y, width = w, height = h,
-                        showWeather = item.optBoolean("showWeather", true),
-                        showTemperature = item.optBoolean("showTemperature", true),
-                        showLocation = item.optBoolean("showLocation", false),
-                        showCountry = item.optBoolean("showCountry", false),
-                        isMinimized = c.isMinimized,
-                        isFullscreen = c.isFullscreen,
-                        savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                        savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                        isPinned = c.isPinned
-                    )
-                }
-            },
-            map = obj.optJSONObject(KEY_CLOSED_MAP_WIDGET)?.let {
-                parseSizedWidgetObject(it) { item, c, w, h ->
-                    MapWidgetState(
-                        x = c.x, y = c.y, width = w, height = h,
-                        mode = item.optString("mode", MapViewMode.TOP_DOWN.name),
-                        zoom = item.optString("zoom", MapZoom.MEDIUM.name),
-                        showLocation = item.optBoolean("showLocation", true),
-                        showCountry = item.optBoolean("showCountry", true),
-                        poiConfig = parsePoiConfig(item.optJSONObject("poiConfig")),
-                        isMinimized = c.isMinimized, isFullscreen = c.isFullscreen,
-                        savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                        savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                        isPinned = c.isPinned
-                    )
-                }
-            },
-            calendar = obj.optJSONObject(KEY_CLOSED_CALENDAR_WIDGET)?.let {
-                parseSizedWidgetObject(it) { item, c, w, h ->
-                    CalendarWidgetState(
-                        x = c.x, y = c.y, width = w, height = h,
-                        fontScale = item.optDouble("fontScale", 1.0).toFloat(),
-                        isMinimized = c.isMinimized,
-                        isFullscreen = c.isFullscreen,
-                        savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                        savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                        isPinned = c.isPinned
-                    )
-                }
-            },
-            finance = obj.optJSONObject(KEY_CLOSED_FINANCE_WIDGET)?.let {
-                parseSizedWidgetObject(it) { item, c, w, h ->
-                    FinanceWidgetState(
-                        x = c.x, y = c.y, width = w, height = h,
-                        selectedSymbol = item.optString("selectedSymbol", "^GSPC"),
-                        selectedRange = item.optString("selectedRange", "1D"),
-                        tiles = parseFinanceTiles(item, item.optString("selectedSymbol", "^GSPC"), item.optString("selectedRange", "1D")),
-                        navigationIndex = item.optInt("navigationIndex", 0),
-                        tilingSpan = item.optInt("tilingSpan", 3).coerceIn(1, 3),
-                        isMinimized = c.isMinimized,
-                        isFullscreen = c.isFullscreen,
-                        savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                        savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                        isPinned = c.isPinned
-                    )
-                }
-            },
-            news = obj.optJSONObject(KEY_CLOSED_NEWS_WIDGET)?.let {
-                parseSizedWidgetObject(it) { item, c, w, h ->
-                    NewsWidgetState(
-                        x = c.x, y = c.y, width = w, height = h,
-                        countryCode = item.optString("countryCode", "US"),
-                        sourceSpec = parseNewsSource(item),
-                        selectedIndex = item.optInt("selectedIndex", 0),
-                        fontScale = item.optDouble("fontScale", 1.0).toFloat(),
-                        isMinimized = c.isMinimized,
-                        isFullscreen = c.isFullscreen,
-                        savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                        savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                        isPinned = c.isPinned
-                    )
-                }
-            },
-            notifications = obj.optJSONObject(KEY_CLOSED_NOTIFICATIONS_WIDGET)?.let {
-                parseSizedWidgetObject(it) { item, c, w, h ->
-                    NotificationsWidgetState(
-                        x = c.x, y = c.y, width = w, height = h,
-                        widgetFontScale = item.optDouble("widgetFontScale", 1.0).toFloat(),
-                        toastFontScale = item.optDouble("toastFontScale", 1.0).toFloat(),
-                        scrollIndex = item.optInt("scrollIndex", 0).coerceAtLeast(0),
-                        isMinimized = c.isMinimized,
-                        isFullscreen = c.isFullscreen,
-                        savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                        savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                        isPinned = c.isPinned
-                    )
-                }
-            },
-            speedometer = obj.optJSONObject(KEY_CLOSED_SPEEDOMETER_WIDGET)?.let {
-                parseSizedWidgetObject(it) { _, c, w, h ->
-                    SpeedometerWidgetState(
-                        x = c.x, y = c.y, width = w, height = h,
-                        isMinimized = c.isMinimized,
-                        isFullscreen = c.isFullscreen,
-                        savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                        savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                        isPinned = c.isPinned
-                    )
-                }
-            },
-            subtitle = obj.optJSONObject(KEY_CLOSED_SUBTITLE_WIDGET)?.let {
-                parseSizedWidgetObject(it) { item, c, w, h ->
-                    SubtitleWidgetState(
-                        x = c.x, y = c.y, width = w, height = h,
-                        phonePlaybackEnabled = item.optBoolean("phonePlaybackEnabled", true),
-                        microphoneEnabled = item.optBoolean("microphoneEnabled", false),
-                        translationEnabled = item.optBoolean("translationEnabled", false),
-                        isMinimized = c.isMinimized,
-                        isFullscreen = c.isFullscreen,
-                        savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                        savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                        isPinned = c.isPinned
-                    )
-                }
-            },
-            mirror = obj.optJSONObject(KEY_CLOSED_MIRROR_WIDGET)?.let {
-                parseSizedWidgetObject(it) { _, c, w, h ->
-                    MirrorWidgetState(
-                        x = c.x, y = c.y, width = w, height = h,
-                        isMinimized = c.isMinimized,
-                        isFullscreen = c.isFullscreen,
-                        savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                        savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                        isPinned = c.isPinned
-                    )
-                }
-            }
+        ImageWidgetState(
+            x = c.x, y = c.y,
+            width = obj.getDouble("width").toFloat(),
+            height = obj.getDouble("height").toFloat(),
+            imagePath = imagePath,
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
         )
-    }
+    }.getOrNull()
 
-    private fun parseHoverControls(rootJson: JSONObject): List<HoverControlPlacementState>? {
-        val jsonArray = rootJson.optJSONArray(KEY_HOVER_CONTROLS) ?: return null
-        val placements = mutableListOf<HoverControlPlacementState>()
+    private fun parseVideoWidget(obj: JSONObject): VideoWidgetState? = runCatching {
+        val c = parseCommonFields(obj)
+        val uri = obj.optString("uri", "")
+        if (uri.isBlank()) return null
+        VideoWidgetState(
+            x = c.x,
+            y = c.y,
+            width = obj.getDouble("width").toFloat(),
+            height = obj.getDouble("height").toFloat(),
+            uri = uri,
+            displayName = obj.optString("displayName", "Video"),
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX,
+            savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth,
+            savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned,
+        )
+    }.getOrNull()
 
-        for (i in 0 until jsonArray.length()) {
-            val obj = jsonArray.optJSONObject(i) ?: continue
-            val id = obj.optString(KEY_HOVER_CONTROL_ID, "").trim()
-            if (id.isBlank()) continue
-            placements.add(
-                HoverControlPlacementState(
-                    controlId = id,
-                    col = obj.optInt(KEY_HOVER_CONTROL_COL, 0),
-                    row = obj.optInt(KEY_HOVER_CONTROL_ROW, 0)
-                )
-            )
-        }
+    private fun parsePdfWidget(obj: JSONObject): PdfWidgetState? = runCatching {
+        val c = parseCommonFields(obj)
+        val uri = obj.optString("uri", "")
+        if (uri.isBlank()) return null
+        PdfWidgetState(
+            x = c.x,
+            y = c.y,
+            width = obj.getDouble("width").toFloat(),
+            height = obj.getDouble("height").toFloat(),
+            uri = uri,
+            displayName = obj.optString("displayName", "PDF"),
+            page = obj.optInt("page", 0).coerceAtLeast(0),
+            zoom = obj.optDouble("zoom", 1.0).toFloat(),
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX,
+            savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth,
+            savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned,
+        )
+    }.getOrNull()
 
-        return placements
-    }
-
-    private fun parseTextWidgets(rootJson: JSONObject): List<TextWidgetState> {
-        val jsonArray = rootJson.optJSONArray(KEY_TEXT_WIDGETS) ?: return emptyList()
-        val widgets = mutableListOf<TextWidgetState>()
-
-        for (i in 0 until jsonArray.length()) {
-            val obj = jsonArray.optJSONObject(i) ?: continue
-            parseTextWidget(obj)?.let(widgets::add)
-        }
-
-        return widgets
-    }
-
-    private fun parseImageWidgets(rootJson: JSONObject): List<ImageWidgetState> {
-        val jsonArray = rootJson.optJSONArray(KEY_IMAGE_WIDGETS) ?: return emptyList()
-        val widgets = mutableListOf<ImageWidgetState>()
-
-        for (i in 0 until jsonArray.length()) {
-            val obj = jsonArray.optJSONObject(i) ?: continue
-            try {
-                val c = parseCommonFields(obj)
-                val imagePath = obj.optString("imagePath", "")
-                if (imagePath.isBlank()) continue
-
-                widgets.add(
-                    ImageWidgetState(
-                        x = c.x, y = c.y,
-                        width = obj.getDouble("width").toFloat(),
-                        height = obj.getDouble("height").toFloat(),
-                        imagePath = imagePath,
-                        isMinimized = c.isMinimized,
-                        isFullscreen = c.isFullscreen,
-                        savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                        savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                        isPinned = c.isPinned
-                    )
-                )
-            } catch (_: Exception) {
-                // ignore bad entry
-            }
-        }
-
-        return widgets
-    }
-
-    private fun parseVideoWidgets(rootJson: JSONObject): List<VideoWidgetState> {
-        val jsonArray = rootJson.optJSONArray(KEY_VIDEO_WIDGETS) ?: return emptyList()
-        val widgets = mutableListOf<VideoWidgetState>()
-        for (i in 0 until jsonArray.length()) {
-            val obj = jsonArray.optJSONObject(i) ?: continue
-            runCatching {
-                val c = parseCommonFields(obj)
-                val uri = obj.optString("uri", "")
-                if (uri.isBlank()) return@runCatching
-                widgets += VideoWidgetState(
-                    x = c.x,
-                    y = c.y,
-                    width = obj.getDouble("width").toFloat(),
-                    height = obj.getDouble("height").toFloat(),
-                    uri = uri,
-                    displayName = obj.optString("displayName", "Video"),
-                    isMinimized = c.isMinimized,
-                    isFullscreen = c.isFullscreen,
-                    savedMinX = c.savedMinX,
-                    savedMinY = c.savedMinY,
-                    savedMinWidth = c.savedMinWidth,
-                    savedMinHeight = c.savedMinHeight,
-                    isPinned = c.isPinned,
-                )
-            }
-        }
-        return widgets
-    }
-
-    private fun parsePdfWidgets(rootJson: JSONObject): List<PdfWidgetState> {
-        val jsonArray = rootJson.optJSONArray(KEY_PDF_WIDGETS) ?: return emptyList()
-        val widgets = mutableListOf<PdfWidgetState>()
-        for (i in 0 until jsonArray.length()) {
-            val obj = jsonArray.optJSONObject(i) ?: continue
-            runCatching {
-                val c = parseCommonFields(obj)
-                val uri = obj.optString("uri", "")
-                if (uri.isBlank()) return@runCatching
-                widgets += PdfWidgetState(
-                    x = c.x,
-                    y = c.y,
-                    width = obj.getDouble("width").toFloat(),
-                    height = obj.getDouble("height").toFloat(),
-                    uri = uri,
-                    displayName = obj.optString("displayName", "PDF"),
-                    page = obj.optInt("page", 0).coerceAtLeast(0),
-                    zoom = obj.optDouble("zoom", 1.0).toFloat(),
-                    isMinimized = c.isMinimized,
-                    isFullscreen = c.isFullscreen,
-                    savedMinX = c.savedMinX,
-                    savedMinY = c.savedMinY,
-                    savedMinWidth = c.savedMinWidth,
-                    savedMinHeight = c.savedMinHeight,
-                    isPinned = c.isPinned,
-                )
-            }
-        }
-        return widgets
-    }
-
-    private fun parseBrowserWidgets(rootJson: JSONObject): List<BrowserWidgetState> {
-        val jsonArray = rootJson.optJSONArray(KEY_BROWSER_WIDGETS) ?: return emptyList()
-        val widgets = mutableListOf<BrowserWidgetState>()
-
-        for (i in 0 until jsonArray.length()) {
-            val obj = jsonArray.optJSONObject(i) ?: continue
-            parseBrowserWidget(obj)?.let(widgets::add)
-        }
-
-        return widgets
-    }
-
-    private fun parseStatusBar(rootJson: JSONObject): StatusBarState? {
-        val statusBarJson = rootJson.optJSONObject(KEY_STATUS_BAR) ?: return null
-        return parseStatusBarObject(statusBarJson)
-    }
-
-    /** Parse a sized widget (has x/y/width/height + common state fields). */
-    private inline fun <T> parseSizedWidget(
-        rootJson: JSONObject,
-        key: String,
-        crossinline builder: (obj: JSONObject, c: ParsedCommonFields, width: Float, height: Float) -> T
-    ): T? {
-        val obj = rootJson.optJSONObject(key) ?: return null
-        return parseSizedWidgetObject(obj, builder)
-    }
-
-    private fun parseLocation(rootJson: JSONObject): LocationWidgetState? =
-        parseSizedWidget(rootJson, KEY_LOCATION_WIDGET) { obj, c, w, h ->
+    private fun parseLocationPayload(payload: JSONObject): LocationWidgetState? =
+        parseSizedWidgetObject(payload) { obj, c, w, h ->
             LocationWidgetState(
                 x = c.x, y = c.y, width = w, height = h,
                 showWeather = obj.optBoolean("showWeather", true),
@@ -1472,8 +907,8 @@ object WidgetPersistence {
             )
         }
 
-    private fun parseMap(rootJson: JSONObject): MapWidgetState? =
-        parseSizedWidget(rootJson, KEY_MAP_WIDGET) { obj, c, w, h ->
+    private fun parseMapPayload(payload: JSONObject): MapWidgetState? =
+        parseSizedWidgetObject(payload) { obj, c, w, h ->
             MapWidgetState(
                 x = c.x, y = c.y, width = w, height = h,
                 mode = obj.optString("mode", MapViewMode.TOP_DOWN.name),
@@ -1574,8 +1009,8 @@ object WidgetPersistence {
         }.getOrDefault(PoiDisplayConfig.DEFAULT)
     }
 
-    private fun parseCalendar(rootJson: JSONObject): CalendarWidgetState? =
-        parseSizedWidget(rootJson, KEY_CALENDAR_WIDGET) { obj, c, w, h ->
+    private fun parseCalendarPayload(payload: JSONObject): CalendarWidgetState? =
+        parseSizedWidgetObject(payload) { obj, c, w, h ->
             CalendarWidgetState(
                 x = c.x, y = c.y, width = w, height = h,
                 fontScale = obj.optDouble("fontScale", 1.0).toFloat(),
@@ -1587,8 +1022,8 @@ object WidgetPersistence {
             )
         }
 
-    private fun parseMirror(rootJson: JSONObject): MirrorWidgetState? =
-        parseSizedWidget(rootJson, KEY_MIRROR_WIDGET) { _, c, w, h ->
+    private fun parseMirrorPayload(payload: JSONObject): MirrorWidgetState? =
+        parseSizedWidgetObject(payload) { _, c, w, h ->
             MirrorWidgetState(
                 x = c.x, y = c.y, width = w, height = h,
                 isMinimized = c.isMinimized,
@@ -1599,8 +1034,8 @@ object WidgetPersistence {
             )
         }
 
-    private fun parseFinance(rootJson: JSONObject): FinanceWidgetState? =
-        parseSizedWidget(rootJson, KEY_FINANCE_WIDGET) { obj, c, w, h ->
+    private fun parseFinancePayload(payload: JSONObject): FinanceWidgetState? =
+        parseSizedWidgetObject(payload) { obj, c, w, h ->
             FinanceWidgetState(
                 x = c.x, y = c.y, width = w, height = h,
                 selectedSymbol = obj.optString("selectedSymbol", "^GSPC"),
@@ -1655,8 +1090,8 @@ object WidgetPersistence {
             obj.optString("sourceValue").takeIf { it.isNotBlank() }
         ) ?: NewsSourceSpec.DEFAULT_LOCATION
 
-    private fun parseNews(rootJson: JSONObject): NewsWidgetState? =
-        parseSizedWidget(rootJson, KEY_NEWS_WIDGET) { obj, c, w, h ->
+    private fun parseNewsPayload(payload: JSONObject): NewsWidgetState? =
+        parseSizedWidgetObject(payload) { obj, c, w, h ->
             NewsWidgetState(
                 x = c.x, y = c.y, width = w, height = h,
                 countryCode = obj.optString("countryCode", "US"),
@@ -1671,8 +1106,8 @@ object WidgetPersistence {
             )
         }
 
-    private fun parseNotifications(rootJson: JSONObject): NotificationsWidgetState? =
-        parseSizedWidget(rootJson, KEY_NOTIFICATIONS_WIDGET) { obj, c, w, h ->
+    private fun parseNotificationsPayload(payload: JSONObject): NotificationsWidgetState? =
+        parseSizedWidgetObject(payload) { obj, c, w, h ->
             NotificationsWidgetState(
                 x = c.x, y = c.y, width = w, height = h,
                 widgetFontScale = obj.optDouble("widgetFontScale", 1.0).toFloat(),
@@ -1686,8 +1121,8 @@ object WidgetPersistence {
             )
         }
 
-    private fun parseSpeedometer(rootJson: JSONObject): SpeedometerWidgetState? =
-        parseSizedWidget(rootJson, KEY_SPEEDOMETER_WIDGET) { _, c, w, h ->
+    private fun parseSpeedometerPayload(payload: JSONObject): SpeedometerWidgetState? =
+        parseSizedWidgetObject(payload) { _, c, w, h ->
             SpeedometerWidgetState(
                 x = c.x, y = c.y, width = w, height = h,
                 isMinimized = c.isMinimized,
@@ -1698,8 +1133,8 @@ object WidgetPersistence {
             )
         }
 
-    private fun parseSubtitle(rootJson: JSONObject): SubtitleWidgetState? =
-        parseSizedWidget(rootJson, KEY_SUBTITLE_WIDGET) { obj, c, w, h ->
+    private fun parseSubtitlePayload(payload: JSONObject): SubtitleWidgetState? =
+        parseSizedWidgetObject(payload) { obj, c, w, h ->
             SubtitleWidgetState(
                 x = c.x, y = c.y, width = w, height = h,
                 phonePlaybackEnabled = obj.optBoolean("phonePlaybackEnabled", true),
@@ -1713,44 +1148,4 @@ object WidgetPersistence {
             )
         }
 
-    // Payload adapters keep the v2 record codecs on the exact parsing path used
-    // by the legacy document, without duplicating validation/default logic.
-    private fun payloadRoot(key: String, payload: JSONObject): JSONObject =
-        JSONObject().put(key, payload)
-
-    private fun parseImageWidget(payload: JSONObject): ImageWidgetState? =
-        parseImageWidgets(JSONObject().put(KEY_IMAGE_WIDGETS, JSONArray().put(payload))).singleOrNull()
-
-    private fun parseVideoWidget(payload: JSONObject): VideoWidgetState? =
-        parseVideoWidgets(JSONObject().put(KEY_VIDEO_WIDGETS, JSONArray().put(payload))).singleOrNull()
-
-    private fun parsePdfWidget(payload: JSONObject): PdfWidgetState? =
-        parsePdfWidgets(JSONObject().put(KEY_PDF_WIDGETS, JSONArray().put(payload))).singleOrNull()
-
-    private fun parseLocationPayload(payload: JSONObject): LocationWidgetState? =
-        parseLocation(payloadRoot(KEY_LOCATION_WIDGET, payload))
-
-    private fun parseMapPayload(payload: JSONObject): MapWidgetState? =
-        parseMap(payloadRoot(KEY_MAP_WIDGET, payload))
-
-    private fun parseCalendarPayload(payload: JSONObject): CalendarWidgetState? =
-        parseCalendar(payloadRoot(KEY_CALENDAR_WIDGET, payload))
-
-    private fun parseFinancePayload(payload: JSONObject): FinanceWidgetState? =
-        parseFinance(payloadRoot(KEY_FINANCE_WIDGET, payload))
-
-    private fun parseNewsPayload(payload: JSONObject): NewsWidgetState? =
-        parseNews(payloadRoot(KEY_NEWS_WIDGET, payload))
-
-    private fun parseNotificationsPayload(payload: JSONObject): NotificationsWidgetState? =
-        parseNotifications(payloadRoot(KEY_NOTIFICATIONS_WIDGET, payload))
-
-    private fun parseSpeedometerPayload(payload: JSONObject): SpeedometerWidgetState? =
-        parseSpeedometer(payloadRoot(KEY_SPEEDOMETER_WIDGET, payload))
-
-    private fun parseSubtitlePayload(payload: JSONObject): SubtitleWidgetState? =
-        parseSubtitle(payloadRoot(KEY_SUBTITLE_WIDGET, payload))
-
-    private fun parseMirrorPayload(payload: JSONObject): MirrorWidgetState? =
-        parseMirror(payloadRoot(KEY_MIRROR_WIDGET, payload))
 }
