@@ -336,7 +336,8 @@ class WidgetContainer @JvmOverloads constructor(
     private val stateStore = WidgetStateStore(
         context = context,
         handler = Handler(Looper.getMainLooper()),
-        captureDashboard = ::captureWidgetDashboardWithoutLayoutName
+        captureDashboard = ::captureWidgetDashboardWithoutLayoutName,
+        canSave = { !isAwaitingRestore }
     )
     private val layoutManager = WidgetLayoutManager(
         context = context,
@@ -687,6 +688,19 @@ class WidgetContainer @JvmOverloads constructor(
     // Flag to control whether default singleton widgets should be created.
     // Set to false after restoring state on a returning user to prevent recreating closed widgets.
     private var shouldCreateDefaultSingletons = true
+
+    /**
+     * True between learning that a saved dashboard exists and actually applying it.
+     * While set, saving is suppressed so a not-yet-restored container cannot overwrite
+     * the stored document. See [setIsReturningUser].
+     */
+    private var isAwaitingRestore = false
+
+    /**
+     * True while a stored dashboard is known to exist but has not been applied yet.
+     * Anything that persists the container must refuse to write while this holds.
+     */
+    val isAwaitingDashboardRestore: Boolean get() = isAwaitingRestore
     private var suppressContentChangedCallback = false
     private var lifecycleMutationInProgress = false
     private var transientNotificationDepth = 0
@@ -5392,6 +5406,9 @@ class WidgetContainer @JvmOverloads constructor(
             suppressContentChangedCallback = false
         }
 
+        // The container now reflects a stored dashboard, so saving is safe again.
+        isAwaitingRestore = false
+
         if (notifyRestored) notifyDashboardRestored()
     }
 
@@ -5582,9 +5599,14 @@ class WidgetContainer @JvmOverloads constructor(
     /**
      * Call this BEFORE restoring widget state to prevent default singleton widgets from being created.
      * This should be called when the app is not a fresh install (returning user).
+     *
+     * It also blocks saving until the restore actually lands. Restoring is driven by the
+     * first layout pass, which does not happen if the display never comes up, and an
+     * unguarded save would then persist the empty container over the user's dashboard.
      */
     fun setIsReturningUser() {
         shouldCreateDefaultSingletons = false
+        isAwaitingRestore = true
     }
 
     /**

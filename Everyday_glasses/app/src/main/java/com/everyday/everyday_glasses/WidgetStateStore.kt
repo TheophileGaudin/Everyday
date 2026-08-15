@@ -9,6 +9,13 @@ class WidgetStateStore(
     private val context: Context,
     private val handler: Handler,
     private val captureDashboard: () -> WidgetDocument.PersistedDashboard,
+    /**
+     * Guards the saved document against being overwritten by a container that has not
+     * loaded it yet. Restoring happens after layout, so between process start and the
+     * first layout pass the container is legitimately empty — writing that out would
+     * discard the user's dashboard.
+     */
+    private val canSave: () -> Boolean = { true },
     private val debounceMs: Long = DEFAULT_DEBOUNCE_MS
 ) {
     companion object {
@@ -23,6 +30,10 @@ class WidgetStateStore(
 
     fun saveNow(): Boolean {
         cancelPendingSave()
+        if (!canSave()) {
+            Log.d(TAG, "Skipping save: dashboard has not been restored yet")
+            return false
+        }
         return saveDashboard(captureDashboard())
     }
 
@@ -30,6 +41,12 @@ class WidgetStateStore(
         saveRunnable?.let { handler.removeCallbacks(it) }
         saveRunnable = Runnable {
             saveRunnable = null
+            // Re-checked here, not at scheduling time: a save queued during startup
+            // must still be dropped if the restore has not landed by the time it fires.
+            if (!canSave()) {
+                Log.d(TAG, "Skipping debounced save: dashboard has not been restored yet")
+                return@Runnable
+            }
             saveDashboard(captureDashboard())
         }
         handler.postDelayed(saveRunnable!!, debounceMs)

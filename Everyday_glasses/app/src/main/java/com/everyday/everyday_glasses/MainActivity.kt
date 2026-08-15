@@ -370,7 +370,8 @@ class MainActivity : AppCompatActivity() {
         persistenceManager = WidgetStateStore(
             context = this,
             handler = handler,
-            captureDashboard = { widgetContainer.capturePersistedDashboard() }
+            captureDashboard = { widgetContainer.capturePersistedDashboard() },
+            canSave = { !widgetContainer.isAwaitingDashboardRestore }
         )
         inputCoordinator = InputCoordinator(
             cursorView = cursorView,
