@@ -18,3 +18,4 @@ Localized map refreshing
 Refactor
 
 Migrated a number of functionalities in WidgetContainer to dedicated services.
+Grouped a number of callbacks into interfaces.
