@@ -5,7 +5,7 @@ import android.util.Log
 
 class WidgetLayoutManager(
     private val context: Context,
-    private val stateStore: WidgetStateStore,
+    private val layouts: LayoutLibrary,
     private val canApplyLayout: () -> Boolean,
     private val captureDashboard: () -> WidgetDocument.PersistedDashboard,
     private val applyDashboard: (WidgetDocument.PersistedDashboard) -> Unit,
@@ -25,7 +25,7 @@ class WidgetLayoutManager(
     var activeLayoutName: String? = null
 
     private fun loadLayoutByNameOrDelivered(name: String): WidgetDocument.PersistedDashboard? {
-        return buildDeliveredLayout(name) ?: stateStore.loadLayout(name)
+        return buildDeliveredLayout(name) ?: layouts.load(name)
     }
 
     private fun isDeliveredWithoutSavedOverride(name: String): Boolean = BuiltInLayouts.isDelivered(name)
@@ -61,7 +61,7 @@ class WidgetLayoutManager(
             notifyTransientContentChanged()
             return
         }
-        val saved = stateStore.saveLayout(trimmedName, capturePersistedDashboard())
+        val saved = layouts.save(trimmedName, capturePersistedDashboard())
         if (saved) {
             activeLayoutName = trimmedName
             dismissNamePrompt()
@@ -75,7 +75,7 @@ class WidgetLayoutManager(
     }
 
     fun deleteLayoutByName(name: String) {
-        if (stateStore.deleteLayout(name)) {
+        if (layouts.delete(name)) {
             if (activeLayoutName.equals(name.trim(), ignoreCase = true)) {
                 activeLayoutName = null
             }

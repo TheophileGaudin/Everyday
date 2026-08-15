@@ -24,8 +24,8 @@ import java.io.File
  */
 object WidgetPersistence {
     private const val TAG = "WidgetPersistence"
-    private const val FILENAME = "everyday_widgets.json"
-    private const val LAYOUTS_FILENAME = "everyday_widget_layouts.json"
+    private const val FILENAME = "everyday_active_dashboard.json"
+    private const val LAYOUTS_FILENAME = "everyday_layouts.json"
     const val DEFAULT_LAYOUT_NAME = BuiltInLayouts.STANDARD
 
     // Avoid spamming logcat if something goes wrong during load.
@@ -476,6 +476,42 @@ object WidgetPersistence {
         }
         return WidgetDocument.dashboardFromJson(rootJson).copy(isFirstRun = false)
     }
+
+    /**
+     * Deletes image files no stored dashboard still references.
+     *
+     * Images are the only widget payload kept outside the documents, so they are the
+     * only thing that can be orphaned. Reachability spans everything stored — the
+     * active dashboard and every named layout — which is why this lives here rather
+     * than with either caller.
+     *
+     * Called at startup and after deleting a layout: the two moments a reference can
+     * disappear. It is deliberately not run on every dashboard save, which would scan
+     * storage every time the user finishes dragging a widget.
+     */
+    fun pruneUnreferencedImages(context: Context) {
+        val active = loadDashboard(context)
+        if (active.isFirstRun) {
+            // Nothing readable was stored, so reachability cannot be established. An
+            // ignored document still names the images it used, and unlike widget
+            // geometry those cannot be recreated by saving a new layout, so leave them.
+            Log.d(TAG, "Skipping image prune: no readable active dashboard")
+            return
+        }
+        val referenced = buildList {
+            addAll(imagePaths(active))
+            listDashboardLayouts(context).forEach { addAll(imagePaths(it.dashboard)) }
+        }
+        ImageWidgetStorage.pruneUnreferenced(context, referenced)
+    }
+
+    private fun imagePaths(dashboard: WidgetDocument.PersistedDashboard): List<String> =
+        dashboard.widgets.mapNotNull { record ->
+            if (record.type != WidgetTypeId.IMAGE) return@mapNotNull null
+            (WidgetDocument.codecs[WidgetTypeId.IMAGE]?.decode(record.state)
+                as? ImageWidgetState)
+                ?.imagePath
+        }
 
     fun listDashboardLayouts(context: Context): List<WidgetDocument.PersistedDashboardLayoutRecord> {
         val file = getLayoutsStorageFile(context)

@@ -131,7 +131,7 @@ class WidgetContainer @JvmOverloads constructor(
     private val pageAgentApprovalOverlay = PageAgentApprovalOverlay(::notifyPersistentContentChanged)
 
     private val commandRegistry by lazy {
-        AppCommandRegistry { stateStore.listLayouts().map { it.name } }
+        AppCommandRegistry { layoutLibrary.names() }
     }
     private val commandExecutor by lazy {
         AppCommandExecutor(commandRegistry, commandCapabilities, CommandUiDispatcher { action ->
@@ -333,15 +333,10 @@ class WidgetContainer @JvmOverloads constructor(
     private var layoutOverlayNotificationEmitted = false
     private var layoutNameSaveInProgress = false
     private var layoutDeleteInProgress = false
-    private val stateStore = WidgetStateStore(
-        context = context,
-        handler = Handler(Looper.getMainLooper()),
-        captureDashboard = ::captureWidgetDashboardWithoutLayoutName,
-        canSave = { !isAwaitingRestore }
-    )
+    private val layoutLibrary = LayoutLibrary(context)
     private val layoutManager = WidgetLayoutManager(
         context = context,
-        stateStore = stateStore,
+        layouts = layoutLibrary,
         canApplyLayout = ::isReady,
         captureDashboard = ::captureWidgetDashboardWithoutLayoutName,
         applyDashboard = ::applyPersistedDashboardReplacingCurrent,
@@ -5370,7 +5365,7 @@ class WidgetContainer @JvmOverloads constructor(
             notifyPersistentContentChanged()
             return true
         }
-        val saved = stateStore.loadLayout(name) ?: return false
+        val saved = layoutLibrary.load(name) ?: return false
         requestLayoutSwitchBrightness()
         applyPersistedDashboardReplacingCurrent(saved, notifyRestored = false)
         layoutManager.activeLayoutName = name

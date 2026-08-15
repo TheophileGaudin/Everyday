@@ -82,7 +82,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binocularView: BinocularView
     private lateinit var cursorView: CursorView
     private lateinit var widgetContainer: WidgetContainer
-    private lateinit var persistenceManager: WidgetStateStore
+    private lateinit var persistenceManager: ActiveDashboardStore
     
     // Wake/Sleep state manager
     private lateinit var wakeSleepManager: WakeSleepManager
@@ -367,12 +367,15 @@ class MainActivity : AppCompatActivity() {
 
         // Setup widget container
         setupWidgetContainer()
-        persistenceManager = WidgetStateStore(
+        persistenceManager = ActiveDashboardStore(
             context = this,
             handler = handler,
             captureDashboard = { widgetContainer.capturePersistedDashboard() },
             canSave = { !widgetContainer.isAwaitingDashboardRestore }
         )
+        // Startup is one of the two moments an image can become unreachable; the other
+        // is deleting a layout. See WidgetPersistence.pruneUnreferencedImages.
+        WidgetPersistence.pruneUnreferencedImages(this)
         inputCoordinator = InputCoordinator(
             cursorView = cursorView,
             widgetContainer = widgetContainer,
@@ -693,7 +696,7 @@ class MainActivity : AppCompatActivity() {
         // Check if this is a returning user BEFORE layout happens.
         // This prevents onSizeChanged() from creating default singleton widgets
         // that the user has previously closed.
-        val persistedState = persistenceManager.loadDashboard()
+        val persistedState = persistenceManager.load()
         if (!persistedState.isFirstRun) {
             Log.d(TAG, "Returning user detected - preventing default singleton widget creation")
             widgetContainer.setIsReturningUser()
