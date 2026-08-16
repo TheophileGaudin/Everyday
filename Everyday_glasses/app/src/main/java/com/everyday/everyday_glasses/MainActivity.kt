@@ -10,10 +10,6 @@ import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -111,42 +107,10 @@ class MainActivity : AppCompatActivity() {
     private val keepAwakeMediaSources = mutableSetOf<String>()
 
     // Brightness management
-    private var requestedBrightness = 1.0f
-    private var adaptiveBrightnessEnabled = true
-    private var isMediaBrightnessCapActive = false
-    private var isBrowserMinimumBrightnessActive = false
-    private var isLayoutSwitchMinimumBrightnessActive = false
-    private var layoutSwitchBrightnessRestoreRunnable: Runnable? = null
-    private var isGlassesCharging = false
-    private var smoothedAmbientLux: Float? = null
-    private var lastAdaptiveBrightnessTarget: Float? = null
-    private var appliedWindowBrightness = -1.0f
-    private var ambientLightSensorManager: SensorManager? = null
-    private var ambientLightSensor: Sensor? = null
-    private var isAmbientLightListenerRegistered = false
-    private val ambientLightListener = object : SensorEventListener {
-        override fun onSensorChanged(event: SensorEvent) {
-            val rawLux = event.values.firstOrNull()?.coerceAtLeast(0f) ?: return
-            val previousLux = smoothedAmbientLux
-            val smoothedLux = if (previousLux == null) {
-                rawLux
-            } else {
-                previousLux + ((rawLux - previousLux) * AMBIENT_LUX_SMOOTHING_ALPHA)
-            }
-            smoothedAmbientLux = smoothedLux
+    private lateinit var brightnessController: BrightnessController
 
-            val adaptiveTarget = mapAmbientLuxToBrightness(smoothedLux)
-            if (lastAdaptiveBrightnessTarget == null ||
-                abs(adaptiveTarget - (lastAdaptiveBrightnessTarget ?: adaptiveTarget)) >= ADAPTIVE_BRIGHTNESS_EPSILON
-            ) {
-                lastAdaptiveBrightnessTarget = adaptiveTarget
-                applyEffectiveWindowBrightness()
-            }
-        }
 
-        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
-    }
-    
+
     private var latestPhoneBatteryPercent: Int = -1
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     
@@ -213,17 +177,10 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_HEADSUP_ENABLED = "headsup_enabled"
         private const val KEY_SPEED_VISIBILITY_THRESHOLD = "speed_visibility_threshold_kmh"
         private const val KEY_SMART_ALIGNMENT = "smart_alignment_enabled"
-        private const val DEFAULT_BRIGHTNESS = 1.0f  // Maximum brightness (no dimming) by default
-        private const val DEFAULT_ADAPTIVE_BRIGHTNESS = true
+
         private const val DEFAULT_SMART_ALIGNMENT = true
         // Keep media dimming visible; the only intentional full black mask is DisplayState.OFF.
-        private const val MEDIA_WIDGET_BRIGHTNESS_CAP = 0.18f
-        private const val MIN_WINDOW_BRIGHTNESS = 0.01f
-        private const val LAYOUT_SWITCH_MIN_BRIGHTNESS_DURATION_MS = 1_000L
-        private const val MIN_ADAPTIVE_BRIGHTNESS = 0.08f
-        private const val AMBIENT_LUX_REFERENCE = 10000f
-        private const val AMBIENT_LUX_SMOOTHING_ALPHA = 0.2f
-        private const val ADAPTIVE_BRIGHTNESS_EPSILON = 0.03f
+
 
         // Speedometer behavior (source of truth in km/h)
         private const val SPEED_THRESHOLD_KMH = 1f
@@ -338,6 +295,9 @@ class MainActivity : AppCompatActivity() {
         // Hide system UI after content view is set
         hideSystemUI()
 
+        // Initialize brightness control
+        brightnessController = BrightnessController(this)
+
         // Initialize views
         binocularView = findViewById(R.id.binocularView)
         binocularView.initialize(this)
@@ -346,7 +306,19 @@ class MainActivity : AppCompatActivity() {
         widgetContainer = findViewById(R.id.widgetContainer)
         userInputActivity = UserInputActivity { widgetContainer.cancelPresentationForUserInput() }
         widgetContainer.userInputActivity = userInputActivity
-        setupAmbientLightSensor()
+
+        brightnessController.initialize()
+        val brightnessState = brightnessController.restore()
+        widgetContainer.setBrightness(brightnessState.requestedBrightness)
+        widgetContainer.setAdaptiveBrightnessEnabled(brightnessState.adaptiveEnabled)
+
+        brightnessController.setMediaBrightnessCap(
+            widgetContainer.shouldApplyMediaBrightnessCap()
+        )
+
+        brightnessController.setBrowserMinimumBrightness(
+            widgetContainer.shouldApplyBrowserMinimumBrightness()
+        )
 
         // Initialize file picker for opening images, PDFs, etc.
         filePicker = FilePicker(this)
@@ -927,31 +899,24 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun applyBrightness(brightness: Float) {
-                requestedBrightness = brightness.coerceIn(0f, 1f)
-                saveBrightnessSettings()
-                applyEffectiveWindowBrightness()
+                brightnessController.setBrightness(brightness)
             }
 
             override fun applyAdaptiveBrightness(enabled: Boolean) {
-                adaptiveBrightnessEnabled = enabled
-                smoothedAmbientLux = null
-                lastAdaptiveBrightnessTarget = null
-                updateAmbientLightMonitoring()
-                saveBrightnessSettings()
-                applyEffectiveWindowBrightness()
+                brightnessController.setAdaptiveBrightness(enabled)
             }
 
             override fun applyMediaBrightnessCap(active: Boolean) {
-                isMediaBrightnessCapActive = active
-                applyEffectiveWindowBrightness()
+                brightnessController.setMediaBrightnessCap(active)
             }
 
             override fun applyBrowserMinimumBrightness(active: Boolean) {
-                isBrowserMinimumBrightnessActive = active
-                applyEffectiveWindowBrightness()
+                brightnessController.setBrowserMinimumBrightness(active)
             }
 
-            override fun applyLayoutSwitchBrightness() = beginLayoutSwitchMinimumBrightness()
+            override fun applyLayoutSwitchBrightness() {
+                brightnessController.beginLayoutSwitchBrightness()
+            }
 
             override fun applyHeadUpTime(durationMs: Long) {
                 if (::headUpWakeManager.isInitialized) headUpWakeManager.headUpHoldTimeMs = durationMs
@@ -977,7 +942,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Restore saved settings
-        restoreBrightness()
         restoreHeadUpSettings()
         restoreSmartAlignmentSetting()
         speedVisibilityThresholdKmh = loadSpeedVisibilityThreshold()
@@ -1097,113 +1061,19 @@ class MainActivity : AppCompatActivity() {
         widgetContainer.setGoogleAuthState(state)
     }
 
-    private fun setupAmbientLightSensor() {
-        ambientLightSensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
-        ambientLightSensor = ambientLightSensorManager?.getDefaultSensor(Sensor.TYPE_LIGHT)
 
-        if (ambientLightSensor != null) {
-            Log.d(TAG, "Ambient light sensor ready: ${ambientLightSensor?.name}")
-        } else {
-            Log.w(TAG, "No ambient light sensor available; adaptive brightness will fall back to manual control")
-        }
-    }
 
-    private fun updateAmbientLightMonitoring() {
-        val sensorManager = ambientLightSensorManager
-        val sensor = ambientLightSensor
-        val shouldListen = adaptiveBrightnessEnabled && sensorManager != null && sensor != null
 
-        if (shouldListen && !isAmbientLightListenerRegistered) {
-            sensorManager!!.registerListener(ambientLightListener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
-            isAmbientLightListenerRegistered = true
-            Log.d(TAG, "Ambient light monitoring enabled")
-        } else if (!shouldListen && isAmbientLightListenerRegistered) {
-            sensorManager?.unregisterListener(ambientLightListener)
-            isAmbientLightListenerRegistered = false
-            Log.d(TAG, "Ambient light monitoring disabled")
-        }
-    }
 
-    private fun stopAmbientLightMonitoring() {
-        if (!isAmbientLightListenerRegistered) return
-        ambientLightSensorManager?.unregisterListener(ambientLightListener)
-        isAmbientLightListenerRegistered = false
-    }
 
-    private fun mapAmbientLuxToBrightness(lux: Float): Float {
-        val normalizedLux = (ln(1f + lux.coerceAtLeast(0f)) / ln(1f + AMBIENT_LUX_REFERENCE)).coerceIn(0f, 1f)
-        return (MIN_ADAPTIVE_BRIGHTNESS + (normalizedLux * (1f - MIN_ADAPTIVE_BRIGHTNESS))).coerceIn(MIN_ADAPTIVE_BRIGHTNESS, 1f)
-    }
 
-    private fun computeEffectiveWindowBrightness(): Float {
-        val adaptiveTarget = if (adaptiveBrightnessEnabled && ambientLightSensor != null) {
-            lastAdaptiveBrightnessTarget ?: requestedBrightness
-        } else {
-            requestedBrightness
-        }
-        val mediaWidgetCap = if (isMediaBrightnessCapActive && !isGlassesCharging) {
-            MEDIA_WIDGET_BRIGHTNESS_CAP
-        } else {
-            1f
-        }
-        val browserWidgetCap = if (isBrowserMinimumBrightnessActive && !isGlassesCharging) {
-            MIN_WINDOW_BRIGHTNESS
-        } else {
-            1f
-        }
-        val layoutSwitchCap = if (isLayoutSwitchMinimumBrightnessActive && !isGlassesCharging) {
-            MIN_WINDOW_BRIGHTNESS
-        } else {
-            1f
-        }
-        return minOf(
-            requestedBrightness,
-            adaptiveTarget,
-            mediaWidgetCap,
-            browserWidgetCap,
-            layoutSwitchCap
-        ).coerceIn(MIN_WINDOW_BRIGHTNESS, 1f)
-    }
 
-    private fun beginLayoutSwitchMinimumBrightness() {
-        if (isGlassesCharging) return
 
-        layoutSwitchBrightnessRestoreRunnable?.let(handler::removeCallbacks)
-        isLayoutSwitchMinimumBrightnessActive = true
-        applyEffectiveWindowBrightness()
 
-        val restoreRunnable = Runnable {
-            isLayoutSwitchMinimumBrightnessActive = false
-            layoutSwitchBrightnessRestoreRunnable = null
-            applyEffectiveWindowBrightness()
-        }
-        layoutSwitchBrightnessRestoreRunnable = restoreRunnable
-        handler.postDelayed(restoreRunnable, LAYOUT_SWITCH_MIN_BRIGHTNESS_DURATION_MS)
-    }
 
-    private fun applyEffectiveWindowBrightness() {
-        val effectiveBrightness = computeEffectiveWindowBrightness()
-        if (abs(effectiveBrightness - appliedWindowBrightness) < 0.01f) {
-            return
-        }
-        applyWindowBrightness(effectiveBrightness)
-    }
 
-    /**
-     * Apply brightness at window level so the entire app (including WebViews) is dimmed.
-     * @param brightness Value from 0.0 (minimum, most dimmed) to 1.0 (maximum, no dimming)
-     */
-    private fun applyWindowBrightness(brightness: Float) {
-        val layoutParams = window.attributes
-        layoutParams.screenBrightness = brightness.coerceIn(MIN_WINDOW_BRIGHTNESS, 1.0f)
-        window.attributes = layoutParams
-        appliedWindowBrightness = layoutParams.screenBrightness
-        Log.d(
-            TAG,
-            "Window brightness set to: $appliedWindowBrightness " +
-                "(requested=$requestedBrightness, adaptive=$adaptiveBrightnessEnabled, mediaCapActive=$isMediaBrightnessCapActive, browserMinActive=$isBrowserMinimumBrightnessActive, layoutSwitchMinActive=$isLayoutSwitchMinimumBrightnessActive, charging=$isGlassesCharging, lux=${smoothedAmbientLux ?: -1f})"
-        )
-    }
+
+
 
     private fun saveSmartAlignmentSetting(enabled: Boolean) {
         getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -1218,39 +1088,7 @@ class MainActivity : AppCompatActivity() {
         widgetContainer.setSmartAlignmentEnabled(enabled)
     }
 
-    /**
-     * Save brightness settings to SharedPreferences.
-     */
-    private fun saveBrightnessSettings() {
-        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putFloat(KEY_BRIGHTNESS, requestedBrightness)
-            .putBoolean(KEY_ADAPTIVE_BRIGHTNESS, adaptiveBrightnessEnabled)
-            .apply()
-    }
 
-    /**
-     * Restore brightness setting from SharedPreferences.
-     */
-    private fun restoreBrightness() {
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        requestedBrightness = prefs.getFloat(KEY_BRIGHTNESS, DEFAULT_BRIGHTNESS).coerceIn(0f, 1f)
-        adaptiveBrightnessEnabled = prefs.getBoolean(KEY_ADAPTIVE_BRIGHTNESS, DEFAULT_ADAPTIVE_BRIGHTNESS)
-        isMediaBrightnessCapActive = widgetContainer.shouldApplyMediaBrightnessCap()
-        isBrowserMinimumBrightnessActive = widgetContainer.shouldApplyBrowserMinimumBrightness()
-        isGlassesCharging = isChargingFromIntent(registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)))
-        binocularView.setChargingState(isGlassesCharging)
-
-        widgetContainer.setBrightness(requestedBrightness)
-        widgetContainer.setAdaptiveBrightnessEnabled(adaptiveBrightnessEnabled)
-        updateAmbientLightMonitoring()
-        applyEffectiveWindowBrightness()
-
-        Log.d(
-            TAG,
-            "Restored brightness settings: requested=$requestedBrightness adaptive=$adaptiveBrightnessEnabled mediaCapActive=$isMediaBrightnessCapActive browserMinActive=$isBrowserMinimumBrightnessActive charging=$isGlassesCharging"
-        )
-    }
 
     /**
      * Save head-up wake settings to SharedPreferences.
@@ -1617,7 +1455,7 @@ class MainActivity : AppCompatActivity() {
             Log.d(TAG, "Recovered visible wake state after stale internal mask ($reason)")
         }
 
-        applyEffectiveWindowBrightness()
+        brightnessController.reapplyBrightness()
     }
     
     private fun saveWidgetStateDebounced() {
@@ -1736,13 +1574,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateChargingStateFromIntent(intent: Intent?) {
         val charging = isChargingFromIntent(intent)
-        val changed = isGlassesCharging != charging
-        isGlassesCharging = charging
+
         binocularView.setChargingState(charging)
 
+        val changed = brightnessController.setCharging(charging)
+
         if (changed) {
-            Log.d(TAG, "Charging state changed: charging=$charging mediaCapActive=$isMediaBrightnessCapActive")
-            applyEffectiveWindowBrightness()
+            Log.d(TAG, "Charging state changed: charging=$charging")
         }
     }
 
@@ -1838,7 +1676,7 @@ class MainActivity : AppCompatActivity() {
 
         // Also hide system keyboard
         hideSystemKeyboard()
-        updateAmbientLightMonitoring()
+        brightnessController.onResume()
 
         if (openFileBrowserAfterAllFilesGrant &&
             (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager())
@@ -1960,7 +1798,7 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         binocularView.onPause()
-        stopAmbientLightMonitoring()
+        brightnessController.onPause()
 
         widgetContainer.onAppPaused()
 
@@ -2021,12 +1859,12 @@ class MainActivity : AppCompatActivity() {
         // Stop time updates
         timeUpdateRunnable?.let { handler.removeCallbacks(it) }
 
-        layoutSwitchBrightnessRestoreRunnable?.let { handler.removeCallbacks(it) }
-        layoutSwitchBrightnessRestoreRunnable = null
 
         // Stop local speed/location updates
         stopSpeedLocationUpdates()
-        stopAmbientLightMonitoring()
+
+        // Stop brightness control updates
+        brightnessController.onDestroy()
 
         // Cancel head-up wake auto-finish timer
         cancelHeadUpWakeAutoFinishTimer()

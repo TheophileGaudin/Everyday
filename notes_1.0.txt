@@ -19,3 +19,4 @@ Refactor
 
 Migrated a number of functionalities in WidgetContainer to dedicated services.
 Grouped a number of callbacks into interfaces.
+Defined boundary between active dashboard and listing of saved layouts
