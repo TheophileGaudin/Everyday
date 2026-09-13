@@ -708,7 +708,7 @@ class MainActivity : AppCompatActivity() {
                         widgetContainer.unfocusAll()
                         widgetContainer.setMirroringEnabled(false)
                         widgetContainer.onSubtitlePhoneDisconnected()
-                    } else if (connected) {
+                    } else {
                         statusBarController.onPhoneConnectionChanged(connected = true, phoneBatteryPercent = phoneBatteryPercent)
                         widgetContainer.onPhoneReconnected()
                     }
@@ -1398,8 +1398,7 @@ class MainActivity : AppCompatActivity() {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
             hideSystemUI()
-            // Also hide system keyboard when window gains focus
-            hideSystemKeyboard()
+            hideSystemKeyboard() // Also hide system keyboard when window gains focus
         }
     }
     
