@@ -1,14 +1,10 @@
 package com.everyday.everyday_glasses
 
 import android.Manifest
-import android.content.BroadcastReceiver
-import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -41,9 +37,6 @@ import com.everyday.shared.transport.DestinationSearchResult
 import com.everyday.shared.transport.RouteTransportError
 import com.everyday.shared.transport.RouteTransportResult
 import com.everyday.shared.transport.TransportMessage
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.concurrent.CompletableFuture
 
 /**
@@ -93,17 +86,10 @@ class MainActivity : AppCompatActivity() {
     // Display power on/off management
     private lateinit var displayPowerController: DisplayPowerController
 
+    // Time / date / battery display management
+    private lateinit var statusBarController: StatusBarController
 
     private val handler = android.os.Handler(Looper.getMainLooper())
-
-    // Glasses battery update
-    private var glassesBatteryUpdateRunnable: Runnable? = null
-    private var batteryStateReceiver: BroadcastReceiver? = null
-    
-    // Time update
-    private var timeUpdateRunnable: Runnable? = null
-    
-    // Auto-save timer
 
     // Pending widget restoration (waits for views to be ready)
     private var pendingWidgetRestore = false
@@ -124,12 +110,6 @@ class MainActivity : AppCompatActivity() {
         private const val REQUEST_PERMISSIONS = 1
         private const val REQUEST_STORAGE_PERMISSION = 2
         private const val REQUEST_ASSISTANT_AUDIO_PERMISSION = 3
-        
-        // Battery update interval
-        private const val BATTERY_UPDATE_INTERVAL_MS = 30000L  // 30 seconds
-
-        // Time update interval
-        private const val TIME_UPDATE_INTERVAL_MS = 1000L  // 1 second
 
         // SharedPreferences keys for settings
         private const val PREFS_NAME = "everyday_settings"
@@ -268,7 +248,8 @@ class MainActivity : AppCompatActivity() {
             userInputActivity = userInputActivity
         )
         updateCursorRedrawMode()
-        registerBatteryStateReceiver()
+        setupStatusBarController()
+        statusBarController.start()
 
         // Initialize Google auth after the mirrored UI is ready.
         setupGoogleAuth()
@@ -350,12 +331,6 @@ class MainActivity : AppCompatActivity() {
         // Default: phone mode ON
         isPhoneMode = true
         cursorView.setCursorColor(Color.WHITE)
-        
-        // Initial status bar update
-        updateStatusBar(
-            isPhoneConnected = false,
-            phoneBattery = -1
-        )
 
         // Aggressively prevent system keyboard
         window.setSoftInputMode(
@@ -365,12 +340,6 @@ class MainActivity : AppCompatActivity() {
         
         // Force hide any existing keyboard
         hideSystemKeyboard()
-
-        // Start glasses battery monitoring
-        startGlassesBatteryMonitoring()
-        
-        // Start time updates
-        startTimeUpdates()
 
         // Check if this is a returning user BEFORE layout happens.
         // This prevents onSizeChanged() from creating default singleton widgets
@@ -491,6 +460,7 @@ class MainActivity : AppCompatActivity() {
             override fun onDashboardRestored() {
                 refreshBinocularRenderingStrategy()
                 notifyStructuralBinocularChange(contentClass = BinocularContentClass.INTERACTIVE)
+                if (::statusBarController.isInitialized) {statusBarController.refreshNow()}
             }
 
             override fun onMediaFrame(sourceId: String) {
@@ -632,7 +602,31 @@ class MainActivity : AppCompatActivity() {
             null
         }
 
+    private fun setupStatusBarController() {
+        statusBarController = StatusBarController(
+            context = this,
+            callbacks = object : StatusBarControllerCallbacks {
+                override fun applyStatusBarState(state: StatusBarDisplayState) {
+                    widgetContainer.updateStatusBar(
+                        isPhoneConnected = state.isPhoneConnected,
+                        phoneBattery = state.phoneBatteryPercent,
+                        glassesBattery = state.glassesBatteryPercent,
+                        time = state.time,
+                        date = state.date
+                    )
+                }
 
+                override fun onChargingChanged(charging: Boolean) {
+                    binocularView.setChargingState(charging)
+
+                    val changed = brightnessController.setCharging(charging)
+                    if (changed) {
+                        Log.d(TAG, "Charging state changed: charging=$charging")
+                    }
+                }
+            }
+        )
+    }
 
     private fun setupPhoneConnectionCoordinator() {
         phoneConnectionCoordinator = PhoneConnectionCoordinator(
@@ -664,28 +658,17 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     if (!connected && isPhoneMode) {
-                        updateStatusBar(
-                            isPhoneConnected = false,
-                            phoneBattery = -1
-                        )
+                        statusBarController.onPhoneConnectionChanged(connected = false, phoneBatteryPercent = -1)
                         widgetContainer.unfocusAll()
                         widgetContainer.setMirroringEnabled(false)
                         widgetContainer.onSubtitlePhoneDisconnected()
                     } else if (connected) {
-                        updateStatusBar(
-                            isPhoneConnected = true,
-                            phoneBattery = phoneBatteryPercent
-                        )
+                        statusBarController.onPhoneConnectionChanged(connected = true, phoneBatteryPercent = phoneBatteryPercent)
                         widgetContainer.onPhoneReconnected()
                     }
                 }
 
-                override fun onPhoneBatteryChanged(phoneBatteryPercent: Int) {
-                    updateStatusBar(
-                        isPhoneConnected = true,
-                        phoneBattery = phoneBatteryPercent
-                    )
-                }
+                override fun onPhoneBatteryChanged(phoneBatteryPercent: Int) {statusBarController.onPhoneBatteryChanged(phoneBatteryPercent)}
 
                 override fun onPointerReceived(pointer: TransportMessage.Pointer) {
                     if (isPhoneMode) {
@@ -1225,70 +1208,6 @@ class MainActivity : AppCompatActivity() {
         widgetContainer.onKeyPress(key, userInitiated = true)
     }
 
-    /**
-     * Get the current time formatted as "HH:mm".
-     */
-    private fun getCurrentTime(): String {
-        val timeFormat = SimpleDateFormat("HH:mm", Locale.ENGLISH)
-        return timeFormat.format(Date())
-    }
-    
-    /**
-     * Get the current date formatted as "Sat 24 Jan 2026" (weekday + day + month + year).
-     */
-    private fun getCurrentDate(): String {
-        val dateFormat = SimpleDateFormat("EEE dd MMM yyyy", Locale.ENGLISH)
-        return dateFormat.format(Date())
-    }
-    
-    /**
-     * Get the current glasses battery level.
-     */
-    private fun getGlassesBatteryLevel(): Int {
-        val batteryIntent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        return batteryIntent?.let { intent ->
-            val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-            val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-            if (level >= 0 && scale > 0) {
-                (level * 100 / scale)
-            } else {
-                -1
-            }
-        } ?: -1
-    }
-
-    private fun registerBatteryStateReceiver() {
-        updateChargingStateFromIntent(registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)))
-
-        batteryStateReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                updateChargingStateFromIntent(intent)
-            }
-        }
-
-        registerReceiver(batteryStateReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-    }
-
-    private fun isChargingFromIntent(intent: Intent?): Boolean {
-        val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-        val plugged = intent?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
-        return status == BatteryManager.BATTERY_STATUS_CHARGING ||
-            status == BatteryManager.BATTERY_STATUS_FULL ||
-            plugged != 0
-    }
-
-    private fun updateChargingStateFromIntent(intent: Intent?) {
-        val charging = isChargingFromIntent(intent)
-
-        binocularView.setChargingState(charging)
-
-        val changed = brightnessController.setCharging(charging)
-
-        if (changed) {
-            Log.d(TAG, "Charging state changed: charging=$charging")
-        }
-    }
-
     private fun handleDebugIntent(intent: Intent?) {
         val isDebuggable =
             (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -1299,68 +1218,6 @@ class MainActivity : AppCompatActivity() {
         widgetContainer.clearDebugWebViewData(profileSummary)
     }
     
-    /**
-     * Start periodic glasses battery monitoring.
-     */
-    private fun startGlassesBatteryMonitoring() {
-        glassesBatteryUpdateRunnable = object : Runnable {
-            override fun run() {
-                // Update glasses battery in status bar
-                val currentStatusBar = widgetContainer.statusBarWidget
-                if (currentStatusBar != null) {
-                    widgetContainer.updateStatusBar(
-                        isPhoneConnected = currentStatusBar.isPhoneConnected,
-                        phoneBattery = currentStatusBar.phoneBattery,
-                        glassesBattery = getGlassesBatteryLevel(),
-                        time = currentStatusBar.timeString,
-                        date = currentStatusBar.dateString
-                    )
-                }
-                handler.postDelayed(this, BATTERY_UPDATE_INTERVAL_MS)
-            }
-        }
-        handler.post(glassesBatteryUpdateRunnable!!)
-    }
-    
-    /**
-     * Start periodic time updates.
-     */
-    private fun startTimeUpdates() {
-        timeUpdateRunnable = object : Runnable {
-            override fun run() {
-                // Update time in status bar
-                val currentStatusBar = widgetContainer.statusBarWidget
-                if (currentStatusBar != null) {
-                    widgetContainer.updateStatusBar(
-                        isPhoneConnected = currentStatusBar.isPhoneConnected,
-                        phoneBattery = currentStatusBar.phoneBattery,
-                        glassesBattery = currentStatusBar.glassesBattery,
-                        time = getCurrentTime(),
-                        date = getCurrentDate()
-                    )
-                }
-                handler.postDelayed(this, TIME_UPDATE_INTERVAL_MS)
-            }
-        }
-        handler.post(timeUpdateRunnable!!)
-    }
-    
-    /**
-     * Update the status bar widget.
-     */
-    private fun updateStatusBar(
-        isPhoneConnected: Boolean,
-        phoneBattery: Int
-    ) {
-        widgetContainer.updateStatusBar(
-            isPhoneConnected = isPhoneConnected,
-            phoneBattery = phoneBattery,
-            glassesBattery = getGlassesBatteryLevel(),
-            time = getCurrentTime(),
-            date = getCurrentDate()
-        )
-    }
-
     private fun captureAssistantUiContextOnDemand(): CompletableFuture<AssistantUiContext> {
         val result = CompletableFuture<AssistantUiContext>()
         val capture = Runnable {
@@ -1548,16 +1405,11 @@ class MainActivity : AppCompatActivity() {
         if (::assistantNetworkLease.isInitialized) assistantNetworkLease.close()
         super.onDestroy()
         if (::phoneConnectionCoordinator.isInitialized) {phoneConnectionCoordinator.release()}
+        if (::statusBarController.isInitialized) {statusBarController.release()} // Stop status bar monitoring
         GlassesService.stop(this)
         binocularView.onDestroy()
         
-        // Stop battery monitoring
-        glassesBatteryUpdateRunnable?.let { handler.removeCallbacks(it) }
-        batteryStateReceiver?.let { unregisterReceiver(it) }
-        batteryStateReceiver = null
 
-        // Stop time updates
-        timeUpdateRunnable?.let { handler.removeCallbacks(it) }
 
         // Stop local speed/location updates
         locationSpeedController.stopLocationUpdates()
