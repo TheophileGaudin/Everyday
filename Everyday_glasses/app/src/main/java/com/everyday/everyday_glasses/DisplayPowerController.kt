@@ -74,6 +74,7 @@ class DisplayPowerController(
     private var windowInitialized = false
     private var started = false
     private var released = false
+    private var activeTransitionReason = "display_state_change"
 
     var isTransitioningDisplayState: Boolean = false
         private set
@@ -132,7 +133,7 @@ class DisplayPowerController(
 
         if (manager.state != WakeSleepManager.DisplayState.WAKE) {
             Log.d(TAG, "User action waking display from ${manager.state} ($reason)")
-            manager.transitionTo(WakeSleepManager.DisplayState.WAKE)
+            transitionTo(WakeSleepManager.DisplayState.WAKE, reason)
             return
         }
 
@@ -146,8 +147,18 @@ class DisplayPowerController(
     }
 
     /** Used by head-up wake and the head-up auto-finish timer. */
-    fun transitionTo(state: WakeSleepManager.DisplayState) {
-        wakeSleepManager?.transitionTo(state)
+    fun transitionTo(
+        state: WakeSleepManager.DisplayState,
+        reason: String = "programmatic"
+    ) {
+        val manager = wakeSleepManager ?: return
+        val previousReason = activeTransitionReason
+        activeTransitionReason = reason
+        try {
+            manager.transitionTo(state)
+        } finally {
+            activeTransitionReason = previousReason
+        }
     }
 
     /**
@@ -218,7 +229,7 @@ class DisplayPowerController(
                     )
                     acquireWakeLock()
                     callbacks.applyDisplayState(state)
-                    callbacks.onDisplayWake("display_wake")
+                    callbacks.onDisplayWake(activeTransitionReason)
                 }
 
                 WakeSleepManager.DisplayState.SLEEP -> {

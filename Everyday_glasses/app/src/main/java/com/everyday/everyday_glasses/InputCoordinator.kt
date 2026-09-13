@@ -13,7 +13,6 @@ class InputCoordinator(
     private val cursorView: CursorView,
     private val widgetContainer: WidgetContainer,
     private val tapGestureDetectorProvider: () -> TapGestureDetector?,
-    private val isPhoneMode: () -> Boolean,
     private val isAwake: () -> Boolean,
     private val wakeDisplay: () -> Unit,
     private val notifyUserActivity: () -> Unit,
@@ -171,7 +170,7 @@ class InputCoordinator(
     fun flashCursor() {
         cursorView.setCursorColor(Color.YELLOW)
         cursorView.postDelayed({
-            cursorView.setCursorColor(if (isPhoneMode()) Color.WHITE else Color.CYAN)
+            cursorView.setCursorColor(Color.WHITE)
             notifyTransientChange()
         }, 150)
     }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Environment
 import android.util.Log
 import java.io.File
+import java.io.IOException
 
 /**
  * Owns the app-managed image files that back persisted image widgets.
@@ -14,6 +15,33 @@ object ImageWidgetStorage {
 
     fun createManagedFile(context: Context, fileName: String): File {
         return File(getManagedDir(context), fileName)
+    }
+
+    /**
+     * Creates a temporary file in the managed directory. Keeping the temporary
+     * file beside the destination makes the final rename atomic on Android's
+     * filesystem implementations.
+     */
+    fun createTemporaryFile(context: Context): File =
+        File.createTempFile("image_import_", ".part", getManagedDir(context))
+
+    /**
+     * Publishes a completely-written temporary image as its final file.
+     * Both files must be inside this component's managed directory.
+     */
+    @Throws(IOException::class)
+    fun commitTemporaryFile(context: Context, tempFile: File, outputFile: File): File {
+        require(isManagedPath(context, outputFile.absolutePath))
+        require(isManagedPath(context, tempFile.absolutePath))
+        require(tempFile.parentFile?.canonicalFile == outputFile.parentFile?.canonicalFile)
+        if (outputFile.exists()) {
+            throw IOException("Managed image already exists: ${outputFile.name}")
+        }
+
+        if (!tempFile.renameTo(outputFile)) {
+            throw IOException("Unable to publish imported image: ${outputFile.name}")
+        }
+        return outputFile
     }
 
     fun isManagedPath(context: Context, path: String): Boolean {

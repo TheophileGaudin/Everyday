@@ -60,6 +60,9 @@ interface PhoneConnectionCallbacks {
     fun onAssistantControlReceived(control: AssistantControl)
 
     fun onPhoneBatteryChanged(phoneBatteryPercent: Int)
+
+    /** Requests the feature-level Wi-Fi Direct permission from the Activity. */
+    fun onWifiDirectPermissionRequired() {}
 }
 
 /**
@@ -70,11 +73,35 @@ interface PhoneConnectionCallbacks {
  */
 class PhoneConnectionCoordinator(
     context: Context,
-    private val callbacks: PhoneConnectionCallbacks
+    private val callbacks: PhoneConnectionCallbacks,
+    private val preferredPhoneAddress: String? = null,
+    private val preferredWifiDirectDeviceAddress: String? = null
 ) : SyncMessenger, GlassesRouteTransport, GlassesDestinationSearchTransport {
 
     companion object {
         private const val TAG = "PhoneConnectionCoordinator"
+
+        /** Selects a P2P peer only when its identity is unambiguous. */
+        internal fun selectWifiDirectPeerIndex(
+            addresses: List<String>,
+            preferredAddress: String?
+        ): Int {
+            preferredAddress?.let { address ->
+                addresses.indexOfFirst { it.equals(address, ignoreCase = true) }
+                    .takeIf { it >= 0 }
+                    ?.let { return it }
+            }
+            return if (addresses.size == 1) 0 else -1
+        }
+
+        internal fun selectWifiDirectPeer(
+            peers: List<WifiP2pDevice>,
+            preferredAddress: String?
+        ): WifiP2pDevice? {
+            return selectWifiDirectPeerIndex(peers.map { it.deviceAddress }, preferredAddress)
+                .takeIf { it >= 0 }
+                ?.let(peers::get)
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -83,7 +110,7 @@ class PhoneConnectionCoordinator(
 
     // Neither transport needs to retain MainActivity itself.
     private val appContext = context.applicationContext
-    private val rfcommClient = RfcommClient(appContext)
+    private val rfcommClient = RfcommClient(appContext, preferredPhoneAddress)
     private var wifiDirectClient: WifiDirectClient? = null
 
     private var pendingWifiDirectMirrorIp: String? = null
@@ -112,7 +139,6 @@ class PhoneConnectionCoordinator(
         if (released) return false
         if (!initialized) initialize()
 
-        rfcommClient.isPaused = false
         return rfcommClient.start()
     }
 
@@ -121,8 +147,13 @@ class PhoneConnectionCoordinator(
         if (released) return
         released = true
 
-        rfcommClient.stop()
-        wifiDirectClient?.release()
+        rfcommClient.release()
+        wifiDirectClient?.let { client ->
+            // Detach before release because WifiDirectClient can already have queued
+            // receiver callbacks on the main handler.
+            client.connectionListener = null
+            client.release()
+        }
         wifiDirectClient = null
         pendingWifiDirectMirrorIp = null
     }
@@ -134,8 +165,34 @@ class PhoneConnectionCoordinator(
     fun sendTextFieldFocus(focused: Boolean, fieldId: String? = null): Boolean =
         rfcommClient.sendTextFieldFocus(focused, fieldId)
 
-    fun sendMirrorRequest(start: Boolean): Boolean =
-        rfcommClient.sendMirrorRequest(start)
+    fun sendMirrorRequest(start: Boolean): Boolean {
+        if (!start) pendingWifiDirectMirrorIp = null
+        return if (!released) rfcommClient.sendMirrorRequest(start) else false
+    }
+
+    /** Continues a deferred Wi-Fi Direct mirror after PermissionCoordinator grants access. */
+    fun onWifiDirectPermissionAvailable() {
+        if (released) return
+        val mirrorIp = pendingWifiDirectMirrorIp ?: return
+        val client = wifiDirectClient ?: return
+
+        if (client.isConnected) {
+            pendingWifiDirectMirrorIp = null
+            callbacks.onMirroringChanged(true, mirrorIp)
+            return
+        }
+
+        if (!client.discoverPeers()) {
+            pendingWifiDirectMirrorIp = null
+            callbacks.onWifiDirectPermissionRequired()
+        }
+    }
+
+    /** Cancels any deferred mirror when the user declines the permission request. */
+    fun onWifiDirectPermissionDenied() {
+        if (released) return
+        pendingWifiDirectMirrorIp = null
+    }
 
     fun requestClipboard(): Boolean =
         rfcommClient.requestClipboard()
@@ -198,10 +255,12 @@ class PhoneConnectionCoordinator(
     private fun configureRfcommListeners() {
         rfcommClient.transportConnectionListener = object : TransportConnectionListener {
             override fun onStatusChanged(status: String) {
+                if (released) return
                 callbacks.onConnectionStatusChanged(status)
             }
 
             override fun onConnectionChanged(connected: Boolean) {
+                if (released) return
                 if (!connected) {
                     latestPhoneBatteryPercent = -1
                 }
@@ -215,24 +274,29 @@ class PhoneConnectionCoordinator(
 
         rfcommClient.remoteInputListener = object : RemoteInputListener {
             override fun onPointerReceived(data: TransportMessage.Pointer) {
+                if (released) return
                 callbacks.onPointerReceived(data)
             }
 
             override fun onKeyReceived(key: String) {
+                if (released) return
                 callbacks.onKeyReceived(key)
             }
 
             override fun onLongPressWithClipboard(clipboardContent: String?) {
+                if (released) return
                 callbacks.onLongPressWithClipboard(clipboardContent)
             }
 
             override fun onClipboardReceived(clipboardContent: String) {
+                if (released) return
                 callbacks.onClipboardReceived(clipboardContent)
             }
         }
 
         rfcommClient.remoteContentListener = object : RemoteContentListener {
             override fun onDeviceStatusReceived(status: TransportMessage.DeviceStatus) {
+                if (released) return
                 status.phoneBatteryPercent?.let { battery ->
                     latestPhoneBatteryPercent = battery
                     callbacks.onPhoneBatteryChanged(battery)
@@ -240,10 +304,12 @@ class PhoneConnectionCoordinator(
             }
 
             override fun onImageReceived(imageData: ByteArray, fileName: String) {
+                if (released) return
                 callbacks.onImageReceived(imageData, fileName)
             }
 
             override fun onOpenBrowserRequested(address: String) {
+                if (released) return
                 callbacks.onOpenBrowserRequested(address)
             }
         }
@@ -254,6 +320,7 @@ class PhoneConnectionCoordinator(
                 ip: String?,
                 isWifiDirect: Boolean
             ) {
+                if (released) return
                 handleMirrorStateChanged(enabled, ip, isWifiDirect)
             }
         }
@@ -264,26 +331,31 @@ class PhoneConnectionCoordinator(
                 account: GoogleAccountSummary?,
                 detail: String?
             ) {
+                if (released) return
                 callbacks.onGoogleAuthStateReceived(status, account, detail)
             }
         }
 
         rfcommClient.syncMessageListener = object : SyncMessageListener {
             override fun onSyncSnapshotReceived(snapshot: SyncSnapshot) {
+                if (released) return
                 callbacks.onSyncSnapshotReceived(snapshot)
             }
 
             override fun onSyncErrorReceived(error: SyncError) {
+                if (released) return
                 callbacks.onSyncErrorReceived(error)
             }
         }
 
         rfcommClient.routeMessageListener = object : RouteMessageListener {
             override fun onRouteResultReceived(result: RouteTransportResult) {
+                if (released) return
                 callbacks.onRouteResultReceived(result)
             }
 
             override fun onRouteErrorReceived(error: RouteTransportError) {
+                if (released) return
                 callbacks.onRouteErrorReceived(error)
             }
         }
@@ -293,28 +365,33 @@ class PhoneConnectionCoordinator(
                 override fun onDestinationSearchResultReceived(
                     result: DestinationSearchResult
                 ) {
+                    if (released) return
                     callbacks.onDestinationSearchResultReceived(result)
                 }
 
                 override fun onDestinationSearchErrorReceived(
                     error: DestinationSearchError
                 ) {
+                    if (released) return
                     callbacks.onDestinationSearchErrorReceived(error)
                 }
             }
 
         rfcommClient.subtitleMessageListener = object : SubtitleMessageListener {
             override fun onSubtitleStatusReceived(status: SubtitleStatus) {
+                if (released) return
                 callbacks.onSubtitleStatusReceived(status)
             }
 
             override fun onSubtitleTranscriptReceived(transcript: SubtitleTranscript) {
+                if (released) return
                 callbacks.onSubtitleTranscriptReceived(transcript)
             }
         }
 
         rfcommClient.assistantControlListener = object : AssistantControlListener {
             override fun onAssistantControlReceived(control: AssistantControl) {
+                if (released) return
                 callbacks.onAssistantControlReceived(control)
             }
         }
@@ -329,20 +406,46 @@ class PhoneConnectionCoordinator(
         ip: String?,
         isWifiDirect: Boolean
     ) {
+        if (released) return
         Log.d(
             TAG,
             "Mirror state changed: enabled=$enabled, ip=$ip, wifiDirect=$isWifiDirect"
         )
 
+        // A disabled/non-P2P mirror supersedes any earlier P2P handoff request.
+        if (!enabled || !isWifiDirect) {
+            pendingWifiDirectMirrorIp = null
+        }
+
         if (enabled && isWifiDirect) {
             if (wifiDirectClient?.isConnected != true) {
                 Log.d(TAG, "Wi-Fi Direct required; starting peer discovery")
+                pendingWifiDirectMirrorIp = null
+                if (ip.isNullOrBlank()) {
+                    Log.e(TAG, "Cannot start Wi-Fi Direct mirroring without a mirror IP")
+                    return
+                }
                 pendingWifiDirectMirrorIp = ip
-                wifiDirectClient?.discoverPeers()
+                if (wifiDirectClient == null) {
+                    pendingWifiDirectMirrorIp = null
+                    Log.e(TAG, "Wi-Fi Direct client is unavailable")
+                    return
+                }
+                val client = wifiDirectClient ?: return
+                if (!client.hasRequiredRuntimePermission()) {
+                    Log.d(TAG, "Wi-Fi Direct permission required before peer discovery")
+                    callbacks.onWifiDirectPermissionRequired()
+                    return
+                }
+                if (!client.discoverPeers()) {
+                    pendingWifiDirectMirrorIp = null
+                    callbacks.onWifiDirectPermissionRequired()
+                }
                 return
             }
 
             Log.d(TAG, "Wi-Fi Direct already connected; enabling mirroring")
+            pendingWifiDirectMirrorIp = null
         }
 
         callbacks.onMirroringChanged(enabled, ip)
@@ -352,6 +455,7 @@ class PhoneConnectionCoordinator(
         wifiDirectClient = WifiDirectClient(appContext).apply {
             connectionListener = object : WifiDirectConnectionListener {
                 override fun onConnected(groupOwnerIp: String) {
+                    if (released) return
                     Log.d(TAG, "Wi-Fi Direct connected, group owner: $groupOwnerIp")
 
                     pendingWifiDirectMirrorIp?.let { mirrorIp ->
@@ -362,11 +466,18 @@ class PhoneConnectionCoordinator(
                 }
 
                 override fun onDisconnected() {
+                    if (released) return
                     Log.d(TAG, "Wi-Fi Direct disconnected")
+                    pendingWifiDirectMirrorIp = null
                 }
 
                 override fun onPeersAvailable(peers: List<WifiP2pDevice>) {
+                    if (released) return
                     Log.d(TAG, "Wi-Fi Direct peers available: ${peers.size}")
+                    if (pendingWifiDirectMirrorIp == null) {
+                        Log.d(TAG, "Ignoring peers because no mirror handoff is pending")
+                        return
+                    }
                     peers.forEach { device ->
                         Log.d(
                             TAG,
@@ -375,28 +486,39 @@ class PhoneConnectionCoordinator(
                         )
                     }
 
-                    val availableDevice = peers.firstOrNull {
-                        it.status == WifiP2pDevice.AVAILABLE
+                    val connectedDevice = peers.firstOrNull { it.status == WifiP2pDevice.CONNECTED }
+                    if (connectedDevice != null) {
+                        Log.d(TAG, "Already connected to: ${connectedDevice.deviceName}")
+                        return
                     }
+
+                    val availableDevices = peers.filter { it.status == WifiP2pDevice.AVAILABLE }
+                    val availableDevice = selectWifiDirectPeer(
+                        availableDevices,
+                        preferredWifiDirectDeviceAddress
+                    )
 
                     if (availableDevice != null) {
                         Log.d(TAG, "Auto-connecting to: ${availableDevice.deviceName}")
                         wifiDirectClient?.connectToDevice(availableDevice)
                     } else {
-                        peers.firstOrNull {
-                            it.status == WifiP2pDevice.CONNECTED
-                        }?.let { device ->
-                            Log.d(TAG, "Already connected to: ${device.deviceName}")
-                        }
+                        Log.w(
+                            TAG,
+                            "No unique Wi-Fi Direct phone peer found " +
+                                "(available=${availableDevices.size}, configured=${preferredWifiDirectDeviceAddress != null})"
+                        )
                     }
                 }
 
                 override fun onError(message: String) {
+                    if (released) return
                     Log.e(TAG, "Wi-Fi Direct error: $message")
+                    pendingWifiDirectMirrorIp = null
                 }
             }
 
             initialize()
         }
     }
+
 }

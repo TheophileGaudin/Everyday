@@ -1,10 +1,12 @@
 package com.everyday.everyday_glasses
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.net.wifi.p2p.*
 import android.os.Build
 import android.os.Handler
@@ -24,6 +26,8 @@ class WifiDirectClient(private val context: Context) {
     private var wifiP2pManager: WifiP2pManager? = null
     private var channel: WifiP2pManager.Channel? = null
     private var receiver: BroadcastReceiver? = null
+    private var initialized = false
+    private var released = false
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -37,7 +41,26 @@ class WifiDirectClient(private val context: Context) {
     // Callbacks
     var connectionListener: WifiDirectConnectionListener? = null
 
+    /** Exposes the platform gate so the owner can request it before discovery. */
+    fun hasRequiredRuntimePermission(): Boolean {
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.NEARBY_WIFI_DEVICES
+        } else {
+            null
+        }
+        return if (permission != null) {
+            context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+        } else {
+            context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
+                    PackageManager.PERMISSION_GRANTED ||
+                    context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                    PackageManager.PERMISSION_GRANTED
+        }
+    }
+
     fun initialize() {
+        if (initialized || released) return
+
         wifiP2pManager = context.getSystemService(Context.WIFI_P2P_SERVICE) as? WifiP2pManager
         if (wifiP2pManager == null) {
             Log.e(TAG, "WiFi Direct not supported")
@@ -45,6 +68,7 @@ class WifiDirectClient(private val context: Context) {
             return
         }
 
+        initialized = true
         channel = wifiP2pManager?.initialize(context, context.mainLooper) {
             Log.d(TAG, "Channel disconnected")
         }
@@ -56,6 +80,8 @@ class WifiDirectClient(private val context: Context) {
     private fun registerReceiver() {
         receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
+                if (released) return
+
                 when (intent.action) {
                     WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION -> {
                         val state = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1)
@@ -102,8 +128,11 @@ class WifiDirectClient(private val context: Context) {
         }
     }
 
-    @SuppressLint("MissingPermission")
-    fun discoverPeers() {
+    /** Starts discovery when the caller has granted the platform's P2P gate. */
+    @SuppressLint("MissingPermission") // Guarded by canUseWifiDirect().
+    fun discoverPeers(): Boolean {
+        if (!canUseWifiDirect()) return false
+
         Log.d(TAG, "Starting peer discovery...")
 
         wifiP2pManager?.discoverPeers(channel, object : WifiP2pManager.ActionListener {
@@ -115,10 +144,13 @@ class WifiDirectClient(private val context: Context) {
                 Log.e(TAG, "Peer discovery failed: $reason")
             }
         })
+        return true
     }
 
-    @SuppressLint("MissingPermission")
+    @SuppressLint("MissingPermission") // Guarded by canUseWifiDirect().
     private fun requestPeers() {
+        if (!canUseWifiDirect()) return
+
         wifiP2pManager?.requestPeers(channel) { peers ->
             val deviceList = peers?.deviceList?.toList() ?: emptyList()
             Log.d(TAG, "Found ${deviceList.size} peers")
@@ -126,8 +158,9 @@ class WifiDirectClient(private val context: Context) {
         }
     }
 
-    @SuppressLint("MissingPermission")
     private fun requestConnectionInfo() {
+        if (!canUseWifiDirect()) return
+
         wifiP2pManager?.requestConnectionInfo(channel) { info ->
             if (info?.groupFormed == true) {
                 groupOwnerAddress = info.groupOwnerAddress?.hostAddress
@@ -144,8 +177,10 @@ class WifiDirectClient(private val context: Context) {
     /**
      * Connect to a specific WiFi Direct device (the phone).
      */
-    @SuppressLint("MissingPermission")
-    fun connectToDevice(device: WifiP2pDevice) {
+    @SuppressLint("MissingPermission") // Guarded by canUseWifiDirect().
+    fun connectToDevice(device: WifiP2pDevice): Boolean {
+        if (!canUseWifiDirect()) return false
+
         Log.d(TAG, "Connecting to: ${device.deviceName} (${device.deviceAddress})")
 
         val config = WifiP2pConfig().apply {
@@ -169,25 +204,61 @@ class WifiDirectClient(private val context: Context) {
                 handler.post { connectionListener?.onError("Connection failed: $reasonStr") }
             }
         })
+        return true
     }
 
-    @SuppressLint("MissingPermission")
-    fun disconnect() {
+    fun disconnect(): Boolean {
+        if (!canUseWifiDirect()) return false
         wifiP2pManager?.removeGroup(channel, null)
+        return true
     }
 
-    @SuppressLint("MissingPermission")
-    fun stopDiscovery() {
+    fun stopDiscovery(): Boolean {
+        if (!canUseWifiDirect()) return false
         wifiP2pManager?.stopPeerDiscovery(channel, null)
+        return true
     }
 
     fun release() {
+        if (released) return
+
+        // Avoid a normal discovery callback after the owning Activity has
+        // gone away. stopPeerDiscovery itself is a privileged operation, so
+        // only attempt it while its runtime gate is still available.
+        if (canUseWifiDirect()) {
+            runCatching { wifiP2pManager?.stopPeerDiscovery(channel, null) }
+                .onFailure { Log.w(TAG, "Error stopping peer discovery", it) }
+        }
+        released = true
+        handler.removeCallbacksAndMessages(null)
+
         try {
             receiver?.let { context.unregisterReceiver(it) }
         } catch (e: Exception) {
             Log.e(TAG, "Error unregistering receiver", e)
         }
         receiver = null
-        stopDiscovery()
+        connectionListener = null
+        channel = null
+        wifiP2pManager = null
+        initialized = false
+        isConnected = false
+        groupOwnerAddress = null
+    }
+
+    /** Returns false and reports a recoverable error instead of risking a SecurityException. */
+    private fun canUseWifiDirect(): Boolean {
+        if (released) return false
+        if (wifiP2pManager == null || channel == null) return false
+
+        val granted = hasRequiredRuntimePermission()
+
+        if (!granted) {
+            Log.w(TAG, "Wi-Fi Direct operation skipped: runtime permission is missing")
+            handler.post {
+                if (!released) connectionListener?.onError("Wi-Fi Direct permission required")
+            }
+        }
+        return granted
     }
 }

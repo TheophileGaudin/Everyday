@@ -12,6 +12,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.everyday.everyday_glasses.binocular.BinocularContentClass
 import com.everyday.everyday_glasses.binocular.DisplayConfig
@@ -59,18 +60,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var userInputActivity: UserInputActivity
     private lateinit var assistantNetworkLease: AssistantNetworkLease
 
-    // Track if this session was started by head-up wake (for auto-finish)
-    private var isHeadUpWakeSession = false
-    private var headUpWakeAutoFinishRunnable: Runnable? = null
+    private lateinit var headUpSessionController: HeadUpSessionController
+    private lateinit var settingsStore: GlassesSettingsStore
 
     // 3DOF (Three Degrees of Freedom) head tracking manager
     private lateinit var threeDofManager: ThreeDofManager
 
     // Tap gesture detector for single/double/triple tap detection
     private lateinit var tapGestureDetector: TapGestureDetector
-
-    // Mode: true = phone trackpad, false = temple trackpad (backend only, no UI toggle)
-    private var isPhoneMode = true
 
     // Brightness management
     private lateinit var brightnessController: BrightnessController
@@ -100,15 +97,6 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "Everyday_glasses"
-        // SharedPreferences keys for settings
-        private const val PREFS_NAME = "everyday_settings"
-        private const val KEY_HEAD_UP_TIME = "head_up_time_ms"
-        private const val KEY_WAKE_DURATION = "wake_duration_ms"
-        private const val KEY_ANGLE_THRESHOLD = "angle_threshold_degrees"
-        private const val KEY_HEADSUP_ENABLED = "headsup_enabled"
-        private const val KEY_SMART_ALIGNMENT = "smart_alignment_enabled"
-
-        private const val DEFAULT_SMART_ALIGNMENT = true
         // Keep media dimming visible; the only intentional full black mask is DisplayState.OFF.
 
         // Speedometer logging gate (flip false to silence)
@@ -131,6 +119,16 @@ class MainActivity : AppCompatActivity() {
 
         setupDisplayPowerController()
         displayPowerController.initializeWindow()
+        settingsStore = GlassesSettingsStore(this)
+        headUpSessionController = HeadUpSessionController(
+            onSessionExpired = {
+                Log.d(TAG, "Head-up session expired; transitioning display to OFF")
+                displayPowerController.transitionTo(
+                    WakeSleepManager.DisplayState.OFF,
+                    reason = "head_up_session_expired"
+                )
+            }
+        )
 
         setContentView(R.layout.activity_main)
         
@@ -194,7 +192,7 @@ class MainActivity : AppCompatActivity() {
             }
         )
 
-        // Initialize file picker for opening images, PDFs, etc.
+        // Initialize imports from the in-app file browser.
         setupFileImportCoordinator()
         setupPermissionCoordinator()
 
@@ -229,7 +227,6 @@ class MainActivity : AppCompatActivity() {
             tapGestureDetectorProvider = {
                 if (::tapGestureDetector.isInitialized) tapGestureDetector else null
             },
-            isPhoneMode = { isPhoneMode },
             isAwake = {!::displayPowerController.isInitialized || displayPowerController.isAwake()},
             wakeDisplay = {if (::displayPowerController.isInitialized) {displayPowerController.wakeFromUserAction("input")}},
             notifyUserActivity = ::notifyUserActivity,
@@ -312,8 +309,6 @@ class MainActivity : AppCompatActivity() {
         setupPhoneConnectionCoordinator()
         googleAuthCoordinator.refreshStateSilently(this)
 
-        // Default: phone mode ON
-        isPhoneMode = true
         cursorView.setCursorColor(Color.WHITE)
 
         // Aggressively prevent system keyboard
@@ -352,15 +347,13 @@ class MainActivity : AppCompatActivity() {
         // Check startup capabilities and request anything currently missing.
         permissionCoordinator.handleStartupPermissions()
 
-        // Start location updates
-        locationSpeedController.startLocationUpdates()
         GlassesService.start(this)
 
         // Note: Head-up wake is now handled via static flags in onResume()
         // This ensures consistent handling whether activity is created fresh or resumed
         // The static flags are checked in onResume which runs after onCreate
 
-        Log.d(TAG, "onCreate complete, isPhoneMode=$isPhoneMode")
+        Log.d(TAG, "onCreate complete")
     }
 
     /**
@@ -633,6 +626,14 @@ class MainActivity : AppCompatActivity() {
                 ) {
                     widgetContainer.createPdfWidget(uri, displayName)
                 }
+
+                override fun showFileImportError(error: FileImportError) {
+                    Toast.makeText(
+                        this@MainActivity,
+                        error.userMessage,
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
         )
     }
@@ -642,7 +643,7 @@ class MainActivity : AppCompatActivity() {
             activity = this,
             callbacks = object : PermissionCoordinatorCallbacks {
                 override fun onBluetoothPermissionAvailable() {
-                    startClient()
+                    phoneConnectionOrNull()?.start()
                 }
 
                 override fun onLocationPermissionAvailable() {
@@ -655,6 +656,15 @@ class MainActivity : AppCompatActivity() {
                         "Startup without location permission -> speed disabled"
                     }
                 }
+
+                override fun onWifiDirectPermissionAvailable() {
+                    phoneConnectionOrNull()?.onWifiDirectPermissionAvailable()
+                }
+
+                override fun onWifiDirectPermissionDenied() {
+                    phoneConnectionOrNull()?.onWifiDirectPermissionDenied()
+                }
+
                 override fun onFileBrowserAccessHandled() {widgetContainer.post {fileImportCoordinator.openFileBrowser()}} // The all-files settings path returns through onResume; post until the resumed view hierarchy is ready for widget work.
                 override fun onAssistantAudioPermissionResult(granted: Boolean) {
                     if (::voiceAssistantCoordinator.isInitialized) {
@@ -671,7 +681,6 @@ class MainActivity : AppCompatActivity() {
             callbacks = object : PhoneConnectionCallbacks {
                 override fun onConnectionStatusChanged(status: String) {
                     Log.d(TAG, "Connection status: $status")
-                    notifyTransientBinocularChange()
                 }
 
                 override fun onConnectionChanged(
@@ -694,7 +703,7 @@ class MainActivity : AppCompatActivity() {
                         dataSyncCoordinator.onPhoneConnectionChanged(connected)
                     }
 
-                    if (!connected && isPhoneMode) {
+                    if (!connected) {
                         statusBarController.onPhoneConnectionChanged(connected = false, phoneBatteryPercent = -1)
                         widgetContainer.unfocusAll()
                         widgetContainer.setMirroringEnabled(false)
@@ -708,9 +717,7 @@ class MainActivity : AppCompatActivity() {
                 override fun onPhoneBatteryChanged(phoneBatteryPercent: Int) {statusBarController.onPhoneBatteryChanged(phoneBatteryPercent)}
 
                 override fun onPointerReceived(pointer: TransportMessage.Pointer) {
-                    if (isPhoneMode) {
-                        handlePhonePointer(pointer)
-                    }
+                    handlePhonePointer(pointer)
                 }
 
                 override fun onKeyReceived(key: String) {
@@ -798,6 +805,10 @@ class MainActivity : AppCompatActivity() {
                     if (::voiceAssistantCoordinator.isInitialized) {
                         voiceAssistantCoordinator.handleControl(control)
                     }
+                }
+
+                override fun onWifiDirectPermissionRequired() {
+                    permissionCoordinator.requestWifiDirectPermission()
                 }
 
             }
@@ -933,16 +944,11 @@ class MainActivity : AppCompatActivity() {
 
 
     private fun saveSmartAlignmentSetting(enabled: Boolean) {
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-            .edit()
-            .putBoolean(KEY_SMART_ALIGNMENT, enabled)
-            .apply()
+        settingsStore.saveSmartAlignmentEnabled(enabled)
     }
 
     private fun restoreSmartAlignmentSetting() {
-        val enabled = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-            .getBoolean(KEY_SMART_ALIGNMENT, DEFAULT_SMART_ALIGNMENT)
-        widgetContainer.setSmartAlignmentEnabled(enabled)
+        widgetContainer.setSmartAlignmentEnabled(settingsStore.loadSmartAlignmentEnabled())
     }
 
 
@@ -955,13 +961,14 @@ class MainActivity : AppCompatActivity() {
         val wakeDurationMs = widgetContainer.getWakeDuration()
         val angleThreshold = widgetContainer.getAngleThreshold()
         val headsUpEnabled = widgetContainer.getHeadsUpEnabled()
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-            .edit()
-            .putLong(KEY_HEAD_UP_TIME, headUpTimeMs)
-            .putLong(KEY_WAKE_DURATION, wakeDurationMs)
-            .putFloat(KEY_ANGLE_THRESHOLD, angleThreshold)
-            .putBoolean(KEY_HEADSUP_ENABLED, headsUpEnabled)
-            .apply()
+        settingsStore.saveHeadUpSettings(
+            HeadUpSettings(
+                holdTimeMs = headUpTimeMs,
+                wakeDurationMs = wakeDurationMs,
+                angleThresholdDegrees = angleThreshold,
+                enabled = headsUpEnabled
+            )
+        )
         Log.d(TAG, "Saved head-up settings: headUpTime=${headUpTimeMs}ms, wakeDuration=${wakeDurationMs}ms, angle=${angleThreshold}°, enabled=$headsUpEnabled")
     }
 
@@ -969,26 +976,22 @@ class MainActivity : AppCompatActivity() {
      * Restore head-up wake settings from SharedPreferences.
      */
     private fun restoreHeadUpSettings() {
-        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        val savedHeadUpTime = prefs.getLong(KEY_HEAD_UP_TIME, HeadUpWakeManager.DEFAULT_HEAD_UP_HOLD_TIME_MS)
-        val savedWakeDuration = prefs.getLong(KEY_WAKE_DURATION, HeadUpWakeManager.DEFAULT_WAKE_DURATION_MS)
-        val savedAngleThreshold = prefs.getFloat(KEY_ANGLE_THRESHOLD, HeadUpWakeManager.DEFAULT_PITCH_CHANGE_THRESHOLD)
-        val savedHeadsUpEnabled = prefs.getBoolean(KEY_HEADSUP_ENABLED, true)
+        val settings = settingsStore.loadHeadUpSettings()
 
-        widgetContainer.setHeadUpTime(savedHeadUpTime)
-        widgetContainer.setWakeDuration(savedWakeDuration)
-        widgetContainer.setAngleThreshold(savedAngleThreshold)
-        widgetContainer.setHeadsUpEnabled(savedHeadsUpEnabled)
+        widgetContainer.setHeadUpTime(settings.holdTimeMs)
+        widgetContainer.setWakeDuration(settings.wakeDurationMs)
+        widgetContainer.setAngleThreshold(settings.angleThresholdDegrees)
+        widgetContainer.setHeadsUpEnabled(settings.enabled)
 
         // Apply to HeadUpWakeManager if initialized
         if (::headUpWakeManager.isInitialized) {
-            headUpWakeManager.headUpHoldTimeMs = savedHeadUpTime
-            headUpWakeManager.wakeDurationMs = savedWakeDuration
-            headUpWakeManager.pitchChangeThreshold = savedAngleThreshold
-            headUpWakeManager.isHeadsUpGestureEnabled = savedHeadsUpEnabled
+            headUpWakeManager.headUpHoldTimeMs = settings.holdTimeMs
+            headUpWakeManager.wakeDurationMs = settings.wakeDurationMs
+            headUpWakeManager.pitchChangeThreshold = settings.angleThresholdDegrees
+            headUpWakeManager.isHeadsUpGestureEnabled = settings.enabled
         }
 
-        Log.d(TAG, "Restored head-up settings: headUpTime=${savedHeadUpTime}ms, wakeDuration=${savedWakeDuration}ms, angle=${savedAngleThreshold}°, enabled=$savedHeadsUpEnabled")
+        Log.d(TAG, "Restored head-up settings: $settings")
     }
 
     private fun setupDisplayPowerController() {
@@ -1065,24 +1068,10 @@ class MainActivity : AppCompatActivity() {
     private fun setupHeadUpWakeManager() {
         headUpWakeManager = HeadUpWakeManager(this)
 
-        // Restore saved settings
-        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        headUpWakeManager.headUpHoldTimeMs = prefs.getLong(
-            KEY_HEAD_UP_TIME,
-            HeadUpWakeManager.DEFAULT_HEAD_UP_HOLD_TIME_MS
-        )
-        headUpWakeManager.wakeDurationMs = prefs.getLong(
-            KEY_WAKE_DURATION,
-            HeadUpWakeManager.DEFAULT_WAKE_DURATION_MS
-        )
-        headUpWakeManager.pitchChangeThreshold = prefs.getFloat(
-            KEY_ANGLE_THRESHOLD,
-            HeadUpWakeManager.DEFAULT_PITCH_CHANGE_THRESHOLD
-        )
-        headUpWakeManager.isHeadsUpGestureEnabled = prefs.getBoolean(
-            KEY_HEADSUP_ENABLED,
-            true
-        )
+        headUpWakeManager.headUpHoldTimeMs = widgetContainer.getHeadUpTime()
+        headUpWakeManager.wakeDurationMs = widgetContainer.getWakeDuration()
+        headUpWakeManager.pitchChangeThreshold = widgetContainer.getAngleThreshold()
+        headUpWakeManager.isHeadsUpGestureEnabled = widgetContainer.getHeadsUpEnabled()
 
         headUpWakeManager.wakeRequestListener = object : WakeRequestListener {
             override fun onWakeRequested() {
@@ -1091,15 +1080,15 @@ class MainActivity : AppCompatActivity() {
                     when (displayPowerController.state) {
                         WakeSleepManager.DisplayState.OFF,
                         WakeSleepManager.DisplayState.SLEEP -> {
-                            isHeadUpWakeSession = true
                             val wakeDurationMs = headUpWakeManager.wakeDurationMs
                             Log.d(
                                 TAG,
                                 "Starting head-up wake session with duration ${wakeDurationMs}ms"
                             )
-                            startHeadUpWakeAutoFinishTimer(wakeDurationMs)
+                            headUpSessionController.start(wakeDurationMs)
                             displayPowerController.transitionTo(
-                                WakeSleepManager.DisplayState.WAKE
+                                WakeSleepManager.DisplayState.WAKE,
+                                reason = "head_up_gesture"
                             )
                             widgetContainer.onHeadUpWake()
                         }
@@ -1196,7 +1185,7 @@ class MainActivity : AppCompatActivity() {
     private fun notifyUserActivity() {
         if (::displayPowerController.isInitialized) {displayPowerController.onUserActivity()}
         // This is head-up session policy, so it remains in MainActivity for now.
-        cancelHeadUpWakeSession()
+        headUpSessionController.onUserActivity()
     }
 
     private fun saveWidgetStateDebounced() {
@@ -1293,21 +1282,17 @@ class MainActivity : AppCompatActivity() {
             // Clear the flags immediately
             GlassesService.pendingHeadUpWake = false
 
-            // Mark this as a head-up wake session
-            isHeadUpWakeSession = true
-
-            // Start auto-finish timer
-            startHeadUpWakeAutoFinishTimer(wakeDurationMs)
+            headUpSessionController.start(wakeDurationMs)
 
             // Ensure internal state wakes when resumed from service-triggered head-up wake.
             if (::displayPowerController.isInitialized && displayPowerController.state != WakeSleepManager.DisplayState.WAKE) {
-                displayPowerController.transitionTo(WakeSleepManager.DisplayState.WAKE)
+                displayPowerController.transitionTo(
+                    WakeSleepManager.DisplayState.WAKE,
+                    reason = "head_up_wake_resume"
+                )
             }
 
             widgetContainer.onHeadUpWake()
-            if (::dataSyncCoordinator.isInitialized) {
-                dataSyncCoordinator.onDisplayWake("head_up_wake_resume")
-            }
         }
 
         // Hardware action-button wake can resume the activity without an internal
@@ -1325,57 +1310,6 @@ class MainActivity : AppCompatActivity() {
         if (::googleAuthCoordinator.isInitialized) {googleAuthCoordinator.refreshStateSilently(this)}
     }
 
-    /**
-     * Start the auto-finish timer for head-up wake sessions.
-     * When the timer expires, the activity will finish() to return to the glasses' lock screen.
-     */
-    private fun startHeadUpWakeAutoFinishTimer(wakeDurationMs: Long) {
-        // Cancel any existing timer
-        cancelHeadUpWakeAutoFinishTimer()
-
-        Log.d(TAG, "Head-up wake auto-finish timer started for ${wakeDurationMs}ms")
-
-        headUpWakeAutoFinishRunnable = Runnable {
-            if (isHeadUpWakeSession) {
-                Log.d(TAG, "Head-up wake timer expired - transitioning to OFF state (staying in foreground)")
-                isHeadUpWakeSession = false
-
-                // Instead of leaving the activity (which causes the launcher to force-stop us),
-                // we stay in foreground but transition to the OFF display state.
-                // This shows a black screen just like when the hardware button turns off the display,
-                // but keeps our app alive so head-up motion can wake it again instantly.
-                if (::displayPowerController.isInitialized) {
-                    displayPowerController.transitionTo(WakeSleepManager.DisplayState.OFF)
-                    Log.d(TAG, "Transitioned to OFF state - app stays in foreground with black screen")
-                }
-            }
-        }
-        handler.postDelayed(headUpWakeAutoFinishRunnable!!, wakeDurationMs)
-    }
-
-    /**
-     * Cancel the head-up wake auto-finish timer.
-     * Called when user interacts with the screen (to keep it open).
-     */
-    private fun cancelHeadUpWakeAutoFinishTimer() {
-        headUpWakeAutoFinishRunnable?.let {
-            handler.removeCallbacks(it)
-            headUpWakeAutoFinishRunnable = null
-        }
-    }
-
-    /**
-     * Cancel head-up wake session - user has interacted, so keep screen on normally.
-     * This converts a head-up wake session into a normal session.
-     */
-    private fun cancelHeadUpWakeSession() {
-        if (isHeadUpWakeSession) {
-            Log.d(TAG, "User activity detected - converting head-up wake session to normal session")
-            isHeadUpWakeSession = false
-            cancelHeadUpWakeAutoFinishTimer()
-        }
-    }
-
     override fun onPause() {
         super.onPause()
         binocularView.onPause()
@@ -1387,8 +1321,8 @@ class MainActivity : AppCompatActivity() {
         saveWidgetState()
 
         // Cancel head-up wake auto-finish timer (activity is already going to background)
-        cancelHeadUpWakeAutoFinishTimer()
-        isHeadUpWakeSession = false
+        headUpSessionController.cancel()
+        locationSpeedController.stopLocationUpdates()
 
         // Disable the activity's own head-up wake manager
         // The service will take over head-up detection when we're in background
@@ -1410,13 +1344,6 @@ class MainActivity : AppCompatActivity() {
         // onResume() will check GlassesService.pendingHeadUpWake after this returns
     }
 
-    override fun onStop() {
-        super.onStop()
-        
-        // Also save in onStop for extra safety
-        saveWidgetState()
-    }
-
     override fun onDestroy() {
         // Flush the last persistent mutation even when the activity is destroyed without a preceding pause/stop callback.
         if (::persistenceManager.isInitialized) saveWidgetState()
@@ -1424,15 +1351,13 @@ class MainActivity : AppCompatActivity() {
         if (::browserRoutingCoordinator.isInitialized) browserRoutingCoordinator.release()
         if (::assistantNetworkLease.isInitialized) assistantNetworkLease.close()
 
-        super.onDestroy()
-
         if (::phoneConnectionCoordinator.isInitialized) {phoneConnectionCoordinator.release()}
 
         GlassesService.stop(this)
         binocularView.onDestroy()
-        locationSpeedController.stopLocationUpdates() // Stop local speed/location updates
+        locationSpeedController.release() // Stop local speed/location updates
         brightnessController.onDestroy() // Stop brightness control updates
-        cancelHeadUpWakeAutoFinishTimer() // Cancel head-up wake auto-finish timer
+        if (::headUpSessionController.isInitialized) headUpSessionController.release()
 
         if (::displayPowerController.isInitialized) {displayPowerController.release()} // Stop display power control updates
         if (::inputCoordinator.isInitialized) {inputCoordinator.release()} // Clean up input coordinator callbacks
@@ -1446,6 +1371,7 @@ class MainActivity : AppCompatActivity() {
         if (::headUpWakeManager.isInitialized) {headUpWakeManager.release()} // Clean up head-up wake manager
         if (::threeDofManager.isInitialized) {threeDofManager.release()} // Clean up 3DOF manager
         if (::tapGestureDetector.isInitialized) {tapGestureDetector.release()} // Clean up tap gesture detector
+        super.onDestroy()
     }
 
     override fun onTrimMemory(level: Int) {
@@ -1551,11 +1477,6 @@ class MainActivity : AppCompatActivity() {
         return super.onKeyDown(keyCode, event)
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (::fileImportCoordinator.isInitialized) {fileImportCoordinator.onActivityResult(requestCode, resultCode, data)}
-    }
-
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
@@ -1572,10 +1493,4 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun startClient() {
-        Log.d(TAG, "startClient called, isPhoneMode=$isPhoneMode")
-        if (isPhoneMode && ::phoneConnectionCoordinator.isInitialized) {
-            phoneConnectionCoordinator.start()
-        }
-    }
 }

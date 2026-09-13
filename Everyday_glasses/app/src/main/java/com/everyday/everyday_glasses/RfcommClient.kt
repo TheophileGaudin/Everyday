@@ -36,6 +36,7 @@ import java.io.InputStreamReader
 import java.io.OutputStream
 import java.util.*
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -43,7 +44,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Can also send messages to the phone (e.g., text field focus state).
  * Connection is kept alive during pause to allow instant resuming.
  */
-class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTransport, GlassesDestinationSearchTransport {
+class RfcommClient(
+    private val context: Context,
+    private val preferredPhoneAddress: String? = null
+) : SyncMessenger, GlassesRouteTransport, GlassesDestinationSearchTransport {
 
     companion object {
         private const val TAG = "RfcommClient"
@@ -71,14 +75,13 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
 
     private val isRunning = AtomicBoolean(false)
     private val isConnected = AtomicBoolean(false)
+    @Volatile
+    private var released = false
+    private val lifecycleLock = Any()
     private val writerExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "RfcommWriter").apply { isDaemon = true }
     }
 
-    // @Volatile ensures the background thread sees changes from the UI thread immediately
-    @Volatile
-    var isPaused: Boolean = false
-    
     // Battery monitoring
     private var batteryUpdateRunnable: Runnable? = null
     private val batteryWritePending = AtomicBoolean(false)
@@ -87,23 +90,24 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
     private val handler = Handler(Looper.getMainLooper())
 
     fun start(): Boolean {
+        if (released) return false
         if (isRunning.get()) return true
 
         val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         bluetoothAdapter = bluetoothManager.adapter
 
         if (bluetoothAdapter == null) {
-            transportConnectionListener?.onStatusChanged("Bluetooth not supported")
+            if (!released) transportConnectionListener?.onStatusChanged("Bluetooth not supported")
             return false
         }
 
         if (!hasPermissions()) {
-            transportConnectionListener?.onStatusChanged("Missing permissions")
+            if (!released) transportConnectionListener?.onStatusChanged("Missing permissions")
             return false
         }
 
         if (bluetoothAdapter?.isEnabled != true) {
-            transportConnectionListener?.onStatusChanged("Bluetooth disabled")
+            if (!released) transportConnectionListener?.onStatusChanged("Bluetooth disabled")
             return false
         }
 
@@ -114,7 +118,31 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
 
     override fun isConnected(): Boolean = isConnected.get()
 
+    /** Stops the connection and publishes the normal disconnection callbacks. */
     fun stop() {
+        stopInternal(notify = true)
+    }
+
+    /**
+     * Permanently releases this client.
+     *
+     * Release is intentionally silent: an Activity being destroyed must not receive
+     * late connection or message callbacks while its views are going away.
+     */
+    fun release() {
+        synchronized(lifecycleLock) {
+            if (released) return
+            released = true
+            // Make the state transition and queue removal atomic with postIfActive(),
+            // so a background RX thread cannot enqueue work after this cleanup.
+            handler.removeCallbacksAndMessages(null)
+        }
+        stopInternal(notify = false)
+        clearListeners()
+        writerExecutor.shutdownNow()
+    }
+
+    private fun stopInternal(notify: Boolean) {
         isRunning.set(false)
         isConnected.set(false)
         
@@ -127,8 +155,23 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
         socket = null
         outputStream = null
 
-        transportConnectionListener?.onStatusChanged("Disconnected")
-        transportConnectionListener?.onConnectionChanged(false)
+        if (notify && !released) {
+            transportConnectionListener?.onStatusChanged("Disconnected")
+            transportConnectionListener?.onConnectionChanged(false)
+        }
+    }
+
+    private fun clearListeners() {
+        transportConnectionListener = null
+        remoteInputListener = null
+        remoteContentListener = null
+        mirrorSessionListener = null
+        remoteAuthListener = null
+        syncMessageListener = null
+        routeMessageListener = null
+        destinationSearchMessageListener = null
+        subtitleMessageListener = null
+        assistantControlListener = null
     }
 
     /**
@@ -223,21 +266,25 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
         operation: String,
         onComplete: (() -> Unit)? = null
     ): Boolean {
-        if (!isConnected.get()) return false
+        if (released || !isConnected.get()) return false
         val output = outputStream ?: return false
 
-        writerExecutor.execute {
-            try {
-                if (!isConnected.get() || outputStream !== output) return@execute
-                synchronized(output) {
-                    output.write(message.toByteArray())
-                    output.flush()
+        try {
+            writerExecutor.execute {
+                try {
+                    if (released || !isConnected.get() || outputStream !== output) return@execute
+                    synchronized(output) {
+                        output.write(message.toByteArray())
+                        output.flush()
+                    }
+                } catch (e: IOException) {
+                    Log.e(TAG, "Failed to $operation", e)
+                } finally {
+                    onComplete?.invoke()
                 }
-            } catch (e: IOException) {
-                Log.e(TAG, "Failed to $operation", e)
-            } finally {
-                onComplete?.invoke()
             }
+        } catch (_: RejectedExecutionException) {
+            return false
         }
         return true
     }
@@ -283,18 +330,18 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
         // Create new runnable
         batteryUpdateRunnable = object : Runnable {
             override fun run() {
-                if (isConnected.get() && !isPaused) {
+                if (!released && isConnected.get()) {
                     sendBatteryUpdate()
-                    handler.postDelayed(this, BATTERY_UPDATE_INTERVAL_MS)
+                    postDelayedIfActive(this, BATTERY_UPDATE_INTERVAL_MS)
                 }
             }
         }
         
         // Send initial update immediately
-        handler.post { sendBatteryUpdate() }
+        postIfActive { sendBatteryUpdate() }
         
         // Schedule periodic updates
-        handler.postDelayed(batteryUpdateRunnable!!, BATTERY_UPDATE_INTERVAL_MS)
+        postDelayedIfActive(batteryUpdateRunnable!!, BATTERY_UPDATE_INTERVAL_MS)
     }
 
     private fun hasPermissions(): Boolean {
@@ -309,18 +356,18 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
     @SuppressLint("MissingPermission")
     private fun connectToPhone() {
         Thread {
-            while (isRunning.get() && !isConnected.get()) {
+            while (!released && isRunning.get() && !isConnected.get()) {
                 val phone = findPairedPhone()
 
                 if (phone == null) {
-                    handler.post { transportConnectionListener?.onStatusChanged("No paired phone found") }
+                    postIfActive { transportConnectionListener?.onStatusChanged("No paired phone found") }
                     Thread.sleep(3000)
                     continue
                 }
 
                 // Grab name safely here to use in the handler
                 val deviceName = phone.name ?: phone.address
-                handler.post { transportConnectionListener?.onStatusChanged("Connecting to $deviceName...") }
+                postIfActive { transportConnectionListener?.onStatusChanged("Connecting to $deviceName...") }
 
                 try {
                     // Use insecure socket for better compatibility
@@ -332,12 +379,19 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
                     socket?.connect()
                     Log.d(TAG, "Connect returned, isConnected=${socket?.isConnected}")
 
+                    if (released || !isRunning.get()) {
+                        try { socket?.close() } catch (_: IOException) {}
+                        socket = null
+                        outputStream = null
+                        return@Thread
+                    }
+
                     if (socket?.isConnected == true) {
                         isConnected.set(true)
                         outputStream = socket?.outputStream
                         Log.d(TAG, "Successfully connected to phone!")
 
-                        handler.post {
+                        postIfActive {
                             transportConnectionListener?.onStatusChanged("Connected")
                             transportConnectionListener?.onConnectionChanged(true)
                         }
@@ -352,14 +406,14 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
 
                 } catch (e: IOException) {
                     Log.e(TAG, "Connection failed: ${e.message}")
-                    handler.post { transportConnectionListener?.onStatusChanged("Connection failed, retrying...") }
+                    postIfActive { transportConnectionListener?.onStatusChanged("Connection failed, retrying...") }
                     try { socket?.close() } catch (e2: IOException) {}
                     socket = null
                     outputStream = null
                     Thread.sleep(2000)
                 } catch (e: SecurityException) {
                     Log.e(TAG, "Permission error: ${e.message}")
-                    handler.post { transportConnectionListener?.onStatusChanged("Permission error") }
+                    postIfActive { transportConnectionListener?.onStatusChanged("Permission error") }
                     break
                 }
             }
@@ -376,20 +430,33 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
             Log.d(TAG, "Found paired device: ${device.name} [${device.address}]")
         }
 
-        // Look for a phone-like device (not glasses or watches)
-        // Prioritize devices that look like phones
-        val likelyPhone = pairedDevices.find { device ->
+        preferredPhoneAddress?.let { preferredAddress ->
+            pairedDevices.firstOrNull { it.address.equals(preferredAddress, ignoreCase = true) }
+                ?.let { preferred ->
+                    Log.d(TAG, "Selected configured phone: ${preferred.name ?: preferred.address}")
+                    return preferred
+                }
+        }
+
+        // Exclude known non-phone devices. Do not silently choose the first remaining
+        // device when several candidates exist: that can connect to a watch, headset,
+        // or a second phone by accident.
+        val phoneLikeDevices = pairedDevices.filter { device ->
             val name = device.name?.lowercase() ?: ""
-            // Exclude known non-phone devices
             !name.contains("rayneo") && 
             !name.contains("glasses") && 
             !name.contains("watch") && 
             !name.contains("buds") && 
             !name.contains("headphone")
         }
-        
-        Log.d(TAG, "Selected device: ${likelyPhone?.name ?: "none found"}")
-        return likelyPhone ?: pairedDevices.firstOrNull()
+
+        val phoneClassDevices = phoneLikeDevices.filter { device ->
+            device.bluetoothClass?.majorDeviceClass == android.bluetooth.BluetoothClass.Device.Major.PHONE
+        }
+        val candidates = if (phoneClassDevices.isNotEmpty()) phoneClassDevices else phoneLikeDevices
+        val selected = candidates.singleOrNull()
+        Log.d(TAG, "Selected device: ${selected?.name ?: "none (candidates=${candidates.size})"}")
+        return selected
     }
 
     private fun receiveData() {
@@ -399,7 +466,7 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
                 val reader = BufferedReader(InputStreamReader(stream))
 
                 while (isConnected.get() && isRunning.get()) {
-                    // We read the line regardless of pause state to clear the buffer
+                    // Keep reading continuously so the socket buffer cannot fill.
                     val line = reader.readLine() ?: break
 
                     // Log ALL received lines for debugging
@@ -407,12 +474,6 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
 
                     if (line.length > TransportProtocol.MAX_MESSAGE_CHARS) {
                         Log.w(TAG, "RX rejected oversized message bytes=${line.length}")
-                        continue
-                    }
-
-                    // IF PAUSED: Skip processing, but keep the loop alive
-                    if (isPaused) {
-                        logRxThrottled(kind = "paused_drop", size = line.length, summary = "paused=true (dropped)")
                         continue
                     }
 
@@ -431,6 +492,7 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
                 Log.d(TAG, "Connection lost")
             }
 
+            if (released) return@Thread
             isConnected.set(false)
             outputStream = null
             
@@ -442,14 +504,14 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
             flushRxLogOnDisconnect("connection_lost")
 
 
-            handler.post {
+            postIfActive {
                 transportConnectionListener?.onStatusChanged("Disconnected")
                 transportConnectionListener?.onConnectionChanged(false)
             }
 
-            if (isRunning.get()) {
-                handler.postDelayed({
-                    if (isRunning.get() && !isConnected.get()) {
+            if (!released && isRunning.get()) {
+                postDelayedIfActive({
+                    if (!released && isRunning.get() && !isConnected.get()) {
                         transportConnectionListener?.onStatusChanged("Reconnecting...")
                         connectToPhone()
                     }
@@ -460,14 +522,14 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
 
     private fun routeMessage(message: TransportMessage) {
         when (message) {
-            is TransportMessage.Pointer -> handler.post { remoteInputListener?.onPointerReceived(message) }
-            is TransportMessage.KeyInput -> handler.post { remoteInputListener?.onKeyReceived(message.key) }
-            is TransportMessage.LongPress -> handler.post { remoteInputListener?.onLongPressWithClipboard(message.clipboard) }
-            is TransportMessage.ClipboardUpdate -> handler.post { remoteInputListener?.onClipboardReceived(message.content) }
-            is TransportMessage.MirrorState -> handler.post {
+            is TransportMessage.Pointer -> postIfActive { remoteInputListener?.onPointerReceived(message) }
+            is TransportMessage.KeyInput -> postIfActive { remoteInputListener?.onKeyReceived(message.key) }
+            is TransportMessage.LongPress -> postIfActive { remoteInputListener?.onLongPressWithClipboard(message.clipboard) }
+            is TransportMessage.ClipboardUpdate -> postIfActive { remoteInputListener?.onClipboardReceived(message.content) }
+            is TransportMessage.MirrorState -> postIfActive {
                 mirrorSessionListener?.onMirrorStateChanged(message.enabled, message.ip, message.wifiDirect)
             }
-            is TransportMessage.OpenBrowser -> handler.post { remoteContentListener?.onOpenBrowserRequested(message.address) }
+            is TransportMessage.OpenBrowser -> postIfActive { remoteContentListener?.onOpenBrowserRequested(message.address) }
             is TransportMessage.GoogleAuthState -> {
                 val status = when (message.status) {
                     TransportGoogleAuthStatus.SIGNED_OUT -> GooglePhoneAuthStatus.SIGNED_OUT
@@ -476,13 +538,13 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
                     TransportGoogleAuthStatus.ERROR -> GooglePhoneAuthStatus.ERROR
                 }
                 val account = message.account?.let { GoogleAccountSummary(it.email, it.displayName) }
-                handler.post { remoteAuthListener?.onGoogleAuthStateReceived(status, account, message.detail) }
+                postIfActive { remoteAuthListener?.onGoogleAuthStateReceived(status, account, message.detail) }
             }
-            is TransportMessage.DeviceStatus -> handler.post { remoteContentListener?.onDeviceStatusReceived(message) }
-            is TransportMessage.SyncSnapshotMessage -> handler.post { syncMessageListener?.onSyncSnapshotReceived(message.snapshot) }
-            is TransportMessage.SyncErrorMessage -> handler.post { syncMessageListener?.onSyncErrorReceived(message.error) }
-            is TransportMessage.SubtitleStatusMessage -> handler.post { subtitleMessageListener?.onSubtitleStatusReceived(message.status) }
-            is TransportMessage.SubtitleTranscriptMessage -> handler.post {
+            is TransportMessage.DeviceStatus -> postIfActive { remoteContentListener?.onDeviceStatusReceived(message) }
+            is TransportMessage.SyncSnapshotMessage -> postIfActive { syncMessageListener?.onSyncSnapshotReceived(message.snapshot) }
+            is TransportMessage.SyncErrorMessage -> postIfActive { syncMessageListener?.onSyncErrorReceived(message.error) }
+            is TransportMessage.SubtitleStatusMessage -> postIfActive { subtitleMessageListener?.onSubtitleStatusReceived(message.status) }
+            is TransportMessage.SubtitleTranscriptMessage -> postIfActive {
                 subtitleMessageListener?.onSubtitleTranscriptReceived(message.transcript)
             }
             is TransportMessage.AssistantControlMessage -> {
@@ -493,19 +555,19 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
                             "session=${message.control.sessionId}"
                     )
                 }
-                handler.post { assistantControlListener?.onAssistantControlReceived(message.control) }
+                postIfActive { assistantControlListener?.onAssistantControlReceived(message.control) }
             }
             is TransportMessage.AssistantStatusMessage -> Unit
-            is TransportMessage.RouteResultMessage -> handler.post {
+            is TransportMessage.RouteResultMessage -> postIfActive {
                 routeMessageListener?.onRouteResultReceived(message.result)
             }
-            is TransportMessage.RouteErrorMessage -> handler.post {
+            is TransportMessage.RouteErrorMessage -> postIfActive {
                 routeMessageListener?.onRouteErrorReceived(message.error)
             }
-            is TransportMessage.DestinationSearchResultMessage -> handler.post {
+            is TransportMessage.DestinationSearchResultMessage -> postIfActive {
                 destinationSearchMessageListener?.onDestinationSearchResultReceived(message.result)
             }
-            is TransportMessage.DestinationSearchErrorMessage -> handler.post {
+            is TransportMessage.DestinationSearchErrorMessage -> postIfActive {
                 destinationSearchMessageListener?.onDestinationSearchErrorReceived(message.error)
             }
             is TransportMessage.Image -> {
@@ -514,9 +576,25 @@ class RfcommClient(private val context: Context) : SyncMessenger, GlassesRouteTr
                         Log.w(TAG, "RX rejected kind=${message.kind}: invalid base64 image")
                         return
                     }
-                handler.post { remoteContentListener?.onImageReceived(bytes, message.fileName) }
+                postIfActive { remoteContentListener?.onImageReceived(bytes, message.fileName) }
             }
             else -> Log.w(TAG, "RX unexpected kind=${message.kind} for glasses endpoint")
+        }
+    }
+
+    private fun postIfActive(action: () -> Unit): Boolean {
+        synchronized(lifecycleLock) {
+            if (released) return false
+            return handler.post {
+                if (!released) action()
+            }
+        }
+    }
+
+    private fun postDelayedIfActive(action: Runnable, delayMs: Long): Boolean {
+        synchronized(lifecycleLock) {
+            if (released) return false
+            return handler.postDelayed(action, delayMs)
         }
     }
 

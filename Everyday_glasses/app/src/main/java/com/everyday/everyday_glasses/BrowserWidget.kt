@@ -2482,7 +2482,6 @@ class BrowserWidget(
 
         // Use unified hover state from BaseWidget
         val baseResult = updateHoverState(px, py)
-        updateContentInteractionTarget(px, py)
 
         // Update nav button specific hovers (for visual feedback)
         if (navBarBounds.contains(px, py)) {

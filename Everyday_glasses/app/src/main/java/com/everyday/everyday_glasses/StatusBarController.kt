@@ -21,6 +21,11 @@ data class StatusBarDisplayState(
     val date: String = "-- --- ----"
 )
 
+internal fun delayUntilNextMinute(nowMs: Long): Long {
+    val remainder = Math.floorMod(nowMs, 60_000L)
+    return if (remainder == 0L) 60_000L else 60_000L - remainder
+}
+
 /** Application reactions required by StatusBarController. */
 interface StatusBarControllerCallbacks {
     /** Sends a complete presentation snapshot to WidgetContainer. */
@@ -45,8 +50,6 @@ class StatusBarController(
 
     companion object {
         private const val TAG = "StatusBarController"
-        private const val BATTERY_UPDATE_INTERVAL_MS = 30_000L
-        private const val TIME_UPDATE_INTERVAL_MS = 1_000L
     }
 
     // ---------------------------------------------------------------------
@@ -58,8 +61,11 @@ class StatusBarController(
 
     private var state = StatusBarDisplayState()
     private var batteryStateReceiver: BroadcastReceiver? = null
-    private var glassesBatteryUpdateRunnable: Runnable? = null
     private var timeUpdateRunnable: Runnable? = null
+    private var lastChargingState: Boolean? = null
+
+    private val timeFormat = SimpleDateFormat("HH:mm", Locale.ENGLISH)
+    private val dateFormat = SimpleDateFormat("EEE dd MMM yyyy", Locale.ENGLISH)
 
     private var started = false
     private var released = false
@@ -75,10 +81,8 @@ class StatusBarController(
 
         registerBatteryStateReceiver()
         refreshClock()
-        refreshGlassesBattery()
         publishState()
 
-        startGlassesBatteryMonitoring()
         startTimeUpdates()
     }
 
@@ -86,9 +90,6 @@ class StatusBarController(
     fun release() {
         if (released) return
         released = true
-
-        glassesBatteryUpdateRunnable?.let(handler::removeCallbacks)
-        glassesBatteryUpdateRunnable = null
 
         timeUpdateRunnable?.let(handler::removeCallbacks)
         timeUpdateRunnable = null
@@ -123,8 +124,8 @@ class StatusBarController(
      * as a reconnection event.
      */
     fun onPhoneBatteryChanged(phoneBatteryPercent: Int) {
+        if (!state.isPhoneConnected) return
         state = state.copy(
-            isPhoneConnected = true,
             phoneBatteryPercent = phoneBatteryPercent
         )
         publishState()
@@ -137,30 +138,13 @@ class StatusBarController(
     fun refreshNow() {
         if (released) return
         refreshClock()
-        refreshGlassesBattery()
+        updateBatteryStateFromIntent(readStickyBatteryIntent(), publish = false)
         publishState()
     }
 
     // ---------------------------------------------------------------------
     // Periodic updates
     // ---------------------------------------------------------------------
-
-    private fun startGlassesBatteryMonitoring() {
-        glassesBatteryUpdateRunnable = object : Runnable {
-            override fun run() {
-                if (released) return
-
-                refreshGlassesBattery()
-                publishState()
-                handler.postDelayed(this, BATTERY_UPDATE_INTERVAL_MS)
-            }
-        }
-
-        handler.postDelayed(
-            glassesBatteryUpdateRunnable!!,
-            BATTERY_UPDATE_INTERVAL_MS
-        )
-    }
 
     private fun startTimeUpdates() {
         timeUpdateRunnable = object : Runnable {
@@ -169,23 +153,20 @@ class StatusBarController(
 
                 refreshClock()
                 publishState()
-                handler.postDelayed(this, TIME_UPDATE_INTERVAL_MS)
+                handler.postDelayed(this, delayUntilNextMinute(System.currentTimeMillis()))
             }
         }
 
-        handler.postDelayed(timeUpdateRunnable!!, TIME_UPDATE_INTERVAL_MS)
+        handler.postDelayed(
+            timeUpdateRunnable!!,
+            delayUntilNextMinute(System.currentTimeMillis())
+        )
     }
 
     private fun refreshClock() {
         state = state.copy(
             time = getCurrentTime(),
             date = getCurrentDate()
-        )
-    }
-
-    private fun refreshGlassesBattery() {
-        state = state.copy(
-            glassesBatteryPercent = getGlassesBatteryLevel()
         )
     }
 
@@ -199,34 +180,25 @@ class StatusBarController(
     // ---------------------------------------------------------------------
 
     private fun getCurrentTime(): String {
-        val format = SimpleDateFormat("HH:mm", Locale.ENGLISH)
-        return format.format(Date())
+        return timeFormat.format(Date())
     }
 
     private fun getCurrentDate(): String {
-        val format = SimpleDateFormat("EEE dd MMM yyyy", Locale.ENGLISH)
-        return format.format(Date())
+        return dateFormat.format(Date())
     }
 
-    private fun getGlassesBatteryLevel(): Int {
-        val batteryIntent = appContext.registerReceiver(
+    private fun readStickyBatteryIntent(): Intent? =
+        appContext.registerReceiver(
             null,
             IntentFilter(Intent.ACTION_BATTERY_CHANGED)
         )
-
-        return batteryPercentFromIntent(batteryIntent)
-    }
 
     private fun registerBatteryStateReceiver() {
-        val stickyBatteryIntent = appContext.registerReceiver(
-            null,
-            IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-        )
-        updateBatteryStateFromIntent(stickyBatteryIntent)
+        updateBatteryStateFromIntent(readStickyBatteryIntent(), publish = false)
 
         batteryStateReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                updateBatteryStateFromIntent(intent)
+                updateBatteryStateFromIntent(intent, publish = true)
             }
         }
 
@@ -236,13 +208,17 @@ class StatusBarController(
         )
     }
 
-    private fun updateBatteryStateFromIntent(intent: Intent?) {
-        callbacks.onChargingChanged(isChargingFromIntent(intent))
+    private fun updateBatteryStateFromIntent(intent: Intent?, publish: Boolean) {
+        val charging = isChargingFromIntent(intent)
+        if (lastChargingState != charging) {
+            lastChargingState = charging
+            callbacks.onChargingChanged(charging)
+        }
 
         val batteryPercent = batteryPercentFromIntent(intent)
-        if (batteryPercent in 0..100) {
+        if (batteryPercent in 0..100 && batteryPercent != state.glassesBatteryPercent) {
             state = state.copy(glassesBatteryPercent = batteryPercent)
-            publishState()
+            if (publish) publishState()
         }
     }
 

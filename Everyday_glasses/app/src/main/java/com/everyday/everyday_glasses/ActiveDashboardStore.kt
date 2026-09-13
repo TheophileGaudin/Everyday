@@ -35,21 +35,26 @@ class ActiveDashboardStore(
     }
 
     private var pendingSave: Runnable? = null
+    private var dirty = false
 
     fun load(): WidgetDocument.PersistedDashboard = WidgetPersistence.loadDashboard(context)
 
     /** Writes immediately, cancelling any pending debounced write. */
     fun saveNow(): Boolean {
         cancelPendingSave()
+        if (!dirty) return true
         if (!canSave()) {
             Log.d(TAG, "Skipping save: dashboard has not been restored yet")
             return false
         }
-        return WidgetPersistence.saveDashboard(context, captureDashboard())
+        val saved = WidgetPersistence.saveDashboard(context, captureDashboard())
+        if (saved) dirty = false
+        return saved
     }
 
     /** Writes once the dashboard has been quiet for [debounceMs]. */
     fun saveDebounced() {
+        dirty = true
         cancelPendingSave()
         val save = Runnable {
             pendingSave = null
@@ -59,7 +64,9 @@ class ActiveDashboardStore(
                 Log.d(TAG, "Skipping debounced save: dashboard has not been restored yet")
                 return@Runnable
             }
-            WidgetPersistence.saveDashboard(context, captureDashboard())
+            if (WidgetPersistence.saveDashboard(context, captureDashboard())) {
+                dirty = false
+            }
         }
         pendingSave = save
         handler.postDelayed(save, debounceMs)

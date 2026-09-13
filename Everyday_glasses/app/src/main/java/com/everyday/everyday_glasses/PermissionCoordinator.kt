@@ -17,10 +17,16 @@ interface PermissionCoordinatorCallbacks {
     fun onLocationPermissionAvailable()
     fun onLocationPermissionDenied()
 
+    /** Called when Wi‑Fi Direct may be used (or already was available). */
+    fun onWifiDirectPermissionAvailable() {}
+
+    /** Called when the user declined the Wi‑Fi Direct permission request. */
+    fun onWifiDirectPermissionDenied() {}
+
     /**
      * Called after the file-browser permission route has completed. This
-     * preserves the current behavior of opening the browser even when a
-     * runtime media permission was denied so the widget can show its message.
+     * preserves the current behavior of opening the browser after a runtime
+     * storage result so the widget can show its own access message.
      */
     fun onFileBrowserAccessHandled()
 
@@ -42,9 +48,11 @@ class PermissionCoordinator(
         private const val REQUEST_STARTUP_PERMISSIONS = 1
         private const val REQUEST_STORAGE_PERMISSION = 2
         private const val REQUEST_ASSISTANT_AUDIO_PERMISSION = 3
+        private const val REQUEST_WIFI_DIRECT_PERMISSION = 4
     }
 
     private var openFileBrowserAfterAllFilesGrant = false
+    private var wifiDirectPermissionRequestInFlight = false
     private var released = false
 
     // ---------------------------------------------------------------------
@@ -63,6 +71,16 @@ class PermissionCoordinator(
         hasPermission(Manifest.permission.ACCESS_FINE_LOCATION) ||
                 hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
 
+    /**
+     * Returns whether the runtime permission required by Wi‑Fi Direct is
+     * currently available. Android 12 and below use location permission for
+     * peer discovery; Android 13+ uses NEARBY_WIFI_DEVICES.
+     */
+    fun hasWifiDirectPermission(): Boolean =
+        PermissionRequestPolicy.wifiDirectRuntimePermission(Build.VERSION.SDK_INT)
+            ?.let(::hasPermission)
+            ?: hasAnyLocationPermission()
+
     fun hasMicrophonePermission(): Boolean =
         hasPermission(Manifest.permission.RECORD_AUDIO)
 
@@ -75,12 +93,9 @@ class PermissionCoordinator(
     fun hasFileBrowserAccess(): Boolean {
         val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            hasPermission(Manifest.permission.READ_MEDIA_IMAGES) &&
-                    hasPermission(Manifest.permission.READ_MEDIA_VIDEO)
-        } else {
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             hasPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
-        }
+        } else true
 
         Log.d(
             TAG,
@@ -94,20 +109,12 @@ class PermissionCoordinator(
     // ---------------------------------------------------------------------
 
     /**
-     * Preserves MainActivity's current startup behavior:
-     *
-     * - If Bluetooth and location already exist, start the phone immediately
-     *   and do not proactively request optional storage permission.
-     * - Otherwise request the current combined batch of missing Bluetooth,
-     *   location, and storage/media permissions.
+     * Requests only the permissions needed to start the phone connection and
+     * location pipeline. File/media access and Wi‑Fi Direct are feature-level
+     * permissions and are requested when those features are invoked.
      */
     fun handleStartupPermissions() {
         if (released) return
-
-        if (hasBluetoothPermission() && hasAnyLocationPermission()) {
-            callbacks.onBluetoothPermissionAvailable()
-            return
-        }
 
         val missingPermissions = buildStartupPermissionRequest()
         if (missingPermissions.isNotEmpty()) {
@@ -124,46 +131,8 @@ class PermissionCoordinator(
         dispatchCurrentStartupCapabilities()
     }
 
-    private fun buildStartupPermissionRequest(): List<String> = buildList {
-        addMissingBluetoothPermissions(this)
-        addMissingLocationPermissions(this)
-        addMissingStartupStoragePermissions(this)
-    }
-
-    private fun addMissingBluetoothPermissions(target: MutableList<String>) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (!hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
-                target += Manifest.permission.BLUETOOTH_CONNECT
-            }
-        } else if (!hasPermission(Manifest.permission.BLUETOOTH)) {
-            target += Manifest.permission.BLUETOOTH
-            target += Manifest.permission.BLUETOOTH_ADMIN
-        }
-    }
-
-    private fun addMissingLocationPermissions(target: MutableList<String>) {
-        if (!hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) {
-            target += Manifest.permission.ACCESS_FINE_LOCATION
-        }
-        if (!hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)) {
-            target += Manifest.permission.ACCESS_COARSE_LOCATION
-        }
-    }
-
-    private fun addMissingStartupStoragePermissions(target: MutableList<String>) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (!hasPermission(Manifest.permission.READ_MEDIA_IMAGES)) {
-                target += Manifest.permission.READ_MEDIA_IMAGES
-            }
-            if (!hasPermission(Manifest.permission.READ_MEDIA_VIDEO)) {
-                target += Manifest.permission.READ_MEDIA_VIDEO
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (!hasPermission(Manifest.permission.READ_EXTERNAL_STORAGE)) {
-                target += Manifest.permission.READ_EXTERNAL_STORAGE
-            }
-        }
-    }
+    private fun buildStartupPermissionRequest(): List<String> =
+        PermissionRequestPolicy.startupPermissions(Build.VERSION.SDK_INT, ::hasPermission)
 
     private fun dispatchCurrentStartupCapabilities() {
         if (hasBluetoothPermission()) {
@@ -175,6 +144,37 @@ class PermissionCoordinator(
         } else {
             callbacks.onLocationPermissionDenied()
         }
+    }
+
+    /**
+     * Requests Wi‑Fi Direct's runtime permission without coupling it to app
+     * startup. The callback is delivered immediately when already granted.
+     */
+    fun requestWifiDirectPermission() {
+        if (released || wifiDirectPermissionRequestInFlight) return
+
+        if (hasWifiDirectPermission()) {
+            callbacks.onWifiDirectPermissionAvailable()
+            return
+        }
+
+        val permission = PermissionRequestPolicy.wifiDirectRuntimePermission(
+            Build.VERSION.SDK_INT
+        )
+
+        // On Android 12 and below location is the Wi‑Fi Direct gate and is
+        // already part of the independent startup capability flow.
+        if (permission == null) {
+            callbacks.onWifiDirectPermissionDenied()
+            return
+        }
+
+        wifiDirectPermissionRequestInFlight = true
+        ActivityCompat.requestPermissions(
+            activity,
+            arrayOf(permission),
+            REQUEST_WIFI_DIRECT_PERMISSION
+        )
     }
 
     // ---------------------------------------------------------------------
@@ -200,23 +200,20 @@ class PermissionCoordinator(
     fun requestStoragePermissions() {
         if (released) return
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (hasFileBrowserAccess()) {
+                callbacks.onFileBrowserAccessHandled()
+            } else {
+                requestAllFilesAccessForBrowser()
+            }
+            return
+        }
+
         val missingPermissions = buildList {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                // Preserved from current behavior even though notification
-                // permission is not technically a storage permission.
-                if (!hasPermission(Manifest.permission.POST_NOTIFICATIONS)) {
-                    add(Manifest.permission.POST_NOTIFICATIONS)
-                }
-                if (!hasPermission(Manifest.permission.READ_MEDIA_IMAGES)) {
-                    add(Manifest.permission.READ_MEDIA_IMAGES)
-                }
-                if (!hasPermission(Manifest.permission.READ_MEDIA_VIDEO)) {
-                    add(Manifest.permission.READ_MEDIA_VIDEO)
-                }
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                if (!hasPermission(Manifest.permission.READ_EXTERNAL_STORAGE)) {
-                    add(Manifest.permission.READ_EXTERNAL_STORAGE)
-                }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                !hasPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
+            ) {
+                add(Manifest.permission.READ_EXTERNAL_STORAGE)
             }
         }
 
@@ -238,6 +235,8 @@ class PermissionCoordinator(
             requestStoragePermissions()
             return
         }
+
+        if (openFileBrowserAfterAllFilesGrant) return
 
         openFileBrowserAfterAllFilesGrant = true
 
@@ -262,10 +261,14 @@ class PermissionCoordinator(
     fun onActivityResumed() {
         if (released || !openFileBrowserAfterAllFilesGrant) return
 
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
-            Environment.isExternalStorageManager()
-        ) {
-            openFileBrowserAfterAllFilesGrant = false
+        // A settings activity returning to the foreground is the only result
+        // signal available with the legacy lifecycle API. Consume the pending
+        // request on every return, including Back/denial, so a later unrelated
+        // grant cannot unexpectedly open the browser.
+        val accessGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
+                Environment.isExternalStorageManager()
+        openFileBrowserAfterAllFilesGrant = false
+        if (accessGranted) {
             callbacks.onFileBrowserAccessHandled()
         }
     }
@@ -306,6 +309,16 @@ class PermissionCoordinator(
                 true
             }
 
+            REQUEST_WIFI_DIRECT_PERMISSION -> {
+                wifiDirectPermissionRequestInFlight = false
+                if (hasWifiDirectPermission()) {
+                    callbacks.onWifiDirectPermissionAvailable()
+                } else {
+                    callbacks.onWifiDirectPermissionDenied()
+                }
+                true
+            }
+
             REQUEST_STORAGE_PERMISSION -> {
                 logStorageResults(permissions, grantResults)
 
@@ -331,7 +344,9 @@ class PermissionCoordinator(
         grantResults: IntArray
     ) {
         permissions.forEachIndexed { index, permission ->
-            if (permission !in storageRuntimePermissions()) return@forEachIndexed
+            if (permission != Manifest.permission.READ_EXTERNAL_STORAGE) {
+                return@forEachIndexed
+            }
 
             val granted =
                 grantResults.getOrNull(index) == PackageManager.PERMISSION_GRANTED
@@ -343,12 +358,6 @@ class PermissionCoordinator(
         }
     }
 
-    private fun storageRuntimePermissions(): Set<String> = setOf(
-        Manifest.permission.READ_MEDIA_IMAGES,
-        Manifest.permission.READ_MEDIA_VIDEO,
-        Manifest.permission.READ_EXTERNAL_STORAGE
-    )
-
     private fun hasPermission(permission: String): Boolean =
         ActivityCompat.checkSelfPermission(activity, permission) ==
                 PackageManager.PERMISSION_GRANTED
@@ -356,5 +365,6 @@ class PermissionCoordinator(
     fun release() {
         released = true
         openFileBrowserAfterAllFilesGrant = false
+        wifiDirectPermissionRequestInFlight = false
     }
 }

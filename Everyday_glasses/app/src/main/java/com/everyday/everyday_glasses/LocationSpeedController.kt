@@ -9,6 +9,7 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
+import android.os.CancellationSignal
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import com.everyday.shared.sync.LocationFix
@@ -61,6 +62,11 @@ class LocationSpeedController(
     private var lastSpeedQualityOk = false
     private var lastSpeedLogMs = 0L
     private var lastMissingPhoneSpeedLogMs = 0L
+    private var started = false
+    private var released = false
+    private var lifecycleGeneration = 0L
+    private var fallbackRequestInFlight = false
+    private var fallbackCancellationSignal: CancellationSignal? = null
 
 
     companion object {
@@ -329,20 +335,20 @@ class LocationSpeedController(
         if (now - lastSpeedLogMs >= SPEED_LOG_INTERVAL_MS) {
             lastSpeedLogMs = now
             speedLog {
-                "speed=${"speed=${String.format(Locale.ENGLISH, "%.2f", smoothedSpeedKmh)} km/h " +
-                        "moving=$isSpeedMoving quality=$qualityOk source=${if (hasReliableSensorSpeed) "sensor" else if (hasReliableEstimatedSpeed) "estimated" else "none"} " +
-                        "acc=${if (location.hasAccuracy()) String.format(Locale.ENGLISH, "%.1f", location.accuracy) else "na"}m " +
-                        "accLimit=${String.format(Locale.ENGLISH, "%.1f", maxAllowedAccuracyM)}m " +
-                        "sensor=${String.format(Locale.ENGLISH, "%.2f", sensorKmh)}km/h " +
-                        "estimate=${String.format(Locale.ENGLISH, "%.2f", estimatedKmh)}km/h ageMs=$ageMs " +
-                        "threshold=${formatSpeedThresholdForLog()}"
-                }"
+                "speed=${String.format(Locale.ENGLISH, "%.2f", smoothedSpeedKmh)} km/h " +
+                    "moving=$isSpeedMoving quality=$qualityOk " +
+                    "source=${if (hasReliableSensorSpeed) "sensor" else if (hasReliableEstimatedSpeed) "estimated" else "none"} " +
+                    "acc=${if (location.hasAccuracy()) String.format(Locale.ENGLISH, "%.1f", location.accuracy) else "na"}m " +
+                    "accLimit=${String.format(Locale.ENGLISH, "%.1f", maxAllowedAccuracyM)}m " +
+                    "sensor=${String.format(Locale.ENGLISH, "%.2f", sensorKmh)}km/h " +
+                    "estimate=${String.format(Locale.ENGLISH, "%.2f", estimatedKmh)}km/h ageMs=$ageMs " +
+                    "threshold=${formatSpeedThresholdForLog()}"
             }
         }
     }
 
     fun onLocationPermissionDenied() {
-        latestLocalLocation = null
+        stopLocationUpdates()
         smoothedSpeedKmh = 0f
         lastReliableSpeedSampleElapsedMs = 0L
         isSpeedMoving = false
@@ -353,12 +359,11 @@ class LocationSpeedController(
 
     @SuppressLint("MissingPermission")
     fun startLocationUpdates() {
+        if (released || started) return
         val fine = ActivityCompat.checkSelfPermission(activity, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarse = ActivityCompat.checkSelfPermission(activity, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         Log.d(TAG, "startLocationUpdates(): fine=$fine coarse=$coarse")
         speedLog { "startLocationUpdates fine=$fine coarse=$coarse" }
-
-        stopLocationUpdates()
 
         if (!fine && !coarse) {
             onLocationUnavailable()
@@ -370,6 +375,9 @@ class LocationSpeedController(
             speedLog { "Location permission denied -> speed pipeline disabled" }
             return
         }
+
+        started = true
+        lifecycleGeneration += 1
 
         val locationManager = activity.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         speedLocationManager = locationManager
@@ -460,10 +468,16 @@ class LocationSpeedController(
             isSpeedMoving = false
             lastSpeedQualityOk = false
             onSpeedUnavailable()
+            started = false
         }
     }
 
     fun stopLocationUpdates() {
+        started = false
+        lifecycleGeneration += 1
+        fallbackCancellationSignal?.cancel()
+        fallbackCancellationSignal = null
+        fallbackRequestInFlight = false
         speedLocationManager?.let { manager ->
             try {
                 manager.removeUpdates(locationListener)
@@ -476,6 +490,17 @@ class LocationSpeedController(
         speedLocationListener = null
         speedLocationManager = null
         latestLocalLocation = null
+        lastSpeedLocationUpdateElapsedMs = 0L
+        lastReliableSpeedSampleElapsedMs = 0L
+        lastSpeedQualityOk = false
+        isSpeedMoving = false
+    }
+
+    fun release() {
+        if (released) return
+        released = true
+        stopLocationUpdates()
+        handler.removeCallbacksAndMessages(null)
     }
 
     private fun startSpeedFallbackPolling(locationManager: LocationManager, providers: List<String>) {
@@ -484,13 +509,14 @@ class LocationSpeedController(
 
         val runnable = object : Runnable {
             override fun run() {
+                if (!started || released) return
                 val manager = speedLocationManager ?: return
                 if (!hasAnyLocationPermission()) return
 
                 val elapsedSinceLast = android.os.SystemClock.elapsedRealtime() - lastSpeedLocationUpdateElapsedMs
                 if (lastSpeedLocationUpdateElapsedMs == 0L || elapsedSinceLast >=SPEED_STALE_UPDATE_WINDOW_MS) {
                     val updatedFromCache = tryUpdateSpeedFromLastKnown(manager, speedFallbackProviders)
-                    if (!updatedFromCache) {
+                    if (!updatedFromCache && !fallbackRequestInFlight) {
                         requestSingleSpeedLocation(manager, speedFallbackProviders)
                     }
                 }
@@ -544,7 +570,9 @@ class LocationSpeedController(
         locationManager: LocationManager,
         providers: List<String>
     ) {
-        if (!hasAnyLocationPermission()) return
+        if (!started || released || fallbackRequestInFlight || !hasAnyLocationPermission()) return
+
+        val requestGeneration = lifecycleGeneration
 
         for (provider in providers) {
             val enabled = runCatching {
@@ -556,12 +584,21 @@ class LocationSpeedController(
             }
 
             try {
+                val cancellationSignal = CancellationSignal()
+                fallbackCancellationSignal = cancellationSignal
+                fallbackRequestInFlight = true
                 androidx.core.location.LocationManagerCompat.getCurrentLocation(
                     locationManager,
                     provider,
-                    null as android.os.CancellationSignal?,
+                    cancellationSignal,
                     androidx.core.content.ContextCompat.getMainExecutor(activity)
                 ) { location: Location? ->
+                    fallbackRequestInFlight = false
+                    fallbackCancellationSignal = null
+
+                    if (!started || released || requestGeneration != lifecycleGeneration) {
+                        return@getCurrentLocation
+                    }
 
                     if (location == null) {
                         speedLog {
@@ -588,6 +625,8 @@ class LocationSpeedController(
 
                 return
             } catch (e: Exception) {
+                fallbackRequestInFlight = false
+                fallbackCancellationSignal = null
                 speedLog {
                     "Failed fallback current location provider=$provider: ${e.message}"
                 }

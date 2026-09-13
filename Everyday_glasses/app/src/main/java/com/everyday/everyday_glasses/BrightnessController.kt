@@ -34,6 +34,8 @@ class BrightnessController(
     private var ambientLightSensorManager: SensorManager? = null
     private var ambientLightSensor: Sensor? = null
     private var isAmbientLightListenerRegistered = false
+    private var resumed = false
+    private var released = false
     private val handler = Handler(Looper.getMainLooper())
 
     // Lifecycle
@@ -50,14 +52,20 @@ class BrightnessController(
     }
 
     fun onResume() {
+        if (released) return
+        resumed = true
         updateAmbientLightMonitoring()
     }
 
     fun onPause() {
+        resumed = false
         stopAmbientLightMonitoring()
     }
 
     fun onDestroy() {
+        if (released) return
+        released = true
+        resumed = false
         stopAmbientLightMonitoring()
 
         layoutSwitchBrightnessRestoreRunnable?.let {
@@ -163,7 +171,7 @@ class BrightnessController(
     private fun updateAmbientLightMonitoring() {
         val sensorManager = ambientLightSensorManager
         val sensor = ambientLightSensor
-        val shouldListen = adaptiveBrightnessEnabled && sensorManager != null && sensor != null
+        val shouldListen = resumed && !released && adaptiveBrightnessEnabled && sensorManager != null && sensor != null
 
         if (shouldListen && !isAmbientLightListenerRegistered) {
             sensorManager!!.registerListener(ambientLightListener, sensor, SensorManager.SENSOR_DELAY_NORMAL)

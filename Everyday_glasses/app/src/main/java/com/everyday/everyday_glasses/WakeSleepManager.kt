@@ -4,6 +4,16 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 
+internal fun resolveDisplayState(
+    requested: WakeSleepManager.DisplayState,
+    hasPinnedWidgets: Boolean
+): WakeSleepManager.DisplayState =
+    if (requested == WakeSleepManager.DisplayState.SLEEP && !hasPinnedWidgets) {
+        WakeSleepManager.DisplayState.OFF
+    } else {
+        requested
+    }
+
 /**
  * Manages the wake/sleep display states for AR glasses.
  *
@@ -122,18 +132,26 @@ class WakeSleepManager(
      * Used for programmatic control.
      */
     fun transitionTo(newState: DisplayState) {
-        if (_state == newState) {
-            Log.d(TAG, "Already in state $newState, ignoring transition")
+        val resolvedState = resolveDisplayState(
+            requested = newState,
+            hasPinnedWidgets = hasPinnedWidgets?.invoke() == true
+        )
+        if (newState == DisplayState.SLEEP && resolvedState == DisplayState.OFF) {
+            Log.d(TAG, "No pinned widgets available; resolving SLEEP request to OFF")
+        }
+
+        if (_state == resolvedState) {
+            Log.d(TAG, "Already in state $resolvedState, ignoring transition")
             return
         }
         
         val oldState = _state
-        _state = newState
+        _state = resolvedState
         
-        Log.d(TAG, "State transition: $oldState → $newState")
+        Log.d(TAG, "State transition: $oldState → $resolvedState")
         
         // Handle state-specific logic
-        when (newState) {
+        when (resolvedState) {
             DisplayState.WAKE -> {
                 // Start the sleep timer
                 startSleepTimer()
@@ -141,15 +159,6 @@ class WakeSleepManager(
             DisplayState.SLEEP -> {
                 // Cancel any running timer (we're now in sleep)
                 cancelSleepTimer()
-                
-                // Check if we should auto-transition to OFF
-                // (if no pinned widgets, SLEEP is effectively OFF)
-                val hasPinned = hasPinnedWidgets?.invoke() ?: false
-                if (!hasPinned) {
-                    Log.d(TAG, "No pinned widgets in SLEEP mode - treating as OFF")
-                    // Note: We still stay in SLEEP state, but visually it's the same as OFF
-                    // This allows head-lift to wake back to WAKE mode
-                }
             }
             DisplayState.OFF -> {
                 // Cancel any running timer
@@ -158,7 +167,7 @@ class WakeSleepManager(
         }
         
         // Notify listener
-        onStateChanged(newState)
+        onStateChanged(resolvedState)
     }
     
     /**
