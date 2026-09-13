@@ -59,8 +59,6 @@ import java.util.concurrent.CompletableFuture
  * - Movable status bar showing phone/glasses battery and time
  */
 class MainActivity : AppCompatActivity() {
-
-    private var rfcommClient: RfcommClient? = null
     
     // Wake lock to prevent display from sleeping
     private var wakeLock: PowerManager.WakeLock? = null
@@ -102,7 +100,7 @@ class MainActivity : AppCompatActivity() {
     // Speed data management
     private lateinit var locationSpeedController: LocationSpeedController
 
-    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val handler = android.os.Handler(Looper.getMainLooper())
 
     // Glasses battery update
     private var glassesBatteryUpdateRunnable: Runnable? = null
@@ -154,7 +152,6 @@ class MainActivity : AppCompatActivity() {
         // Speedometer logging gate (flip to false to silence)
         private const val SPEEDO_LOG = true
         private const val SPEEDO_LOG_TAG = "Speedometer"
-        private const val SPEED_LOG_INTERVAL_MS = 5000L
         private const val ACTION_DEBUG_CLEAR_WEBVIEW =
             "com.everyday.everyday_glasses.action.DEBUG_CLEAR_WEBVIEW"
     }
@@ -184,7 +181,7 @@ class MainActivity : AppCompatActivity() {
 
         // Dismiss keyguard if possible
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+            val keyguardManager = getSystemService(KEYGUARD_SERVICE) as android.app.KeyguardManager
             keyguardManager.requestDismissKeyguard(this, null)
         } else {
             @Suppress("DEPRECATION")
@@ -195,7 +192,7 @@ class MainActivity : AppCompatActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         
         // Also acquire a wake lock to prevent display sleep
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val powerManager = getSystemService(POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
             "Everyday_glasses::DisplayWakeLock"
@@ -380,7 +377,7 @@ class MainActivity : AppCompatActivity() {
             browserRouting = browserRoutingCoordinator
         )
 
-        // On-demand inspection is marshalled to the UI thread; ordinary context capture
+        // On-demand inspection is marshaled to the UI thread; ordinary context capture
         // remains the small snapshot taken when the voice request is submitted.
 
         widgetContainer.configureAssistantSettings(
@@ -964,14 +961,14 @@ class MainActivity : AppCompatActivity() {
 
 
     private fun saveSmartAlignmentSetting(enabled: Boolean) {
-        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             .edit()
             .putBoolean(KEY_SMART_ALIGNMENT, enabled)
             .apply()
     }
 
     private fun restoreSmartAlignmentSetting() {
-        val enabled = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val enabled = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             .getBoolean(KEY_SMART_ALIGNMENT, DEFAULT_SMART_ALIGNMENT)
         widgetContainer.setSmartAlignmentEnabled(enabled)
     }
@@ -986,7 +983,7 @@ class MainActivity : AppCompatActivity() {
         val wakeDurationMs = widgetContainer.getWakeDuration()
         val angleThreshold = widgetContainer.getAngleThreshold()
         val headsUpEnabled = widgetContainer.getHeadsUpEnabled()
-        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             .edit()
             .putLong(KEY_HEAD_UP_TIME, headUpTimeMs)
             .putLong(KEY_WAKE_DURATION, wakeDurationMs)
@@ -1000,7 +997,7 @@ class MainActivity : AppCompatActivity() {
      * Restore head-up wake settings from SharedPreferences.
      */
     private fun restoreHeadUpSettings() {
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         val savedHeadUpTime = prefs.getLong(KEY_HEAD_UP_TIME, HeadUpWakeManager.DEFAULT_HEAD_UP_HOLD_TIME_MS)
         val savedWakeDuration = prefs.getLong(KEY_WAKE_DURATION, HeadUpWakeManager.DEFAULT_WAKE_DURATION_MS)
         val savedAngleThreshold = prefs.getFloat(KEY_ANGLE_THRESHOLD, HeadUpWakeManager.DEFAULT_PITCH_CHANGE_THRESHOLD)
@@ -1103,7 +1100,7 @@ class MainActivity : AppCompatActivity() {
         headUpWakeManager = HeadUpWakeManager(this)
 
         // Restore saved settings
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         headUpWakeManager.headUpHoldTimeMs = prefs.getLong(
             KEY_HEAD_UP_TIME,
             HeadUpWakeManager.DEFAULT_HEAD_UP_HOLD_TIME_MS
@@ -1161,8 +1158,8 @@ class MainActivity : AppCompatActivity() {
 
         // Set screen dimensions for offset calculations
         threeDofManager.setScreenDimensions(
-            com.everyday.everyday_glasses.binocular.DisplayConfig.EYE_WIDTH.toFloat(),
-            com.everyday.everyday_glasses.binocular.DisplayConfig.EYE_HEIGHT.toFloat()
+            DisplayConfig.EYE_WIDTH.toFloat(),
+            DisplayConfig.EYE_HEIGHT.toFloat()
         )
 
         threeDofManager.observer = object : ThreeDofObserver {
@@ -1533,7 +1530,7 @@ class MainActivity : AppCompatActivity() {
 
         // Hardware action-button wake can resume the activity without an internal
         // WakeSleepManager transition. Let the coordinator refresh visible data.
-        if ((getSystemService(Context.POWER_SERVICE) as PowerManager).isInteractive) {
+        if ((getSystemService(POWER_SERVICE) as PowerManager).isInteractive) {
             handlePhysicalScreenOn("activity_resume")
         }
         widgetContainer.onAppResumed()
@@ -1733,7 +1730,7 @@ class MainActivity : AppCompatActivity() {
 
     // ==================== Phone Data Handling ====================
 
-    private fun handlePhonePointer(data: com.everyday.shared.transport.TransportMessage.Pointer) {
+    private fun handlePhonePointer(data: TransportMessage.Pointer) {
         inputCoordinator.handlePhoneData(data)
     }
 
@@ -1753,7 +1750,7 @@ class MainActivity : AppCompatActivity() {
      * This is called in multiple places to ensure the keyboard never appears.
      */
     private fun hideSystemKeyboard() {
-        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager ?: return
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager ?: return
         val currentFocus = currentFocus ?: window.decorView
 
         // Hide the keyboard - only use hideSoftInputFromWindow, NOT toggleSoftInput
