@@ -1,15 +1,11 @@
 package com.everyday.everyday_glasses
 
-import android.Manifest
 import android.content.Intent
 import android.content.pm.ApplicationInfo
-import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.os.Looper
-import android.provider.Settings
 import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -17,7 +13,6 @@ import android.view.View
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
 import com.everyday.everyday_glasses.binocular.BinocularContentClass
 import com.everyday.everyday_glasses.binocular.DisplayConfig
 import com.everyday.everyday_glasses.binocular.BinocularUpdateType
@@ -96,7 +91,6 @@ class MainActivity : AppCompatActivity() {
 
     // File picker for opening images, PDFs, etc.
     private lateinit var filePicker: FilePicker
-    private var openFileBrowserAfterAllFilesGrant = false
 
     private lateinit var phoneConnectionCoordinator: PhoneConnectionCoordinator // Phone communication (inbound / outbound) coordination
     private lateinit var googleAuthCoordinator: GoogleAuthCoordinator
@@ -104,13 +98,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var dataSyncCoordinator: GlassesDataSyncCoordinator
     private lateinit var voiceAssistantCoordinator: VoiceAssistantCoordinator
     private lateinit var browserRoutingCoordinator: BrowserRoutingCoordinator
+    private lateinit var permissionCoordinator: PermissionCoordinator
 
     companion object {
         private const val TAG = "Everyday_glasses"
-        private const val REQUEST_PERMISSIONS = 1
-        private const val REQUEST_STORAGE_PERMISSION = 2
-        private const val REQUEST_ASSISTANT_AUDIO_PERMISSION = 3
-
         // SharedPreferences keys for settings
         private const val PREFS_NAME = "everyday_settings"
         private const val KEY_HEAD_UP_TIME = "head_up_time_ms"
@@ -207,6 +198,7 @@ class MainActivity : AppCompatActivity() {
 
         // Initialize file picker for opening images, PDFs, etc.
         filePicker = FilePicker(this)
+        setupPermissionCoordinator()
 
         cursorView.activityObserver = object : CursorActivityObserver {
             override fun onVisibilityChanged(visible: Boolean) {
@@ -281,14 +273,8 @@ class MainActivity : AppCompatActivity() {
             preferences = assistantPreferences,
             provider = GeminiVoiceAssistantProvider(),
             recorder = AssistantAudioRecorder(this),
-            hasMicrophonePermission = {
-                ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-            },
-            requestMicrophonePermission = {
-                ActivityCompat.requestPermissions(
-                    this, arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_ASSISTANT_AUDIO_PERMISSION
-                )
-            },
+            hasMicrophonePermission = permissionCoordinator::hasMicrophonePermission,
+            requestMicrophonePermission = permissionCoordinator::requestMicrophonePermission,
             toolCatalog = widgetContainer::assistantToolCatalog,
             captureUiContext = widgetContainer::assistantUiContext,
             stateObserver = object : AssistantStateObserver {
@@ -365,12 +351,8 @@ class MainActivity : AppCompatActivity() {
         }
         vto.addOnGlobalLayoutListener(listener)
 
-        // Check permissions and start
-        if (hasPermissions() && locationSpeedController.hasAnyLocationPermission()) {
-            startClient()
-        } else {
-            requestPermissions()
-        }
+        // Check startup capabilities and request anything currently missing.
+        permissionCoordinator.handleStartupPermissions()
 
         // Start location updates
         locationSpeedController.startLocationUpdates()
@@ -518,18 +500,12 @@ class MainActivity : AppCompatActivity() {
 
             override fun requestFilePicker() {
                 Log.d(TAG, "File picker requested")
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
-                    requestAllFilesAccessForBrowser()
-                } else if (hasStoragePermission()) {
-                    openFileBrowser()
-                } else {
-                    this@MainActivity.requestStoragePermission()
-                }
+                permissionCoordinator.requestFileBrowserAccess()
             }
 
             override fun requestStoragePermission() {
                 Log.d(TAG, "Storage permission requested by widget")
-                this@MainActivity.requestStoragePermission()
+                permissionCoordinator.requestStoragePermissions()
             }
 
             override fun requestCursorCenter() {
@@ -622,6 +598,42 @@ class MainActivity : AppCompatActivity() {
                     val changed = brightnessController.setCharging(charging)
                     if (changed) {
                         Log.d(TAG, "Charging state changed: charging=$charging")
+                    }
+                }
+            }
+        )
+    }
+
+    private fun setupPermissionCoordinator() {
+        permissionCoordinator = PermissionCoordinator(
+            activity = this,
+            callbacks = object : PermissionCoordinatorCallbacks {
+                override fun onBluetoothPermissionAvailable() {
+                    startClient()
+                }
+
+                override fun onLocationPermissionAvailable() {
+                    locationSpeedController.startLocationUpdates()
+                }
+
+                override fun onLocationPermissionDenied() {
+                    locationSpeedController.onLocationPermissionDenied()
+                    speedLog {
+                        "Startup without location permission -> speed disabled"
+                    }
+                }
+
+                override fun onFileBrowserAccessHandled() {
+                    // The all-files settings path returns through onResume; post
+                    // until the resumed view hierarchy is ready for widget work.
+                    widgetContainer.post {
+                        openFileBrowser()
+                    }
+                }
+
+                override fun onAssistantAudioPermissionResult(granted: Boolean) {
+                    if (::voiceAssistantCoordinator.isInitialized) {
+                        voiceAssistantCoordinator.onPermissionResult(granted)
                     }
                 }
             }
@@ -1240,12 +1252,8 @@ class MainActivity : AppCompatActivity() {
         hideSystemKeyboard()
         brightnessController.onResume()
 
-        if (openFileBrowserAfterAllFilesGrant &&
-            (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager())
-        ) {
-            openFileBrowserAfterAllFilesGrant = false
-            widgetContainer.post { openFileBrowser() }
-        }
+        // Check if any permissions are needed on resuming the activity (important for file browser)
+        if (::permissionCoordinator.isInitialized) {permissionCoordinator.onActivityResumed()}
 
         // Notify service that activity is in foreground
         // Service will disable its head-up detection (we handle it here)
@@ -1253,9 +1261,7 @@ class MainActivity : AppCompatActivity() {
 
         // Enable the activity's own head-up wake manager
         // (for detecting head-up when in app's internal SLEEP/OFF state)
-        if (::headUpWakeManager.isInitialized) {
-            headUpWakeManager.enable()
-        }
+        if (::headUpWakeManager.isInitialized) {headUpWakeManager.enable()}
 
         // Check for head-up wake via static flags (intent extras don't work reliably with full-screen intents)
         if (GlassesService.pendingHeadUpWake) {
@@ -1293,15 +1299,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Re-evaluate local speed pipeline on resume in case providers were toggled externally.
-        val fine = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val coarse = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (fine || coarse) {
-            locationSpeedController.startLocationUpdates()
-        }
-
-        if (::googleAuthCoordinator.isInitialized) {
-            googleAuthCoordinator.refreshStateSilently(this)
-        }
+        if (::permissionCoordinator.isInitialized && permissionCoordinator.hasAnyLocationPermission()) {locationSpeedController.startLocationUpdates()}
+        if (::googleAuthCoordinator.isInitialized) {googleAuthCoordinator.refreshStateSilently(this)}
     }
 
     /**
@@ -1397,60 +1396,33 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        // Flush the last persistent mutation even when the activity is destroyed without a
-        // preceding pause/stop callback.
+        // Flush the last persistent mutation even when the activity is destroyed without a preceding pause/stop callback.
         if (::persistenceManager.isInitialized) saveWidgetState()
         if (::voiceAssistantCoordinator.isInitialized) voiceAssistantCoordinator.release()
         if (::browserRoutingCoordinator.isInitialized) browserRoutingCoordinator.release()
         if (::assistantNetworkLease.isInitialized) assistantNetworkLease.close()
+
         super.onDestroy()
+
         if (::phoneConnectionCoordinator.isInitialized) {phoneConnectionCoordinator.release()}
         if (::statusBarController.isInitialized) {statusBarController.release()} // Stop status bar monitoring
+
         GlassesService.stop(this)
         binocularView.onDestroy()
-        
+        locationSpeedController.stopLocationUpdates() // Stop local speed/location updates
+        brightnessController.onDestroy() // Stop brightness control updates
+        cancelHeadUpWakeAutoFinishTimer() // Cancel head-up wake auto-finish timer
 
+        if (::displayPowerController.isInitialized) {displayPowerController.release()} // Stop display power control updates
+        if (::inputCoordinator.isInitialized) {inputCoordinator.release()} // Clean up input coordinator callbacks
+        if (::dataSyncCoordinator.isInitialized) {dataSyncCoordinator.release()}
+        if (::permissionCoordinator.isInitialized) {permissionCoordinator.release()}
 
-        // Stop local speed/location updates
-        locationSpeedController.stopLocationUpdates()
+        widgetContainer.release() // Clean up widget container resources
 
-        // Stop brightness control updates
-        brightnessController.onDestroy()
-
-        // Cancel head-up wake auto-finish timer
-        cancelHeadUpWakeAutoFinishTimer()
-
-        // Stop display power control updates
-        if (::displayPowerController.isInitialized) {
-            displayPowerController.release()
-        }
-
-        // Clean up input coordinator callbacks
-        if (::inputCoordinator.isInitialized) {
-            inputCoordinator.release()
-        }
-
-        if (::dataSyncCoordinator.isInitialized) {
-            dataSyncCoordinator.release()
-        }
-        
-        // Clean up widget container resources
-        widgetContainer.release()
-
-        // Clean up head-up wake manager
-        if (::headUpWakeManager.isInitialized) {
-            headUpWakeManager.release()
-        }
-
-        // Clean up 3DOF manager
-        if (::threeDofManager.isInitialized) {
-            threeDofManager.release()
-        }
-
-        // Clean up tap gesture detector
-        if (::tapGestureDetector.isInitialized) {
-            tapGestureDetector.release()
-        }
+        if (::headUpWakeManager.isInitialized) {headUpWakeManager.release()} // Clean up head-up wake manager
+        if (::threeDofManager.isInitialized) {threeDofManager.release()} // Clean up 3DOF manager
+        if (::tapGestureDetector.isInitialized) {tapGestureDetector.release()} // Clean up tap gesture detector
     }
 
     override fun onTrimMemory(level: Int) {
@@ -1556,84 +1528,6 @@ class MainActivity : AppCompatActivity() {
         return super.onKeyDown(keyCode, event)
     }
 
-    // ==================== Location Handling ====================
-
-
-
-
-
-
-
-
-
-    // ==================== Permissions ====================
-
-    private fun hasPermissions(): Boolean {
-        // Return true only if mandatory Bluetooth permissions are granted.
-        // Location permission is handled separately.
-
-        val bluetoothGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-        } else {
-            ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED
-        }
-
-        return bluetoothGranted
-    }
-
-
-    /**
-     * Check if storage permission is granted for reading images.
-     */
-    private fun hasStoragePermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Environment.isExternalStorageManager()
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED &&
-                ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED
-        } else {
-            // Android 6-12 uses READ_EXTERNAL_STORAGE
-            ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
-        }.also { granted ->
-            Log.d(TAG, "hasStoragePermission check: granted=$granted, SDK=${Build.VERSION.SDK_INT}")
-        }
-    }
-
-    /**
-     * Request storage permission specifically for the file browser.
-     * Uses a separate request code to handle the result appropriately.
-     */
-    private fun requestStoragePermission() {
-        val permissionsList = mutableListOf<String>()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                permissionsList.add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-            // Android 13+ uses granular media permissions
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
-                permissionsList.add(Manifest.permission.READ_MEDIA_IMAGES)
-            }
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
-                permissionsList.add(Manifest.permission.READ_MEDIA_VIDEO)
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            // Android 6-12 uses READ_EXTERNAL_STORAGE
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                permissionsList.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
-        }
-
-        if (permissionsList.isNotEmpty()) {
-            Log.d(TAG, "Requesting storage permissions: $permissionsList")
-            ActivityCompat.requestPermissions(this, permissionsList.toTypedArray(), REQUEST_STORAGE_PERMISSION)
-        } else {
-            // Permission already granted, open file browser
-            Log.d(TAG, "Storage permission already granted, opening file browser")
-            openFileBrowser()
-        }
-    }
-
     /**
      * Open the file browser widget.
      */
@@ -1657,24 +1551,6 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun requestAllFilesAccessForBrowser() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            requestStoragePermission()
-            return
-        }
-        openFileBrowserAfterAllFilesGrant = true
-        val appSettingsIntent = Intent(
-            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-            android.net.Uri.parse("package:$packageName")
-        )
-        runCatching { startActivity(appSettingsIntent) }
-            .recoverCatching { startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
-            .onFailure {
-                openFileBrowserAfterAllFilesGrant = false
-                Log.e(TAG, "Unable to open all-files access settings", it)
-            }
-    }
-
     private fun handleVideoFile(uri: android.net.Uri, displayName: String) {
         runOnUiThread {
             widgetContainer.createVideoWidget(uri, displayName)
@@ -1684,62 +1560,6 @@ class MainActivity : AppCompatActivity() {
     private fun handlePdfFile(uri: android.net.Uri, displayName: String) {
         runOnUiThread {
             widgetContainer.createPdfWidget(uri, displayName)
-        }
-    }
-
-    private fun requestPermissions() {
-        // Request any missing runtime permissions needed by the app and optional widgets.
-        
-        val permissionsList = mutableListOf<String>()
-        
-        // Mandatory Bluetooth permissions
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                permissionsList.add(Manifest.permission.BLUETOOTH_CONNECT)
-            }
-        } else {
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED) {
-                permissionsList.add(Manifest.permission.BLUETOOTH)
-                permissionsList.add(Manifest.permission.BLUETOOTH_ADMIN)
-            }
-        }
-
-        // Location permissions: always request if missing so user gets standard OS prompt.
-        val fineGranted = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val coarseGranted = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-
-        if (!fineGranted) {
-            permissionsList.add(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
-        if (!coarseGranted) {
-            permissionsList.add(Manifest.permission.ACCESS_COARSE_LOCATION)
-        }
-
-        // Storage permissions for file browser
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // Android 13+ uses granular media permissions
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
-                permissionsList.add(Manifest.permission.READ_MEDIA_IMAGES)
-            }
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
-                permissionsList.add(Manifest.permission.READ_MEDIA_VIDEO)
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            // Android 6-12 uses READ_EXTERNAL_STORAGE
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                permissionsList.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
-        }
-        
-        if (permissionsList.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, permissionsList.toTypedArray(), REQUEST_PERMISSIONS)
-        } else {
-            // If list is empty, all requested runtime permissions are already granted.
-            startClient()
-            if (!locationSpeedController.hasAnyLocationPermission()) {
-                locationSpeedController.onLocationPermissionDenied()
-                speedLog { "Startup without location permission -> speed disabled" }
-            }
         }
     }
 
@@ -1855,79 +1675,12 @@ class MainActivity : AppCompatActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
 
-        when (requestCode) {
-            REQUEST_PERMISSIONS -> {
-                // Check Bluetooth permissions (essential)
-                var bluetoothGranted = hasPermissions()
-                // Check location permission (optional)
-                var locationGranted = locationSpeedController.hasAnyLocationPermission()
-
-                for (i in permissions.indices) {
-                    if (permissions[i] == Manifest.permission.BLUETOOTH_CONNECT ||
-                        permissions[i] == Manifest.permission.BLUETOOTH ||
-                        permissions[i] == Manifest.permission.BLUETOOTH_ADMIN) {
-                        if (grantResults[i] == PackageManager.PERMISSION_GRANTED) {
-                            bluetoothGranted = true
-                        }
-                    }
-                    if (permissions[i] == Manifest.permission.ACCESS_FINE_LOCATION ||
-                        permissions[i] == Manifest.permission.ACCESS_COARSE_LOCATION) {
-                        if (grantResults[i] == PackageManager.PERMISSION_GRANTED) {
-                            locationGranted = true
-                        }
-                    }
-                }
-
-                // If no location permission was included in this request, use current runtime state.
-                if (!permissions.contains(Manifest.permission.ACCESS_FINE_LOCATION) &&
-                    !permissions.contains(Manifest.permission.ACCESS_COARSE_LOCATION)) {
-                    locationGranted = locationSpeedController.hasAnyLocationPermission()
-                }
-
-                if (bluetoothGranted) {
-                    startClient()
-                }
-
-                if (locationGranted) {
-                    locationSpeedController.startLocationUpdates()
-                } else {
-                    locationSpeedController.onLocationPermissionDenied()
-                }
-
-            }
-
-            REQUEST_STORAGE_PERMISSION -> {
-                // Check if storage permission was granted
-                var storageGranted = false
-
-                for (i in permissions.indices) {
-                    val permission = permissions[i]
-                    if (permission == Manifest.permission.READ_MEDIA_IMAGES ||
-                        permission == Manifest.permission.READ_MEDIA_VIDEO ||
-                        permission == Manifest.permission.READ_EXTERNAL_STORAGE) {
-                        if (grantResults[i] == PackageManager.PERMISSION_GRANTED) {
-                            storageGranted = true
-                            Log.d(TAG, "Storage permission granted: $permission")
-                        } else {
-                            Log.d(TAG, "Storage permission DENIED: $permission")
-                        }
-                    }
-                }
-
-                if (storageGranted) {
-                    // Permission granted, open the file browser
-                    Log.d(TAG, "Storage permission result: granted, opening file browser")
-                    openFileBrowser()
-                } else {
-                    // Permission denied - still open file browser, it will show the permission message
-                    Log.d(TAG, "Storage permission result: denied, opening file browser anyway (will show permission message)")
-                    openFileBrowser()
-                }
-            }
-            REQUEST_ASSISTANT_AUDIO_PERMISSION -> {
-                val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
-                if (::voiceAssistantCoordinator.isInitialized) voiceAssistantCoordinator.onPermissionResult(granted)
-            }
+        if (::permissionCoordinator.isInitialized) {
+            permissionCoordinator.onRequestPermissionsResult(
+                requestCode,
+                permissions,
+                grantResults
+            )
         }
     }
 
