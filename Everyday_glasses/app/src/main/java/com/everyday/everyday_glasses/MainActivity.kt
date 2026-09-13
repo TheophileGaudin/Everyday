@@ -11,7 +11,6 @@ import android.graphics.Color
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
-import android.os.PowerManager
 import android.os.Environment
 import android.os.Looper
 import android.provider.Settings
@@ -59,17 +58,12 @@ import java.util.concurrent.CompletableFuture
  * - Movable status bar showing phone/glasses battery and time
  */
 class MainActivity : AppCompatActivity() {
-    
-    // Wake lock to prevent display from sleeping
-    private var wakeLock: PowerManager.WakeLock? = null
+
     
     private lateinit var binocularView: BinocularView
     private lateinit var cursorView: CursorView
     private lateinit var widgetContainer: WidgetContainer
     private lateinit var persistenceManager: ActiveDashboardStore
-    
-    // Wake/Sleep state manager
-    private lateinit var wakeSleepManager: WakeSleepManager
 
     // Head-up wake manager for hands-free screen wake
     private lateinit var headUpWakeManager: HeadUpWakeManager
@@ -90,22 +84,21 @@ class MainActivity : AppCompatActivity() {
     // Mode: true = phone trackpad, false = temple trackpad (backend only, no UI toggle)
     private var isPhoneMode = true
 
-    // Flag to prevent aggressive invalidation during display state transitions
-    private var isTransitioningDisplayState = false
-    private val keepAwakeMediaSources = mutableSetOf<String>()
-
     // Brightness management
     private lateinit var brightnessController: BrightnessController
 
     // Speed data management
     private lateinit var locationSpeedController: LocationSpeedController
 
+    // Display power on/off management
+    private lateinit var displayPowerController: DisplayPowerController
+
+
     private val handler = android.os.Handler(Looper.getMainLooper())
 
     // Glasses battery update
     private var glassesBatteryUpdateRunnable: Runnable? = null
     private var batteryStateReceiver: BroadcastReceiver? = null
-    private var screenStateReceiver: BroadcastReceiver? = null
     
     // Time update
     private var timeUpdateRunnable: Runnable? = null
@@ -149,7 +142,7 @@ class MainActivity : AppCompatActivity() {
         private const val DEFAULT_SMART_ALIGNMENT = true
         // Keep media dimming visible; the only intentional full black mask is DisplayState.OFF.
 
-        // Speedometer logging gate (flip to false to silence)
+        // Speedometer logging gate (flip false to silence)
         private const val SPEEDO_LOG = true
         private const val SPEEDO_LOG_TAG = "Speedometer"
         private const val ACTION_DEBUG_CLEAR_WEBVIEW =
@@ -167,40 +160,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Allow showing over lock screen
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            setShowWhenLocked(true)
-            setTurnScreenOn(true)
-        } else {
-            @Suppress("DEPRECATION")
-            window.addFlags(
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-            )
-        }
+        setupDisplayPowerController()
+        displayPowerController.initializeWindow()
 
-        // Dismiss keyguard if possible
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val keyguardManager = getSystemService(KEYGUARD_SERVICE) as android.app.KeyguardManager
-            keyguardManager.requestDismissKeyguard(this, null)
-        } else {
-            @Suppress("DEPRECATION")
-            window.addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD)
-        }
-
-        // Keep screen on while app is running
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        
-        // Also acquire a wake lock to prevent display sleep
-        val powerManager = getSystemService(POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(
-            PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
-            "Everyday_glasses::DisplayWakeLock"
-        ).apply {
-            acquire()
-        }
-        Log.d(TAG, "Wake lock acquired")
-        
         setContentView(R.layout.activity_main)
         
         // Hide system UI after content view is set
@@ -208,9 +170,6 @@ class MainActivity : AppCompatActivity() {
 
         // Initialize brightness control
         brightnessController = BrightnessController(this)
-
-        // Initialize speed data control
-
 
         // Initialize views
         binocularView = findViewById(R.id.binocularView)
@@ -275,7 +234,7 @@ class MainActivity : AppCompatActivity() {
                 val cursorY = cursorView.getCursorY()
                 widgetContainer.updateCursor(cursorX, cursorY, visible)
                 widgetContainer.onCursorVisibilityChanged(visible)
-                if (!isTransitioningDisplayState) notifyTransientBinocularChange()
+                if (!displayPowerController.isTransitioningDisplayState) {notifyTransientBinocularChange()}
             }
 
             override fun onUserActivity() {
@@ -301,8 +260,8 @@ class MainActivity : AppCompatActivity() {
                 if (::tapGestureDetector.isInitialized) tapGestureDetector else null
             },
             isPhoneMode = { isPhoneMode },
-            isAwake = { !::wakeSleepManager.isInitialized || wakeSleepManager.isAwake() },
-            wakeDisplay = { wakeDisplayFromUserAction("input") },
+            isAwake = {!::displayPowerController.isInitialized || displayPowerController.isAwake()},
+            wakeDisplay = {if (::displayPowerController.isInitialized) {displayPowerController.wakeFromUserAction("input")}},
             notifyUserActivity = ::notifyUserActivity,
             notifyTransientChange = ::notifyTransientBinocularChange,
             onTripleTap = ::handleTripleTap,
@@ -310,14 +269,13 @@ class MainActivity : AppCompatActivity() {
         )
         updateCursorRedrawMode()
         registerBatteryStateReceiver()
-        registerScreenStateReceiver()
 
         // Initialize Google auth after the mirrored UI is ready.
         setupGoogleAuth()
         setupDataSyncCoordinator()
 
-        // Initialize wake/sleep manager
-        setupWakeSleepManager()
+        // Start internal display state management after views are ready.
+        displayPowerController.start()
 
         // Initialize head-up wake manager (for hands-free screen wake)
         setupHeadUpWakeManager()
@@ -547,10 +505,7 @@ class MainActivity : AppCompatActivity() {
             ) {
                 binocularView.setContentClass(sourceId, contentClass, active)
                 if (contentClass == BinocularContentClass.MEDIA) {
-                    if (active) keepAwakeMediaSources += sourceId else keepAwakeMediaSources -= sourceId
-                    if (::wakeSleepManager.isInitialized) {
-                        wakeSleepManager.setKeepAwake(keepAwakeMediaSources.isNotEmpty())
-                    }
+                    displayPowerController.setMediaKeepAwake(sourceId, active)
                 }
                 refreshBinocularRenderingStrategy()
                 notifyStructuralBinocularChange(
@@ -667,7 +622,7 @@ class MainActivity : AppCompatActivity() {
         restoreSmartAlignmentSetting()
         val speedThreshold = locationSpeedController.restoreVisibilityThreshold()
         widgetContainer.setSpeedVisibilityThreshold(speedThreshold)
-        speedLog { "Loaded speed visibility threshold ${speedThreshold}" }
+        speedLog { "Loaded speed visibility threshold $speedThreshold" }
     }
 
     private fun phoneConnectionOrNull(): PhoneConnectionCoordinator? =
@@ -1019,77 +974,71 @@ class MainActivity : AppCompatActivity() {
         Log.d(TAG, "Restored head-up settings: headUpTime=${savedHeadUpTime}ms, wakeDuration=${savedWakeDuration}ms, angle=${savedAngleThreshold}°, enabled=$savedHeadsUpEnabled")
     }
 
-    /**
-     * Initialize and configure the wake/sleep manager.
-     */
-    private fun setupWakeSleepManager() {
-        wakeSleepManager = WakeSleepManager { state ->
-            Log.d(TAG, "Display state changed to: $state")
-
-            // Set transition flag to prevent aggressive invalidation cascades
-            // that cause power spikes and display flashes on battery power
-            isTransitioningDisplayState = true
-
-            // Notify head-up wake manager of screen state changes
-            if (::headUpWakeManager.isInitialized) {
-                headUpWakeManager.onScreenStateChanged(state == WakeSleepManager.DisplayState.OFF)
-            }
-
-            // Update visibility of UI elements based on state
-            // Note: We use a controlled single invalidation approach to avoid
-            // power spikes that cause display flashes on battery power.
-            when (state) {
-                WakeSleepManager.DisplayState.OFF -> {
-                    // Hide everything
-                    cursorView.setForceHidden(true, useGentleRedraw = true)
-                    widgetContainer.setDisplayState(state)
-
-                    // NEW: Actually turn off the display
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    wakeLock?.let {
-                        if (it.isHeld) it.release()
+    private fun setupDisplayPowerController() {
+        displayPowerController = DisplayPowerController(
+            activity = this,
+            callbacks = object : DisplayPowerCallbacks {
+                override fun onDisplayStateChanging(
+                    state: WakeSleepManager.DisplayState
+                ) {
+                    if (::headUpWakeManager.isInitialized) {
+                        headUpWakeManager.onScreenStateChanged(
+                            state == WakeSleepManager.DisplayState.OFF
+                        )
                     }
                 }
-                WakeSleepManager.DisplayState.WAKE -> {
-                    // NEW: Re-enable display keeping
-                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    wakeLock?.let {
-                        if (!it.isHeld) it.acquire()
+
+                override fun applyDisplayState(
+                    state: WakeSleepManager.DisplayState
+                ) {
+                    when (state) {
+                        WakeSleepManager.DisplayState.WAKE -> {
+                            cursorView.setForceHidden(
+                                false,
+                                useGentleRedraw = true
+                            )
+                        }
+
+                        WakeSleepManager.DisplayState.SLEEP,
+                        WakeSleepManager.DisplayState.OFF -> {
+                            cursorView.setForceHidden(
+                                true,
+                                useGentleRedraw = true
+                            )
+                        }
                     }
 
-                    // Show everything
-                    cursorView.setForceHidden(false, useGentleRedraw = true)
                     widgetContainer.setDisplayState(state)
+                }
+
+                override fun ensureVisibleWakeState(): Boolean {
+                    val containerWasNotAwake = !widgetContainer.isDisplayAwake()
+
+                    cursorView.setForceHidden(
+                        false,
+                        useGentleRedraw = true
+                    )
+                    widgetContainer.setDisplayState(
+                        WakeSleepManager.DisplayState.WAKE
+                    )
+
+                    return containerWasNotAwake
+                }
+
+                override fun onDisplayWake(reason: String) {
                     if (::dataSyncCoordinator.isInitialized) {
-                        dataSyncCoordinator.onDisplayWake("display_wake")
+                        dataSyncCoordinator.onDisplayWake(reason)
                     }
                 }
-                WakeSleepManager.DisplayState.SLEEP -> {
-                    // Hide cursor, show only pinned widgets - use gentle redraw
-                    cursorView.setForceHidden(true, useGentleRedraw = true)
-                    widgetContainer.setDisplayState(state)
+
+                override fun hasPinnedWidgets(): Boolean =
+                    widgetContainer.hasPinnedWidgets()
+
+                override fun reapplyBrightness() {
+                    brightnessController.applyEffectiveWindowBrightness()
                 }
             }
-
-            // Clear transition flag before final invalidation
-            isTransitioningDisplayState = false
-
-            // WidgetContainer emits the single transient repaint/binocular update for this
-            // display transition after its visibility state has settled.
-        }
-        
-        // Wire up callbacks for checking pinned widgets
-        // (These will be implemented in Task 2, for now return false)
-        wakeSleepManager.hasPinnedWidgets = {
-            widgetContainer.hasPinnedWidgets()
-        }
-        
-//        wakeSleepManager.hasVisibleContent = {
-//            // Returns true if there's any visible content on screen
-//            wakeSleepManager.state != WakeSleepManager.DisplayState.OFF
-//        }
-        
-        Log.d(TAG, "WakeSleepManager initialized")
+        )
     }
 
     /**
@@ -1121,17 +1070,23 @@ class MainActivity : AppCompatActivity() {
         headUpWakeManager.wakeRequestListener = object : WakeRequestListener {
             override fun onWakeRequested() {
                 Log.d(TAG, "Head-up wake requested (activity in foreground, waking from internal OFF state)")
-                if (::wakeSleepManager.isInitialized) {
-                    when (wakeSleepManager.state) {
+                if (::displayPowerController.isInitialized) {
+                    when (displayPowerController.state) {
                         WakeSleepManager.DisplayState.OFF,
                         WakeSleepManager.DisplayState.SLEEP -> {
                             isHeadUpWakeSession = true
                             val wakeDurationMs = headUpWakeManager.wakeDurationMs
-                            Log.d(TAG, "Starting head-up wake session with duration ${wakeDurationMs}ms")
+                            Log.d(
+                                TAG,
+                                "Starting head-up wake session with duration ${wakeDurationMs}ms"
+                            )
                             startHeadUpWakeAutoFinishTimer(wakeDurationMs)
-                            wakeSleepManager.transitionTo(WakeSleepManager.DisplayState.WAKE)
+                            displayPowerController.transitionTo(
+                                WakeSleepManager.DisplayState.WAKE
+                            )
                             widgetContainer.onHeadUpWake()
                         }
+
                         WakeSleepManager.DisplayState.WAKE -> Unit
                     }
                 }
@@ -1222,48 +1177,11 @@ class MainActivity : AppCompatActivity() {
      * This resets the sleep timer when the user interacts.
      */
     private fun notifyUserActivity() {
-        wakeDisplayFromUserAction("user_activity")
-
-        if (::wakeSleepManager.isInitialized) {
-            wakeSleepManager.onUserActivity()
-        }
-
-        // If this was a head-up wake session, convert it to a normal session
-        // so the screen stays on after user interaction
+        if (::displayPowerController.isInitialized) {displayPowerController.onUserActivity()}
+        // This is head-up session policy, so it remains in MainActivity for now.
         cancelHeadUpWakeSession()
     }
 
-    private fun wakeDisplayFromUserAction(reason: String) {
-        if (!::wakeSleepManager.isInitialized) return
-
-        if (wakeSleepManager.state != WakeSleepManager.DisplayState.WAKE) {
-            Log.d(TAG, "User action waking display from ${wakeSleepManager.state} ($reason)")
-            wakeSleepManager.transitionTo(WakeSleepManager.DisplayState.WAKE)
-            return
-        }
-
-        ensureVisibleWakeState(reason)
-    }
-
-    private fun ensureVisibleWakeState(reason: String) {
-        if (!::widgetContainer.isInitialized || !::cursorView.isInitialized) return
-
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        wakeLock?.let {
-            if (!it.isHeld) it.acquire()
-        }
-
-        val containerWasNotAwake = !widgetContainer.isDisplayAwake()
-        cursorView.setForceHidden(false, useGentleRedraw = true)
-        widgetContainer.setDisplayState(WakeSleepManager.DisplayState.WAKE)
-
-        if (containerWasNotAwake) {
-            Log.d(TAG, "Recovered visible wake state after stale internal mask ($reason)")
-        }
-
-        brightnessController.applyEffectiveWindowBrightness()
-    }
-    
     private fun saveWidgetStateDebounced() {
         persistenceManager.saveDebounced()
     }
@@ -1283,7 +1201,7 @@ class MainActivity : AppCompatActivity() {
      * On returning user (saved state exists): Restore currently open widgets and keep the
      * last-closed widget templates available so reopening uses the previous bounds/config.
      *
-     * @param state The pre-loaded persisted state (loaded before layout to set isReturningUser flag)
+     * @param state The preloaded persisted state (loaded before layout to set isReturningUser flag)
      */
     private fun restoreWidgetState(state: WidgetDocument.PersistedDashboard) {
         Log.d(TAG, "Restoring widget dashboard: isFirstRun=${state.isFirstRun}, widgets=${state.widgets.size}, templates=${state.closedTemplates.size}")
@@ -1316,7 +1234,7 @@ class MainActivity : AppCompatActivity() {
     }
     
     /**
-     * Get the current date formatted as "Wed 24 Jan 2026" (weekday + day + month + year).
+     * Get the current date formatted as "Sat 24 Jan 2026" (weekday + day + month + year).
      */
     private fun getCurrentDate(): String {
         val dateFormat = SimpleDateFormat("EEE dd MMM yyyy", Locale.ENGLISH)
@@ -1349,25 +1267,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         registerReceiver(batteryStateReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-    }
-
-    private fun registerScreenStateReceiver() {
-        screenStateReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent?.action == Intent.ACTION_SCREEN_ON) {
-                    handlePhysicalScreenOn("screen_on_broadcast")
-                }
-            }
-        }
-
-        registerReceiver(screenStateReceiver, IntentFilter(Intent.ACTION_SCREEN_ON))
-    }
-
-    private fun handlePhysicalScreenOn(reason: String) {
-        if (!::wakeSleepManager.isInitialized) return
-
-        Log.d(TAG, "Physical screen-on detected ($reason) in state ${wakeSleepManager.state}")
-        wakeDisplayFromUserAction(reason)
     }
 
     private fun isChargingFromIntent(intent: Intent?): Boolean {
@@ -1516,10 +1415,8 @@ class MainActivity : AppCompatActivity() {
             startHeadUpWakeAutoFinishTimer(wakeDurationMs)
 
             // Ensure internal state wakes when resumed from service-triggered head-up wake.
-            if (::wakeSleepManager.isInitialized &&
-                wakeSleepManager.state != WakeSleepManager.DisplayState.WAKE
-            ) {
-                wakeSleepManager.transitionTo(WakeSleepManager.DisplayState.WAKE)
+            if (::displayPowerController.isInitialized && displayPowerController.state != WakeSleepManager.DisplayState.WAKE) {
+                displayPowerController.transitionTo(WakeSleepManager.DisplayState.WAKE)
             }
 
             widgetContainer.onHeadUpWake()
@@ -1530,8 +1427,8 @@ class MainActivity : AppCompatActivity() {
 
         // Hardware action-button wake can resume the activity without an internal
         // WakeSleepManager transition. Let the coordinator refresh visible data.
-        if ((getSystemService(POWER_SERVICE) as PowerManager).isInteractive) {
-            handlePhysicalScreenOn("activity_resume")
+        if (::displayPowerController.isInitialized) {
+            displayPowerController.onActivityResumed()
         }
         widgetContainer.onAppResumed()
         if (::dataSyncCoordinator.isInitialized) {
@@ -1569,8 +1466,8 @@ class MainActivity : AppCompatActivity() {
                 // we stay in foreground but transition to the OFF display state.
                 // This shows a black screen just like when the hardware button turns off the display,
                 // but keeps our app alive so head-up motion can wake it again instantly.
-                if (::wakeSleepManager.isInitialized) {
-                    wakeSleepManager.transitionTo(WakeSleepManager.DisplayState.OFF)
+                if (::displayPowerController.isInitialized) {
+                    displayPowerController.transitionTo(WakeSleepManager.DisplayState.OFF)
                     Log.d(TAG, "Transitioned to OFF state - app stays in foreground with black screen")
                 }
             }
@@ -1658,12 +1555,9 @@ class MainActivity : AppCompatActivity() {
         glassesBatteryUpdateRunnable?.let { handler.removeCallbacks(it) }
         batteryStateReceiver?.let { unregisterReceiver(it) }
         batteryStateReceiver = null
-        screenStateReceiver?.let { unregisterReceiver(it) }
-        screenStateReceiver = null
 
         // Stop time updates
         timeUpdateRunnable?.let { handler.removeCallbacks(it) }
-
 
         // Stop local speed/location updates
         locationSpeedController.stopLocationUpdates()
@@ -1673,16 +1567,12 @@ class MainActivity : AppCompatActivity() {
 
         // Cancel head-up wake auto-finish timer
         cancelHeadUpWakeAutoFinishTimer()
-        
-        // Release wake lock
-        wakeLock?.let {
-            if (it.isHeld) {
-                it.release()
-                Log.d(TAG, "Wake lock released")
-            }
+
+        // Stop display power control updates
+        if (::displayPowerController.isInitialized) {
+            displayPowerController.release()
         }
-        wakeLock = null
-        
+
         // Clean up input coordinator callbacks
         if (::inputCoordinator.isInitialized) {
             inputCoordinator.release()
@@ -1694,11 +1584,6 @@ class MainActivity : AppCompatActivity() {
         
         // Clean up widget container resources
         widgetContainer.release()
-
-        // Clean up wake/sleep manager
-        if (::wakeSleepManager.isInitialized) {
-            wakeSleepManager.release()
-        }
 
         // Clean up head-up wake manager
         if (::headUpWakeManager.isInitialized) {
@@ -1754,7 +1639,7 @@ class MainActivity : AppCompatActivity() {
         val currentFocus = currentFocus ?: window.decorView
 
         // Hide the keyboard - only use hideSoftInputFromWindow, NOT toggleSoftInput
-        // toggleSoftInput can actually SHOW the keyboard if it's currently hidden!
+        // it can actually SHOW the keyboard if it's currently hidden!
         imm.hideSoftInputFromWindow(currentFocus.windowToken, 0)
     }
 
@@ -1792,13 +1677,11 @@ class MainActivity : AppCompatActivity() {
         // We do NOT intercept or handle the hardware action button in this app.
 
         // Only process key events if we're in WAKE state
-        if (::wakeSleepManager.isInitialized && !wakeSleepManager.isAwake()) {
+        if (::displayPowerController.isInitialized && !displayPowerController.isAwake()) {
             Log.d(TAG, "Key event while display not awake - waking display")
-            if (::userInputActivity.isInitialized) {
-                userInputActivity.onUserInput(UserInputKind.KEYBOARD)
-            }
-            wakeDisplayFromUserAction("key_event")
-            return true  // Consume but don't process
+            if (::userInputActivity.isInitialized) {userInputActivity.onUserInput(UserInputKind.KEYBOARD)}
+            displayPowerController.wakeFromUserAction("key_event")
+            return true
         }
 
         if (::userInputActivity.isInitialized) {
