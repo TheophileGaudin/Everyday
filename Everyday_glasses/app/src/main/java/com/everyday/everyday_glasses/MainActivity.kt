@@ -89,9 +89,6 @@ class MainActivity : AppCompatActivity() {
     // Pending widget restoration (waits for views to be ready)
     private var pendingWidgetRestore = false
 
-    // File picker for opening images, PDFs, etc.
-    private lateinit var filePicker: FilePicker
-
     private lateinit var phoneConnectionCoordinator: PhoneConnectionCoordinator // Phone communication (inbound / outbound) coordination
     private lateinit var googleAuthCoordinator: GoogleAuthCoordinator
     private lateinit var googleCalendarClient: GoogleCalendarClient
@@ -99,6 +96,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var voiceAssistantCoordinator: VoiceAssistantCoordinator
     private lateinit var browserRoutingCoordinator: BrowserRoutingCoordinator
     private lateinit var permissionCoordinator: PermissionCoordinator
+    private lateinit var fileImportCoordinator: FileImportCoordinator
 
     companion object {
         private const val TAG = "Everyday_glasses"
@@ -197,7 +195,7 @@ class MainActivity : AppCompatActivity() {
         )
 
         // Initialize file picker for opening images, PDFs, etc.
-        filePicker = FilePicker(this)
+        setupFileImportCoordinator()
         setupPermissionCoordinator()
 
         cursorView.activityObserver = object : CursorActivityObserver {
@@ -604,6 +602,41 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun setupFileImportCoordinator() {
+        fileImportCoordinator = FileImportCoordinator(
+            activity = this,
+            callbacks = object : FileImportCallbacks {
+                override fun showFileBrowser(
+                    filter: FileBrowserWidget.FileFilter,
+                    onFileSelected: (FileBrowserWidget.FileEntry) -> Unit
+                ) {
+                    widgetContainer.createFileBrowserWidget(
+                        filter = filter,
+                        onFileSelected = onFileSelected
+                    )
+                }
+
+                override fun createImageWidget(path: String) {
+                    widgetContainer.createImageWidget(path)
+                }
+
+                override fun createVideoWidget(
+                    uri: android.net.Uri,
+                    displayName: String
+                ) {
+                    widgetContainer.createVideoWidget(uri, displayName)
+                }
+
+                override fun createPdfWidget(
+                    uri: android.net.Uri,
+                    displayName: String
+                ) {
+                    widgetContainer.createPdfWidget(uri, displayName)
+                }
+            }
+        )
+    }
+
     private fun setupPermissionCoordinator() {
         permissionCoordinator = PermissionCoordinator(
             activity = this,
@@ -622,15 +655,7 @@ class MainActivity : AppCompatActivity() {
                         "Startup without location permission -> speed disabled"
                     }
                 }
-
-                override fun onFileBrowserAccessHandled() {
-                    // The all-files settings path returns through onResume; post
-                    // until the resumed view hierarchy is ready for widget work.
-                    widgetContainer.post {
-                        openFileBrowser()
-                    }
-                }
-
+                override fun onFileBrowserAccessHandled() {widgetContainer.post {fileImportCoordinator.openFileBrowser()}} // The all-files settings path returns through onResume; post until the resumed view hierarchy is ready for widget work.
                 override fun onAssistantAudioPermissionResult(granted: Boolean) {
                     if (::voiceAssistantCoordinator.isInitialized) {
                         voiceAssistantCoordinator.onPermissionResult(granted)
@@ -707,11 +732,8 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 override fun onImageReceived(imageData: ByteArray, fileName: String) {
-                    Log.d(
-                        TAG,
-                        "Image received from phone: $fileName (${imageData.size} bytes)"
-                    )
-                    handleReceivedImage(imageData, fileName)
+                    Log.d(TAG,"Image received from phone: $fileName (${imageData.size} bytes)")
+                    fileImportCoordinator.importReceivedImage(imageData, fileName)
                 }
 
                 override fun onOpenBrowserRequested(address: String) {
@@ -1405,7 +1427,6 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
 
         if (::phoneConnectionCoordinator.isInitialized) {phoneConnectionCoordinator.release()}
-        if (::statusBarController.isInitialized) {statusBarController.release()} // Stop status bar monitoring
 
         GlassesService.stop(this)
         binocularView.onDestroy()
@@ -1417,6 +1438,8 @@ class MainActivity : AppCompatActivity() {
         if (::inputCoordinator.isInitialized) {inputCoordinator.release()} // Clean up input coordinator callbacks
         if (::dataSyncCoordinator.isInitialized) {dataSyncCoordinator.release()}
         if (::permissionCoordinator.isInitialized) {permissionCoordinator.release()}
+        if (::statusBarController.isInitialized) {statusBarController.release()} // Stop status bar monitoring
+        if (::fileImportCoordinator.isInitialized) {fileImportCoordinator.release()}
 
         widgetContainer.release() // Clean up widget container resources
 
@@ -1528,144 +1551,9 @@ class MainActivity : AppCompatActivity() {
         return super.onKeyDown(keyCode, event)
     }
 
-    /**
-     * Open the file browser widget.
-     */
-    private fun openFileBrowser() {
-        widgetContainer.createFileBrowserWidget(
-            filter = FileBrowserWidget.FileFilter.MEDIA,
-            onFileSelected = { entry ->
-                Log.d(TAG, "File selected: ${entry.absolutePath}, uri: ${entry.uri}")
-                if (entry.extension == "pdf" || entry.mimeType == "application/pdf") {
-                    val uri = entry.uri ?: android.net.Uri.fromFile(java.io.File(entry.absolutePath))
-                    handlePdfFile(uri, entry.name)
-                } else if (entry.extension in FileBrowserWidget.FileFilter.VIDEOS.extensions || entry.mimeType?.startsWith("video/") == true) {
-                    val uri = entry.uri ?: android.net.Uri.fromFile(java.io.File(entry.absolutePath))
-                    handleVideoFile(uri, entry.name)
-                } else if (entry.uri != null) {
-                    handleImageFile(entry.uri)
-                } else {
-                    handleImageFile(java.io.File(entry.absolutePath))
-                }
-            }
-        )
-    }
-
-    private fun handleVideoFile(uri: android.net.Uri, displayName: String) {
-        runOnUiThread {
-            widgetContainer.createVideoWidget(uri, displayName)
-        }
-    }
-
-    private fun handlePdfFile(uri: android.net.Uri, displayName: String) {
-        runOnUiThread {
-            widgetContainer.createPdfWidget(uri, displayName)
-        }
-    }
-
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        // Delegate to FilePicker if this is a file picker request
-        filePicker.handleActivityResult(requestCode, resultCode, data)
-    }
-
-    /**
-     * Handle file selection from the file picker.
-     * Extensible to support different file types (images, PDFs, etc.)
-     */
-    /**
-     * Process an image file from the given URI.
-     * Copies URI content to persistent app storage to get a durable file path for BitmapFactory.
-     */
-    private fun handleImageFile(uri: android.net.Uri) {
-        Thread {
-            try {
-                // Determine the file extension from the content type
-                val mimeType = contentResolver.getType(uri)
-                val extension = when (mimeType) {
-                    "image/png" -> "png"
-                    "image/gif" -> "gif"
-                    "image/webp" -> "webp"
-                    "image/bmp" -> "bmp"
-                    else -> "jpg"
-                }
-
-                val inputStream = contentResolver.openInputStream(uri)
-                    ?: throw IllegalStateException("Unable to open image URI: $uri")
-                val file = saveImageToPersistentStorage(inputStream, "image_${System.currentTimeMillis()}.$extension")
-
-                Log.d(TAG, "Image saved to ${file.absolutePath}")
-
-                runOnUiThread {
-                    widgetContainer.createImageWidget(file.absolutePath)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error loading image from URI: $uri", e)
-            }
-        }.start()
-    }
-
-    /**
-     * Process an image file directly from the file system (used by FileBrowserWidget).
-     */
-    private fun handleImageFile(file: java.io.File) {
-        Thread {
-            try {
-                Log.d(TAG, "Loading image from ${file.absolutePath}")
-                runOnUiThread {
-                    widgetContainer.createImageWidget(file.absolutePath)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error loading image file", e)
-            }
-        }.start()
-    }
-
-    /**
-     * Handle an image received from the phone over Bluetooth.
-     * Saves the image to persistent app storage and opens it in an ImageWidget.
-     */
-    private fun handleReceivedImage(imageData: ByteArray, fileName: String) {
-        Thread {
-            try {
-                // Create a unique file name to avoid conflicts
-                val timestamp = System.currentTimeMillis()
-                val safeFileName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
-                val imageFile = saveImageToPersistentStorage(imageData, "${timestamp}_$safeFileName")
-
-                // Write image data to file
-                Log.d(TAG, "Saved received image to ${imageFile.absolutePath}")
-
-                // Create ImageWidget on UI thread
-                runOnUiThread {
-                    widgetContainer.createImageWidget(imageFile.absolutePath)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error handling received image: ${e.message}", e)
-            }
-        }.start()
-    }
-
-    private fun saveImageToPersistentStorage(
-        inputStream: java.io.InputStream,
-        fileName: String
-    ): java.io.File {
-        val outputFile = ImageWidgetStorage.createManagedFile(this, fileName)
-        inputStream.use { input ->
-            java.io.FileOutputStream(outputFile).use { output ->
-                input.copyTo(output)
-            }
-        }
-        return outputFile
-    }
-
-    private fun saveImageToPersistentStorage(
-        imageData: ByteArray,
-        fileName: String
-    ): java.io.File {
-        val outputFile = ImageWidgetStorage.createManagedFile(this, fileName)
-        outputFile.writeBytes(imageData)
-        return outputFile
+        if (::fileImportCoordinator.isInitialized) {fileImportCoordinator.onActivityResult(requestCode, resultCode, data)}
     }
 
     override fun onRequestPermissionsResult(
