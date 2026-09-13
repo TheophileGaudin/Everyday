@@ -18,5 +18,6 @@ Localized map refreshing
 Refactor
 
 Migrated a number of functionalities in WidgetContainer to dedicated services.
+Extracted a number of classes from MainActivity to reduce the number of responsibilities in this central file
 Grouped a number of callbacks into interfaces.
 Defined boundary between active dashboard and listing of saved layouts

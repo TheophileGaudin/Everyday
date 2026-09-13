@@ -8,7 +8,6 @@ import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.net.wifi.p2p.WifiP2pDevice
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
@@ -103,10 +102,8 @@ class MainActivity : AppCompatActivity() {
     // Speed data management
     private lateinit var locationSpeedController: LocationSpeedController
 
-
-    private var latestPhoneBatteryPercent: Int = -1
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
-    
+
     // Glasses battery update
     private var glassesBatteryUpdateRunnable: Runnable? = null
     private var batteryStateReceiver: BroadcastReceiver? = null
@@ -120,15 +117,11 @@ class MainActivity : AppCompatActivity() {
     // Pending widget restoration (waits for views to be ready)
     private var pendingWidgetRestore = false
 
-
-    // Wifi direct variables
-    private var wifiDirectClient: WifiDirectClient? = null
-    private var pendingWifiDirectMirrorIp: String? = null
-
     // File picker for opening images, PDFs, etc.
     private lateinit var filePicker: FilePicker
     private var openFileBrowserAfterAllFilesGrant = false
 
+    private lateinit var phoneConnectionCoordinator: PhoneConnectionCoordinator // Phone communication (inbound / outbound) coordination
     private lateinit var googleAuthCoordinator: GoogleAuthCoordinator
     private lateinit var googleCalendarClient: GoogleCalendarClient
     private lateinit var dataSyncCoordinator: GlassesDataSyncCoordinator
@@ -336,203 +329,6 @@ class MainActivity : AppCompatActivity() {
         setup3DofManager()
         setupTapGestureDetector()
 
-        // Create RFCOMM client
-        rfcommClient = RfcommClient(this).apply {
-            transportConnectionListener = object : TransportConnectionListener {
-                override fun onStatusChanged(status: String) {
-                    runOnUiThread {
-                        Log.d(TAG, "Connection status: $status")
-                        notifyTransientBinocularChange()
-                    }
-                }
-
-                override fun onConnectionChanged(connected: Boolean) {
-                    runOnUiThread {
-                        widgetContainer.onPhoneRouteConnectionChanged(connected)
-                        if (::voiceAssistantCoordinator.isInitialized) {
-                            if (connected) rfcommClient?.sendAssistantStatus(voiceAssistantCoordinator.currentStatus())
-                            else voiceAssistantCoordinator.onPhoneDisconnected()
-                        }
-                        if (::dataSyncCoordinator.isInitialized) {
-                            dataSyncCoordinator.onPhoneConnectionChanged(connected)
-                        }
-                        if (!connected && isPhoneMode) {
-                            latestPhoneBatteryPercent = -1
-                            // Update status bar to show disconnected
-                            updateStatusBar(
-                                isPhoneConnected = false,
-                                phoneBattery = -1,
-                            )
-                            // Unfocus any widgets on disconnect
-                            widgetContainer.unfocusAll()
-                            // Disable mirroring on disconnect
-                            widgetContainer.setMirroringEnabled(false)
-                            widgetContainer.onSubtitlePhoneDisconnected()
-                        } else if (connected) {
-                            updateStatusBar(
-                                isPhoneConnected = true,
-                                phoneBattery = latestPhoneBatteryPercent,
-                            )
-                            widgetContainer.onPhoneReconnected()
-                        }
-                    }
-                }
-            }
-
-            remoteInputListener = object : RemoteInputListener {
-                override fun onPointerReceived(data: TransportMessage.Pointer) {
-                    runOnUiThread {
-                        if (isPhoneMode) {
-                            handlePhonePointer(data)
-                        }
-                    }
-                }
-
-                override fun onKeyReceived(key: String) {
-                    runOnUiThread {
-                        handleKeyFromPhone(key)
-                    }
-                }
-
-                override fun onLongPressWithClipboard(clipboardContent: String?) {
-                    runOnUiThread {
-                        userInputActivity.onUserInput(UserInputKind.LONG_PRESS)
-                        Log.d(TAG, "Phone clipboard received: available=${clipboardContent != null}")
-                        // Store phone clipboard content for paste operations
-                        // Note: Text selection is now handled by glasses-side long-press detection
-                        // Double-tap on focused text shows the text edit menu
-                        widgetContainer.setPhoneClipboard(clipboardContent)
-                    }
-                }
-
-                override fun onClipboardReceived(clipboardContent: String) {
-                    runOnUiThread {
-                        Log.d(TAG, "Phone clipboard updated: chars=${clipboardContent.length}")
-                        // Store phone clipboard content for paste operations
-                        widgetContainer.setPhoneClipboard(clipboardContent)
-                    }
-                }
-            }
-
-            remoteContentListener = object : RemoteContentListener {
-                override fun onDeviceStatusReceived(status: TransportMessage.DeviceStatus) {
-                    status.phoneBatteryPercent?.let { battery ->
-                        runOnUiThread {
-                            latestPhoneBatteryPercent = battery
-                            updateStatusBar(isPhoneConnected = true, phoneBattery = battery)
-                        }
-                    }
-                }
-
-                override fun onImageReceived(imageData: ByteArray, fileName: String) {
-                    runOnUiThread {
-                        Log.d(TAG, "Image received from phone: $fileName (${imageData.size} bytes)")
-                        handleReceivedImage(imageData, fileName)
-                    }
-                }
-
-                override fun onOpenBrowserRequested(address: String) {
-                    runOnUiThread {
-                        Log.d(TAG, "Open browser requested from phone: ${address.take(80)}")
-                        widgetContainer.executeOpenUrlCommand(address)
-                    }
-                }
-            }
-
-            mirrorSessionListener = object : MirrorSessionListener {
-                override fun onMirrorStateChanged(enabled: Boolean, ip: String?, isWifiDirect: Boolean) {
-                    runOnUiThread {
-                        Log.d(TAG, "Mirror state changed: enabled=$enabled, ip=$ip, wifiDirect=$isWifiDirect")
-
-                        if (enabled && isWifiDirect) {
-                            // Phone told us this is WiFi Direct - we need to join the P2P group first
-                            if (wifiDirectClient?.isConnected != true) {
-                                Log.d(TAG, "WiFi Direct mode, starting peer discovery...")
-                                pendingWifiDirectMirrorIp = ip  // Save IP for when we connect
-                                wifiDirectClient?.discoverPeers()
-                                // DON'T enable mirroring yet - wait for P2P connection
-                                return@runOnUiThread
-                            } else {
-                                Log.d(TAG, "Already connected to WiFi Direct, proceeding with mirroring")
-                            }
-                        }
-
-                        widgetContainer.setMirroringEnabled(enabled, ip)
-                    }
-                }
-            }
-
-            remoteAuthListener = object : RemoteAuthListener {
-                override fun onGoogleAuthStateReceived(
-                    status: GooglePhoneAuthStatus,
-                    account: GoogleAccountSummary?,
-                    detail: String?
-                ) {
-                    runOnUiThread {
-                        if (status == GooglePhoneAuthStatus.SIGNED_OUT) {
-                            dataSyncCoordinator.clearCalendarSnapshot()
-                        }
-                        googleAuthCoordinator.onPhoneAuthStateChanged(status, account, detail)
-                    }
-                }
-            }
-
-            syncMessageListener = object : SyncMessageListener {
-                override fun onSyncSnapshotReceived(snapshot: SyncSnapshot) {
-                    runOnUiThread {
-                        dataSyncCoordinator.onSyncSnapshotReceived(snapshot)
-                    }
-                }
-
-                override fun onSyncErrorReceived(error: SyncError) {
-                    runOnUiThread {
-                        dataSyncCoordinator.onSyncErrorReceived(error)
-                    }
-                }
-            }
-
-            routeMessageListener = object : RouteMessageListener {
-                override fun onRouteResultReceived(result: RouteTransportResult) {
-                    runOnUiThread { widgetContainer.onPhoneRouteResult(result) }
-                }
-
-                override fun onRouteErrorReceived(error: RouteTransportError) {
-                    runOnUiThread { widgetContainer.onPhoneRouteError(error) }
-                }
-            }
-
-            destinationSearchMessageListener = object : DestinationSearchMessageListener {
-                override fun onDestinationSearchResultReceived(result: DestinationSearchResult) {
-                    runOnUiThread { widgetContainer.onPhoneDestinationSearchResult(result) }
-                }
-
-                override fun onDestinationSearchErrorReceived(error: DestinationSearchError) {
-                    runOnUiThread { widgetContainer.onPhoneDestinationSearchError(error) }
-                }
-            }
-
-            subtitleMessageListener = object : SubtitleMessageListener {
-                override fun onSubtitleStatusReceived(status: SubtitleStatus) {
-                    runOnUiThread {
-                        widgetContainer.applySubtitleStatus(status)
-                    }
-                }
-
-                override fun onSubtitleTranscriptReceived(transcript: SubtitleTranscript) {
-                    runOnUiThread {
-                        widgetContainer.applySubtitleTranscript(transcript)
-                    }
-                }
-            }
-
-            assistantControlListener = object : AssistantControlListener {
-                override fun onAssistantControlReceived(control: AssistantControl) {
-                    if (::voiceAssistantCoordinator.isInitialized) voiceAssistantCoordinator.handleControl(control)
-                }
-            }
-        }
-        widgetContainer.configurePhoneRouteTransport(rfcommClient)
-
         val assistantPreferences = AssistantPreferencesStore(this)
         assistantNetworkLease = AssistantNetworkLease(this)
         browserRoutingCoordinator = BrowserRoutingCoordinator(
@@ -564,7 +360,7 @@ class MainActivity : AppCompatActivity() {
                     runOnUiThread {
                         assistantNetworkLease.update(status.state, status.sessionId != null)
                         widgetContainer.setAssistantStatus(status)
-                        rfcommClient?.sendAssistantStatus(status)
+                        phoneConnectionOrNull()?.sendAssistantStatus(status)
                     }
                 }
 
@@ -593,7 +389,7 @@ class MainActivity : AppCompatActivity() {
             voiceAssistantCoordinator::selectModel
         )
         voiceAssistantCoordinator.initialize()
-
+        setupPhoneConnectionCoordinator()
         googleAuthCoordinator.refreshStateSilently(this)
 
         // Default: phone mode ON
@@ -655,7 +451,6 @@ class MainActivity : AppCompatActivity() {
         // Start location updates
         locationSpeedController.startLocationUpdates()
         GlassesService.start(this)
-        initializeWifiDirect()
 
         // Note: Head-up wake is now handled via static flags in onResume()
         // This ensures consistent handling whether activity is created fresh or resumed
@@ -725,7 +520,7 @@ class MainActivity : AppCompatActivity() {
         widgetContainer.contentObserver = object : WidgetContentObserver {
             override fun onFocusChanged(focused: Boolean) {
                 Log.d(TAG, "Widget focus changed: $focused")
-                rfcommClient?.sendTextFieldFocus(focused)
+                phoneConnectionOrNull()?.sendTextFieldFocus(focused)
             }
 
             override fun onPersistentContentChanged() {
@@ -779,24 +574,24 @@ class MainActivity : AppCompatActivity() {
 
             override fun requestMirror(start: Boolean) {
                 Log.d(TAG, "Mirror request from widget: start=$start")
-                rfcommClient?.sendMirrorRequest(start)
+                phoneConnectionOrNull()?.sendMirrorRequest(start)
             }
 
             override fun requestSubtitleControl(control: SubtitleControl) {
                 Log.d(TAG, "Subtitle control from widget: action=${control.action.wireName}")
-                if (rfcommClient?.sendSubtitleControl(control) != true) {
+                if (phoneConnectionOrNull()?.sendSubtitleControl(control) != true) {
                     widgetContainer.onSubtitlePhoneDisconnected()
                 }
             }
 
             override fun requestBrowserKeyboard(show: Boolean) {
                 Log.d(TAG, "Browser keyboard request: show=$show")
-                rfcommClient?.sendTextFieldFocus(show)
+                phoneConnectionOrNull()?.sendTextFieldFocus(show)
             }
 
             override fun requestClipboard() {
                 Log.d(TAG, "Clipboard request from widget - asking phone for current clipboard")
-                rfcommClient?.requestClipboard()
+                phoneConnectionOrNull()?.requestClipboard()
             }
 
             override fun requestFilePicker() {
@@ -878,6 +673,170 @@ class MainActivity : AppCompatActivity() {
         speedLog { "Loaded speed visibility threshold ${speedThreshold}" }
     }
 
+    private fun phoneConnectionOrNull(): PhoneConnectionCoordinator? =
+        if (::phoneConnectionCoordinator.isInitialized) {
+            phoneConnectionCoordinator
+        } else {
+            null
+        }
+
+
+
+    private fun setupPhoneConnectionCoordinator() {
+        phoneConnectionCoordinator = PhoneConnectionCoordinator(
+            context = this,
+            callbacks = object : PhoneConnectionCallbacks {
+                override fun onConnectionStatusChanged(status: String) {
+                    Log.d(TAG, "Connection status: $status")
+                    notifyTransientBinocularChange()
+                }
+
+                override fun onConnectionChanged(
+                    connected: Boolean,
+                    phoneBatteryPercent: Int
+                ) {
+                    widgetContainer.onPhoneRouteConnectionChanged(connected)
+
+                    if (::voiceAssistantCoordinator.isInitialized) {
+                        if (connected) {
+                            phoneConnectionCoordinator.sendAssistantStatus(
+                                voiceAssistantCoordinator.currentStatus()
+                            )
+                        } else {
+                            voiceAssistantCoordinator.onPhoneDisconnected()
+                        }
+                    }
+
+                    if (::dataSyncCoordinator.isInitialized) {
+                        dataSyncCoordinator.onPhoneConnectionChanged(connected)
+                    }
+
+                    if (!connected && isPhoneMode) {
+                        updateStatusBar(
+                            isPhoneConnected = false,
+                            phoneBattery = -1
+                        )
+                        widgetContainer.unfocusAll()
+                        widgetContainer.setMirroringEnabled(false)
+                        widgetContainer.onSubtitlePhoneDisconnected()
+                    } else if (connected) {
+                        updateStatusBar(
+                            isPhoneConnected = true,
+                            phoneBattery = phoneBatteryPercent
+                        )
+                        widgetContainer.onPhoneReconnected()
+                    }
+                }
+
+                override fun onPhoneBatteryChanged(phoneBatteryPercent: Int) {
+                    updateStatusBar(
+                        isPhoneConnected = true,
+                        phoneBattery = phoneBatteryPercent
+                    )
+                }
+
+                override fun onPointerReceived(pointer: TransportMessage.Pointer) {
+                    if (isPhoneMode) {
+                        handlePhonePointer(pointer)
+                    }
+                }
+
+                override fun onKeyReceived(key: String) {
+                    handleKeyFromPhone(key)
+                }
+
+                override fun onLongPressWithClipboard(clipboardContent: String?) {
+                    userInputActivity.onUserInput(UserInputKind.LONG_PRESS)
+                    Log.d(
+                        TAG,
+                        "Phone clipboard received: available=${clipboardContent != null}"
+                    )
+                    widgetContainer.setPhoneClipboard(clipboardContent)
+                }
+
+                override fun onClipboardReceived(clipboardContent: String) {
+                    Log.d(TAG, "Phone clipboard updated: chars=${clipboardContent.length}")
+                    widgetContainer.setPhoneClipboard(clipboardContent)
+                }
+
+                override fun onImageReceived(imageData: ByteArray, fileName: String) {
+                    Log.d(
+                        TAG,
+                        "Image received from phone: $fileName (${imageData.size} bytes)"
+                    )
+                    handleReceivedImage(imageData, fileName)
+                }
+
+                override fun onOpenBrowserRequested(address: String) {
+                    Log.d(TAG, "Open browser requested from phone: ${address.take(80)}")
+                    widgetContainer.executeOpenUrlCommand(address)
+                }
+
+                override fun onMirroringChanged(enabled: Boolean, ip: String?) {
+                    widgetContainer.setMirroringEnabled(enabled, ip)
+                }
+
+                override fun onGoogleAuthStateReceived(
+                    status: GooglePhoneAuthStatus,
+                    account: GoogleAccountSummary?,
+                    detail: String?
+                ) {
+                    if (status == GooglePhoneAuthStatus.SIGNED_OUT) {
+                        dataSyncCoordinator.clearCalendarSnapshot()
+                    }
+                    googleAuthCoordinator.onPhoneAuthStateChanged(status, account, detail)
+                }
+
+                override fun onSyncSnapshotReceived(snapshot: SyncSnapshot) {
+                    dataSyncCoordinator.onSyncSnapshotReceived(snapshot)
+                }
+
+                override fun onSyncErrorReceived(error: SyncError) {
+                    dataSyncCoordinator.onSyncErrorReceived(error)
+                }
+
+                override fun onRouteResultReceived(result: RouteTransportResult) {
+                    widgetContainer.onPhoneRouteResult(result)
+                }
+
+                override fun onRouteErrorReceived(error: RouteTransportError) {
+                    widgetContainer.onPhoneRouteError(error)
+                }
+
+                override fun onDestinationSearchResultReceived(
+                    result: DestinationSearchResult
+                ) {
+                    widgetContainer.onPhoneDestinationSearchResult(result)
+                }
+
+                override fun onDestinationSearchErrorReceived(
+                    error: DestinationSearchError
+                ) {
+                    widgetContainer.onPhoneDestinationSearchError(error)
+                }
+
+                override fun onSubtitleStatusReceived(status: SubtitleStatus) {
+                    widgetContainer.applySubtitleStatus(status)
+                }
+
+                override fun onSubtitleTranscriptReceived(
+                    transcript: SubtitleTranscript
+                ) {
+                    widgetContainer.applySubtitleTranscript(transcript)
+                }
+
+                override fun onAssistantControlReceived(control: AssistantControl) {
+                    if (::voiceAssistantCoordinator.isInitialized) {
+                        voiceAssistantCoordinator.handleControl(control)
+                    }
+                }
+
+            }
+        )
+
+        phoneConnectionCoordinator.initialize()
+        widgetContainer.configurePhoneRouteTransport(phoneConnectionCoordinator)
+    }
     private fun setupGoogleAuth() {
         googleAuthCoordinator = GoogleAuthCoordinator(
             clientId = getString(R.string.google_device_client_id),
@@ -885,7 +844,7 @@ class MainActivity : AppCompatActivity() {
             networkStatusProvider = DefaultNetworkStatusProvider(this),
             phoneFallbackBridge = object : GooglePhoneFallbackBridge {
                 override fun requestPhoneAuthorization() {
-                    rfcommClient?.requestGooglePhoneAuthorization()
+                    phoneConnectionOrNull()?.requestGooglePhoneAuthorization()
                 }
 
                 override fun requestCalendarSnapshot() {
@@ -895,7 +854,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 override fun disconnectPhoneAuthorization() {
-                    rfcommClient?.disconnectGooglePhoneAuth()
+                    phoneConnectionOrNull()?.disconnectGooglePhoneAuth()
                 }
             }
         ).apply {
@@ -940,7 +899,7 @@ class MainActivity : AppCompatActivity() {
         dataSyncCoordinator = GlassesDataSyncCoordinator(
             context = this,
             widgetContainer = widgetContainer,
-            syncMessengerProvider = { rfcommClient },
+            syncMessengerProvider = { phoneConnectionOrNull() },
             networkStatusProvider = DefaultNetworkStatusProvider(this),
             googleAuthCoordinatorProvider = {
                 if (::googleAuthCoordinator.isInitialized) googleAuthCoordinator else null
@@ -1063,55 +1022,6 @@ class MainActivity : AppCompatActivity() {
         Log.d(TAG, "Restored head-up settings: headUpTime=${savedHeadUpTime}ms, wakeDuration=${savedWakeDuration}ms, angle=${savedAngleThreshold}°, enabled=$savedHeadsUpEnabled")
     }
 
-
-
-
-
-
-
-    private fun initializeWifiDirect() {
-        wifiDirectClient = WifiDirectClient(this).apply {
-            connectionListener = object : WifiDirectConnectionListener {
-                override fun onConnected(groupOwnerIp: String) {
-                    Log.d(TAG, "WiFi Direct connected, group owner: $groupOwnerIp")
-                    pendingWifiDirectMirrorIp?.let { ip ->
-                        Log.d(TAG, "WiFi Direct connected, now enabling mirroring to $ip")
-                        runOnUiThread {
-                            widgetContainer.setMirroringEnabled(true, ip)
-                        }
-                        pendingWifiDirectMirrorIp = null
-                    }
-                }
-
-                override fun onDisconnected() {
-                    Log.d(TAG, "WiFi Direct disconnected")
-                }
-
-                override fun onPeersAvailable(peers: List<WifiP2pDevice>) {
-                    Log.d(TAG, "WiFi Direct peers available: ${peers.size}")
-                    peers.forEach { device ->
-                        Log.d(TAG, "  - ${device.deviceName} (${device.deviceAddress}) status=${device.status}")
-                    }
-
-                    val availableDevice = peers.firstOrNull { it.status == WifiP2pDevice.AVAILABLE }
-                    if (availableDevice != null) {
-                        Log.d(TAG, "Auto-connecting to: ${availableDevice.deviceName}")
-                        connectToDevice(availableDevice)
-                    } else {
-                        peers.firstOrNull { it.status == WifiP2pDevice.CONNECTED }?.let {
-                            Log.d(TAG, "Already connected to: ${it.deviceName}")
-                        }
-                    }
-                }
-
-                override fun onError(message: String) {
-                    Log.e(TAG, "WiFi Direct error: $message")
-                }
-            }
-
-            initialize()
-        }
-    }
     /**
      * Initialize and configure the wake/sleep manager.
      */
@@ -1743,8 +1653,7 @@ class MainActivity : AppCompatActivity() {
         if (::browserRoutingCoordinator.isInitialized) browserRoutingCoordinator.release()
         if (::assistantNetworkLease.isInitialized) assistantNetworkLease.close()
         super.onDestroy()
-        rfcommClient?.stop()
-        wifiDirectClient?.release()
+        if (::phoneConnectionCoordinator.isInitialized) {phoneConnectionCoordinator.release()}
         GlassesService.stop(this)
         binocularView.onDestroy()
         
@@ -2292,9 +2201,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun startClient() {
         Log.d(TAG, "startClient called, isPhoneMode=$isPhoneMode")
-        if (isPhoneMode) {
-            rfcommClient?.isPaused = false
-            rfcommClient?.start()
+        if (isPhoneMode && ::phoneConnectionCoordinator.isInitialized) {
+            phoneConnectionCoordinator.start()
         }
     }
 }
