@@ -29,8 +29,8 @@ class TapGestureDetector {
         private const val TAG = "TapGestureDetector"
 
         // Time window for counting consecutive taps as multi-tap
-        // 200ms feels responsive while allowing natural multi-tap gestures
-        private const val TAP_WINDOW_MS = 200L
+        // 500ms feels responsive while allowing natural multi-tap gestures
+        private const val TAP_WINDOW_MS = 500L
 
         // Maximum movement between taps to still count as same gesture
         private const val MAX_TAP_DISTANCE = 60f

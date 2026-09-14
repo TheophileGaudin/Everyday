@@ -4549,51 +4549,17 @@ class WidgetContainer @JvmOverloads constructor(
         notifyTransientContentChanged()
     }
 
+    private fun shouldApplyThreeDofTransform(): Boolean =
+        displayState == WakeSleepManager.DisplayState.WAKE &&
+                !hasFullscreenWidget() &&
+                (is3DofEnabled || threeDofOverlay.isVisible())
+
     /**
-     * Convert screen coordinates to content coordinates.
-     * In 3DOF mode, the cursor stays centered (head-locked) while content moves.
-     * This transforms cursor position to where it would be in content space.
+     * Convert the fixed screen cursor to the coordinate space in which widgets are drawn.
      */
     fun screenToContentCoordinates(screenX: Float, screenY: Float): Pair<Float, Float> {
-        if (!is3DofEnabled) {
-            return Pair(screenX, screenY)
-        }
-
-        // Inverse of the draw transform:
-        // draw: translate(offset) then rotate(-roll) about screen center
-        // inverse: rotate(+roll) about screen center then translate(-offset)
-
-        val cx = width / 2f
-        val cy = height / 2f
-
-        val a = Math.toRadians(threeDofRollDeg.toDouble())
-        val cosA = kotlin.math.cos(a).toFloat()
-        val sinA = kotlin.math.sin(a).toFloat()
-
-        // Current onDraw logic: translate(offset) then rotate(-roll)
-        // This corresponds to: Rotate then Translate (in forward transform, Android Canvas order)
-        // Or Translate then Rotate (in matrix order T*R)?
-        // Android Canvas: translate(T); rotate(R) -> Matrix = T * R.
-        // Point P' = T * R * P.
-        // P is Rotated (around content center) then Translated.
-        
-        // Inverse should be: P = R_inv * T_inv * P'.
-        // 1. Untranslate (T_inv)
-        // 2. Unrotate (R_inv)
-
-        // 1. Untranslate
-        val untranslatedX = screenX - threeDofOffsetX
-        val untranslatedY = screenY - threeDofOffsetY
-
-        // 2. Unrotate around (cx, cy)
-        // Rotate by +roll (inverse of -roll)
-        val dx = untranslatedX - cx
-        val dy = untranslatedY - cy
-
-        val xRot = cx + dx * cosA - dy * sinA
-        val yRot = cy + dx * sinA + dy * cosA
-
-        return Pair(xRot, yRot)
+        if (!shouldApplyThreeDofTransform()) return Pair(screenX, screenY)
+        return ThreeDofCoordinateMath.screenToContent(screenX = screenX, screenY = screenY, viewportWidth = width.toFloat(), viewportHeight = height.toFloat(), offsetX = threeDofOffsetX, offsetY = threeDofOffsetY, rollDeg = threeDofRollDeg,)
     }
 
 
@@ -4610,9 +4576,7 @@ class WidgetContainer @JvmOverloads constructor(
             if (pinnedFullscreenWidget != null) {
                 // Only draw the pinned fullscreen widget - it covers everything else
                 pinnedFullscreenWidget.draw(canvas)
-                if (!settingsController.isHoverControlsLayoutEditorVisible()) {
-                    drawHoverControls(canvas)
-                }
+                if (!settingsController.isHoverControlsLayoutEditorVisible()) {drawHoverControls(canvas)}
                 drawVisibleKeyboardOverlays(canvas)
                 drawPresentationProgress(canvas)
                 drawOverlayMenus(canvas)
@@ -4644,15 +4608,15 @@ class WidgetContainer @JvmOverloads constructor(
             return
         }
 
+        val applyThreeDofTransform = shouldApplyThreeDofTransform()
         val cx = width / 2f - threeDofOffsetX
         val cy = height / 2f - threeDofOffsetY
 
-        // Apply 3DOF transformation to content (not to close button or menus)
-        if (is3DofEnabled || threeDofOverlay.isVisible()) {
+        // Apply 3DOF transformation to dashboard content, but not to head-locked menus.
+        if (applyThreeDofTransform) {
             canvas.save()
             // Translate canvas by 3DOF offset to move content with head movement
             canvas.translate(threeDofOffsetX, threeDofOffsetY)
-
             canvas.rotate(-threeDofRollDeg, cx, cy)
         }
 
@@ -4686,9 +4650,7 @@ class WidgetContainer @JvmOverloads constructor(
         threeDofOverlay.draw(canvas)
 
         // Restore canvas if 3DOF was applied
-        if (is3DofEnabled || threeDofOverlay.isVisible()) {
-            canvas.restore()
-        }
+        if (applyThreeDofTransform) {canvas.restore()}
 
         drawPresentationProgress(canvas)
 
