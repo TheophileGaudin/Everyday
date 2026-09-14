@@ -84,34 +84,71 @@ class AppCommandRegistryTest {
     @Test
     fun `executor validates availability and crosses UI boundary exactly once`() {
         val capabilities = FakeCapabilities()
-        val queued = mutableListOf<() -> Unit>()
-        val executor = AppCommandExecutor(registry, capabilities, CommandUiDispatcher(queued::add))
+        var dispatchCalls = 0
+        val executor = AppCommandExecutor(registry, capabilities, CommandUiDispatcher { action ->
+            dispatchCalls++
+            action()
+        })
 
         val result = executor.execute(registry.invocation(registry.toggleStatus))
         assertTrue(result is AppCommandResult.Success)
-        assertEquals(1, queued.size)
-        assertEquals(0, capabilities.calls)
-        queued.single().invoke()
+        assertEquals(1, dispatchCalls)
         assertEquals(1, capabilities.calls)
+        assertEquals(1, capabilities.finishedCalls)
         assertEquals(CommandWidgetId.STATUS, capabilities.widget)
 
         val showNews = registry.assistantDefinitions().first { it.id == "show:news" }
         val showResult = executor.execute(registry.invocation(showNews))
         assertTrue(showResult is AppCommandResult.Success)
-        assertEquals(2, queued.size)
-        queued.last().invoke()
+        assertEquals(2, dispatchCalls)
+        assertEquals(2, capabilities.calls)
+        assertEquals(2, capabilities.finishedCalls)
         assertEquals(true, capabilities.visible)
         assertEquals(CommandWidgetId.NEWS, capabilities.widget)
 
         capabilities.available = false
         val unavailable = executor.execute(registry.invocation(registry.toggleNews))
         assertTrue(unavailable is AppCommandResult.Failure)
-        assertEquals(2, queued.size)
+        assertEquals(2, dispatchCalls)
         assertEquals(2, capabilities.calls)
+        assertEquals(2, capabilities.finishedCalls)
 
         val unknown = executor.execute(AppCommandInvocation("unknown"))
         assertTrue(unknown is AppCommandResult.Failure)
         assertFalse(unknown is AppCommandResult.Success)
+        assertEquals(2, dispatchCalls)
+    }
+
+    @Test
+    fun `executor reports application failure when capability cannot complete command`() {
+        val capabilities = FakeCapabilities().apply { loadLayoutSucceeds = false }
+        val executor = AppCommandExecutor(registry, capabilities, CommandUiDispatcher { action -> action() })
+
+        val result = executor.execute(registry.invocation("layout:Work"))
+
+        assertTrue(result is AppCommandResult.Failure)
+        assertEquals(
+            AppCommandResult.Failure.Code.APPLICATION_FAILURE,
+            (result as AppCommandResult.Failure).code,
+        )
+        assertEquals(1, capabilities.calls)
+        assertEquals(1, capabilities.finishedCalls)
+    }
+
+    @Test
+    fun `executor reports application failure when dispatch has no completed result`() {
+        val capabilities = FakeCapabilities()
+        val executor = AppCommandExecutor(registry, capabilities, CommandUiDispatcher { null })
+
+        val result = executor.execute(registry.invocation(registry.toggleStatus))
+
+        assertTrue(result is AppCommandResult.Failure)
+        assertEquals(
+            AppCommandResult.Failure.Code.APPLICATION_FAILURE,
+            (result as AppCommandResult.Failure).code,
+        )
+        assertEquals(0, capabilities.calls)
+        assertEquals(0, capabilities.finishedCalls)
     }
 
     private class FakeCapabilities : AppCommandCapabilities {
@@ -119,6 +156,8 @@ class AppCommandRegistryTest {
         var calls = 0
         var widget: CommandWidgetId? = null
         var visible: Boolean? = null
+        var loadLayoutSucceeds = true
+        var finishedCalls = 0
         override fun isAvailable(requirement: CommandAvailability) = available
         override fun toggleWidget(widgetId: CommandWidgetId) { calls++; widget = widgetId }
         override fun setWidgetVisible(widgetId: CommandWidgetId, visible: Boolean) {
@@ -129,7 +168,7 @@ class AppCommandRegistryTest {
         override fun createTextWidget() { calls++ }
         override fun createBrowserWidget() { calls++ }
         override fun openYouTubeHistory() { calls++ }
-        override fun loadLayout(name: String): Boolean { calls++; return true }
+        override fun loadLayout(name: String): Boolean {calls++; return loadLayoutSucceeds}
         override fun toggleLayoutLock() { calls++ }
         override fun saveLayout() { calls++ }
         override fun saveLayoutAs() { calls++ }
@@ -140,6 +179,6 @@ class AppCommandRegistryTest {
         override fun scroll(direction: CommandScrollDirection, amount: Float) { calls++ }
         override fun openUrl(url: String) { calls++ }
         override fun enterText(text: String) { calls++ }
-        override fun commandFinished() = Unit
+        override fun commandFinished() { finishedCalls++ }
     }
 }

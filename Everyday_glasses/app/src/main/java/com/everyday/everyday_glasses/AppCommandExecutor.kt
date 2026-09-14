@@ -26,7 +26,7 @@ interface AppCommandCapabilities {
     fun commandFinished()
 }
 
-fun interface CommandUiDispatcher { fun dispatch(action: () -> Unit) }
+fun interface CommandUiDispatcher {fun dispatch(action: () -> Boolean): Boolean?} /** Returns the completed action result, or null when no completed result is available. */
 
 sealed class AppCommandResult {
     data class Success(val commandId: String) : AppCommandResult()
@@ -54,9 +54,8 @@ class AppCommandExecutor(
                 invocation.commandId, AppCommandResult.Failure.Code.UNAVAILABLE, "Command is unavailable"
             )
         }
-        var completed = true
-        uiDispatcher.dispatch {
-            completed = try {
+        val completed = uiDispatcher.dispatch {
+            try {
                 executeValidated(validated.definition, validated.invocation.arguments)
             } catch (_: Throwable) {
                 false
@@ -64,7 +63,7 @@ class AppCommandExecutor(
                 capabilities.commandFinished()
             }
         }
-        return if (completed) AppCommandResult.Success(invocation.commandId) else AppCommandResult.Failure(
+        return if (completed == true) AppCommandResult.Success(invocation.commandId) else AppCommandResult.Failure(
             invocation.commandId, AppCommandResult.Failure.Code.APPLICATION_FAILURE, "Application could not complete command"
         )
     }

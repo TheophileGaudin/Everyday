@@ -36,8 +36,6 @@ import com.everyday.shared.command.CommandWidgetId
 import com.everyday.shared.transport.AssistantStatus
 import java.io.File
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import java.util.Locale
 import kotlin.reflect.KClass
 import kotlin.math.roundToInt
@@ -134,17 +132,11 @@ class WidgetContainer @JvmOverloads constructor(
         AppCommandRegistry { layoutLibrary.names() }
     }
     private val commandExecutor by lazy {
-        AppCommandExecutor(commandRegistry, commandCapabilities, CommandUiDispatcher { action ->
-            if (Looper.myLooper() == Looper.getMainLooper()) {
-                action()
-            } else {
-                val completed = CountDownLatch(1)
-                post {
-                    try { action() } finally { completed.countDown() }
-                }
-                completed.await(5, TimeUnit.SECONDS)
-            }
-        })
+        AppCommandExecutor(
+            registry = commandRegistry,
+            capabilities = commandCapabilities,
+            uiDispatcher = AwaitingCommandUiDispatcher(isUiThread = { Looper.myLooper() == Looper.getMainLooper() }, postToUiThread = { action -> post(action) },),
+        )
     }
 
     private val commandCapabilities = object : AppCommandCapabilities {
