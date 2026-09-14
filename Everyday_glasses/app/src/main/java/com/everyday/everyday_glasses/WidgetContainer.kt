@@ -879,12 +879,12 @@ class WidgetContainer @JvmOverloads constructor(
                         // Always keep WebView hidden when video is in fullscreen mode
                         // (the fullscreen video view is a separate view on top)
                         if (browser.isInVideoFullscreen()) {
-                            view.visibility = View.GONE
+                            view.visibility = GONE
                         } else {
                             view.visibility = when (state) {
-                                WakeSleepManager.DisplayState.OFF -> View.GONE
-                                WakeSleepManager.DisplayState.SLEEP -> if (browser.isPinned) View.VISIBLE else View.GONE
-                                else -> if (browser.isMinimized) View.GONE else View.VISIBLE
+                                WakeSleepManager.DisplayState.OFF -> GONE
+                                WakeSleepManager.DisplayState.SLEEP -> if (browser.isPinned) VISIBLE else GONE
+                                else -> if (browser.isMinimized) GONE else VISIBLE
                             }
                         }
                     }
@@ -5599,14 +5599,6 @@ class WidgetContainer @JvmOverloads constructor(
         }
     }
 
-    private fun openTextStates(states: List<WidgetPersistence.TextWidgetState>) {
-        val restoredWidgets = persistenceHelper.restoreTextWidgets(states, width, height)
-        for ((index, widget) in restoredWidgets.withIndex()) {
-            lifecycleController.open(textLifecycle) { widget }
-            applyFullscreenState(widget, states.getOrNull(index)?.isFullscreen == true)
-        }
-    }
-
     /**
      * Call this BEFORE restoring widget state to prevent default singleton widgets from being created.
      * This should be called when the app is not a fresh install (returning user).
@@ -5633,33 +5625,12 @@ class WidgetContainer @JvmOverloads constructor(
         return widget
     }
 
-    private fun openBrowserStates(states: List<WidgetPersistence.BrowserWidgetState>) {
-        val rootView = (parent as? ViewGroup) ?: return
-        val restoredWidgets = persistenceHelper.restoreBrowserWidgets(states, rootView, this, width, height)
-        for ((index, widget) in restoredWidgets.withIndex()) {
-            configureBrowserWidget(widget)
-            lifecycleController.open(browserLifecycle) { widget }
-            applyFullscreenState(widget, states.getOrNull(index)?.isFullscreen == true)
-        }
-        notifyMediaBrightnessCapChanged()
-        notifyBrowserMinimumBrightnessChanged()
-    }
-
     fun shouldApplyBrowserMinimumBrightness(): Boolean {
         return browserWidgets.any { !it.isMinimized }
     }
 
     fun shouldApplyMediaBrightnessCap(): Boolean {
         return fullscreenVideoWidget != null || screenMirrorWidget?.shouldApplyMediaBrightnessCap() == true
-    }
-
-    private fun openImageStates(states: List<WidgetPersistence.ImageWidgetState>) {
-        val restoredWidgets = persistenceHelper.restoreImageWidgets(states, width, height)
-        val validStates = states.filter { File(it.imagePath).exists() }
-        for ((index, widget) in restoredWidgets.withIndex()) {
-            lifecycleController.open(imageLifecycle) { widget }
-            applyFullscreenState(widget, validStates.getOrNull(index)?.isFullscreen == true)
-        }
     }
 
     /**
@@ -5680,77 +5651,6 @@ class WidgetContainer @JvmOverloads constructor(
         // Restore the projected preference only after fullscreen bounds/state exist.
         widget.restorePreferences(state.mode, state.zoom, state.showLocation, state.showCountry)
         return widget
-    }
-
-    private fun openVideoStates(states: List<WidgetPersistence.VideoWidgetState>) {
-        val rootView = parent as? ViewGroup ?: return
-        states.forEach { state ->
-            val uri = runCatching { android.net.Uri.parse(state.uri) }.getOrNull() ?: return@forEach
-            val readable = runCatching {
-                context.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
-            }.getOrDefault(false)
-            if (!readable) return@forEach
-
-            val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, width.toFloat())
-            val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, height.toFloat())
-            val adjustedX = state.x.coerceIn(0f, (width - adjustedWidth).coerceAtLeast(0f))
-            val adjustedY = state.y.coerceIn(0f, (height - adjustedHeight).coerceAtLeast(0f))
-            val sourceId = "local-video-${uri.hashCode()}"
-            val widget = VideoWidget(
-                context = context,
-                rootLayout = rootView,
-                containerView = this,
-                contentUri = uri,
-                displayName = state.displayName,
-                x = adjustedX,
-                y = adjustedY,
-                queueItems = buildVideoQueue(uri, state.displayName),
-            ).apply {
-                widgetWidth = adjustedWidth
-                widgetHeight = adjustedHeight
-                listener = object : VideoWidgetListener {
-                    override fun onStateChanged() = notifyTransientContentChanged()
-                    override fun onPlaybackVisibilityChanged(active: Boolean) {
-                        setBinocularMediaSourceActive(sourceId, active)
-                        notifyMediaBrightnessCapChanged()
-                    }
-                }
-            }
-            persistenceHelper.restoreVideoWidgetState(widget, state, adjustedX, adjustedY)
-            lifecycleController.open(videoLifecycle) { widget }
-            applyFullscreenState(widget, state.isFullscreen)
-        }
-    }
-
-    private fun openPdfStates(states: List<WidgetPersistence.PdfWidgetState>) {
-        states.forEach { state ->
-            val uri = runCatching { android.net.Uri.parse(state.uri) }.getOrNull() ?: return@forEach
-            val readable = runCatching {
-                context.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
-            }.getOrDefault(false)
-            if (!readable) return@forEach
-
-            val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, width.toFloat())
-            val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, height.toFloat())
-            val adjustedX = state.x.coerceIn(0f, (width - adjustedWidth).coerceAtLeast(0f))
-            val adjustedY = state.y.coerceIn(0f, (height - adjustedHeight).coerceAtLeast(0f))
-            val widget = PdfWidget(
-                context = context,
-                contentUri = uri,
-                displayName = state.displayName,
-                x = adjustedX,
-                y = adjustedY,
-                width = adjustedWidth,
-                height = adjustedHeight,
-                initialPage = state.page,
-                initialZoom = state.zoom,
-            ).apply {
-                onStateChanged = { notifyTransientContentChanged() }
-            }
-            persistenceHelper.restorePdfWidgetState(widget, state, adjustedX, adjustedY)
-            lifecycleController.open(pdfLifecycle) { widget }
-            applyFullscreenState(widget, state.isFullscreen)
-        }
     }
 
     private fun applyLocationState(state: WidgetPersistence.LocationWidgetState): LocationWidget {
