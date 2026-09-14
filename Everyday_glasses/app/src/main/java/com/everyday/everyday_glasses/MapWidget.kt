@@ -313,6 +313,8 @@ class MapWidget(
     fun isAddressEntryFocused(): Boolean = addressFocused
     fun isAddressKeyboardVisible(): Boolean = addressKeyboard.isVisible
     fun getAddressKeyboard(): GlassesKeyboardView? = addressKeyboard.getKeyboard()
+    fun hasActiveNavigation(): Boolean = navigationState.status != NavigationStatus.INACTIVE &&
+        navigationState.status != NavigationStatus.ERROR
 
     fun release() {
         poseRedrawHandler.removeCallbacksAndMessages(null)
@@ -482,10 +484,30 @@ class MapWidget(
         return super.containsPoint(px, py)
     }
 
+    override fun baseHitTest(px: Float, py: Float): BaseHitArea {
+        val hit = super.baseHitTest(px, py)
+        if (!showsWindowedNavigationFooter()) return hit
+        return when (hit) {
+            BaseHitArea.CLOSE_BUTTON,
+            BaseHitArea.FULLSCREEN_BUTTON,
+            BaseHitArea.MINIMIZE_BUTTON,
+            BaseHitArea.PIN_BUTTON,
+            BaseHitArea.RESIZE_HANDLE -> BaseHitArea.BORDER
+            else -> hit
+        }
+    }
+
+    override fun shouldShowBorderButtons(): Boolean =
+        !showsWindowedNavigationFooter() && super.shouldShowBorderButtons()
+
     fun onDoubleTap(px: Float, py: Float): Boolean {
         if (!containsPoint(px, py)) return false
         if (addressEntryVisible) {
             closeAddressEntry()
+            return true
+        }
+        if (hasActiveNavigation()) {
+            openAddressEntry()
             return true
         }
         if (!isFullscreen) {
@@ -526,6 +548,9 @@ class MapWidget(
                     return true
                 }
             }
+        }
+        if (showsWindowedNavigationFooter() && isHovering()) {
+            updateWindowedCancelNavigationBounds(contentBounds, contentBounds.bottom - 40f)
         }
         if (navigationStopBounds.contains(px, py)) {
             onStopNavigationRequested?.invoke() ?: stopNavigation()
@@ -645,7 +670,7 @@ class MapWidget(
         closeAddressEntry()
         showOptions = false
         showPoiConfig = false
-        val generation = ++navigationGeneration
+        ++navigationGeneration
         pendingNavigationCompletion = completion
         navigationState = NavigationState(
             status = NavigationStatus.SEARCHING,
@@ -723,12 +748,40 @@ class MapWidget(
             GeocodingCandidate(MapGeoPoint(item.point.lat, item.point.lon), item.displayName,
                 addressText = item.secondaryText, sourceIndex = index)
         }
-        val ranked = GeocodingRanker.rank(query, candidates, origin).take(GeocodingRanker.MAX_CHOICES)
-        if (ranked.isEmpty()) return
+        when (val resolution = GeocodingRanker.resolve(query, candidates, origin)) {
+            GeocodingResolution.NoResults -> {
+                finishNavigationFailure("No destination was found for \"$query\".", null)
+                return
+            }
+            is GeocodingResolution.Accepted -> beginNavigationToResolvedCandidate(query, origin, resolution.candidate)
+            is GeocodingResolution.Ambiguous -> {
+                navigationChoiceScrollOffset = 0f
+                searchAttribution = result.attribution
+                navigationState = NavigationState(
+                    status = NavigationStatus.CHOOSING,
+                    query = query,
+                    choices = resolution.choices
+                )
+                completeNavigation(NavigationOperationResult.Ambiguous(navigationState), null)
+                invalidate?.invoke()
+            }
+        }
+    }
+
+    private fun beginNavigationToResolvedCandidate(
+        query: String,
+        origin: MapGeoPoint,
+        candidate: RankedGeocodingCandidate
+    ) {
+        val destination = NavigationDestination(query, candidate.label, candidate.point)
+        val generation = ++navigationGeneration
+        navigationState = NavigationState(
+            status = NavigationStatus.CALCULATING,
+            query = query,
+            destination = destination
+        )
         navigationChoiceScrollOffset = 0f
-        searchAttribution = result.attribution
-        navigationState = NavigationState(status = NavigationStatus.CHOOSING, query = query, choices = ranked)
-        completeNavigation(NavigationOperationResult.Ambiguous(navigationState), null)
+        beginPhoneOrLocalNavigation(generation, query, origin, selectedDestination = candidate)
         invalidate?.invoke()
     }
 
@@ -749,11 +802,32 @@ class MapWidget(
                 if (ranked.isNotEmpty() && phoneSearch.acceptFallback(request.requestId)) {
                     navigationMain.post {
                         if (generation != navigationGeneration) return@post
-                        navigationChoiceScrollOffset = 0f
-                        searchAttribution = "© OpenStreetMap contributors"
-                        navigationState = NavigationState(NavigationStatus.CHOOSING, request.query, choices = ranked)
-                        completeNavigation(NavigationOperationResult.Ambiguous(navigationState), null)
-                        invalidate?.invoke()
+                        when (val resolution = GeocodingRanker.resolve(
+                            request.query,
+                            ranked.map { it.candidate },
+                            origin
+                        )) {
+                            GeocodingResolution.NoResults -> finishNavigationFailure(
+                                "No destination was found for \"${request.query}\".",
+                                null
+                            )
+                            is GeocodingResolution.Accepted -> beginNavigationToResolvedCandidate(
+                                request.query,
+                                origin,
+                                resolution.candidate
+                            )
+                            is GeocodingResolution.Ambiguous -> {
+                                navigationChoiceScrollOffset = 0f
+                                searchAttribution = "© OpenStreetMap contributors"
+                                navigationState = NavigationState(
+                                    NavigationStatus.CHOOSING,
+                                    request.query,
+                                    choices = resolution.choices
+                                )
+                                completeNavigation(NavigationOperationResult.Ambiguous(navigationState), null)
+                                invalidate?.invoke()
+                            }
+                        }
                     }
                 }
             } catch (_: Throwable) {
@@ -1305,14 +1379,15 @@ class MapWidget(
         viewportWidth = canvas.width.toFloat()
         viewportHeight = canvas.height.toFloat()
         val c = contentBounds
+        navigationStopBounds.setEmpty()
+        navigationBannerBounds.setEmpty()
         if (addressEntryVisible) {
             updateAddressKeyboardLayout()
             updateAddressLayout()
-        } else {
-            navigationStopBounds.setEmpty()
         }
+        val showNavigationFooter = showsWindowedNavigationFooter()
         val labelSpace = when {
-            showLocation && !isFullscreen -> 40f
+            !isFullscreen && (showNavigationFooter || showLocation || showCountry) -> 40f
             else -> 0f
         }
         val mapBottom = c.bottom - labelSpace
@@ -1331,16 +1406,35 @@ class MapWidget(
             drawOffscreenNavigationDestination(canvas, it, cx, cy, radius)
         }
         drawPoiLabels(canvas, pendingLabels)
-        if (!addressEntryVisible) drawLocationFooter(canvas, c, cx)
+        if (!addressEntryVisible) {
+            if (showNavigationFooter) drawWindowedNavigationFooter(canvas, c, cx)
+            else drawLocationFooter(canvas, c, cx)
+        }
         if (isFullscreen) drawControls(canvas, c)
         if (showPoiConfig) drawPoiConfigPanel(canvas)
         else if (showOptions) drawOptions(canvas)
-        drawNavigationChoices(canvas)
-        if (navigationState.status != NavigationStatus.INACTIVE) drawNavigationBanner(canvas, c)
-        if (addressEntryVisible) drawAddressEntry(canvas)
-        addressKeyboard.draw(canvas)
+        if (isFullscreen && navigationState.status != NavigationStatus.INACTIVE &&
+            navigationState.choices.isEmpty() && !addressEntryVisible) {
+            drawNavigationBanner(canvas, c)
+        } else if (showNavigationFooter && isHovering() &&
+            !addressEntryVisible && navigationState.choices.isEmpty()) {
+            drawWindowedCancelNavigation(canvas, c, mapBottom)
+        }
         if (shouldShowBorder()) canvas.drawRoundRect(widgetBounds, 8f, 8f, hoverBorderPaint)
         if (shouldShowBorderButtons()) { drawBorderButtons(canvas); drawResizeHandle(canvas) }
+    }
+
+    /** Draws modal destination UI head-locked at screen scale, above dashboard transforms. */
+    fun drawScreenOverlay(canvas: Canvas) {
+        viewportWidth = canvas.width.toFloat()
+        viewportHeight = canvas.height.toFloat()
+        if (addressEntryVisible) {
+            updateAddressKeyboardLayout()
+            updateAddressLayout()
+        }
+        drawNavigationChoices(canvas)
+        if (addressEntryVisible) drawAddressEntry(canvas)
+        addressKeyboard.draw(canvas)
     }
 
     private fun drawTopDown(canvas: Canvas, loc: Location, cx: Float, cy: Float, radius: Float, pendingLabels: MutableList<PoiLabel>) {
@@ -1670,6 +1764,41 @@ class MapWidget(
                 canvas.drawText(flag, drawX, locationBaseline, label)
             }
         }
+    }
+
+    private fun showsWindowedNavigationFooter(): Boolean =
+        !isFullscreen && navigationState.route != null && navigationState.destination != null
+
+    private fun drawWindowedNavigationFooter(canvas: Canvas, c: RectF, cx: Float) {
+        val destination = navigationState.destination?.label?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
+        val distance = formatGuidanceDistance(navigationState.remainingDistanceMeters)
+        val availableWidth = (c.width() - 12f).coerceAtLeast(20f)
+        label.textAlign = Paint.Align.CENTER
+        label.textSize = 12f
+        val suffix = " · $distance"
+        var name = destination.ifBlank { "Destination" }
+        while (name.length > 3 && label.measureText(name + suffix) > availableWidth) {
+            name = name.dropLast(1)
+        }
+        if (name != destination && name.length > 3) name = name.trimEnd() + "…"
+        canvas.drawText(name + suffix, cx, c.bottom - 13f, label)
+        label.textAlign = Paint.Align.LEFT
+    }
+
+    private fun drawWindowedCancelNavigation(canvas: Canvas, c: RectF, mapBottom: Float) {
+        updateWindowedCancelNavigationBounds(c, mapBottom)
+        drawAddressAction(canvas, navigationStopBounds, "Cancel navigation", addressCancelPaint)
+    }
+
+    private fun updateWindowedCancelNavigationBounds(c: RectF, mapBottom: Float) {
+        val width = 126f.coerceAtMost((c.width() - 16f).coerceAtLeast(72f))
+        val height = 30f
+        navigationStopBounds.set(
+            c.centerX() - width / 2f,
+            (mapBottom - height - 8f).coerceAtLeast(c.top + 8f),
+            c.centerX() + width / 2f,
+            (mapBottom - 8f).coerceAtLeast(c.top + 8f + height)
+        )
     }
 
     private fun drawAddressEntry(canvas: Canvas) {

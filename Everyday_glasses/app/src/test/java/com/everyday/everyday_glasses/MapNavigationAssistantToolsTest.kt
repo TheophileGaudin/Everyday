@@ -53,6 +53,20 @@ class MapNavigationAssistantToolsTest {
     }
 
     @Test
+    fun startNavigationDefaultsToWalkingWhenVoiceCommandOmitsMode() {
+        var received: StartNavigationRequest? = null
+        val handler = StartNavigationSemanticToolHandler(
+            startNavigation = { request ->
+                received = request
+                assistantCompletedFuture(success())
+            }
+        )
+
+        assertTrue(handler.execute(JSONObject().put("address", "Central Station"), context()).get().success)
+        assertEquals("WALKING", received!!.mode)
+    }
+
+    @Test
     fun stopNavigationHasNoArgumentsAndDelegatesToHost() {
         var calls = 0
         val handler = StopNavigationSemanticToolHandler(

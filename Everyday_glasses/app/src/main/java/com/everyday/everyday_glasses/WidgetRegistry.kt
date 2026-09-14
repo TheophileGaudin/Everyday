@@ -144,6 +144,16 @@ class WidgetRegistry {
         if (widget == null || fullscreenWidget === widget) fullscreenWidget = null
     }
 
+    /**
+     * Whether [widget] is the current fullscreen owner.
+     *
+     * An absent widget is never fullscreen. The null guard is load-bearing: a bare
+     * `fullscreenWidget === widget` identity check is `true` when both sides are null, so an
+     * optional widget that is simply not on the dashboard would report itself as fullscreen on
+     * every windowed dashboard.
+     */
+    fun isFullscreen(widget: BaseWidget?): Boolean = widget != null && fullscreenWidget === widget
+
     fun bringToFront(widget: BaseWidget, rootView: ViewGroup? = null, containerView: View? = null) {
         require(isRegistered(widget)) { "Cannot bring an unregistered widget to front" }
         val oldZOrder = widget.zOrder

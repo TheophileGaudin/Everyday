@@ -127,6 +127,26 @@ class MapNavigationGeocodingTest {
         assertEquals(GeocodingRanker.MAX_CHOICES, (resolution as GeocodingResolution.Ambiguous).choices.size)
     }
 
+    @Test
+    fun nearbyRegionalSpellingMatchBeatsDistantGenericMatches() {
+        val ely = MapGeoPoint(52.399, 0.266)
+        val resolution = GeocodingRanker.resolve(
+            "Hive leisure center",
+            listOf(
+                candidate("The Hive Leisure Centre, Leisure Park, Ely", 52.401, 0.270),
+                candidate("The Hive", 51.507, -0.128),
+                candidate("Hive Leisure Center", 53.480, -2.242)
+            ),
+            ely
+        )
+
+        assertTrue(resolution is GeocodingResolution.Accepted)
+        assertEquals(
+            "The Hive Leisure Centre, Leisure Park, Ely",
+            (resolution as GeocodingResolution.Accepted).candidate.candidate.displayName
+        )
+    }
+
     private fun candidate(name: String, lat: Double, lon: Double) =
         GeocodingCandidate(MapGeoPoint(lat, lon), name)
 }

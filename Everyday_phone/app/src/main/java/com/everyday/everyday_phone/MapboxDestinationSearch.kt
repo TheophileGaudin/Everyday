@@ -7,6 +7,7 @@ import com.everyday.shared.transport.DestinationSearchCandidateKind
 import com.everyday.shared.transport.DestinationSearchErrorCode
 import com.everyday.shared.transport.DestinationSearchProtocol
 import com.everyday.shared.transport.DestinationSearchRequest
+import com.everyday.shared.transport.DestinationTextMatcher
 import org.json.JSONObject
 import okhttp3.Call
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -17,6 +18,8 @@ import java.text.Normalizer
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.cos
 
 enum class DestinationQueryKind { ADDRESS, CATEGORY, PLACE }
 
@@ -75,24 +78,69 @@ class MapboxDestinationSearchProvider(
     private val accessToken: String = BuildConfig.MAPBOX_ACCESS_TOKEN,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(3, TimeUnit.SECONDS).readTimeout(4, TimeUnit.SECONDS)
-        .callTimeout(7, TimeUnit.SECONDS).build(),
+        .callTimeout(3, TimeUnit.SECONDS).build(),
     private val fetchResponse: ((String) -> Pair<Int, String>)? = null
 ) : CancellableDestinationSearchProvider {
     private val activeCall = AtomicReference<Call?>(null)
+    private val requestGeneration = AtomicLong(0L)
 
     override fun search(request: DestinationSearchRequest): Result<DestinationSearchResponse> = runCatching {
+        val generation = requestGeneration.incrementAndGet()
         if (!accessToken.startsWith("pk.")) throw DestinationSearchException(
             DestinationSearchErrorCode.NOT_CONFIGURED, "Mapbox destination search is not configured", false
         )
         val classification = DestinationQueryClassifier.classify(request.query)
-        val url = buildUrl(request, classification)
-        val (status, body) = fetchResponse?.invoke(url) ?: execute(url)
-        if (status !in 200..299) throw when (status) {
-            429 -> DestinationSearchException(DestinationSearchErrorCode.RATE_LIMITED, "Destination search rate limit reached")
-            401, 403 -> DestinationSearchException(DestinationSearchErrorCode.NOT_CONFIGURED, "Mapbox rejected the access token", false)
-            else -> DestinationSearchException(DestinationSearchErrorCode.NETWORK, "Destination search returned HTTP $status")
+        val urls = if (classification.kind == DestinationQueryKind.PLACE) {
+            listOf(buildUrl(request, classification, nearbyOnly = true), buildUrl(request, classification))
+        } else {
+            listOf(buildUrl(request, classification))
         }
-        parseAndRank(body, request, classification)
+        val responses = mutableListOf<DestinationSearchResponse>()
+        var lastFailure: Throwable? = null
+        var strongNearby: DestinationSearchResponse? = null
+        for ((index, url) in urls.withIndex()) {
+            ensureCurrent(generation)
+            val response = runCatching {
+                val (status, body) = fetchResponse?.invoke(url) ?: execute(url)
+                if (status !in 200..299) throw when (status) {
+                    429 -> DestinationSearchException(DestinationSearchErrorCode.RATE_LIMITED, "Destination search rate limit reached")
+                    401, 403 -> DestinationSearchException(DestinationSearchErrorCode.NOT_CONFIGURED, "Mapbox rejected the access token", false)
+                    else -> DestinationSearchException(DestinationSearchErrorCode.NETWORK, "Destination search returned HTTP $status")
+                }
+                parseAndRank(body, request, classification)
+            }
+            ensureCurrent(generation)
+            if (response.isSuccess) {
+                val parsed = response.getOrThrow()
+                responses += parsed
+                // A strong nearby result is preferable to spending another network round trip
+                // asking for the same text globally. Non-local or weak matches still get the
+                // global pass and are merged below.
+                if (index == 0 && parsed.candidates.any {
+                        DestinationTextMatcher.match(request.query, it.displayName, it.secondaryText).score >= STRONG_NEARBY_TEXT_SCORE
+                    }) {
+                    strongNearby = parsed
+                    break
+                }
+            } else {
+                lastFailure = response.exceptionOrNull()
+            }
+        }
+        strongNearby?.let { return@runCatching it }
+        if (responses.isEmpty()) throw lastFailure ?: DestinationSearchException(
+            DestinationSearchErrorCode.NO_RESULTS,
+            "No destination was found",
+            false
+        )
+        val merged = responses.flatMap { it.candidates }.distinctBy {
+            DestinationTextMatcher.normalize(it.displayName + " " + it.secondaryText) +
+                ":${"%.5f".format(Locale.US, it.point.lat)},${"%.5f".format(Locale.US, it.point.lon)}"
+        }
+        DestinationSearchResponse(
+            candidates = rankCandidates(request, merged).take(request.limit),
+            attribution = responses.map { it.attribution }.firstOrNull { it.isNotBlank() }.orEmpty(),
+            outsideWalkingRange = false
+        )
     }.recoverCatching { failure ->
         if (failure is DestinationSearchException) throw failure
         val code = if (failure is IOException) DestinationSearchErrorCode.NETWORK else DestinationSearchErrorCode.MALFORMED
@@ -104,7 +152,11 @@ class MapboxDestinationSearchProvider(
         )
     }
 
-    internal fun buildUrl(request: DestinationSearchRequest, classification: DestinationQueryClassification): String {
+    internal fun buildUrl(
+        request: DestinationSearchRequest,
+        classification: DestinationQueryClassification,
+        nearbyOnly: Boolean = false
+    ): String {
         val base = when (classification.kind) {
             DestinationQueryKind.ADDRESS -> "https://api.mapbox.com/search/geocode/v6/forward"
             DestinationQueryKind.CATEGORY -> "https://api.mapbox.com/search/searchbox/v1/category/${classification.categoryId}"
@@ -113,6 +165,9 @@ class MapboxDestinationSearchProvider(
         if (classification.kind != DestinationQueryKind.CATEGORY) base.addQueryParameter("q", request.query)
         return base.addQueryParameter("limit", request.limit.coerceAtMost(DestinationSearchProtocol.MAX_RESULTS).toString())
             .addQueryParameter("proximity", "${request.origin.lon},${request.origin.lat}")
+            .apply {
+                if (nearbyOnly) addQueryParameter("bbox", nearbyBoundingBox(request.origin))
+            }
             .apply { request.languageTag.substringBefore('-').takeIf { it.length in 2..3 }?.let { addQueryParameter("language", it) } }
             .addQueryParameter("access_token", accessToken).build().toString()
     }
@@ -124,7 +179,20 @@ class MapboxDestinationSearchProvider(
         finally { activeCall.compareAndSet(call, null) }
     }
 
-    override fun cancelActive() { activeCall.getAndSet(null)?.cancel() }
+    override fun cancelActive() {
+        requestGeneration.incrementAndGet()
+        activeCall.getAndSet(null)?.cancel()
+    }
+
+    private fun ensureCurrent(generation: Long) {
+        if (generation != requestGeneration.get() || Thread.currentThread().isInterrupted) {
+            throw DestinationSearchException(
+                DestinationSearchErrorCode.CANCELLED,
+                "Destination search was cancelled",
+                false
+            )
+        }
+    }
 
     private data class Raw(val id: String, val candidate: DestinationSearchCandidate, val sourceIndex: Int)
 
@@ -161,20 +229,52 @@ class MapboxDestinationSearchProvider(
                 index
             )
         }
-        val queryKey = DestinationSearchText.matchKey(request.query)
         val deduped = raw.distinctBy { rawItem ->
             rawItem.id.ifBlank { DestinationSearchText.matchKey(rawItem.candidate.displayName + rawItem.candidate.secondaryText) }
         }
-        val sorted = deduped.sortedWith(compareBy<Raw> { item ->
-            if (classification.kind == DestinationQueryKind.CATEGORY) 0 else {
-                val searchable = DestinationSearchText.matchKey(item.candidate.displayName + " " + item.candidate.secondaryText)
-                if (searchable.contains(queryKey)) 0 else queryKey.split(' ').count { !searchable.contains(it) }
-            }
-        }.thenBy { GeoMath.distanceMeters(request.origin, it.candidate.point) }.thenBy { it.sourceIndex })
+        val sourceOrder = deduped.associate { it.candidate to it.sourceIndex }
+        val sorted = rankCandidates(request, deduped.map(Raw::candidate)).sortedWith(
+            compareBy<DestinationSearchCandidate> { candidate ->
+                rankScore(request, candidate)
+            }.thenBy { sourceOrder[it] ?: Int.MAX_VALUE }
+        )
         return DestinationSearchResponse(
-            sorted.take(request.limit).map(Raw::candidate),
+            sorted.take(request.limit),
             root.optString("attribution").take(512),
             outsideWalkingRange = false
         )
+    }
+
+    private fun rankCandidates(
+        request: DestinationSearchRequest,
+        candidates: List<DestinationSearchCandidate>
+    ): List<DestinationSearchCandidate> = candidates.sortedWith(
+        compareBy<DestinationSearchCandidate> { rankScore(request, it) }
+            .thenBy { GeoMath.distanceMeters(request.origin, it.point) }
+            .thenBy { it.displayName.lowercase(Locale.ROOT) }
+    )
+
+    private fun rankScore(request: DestinationSearchRequest, candidate: DestinationSearchCandidate): Double {
+        val text = DestinationTextMatcher.match(request.query, candidate.displayName, candidate.secondaryText).score
+        val distance = GeoMath.distanceMeters(request.origin, candidate.point)
+        val proximity = 1.0 / (1.0 + distance / 1_000.0)
+        return -(text * 100.0 + proximity * 48.0)
+    }
+
+    private fun nearbyBoundingBox(origin: GeoPoint): String {
+        val latDelta = LOCAL_BBOX_HALF_WIDTH_KM / 111.32
+        val lonScale = cos(Math.toRadians(origin.lat)).coerceAtLeast(0.1)
+        val lonDelta = LOCAL_BBOX_HALF_WIDTH_KM / (111.32 * lonScale)
+        return listOf(
+            (origin.lon - lonDelta).coerceAtLeast(-180.0),
+            (origin.lat - latDelta).coerceAtLeast(-90.0),
+            (origin.lon + lonDelta).coerceAtMost(180.0),
+            (origin.lat + latDelta).coerceAtMost(90.0)
+        ).joinToString(",") { String.format(Locale.US, "%.6f", it) }
+    }
+
+    private companion object {
+        const val LOCAL_BBOX_HALF_WIDTH_KM = 40.0
+        const val STRONG_NEARBY_TEXT_SCORE = 0.75
     }
 }

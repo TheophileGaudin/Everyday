@@ -493,26 +493,29 @@ class WidgetContainer @JvmOverloads constructor(
     private var googleAuthBrowserWidget: BrowserWidget? = null
     private var browserRoutingCoordinator: BrowserRoutingCoordinator? = null
     private val webSearchHandler = WebSearchSemanticToolHandler(DuckDuckGoWebSearchProvider())
+    // registry.isFullscreen treats an absent widget as windowed. A bare identity check against
+    // registry.fullscreenWidget would report `true` for a singleton that is not on the dashboard
+    // at all, because both sides are then null.
     private val isStatusBarFullscreen: Boolean
-        get() = registry.fullscreenWidget === statusBarWidget
+        get() = registry.isFullscreen(statusBarWidget)
     private val isLocationWidgetFullscreen: Boolean
-        get() = registry.fullscreenWidget === locationWidget
+        get() = registry.isFullscreen(locationWidget)
     private val isMapWidgetFullscreen: Boolean
-        get() = registry.fullscreenWidget === mapWidget
+        get() = registry.isFullscreen(mapWidget)
     private val isCalendarWidgetFullscreen: Boolean
-        get() = registry.fullscreenWidget === calendarWidget
+        get() = registry.isFullscreen(calendarWidget)
     private val isFinanceWidgetFullscreen: Boolean
-        get() = registry.fullscreenWidget === financeWidget
+        get() = registry.isFullscreen(financeWidget)
     private val isNewsWidgetFullscreen: Boolean
-        get() = registry.fullscreenWidget === newsWidget
+        get() = registry.isFullscreen(newsWidget)
     private val isNotificationsWidgetFullscreen: Boolean
-        get() = registry.fullscreenWidget === notificationsWidget
+        get() = registry.isFullscreen(notificationsWidget)
     private val isSpeedometerWidgetFullscreen: Boolean
-        get() = registry.fullscreenWidget === speedometerWidget
+        get() = registry.isFullscreen(speedometerWidget)
     private val isSubtitleWidgetFullscreen: Boolean
-        get() = registry.fullscreenWidget === subtitleWidget
+        get() = registry.isFullscreen(subtitleWidget)
     private val isMirrorWidgetFullscreen: Boolean
-        get() = registry.fullscreenWidget === screenMirrorWidget
+        get() = registry.isFullscreen(screenMirrorWidget)
 
     private val browserLifecycle by lazy {
         WidgetLifecycleRegistration(
@@ -3241,6 +3244,22 @@ class WidgetContainer @JvmOverloads constructor(
             return false
         }
 
+        // A windowed map owns double-tap anywhere on its visible shell, including the border.
+        // Route it before the generic border double-tap opens the app context menu.
+        if (!hasFullscreenWidget()) {
+            mapWidget?.let { map ->
+                if (interactionTargetAt(cx, cy) === map && map.containsPoint(cx, cy)) {
+                    val before = mapPersistentSignature(map)
+                    if (runClassifiedInput(
+                            { map.onDoubleTap(cx, cy) },
+                            { mapPersistentSignature(map) != before }
+                        )) {
+                        return true
+                    }
+                }
+            }
+        }
+
         if (!hasFullscreenWidget() && isAppContextMenuBorderDoubleTap(cx, cy)) {
             showAppContextMenu(x, y, cx, cy)
             return true
@@ -3440,25 +3459,18 @@ class WidgetContainer @JvmOverloads constructor(
                 }
             }
         }
-        if (hasFullscreenWidget() && fullscreenTextWidget == null) return false
         if (hasFullscreenWidget()) return false
-        for (widget in widgets) { if (widget.containsPoint(cx, cy)) return false }
-        for (widget in browserWidgets) { if (widget.containsPoint(cx, cy)) return false }
-        screenMirrorWidget?.let { if (it.containsPoint(cx, cy)) return false }
-        statusBarWidget?.let { if (it.containsPoint(cx, cy)) return false }
-        calendarWidget?.let { if (it.containsPoint(cx, cy)) return false }
-        locationWidget?.let { if (it.containsPoint(cx, cy)) return false }
-        financeWidget?.let { if (it.containsPoint(cx, cy)) return false }
-        newsWidget?.let { if (it.containsPoint(cx, cy)) return false }
-        notificationsWidget?.let { if (it.containsPoint(cx, cy)) return false }
-        subtitleWidget?.let { if (it.containsPoint(cx, cy)) return false }
-        speedometerWidget?.let {
-            if (it.containsPoint(cx, cy)) {
-                settingsController.showSpeedometerSettingsMenu()
-                return true
-            }
-        }
 
+        // Every explicit windowed-widget double-tap action has had an opportunity above.
+        // Do not silently swallow an otherwise-unhandled double-tap just because it landed
+        // inside a widget's bounds. The app context menu is the dashboard-level fallback for
+        // both widget shells/content and empty dashboard space. This also makes the behavior
+        // independent of the input source (temple gesture or phone pointer event).
+        val fallbackTarget = interactionTargetAt(cx, cy)
+        if (fallbackTarget is SpeedometerWidget && fallbackTarget.isContentVisible()) {
+            settingsController.showSpeedometerSettingsMenu()
+            return true
+        }
         showAppContextMenu(x, y, cx, cy)
         return true
     }
@@ -4696,9 +4708,13 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun drawOverlayMenus(canvas: Canvas) {
-        if (isAnyPopupVisible() || focusedBrowserWidget?.isEditingAddress() == true || fullscreenBrowserWidget?.isEditingAddress() == true) {
+        val mapOverlayVisible = mapWidget?.let {
+            it.isAddressEntryVisible() || it.navigationState.choices.isNotEmpty()
+        } == true
+        if (isAnyPopupVisible() || mapOverlayVisible || focusedBrowserWidget?.isEditingAddress() == true || fullscreenBrowserWidget?.isEditingAddress() == true) {
             ensureDrawnAboveNativeOverlays()
         }
+        mapWidget?.drawScreenOverlay(canvas)
         contextMenu?.draw(canvas)
         textEditMenu?.draw(canvas)
         formattingMenu?.draw(canvas)
@@ -5014,7 +5030,7 @@ class WidgetContainer @JvmOverloads constructor(
             ),
             StopNavigationSemanticToolHandler(
                 stopNavigation = ::stopNavigation,
-                isAvailable = ::isReady
+                isAvailable = { isReady() && mapWidget?.hasActiveNavigation() == true }
             ),
             SetNewsSourceSemanticToolHandler(::setNewsSource),
             UpdateFinanceTileSemanticToolHandler(

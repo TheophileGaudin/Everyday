@@ -90,6 +90,9 @@ class SpeedometerWidget(
         return true
     }
 
+    /** Whether the speedometer currently presents content rather than only its hover shell. */
+    fun isContentVisible(): Boolean = forceVisibleWhenIdle || (isMoving && hasReliableSpeed)
+
     /**
      * Update speed state.
      *
@@ -147,8 +150,7 @@ class SpeedometerWidget(
             drawResizeHandle(canvas)
         }
 
-        val shouldShowContent = forceVisibleWhenIdle || (isMoving && hasReliableSpeed)
-        if (!shouldShowContent) {
+        if (!isContentVisible()) {
             unitChipBounds.setEmpty()
             unitChipHovered = false
             return

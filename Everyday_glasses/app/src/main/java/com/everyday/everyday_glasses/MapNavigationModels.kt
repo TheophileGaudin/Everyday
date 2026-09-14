@@ -6,6 +6,7 @@ import com.everyday.shared.routing.LiveGuidanceSnapshot
 import com.everyday.shared.routing.RouteResult
 import org.json.JSONArray
 import org.json.JSONObject
+import com.everyday.shared.transport.DestinationTextMatcher
 import java.text.Normalizer
 import java.util.Locale
 import kotlin.math.ceil
@@ -168,25 +169,15 @@ object GeocodingRanker {
         candidates: List<GeocodingCandidate>,
         currentLocation: MapGeoPoint
     ): List<RankedGeocodingCandidate> {
-        val normalizedQuery = normalizeForMatch(query)
+        val normalizedQuery = DestinationTextMatcher.normalize(query)
         val queryTokens = normalizedQuery.split(' ').filter(String::isNotBlank).toSet()
         val isAddressQuery = queryTokens.size >= 2 && queryTokens.any { token ->
             token.any(Char::isDigit)
         }
         return candidates.map { candidate ->
-            val searchable = normalizeForMatch(
-                listOfNotNull(candidate.displayName, candidate.addressText).joinToString(" ")
-            )
-            val candidateTokens = searchable.split(' ').filter(String::isNotBlank).toSet()
-            val matchingTokens = queryTokens.count { token ->
-                candidateTokens.any { it == token || it.contains(token) || token.contains(it) }
-            }
-            val tokenCoverage = if (queryTokens.isEmpty()) 0.0 else matchingTokens.toDouble() / queryTokens.size
-            val exact = if (searchable == normalizedQuery && normalizedQuery.isNotBlank()) 1.0 else 0.0
-            val prefix = if (searchable.startsWith(normalizedQuery) && normalizedQuery.isNotBlank()) 1.0 else 0.0
-            val contains = if (searchable.contains(normalizedQuery) && normalizedQuery.isNotBlank()) 1.0 else 0.0
-            val textual = (exact * 0.42 + prefix * 0.18 + contains * 0.16 + tokenCoverage * 0.24)
-                .coerceIn(0.0, 1.0)
+            val textMatch = DestinationTextMatcher.match(query, candidate.displayName, candidate.addressText)
+            val tokenCoverage = textMatch.tokenCoverage
+            val textual = textMatch.score
             val distance = distanceMeters(currentLocation, candidate.point)
             val proximity = 1.0 / (1.0 + distance / 1_000.0)
             val importance = candidate.importance?.coerceIn(0.0, 1.0) ?: 0.0
@@ -229,14 +220,6 @@ object GeocodingRanker {
             GeocodingResolution.Ambiguous(ranked.take(maxChoices))
         }
     }
-
-    private fun normalizeForMatch(value: String): String =
-        Normalizer.normalize(NavigationAddressText.normalize(value), Normalizer.Form.NFD)
-            .replace(Regex("\\p{M}+"), "")
-            .lowercase(Locale.ROOT)
-            .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
 
     private fun distanceMeters(a: MapGeoPoint, b: MapGeoPoint): Double {
         val lat1 = Math.toRadians(a.lat)

@@ -111,6 +111,28 @@ class WidgetRegistryTest {
     }
 
     @Test
+    fun `an absent widget is never the fullscreen owner`() {
+        val registry = WidgetRegistry()
+        val widget = fake(WidgetTypeId.TEXT)
+        registry.add(widget)
+
+        // A missing singleton must not be mistaken for the fullscreen owner just because both
+        // it and the owner are null: that made every fullscreen-only input branch fire on a
+        // purely windowed dashboard and swallowed the app context menu.
+        assertNull(registry.fullscreenWidget)
+        assertFalse(registry.isFullscreen(null))
+        assertFalse(registry.isFullscreen(widget))
+
+        registry.setFullscreen(widget)
+        assertTrue(registry.isFullscreen(widget))
+        assertFalse(registry.isFullscreen(null))
+
+        registry.clearFullscreen(widget)
+        assertFalse(registry.isFullscreen(widget))
+        assertFalse(registry.isFullscreen(null))
+    }
+
+    @Test
     fun `clear resets membership fullscreen and id allocation`() {
         val registry = WidgetRegistry()
         val widget = fake(WidgetTypeId.TEXT)

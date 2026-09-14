@@ -15,7 +15,7 @@ class StartNavigationSemanticToolHandler(
 
     override val definition = AssistantToolDefinition(
         name = "start_navigation",
-        description = "Start a local walking route to an address on the Everyday glasses map",
+        description = "Search for the best matching destination and start turn-by-turn walking navigation on the Everyday glasses map. Use for commands such as search, find, directions to, go to, or navigate to a place or address.",
         parameters = JSONObject()
             .put("type", "object")
             .put(
@@ -27,13 +27,13 @@ class StartNavigationSemanticToolHandler(
                             .put("type", "string")
                             .put(
                                 "enum",
-                                JSONArray().put("WALKING").put("CYCLING").put("DRIVING").put("TRANSIT")
+                                JSONArray().put("WALKING")
                             )
                     )
                     .put("presentation", presentationSchema())
                     .put("presentation_spec", presentationSchema())
             )
-            .put("required", JSONArray().put("address").put("mode"))
+            .put("required", JSONArray().put("address"))
     )
 
     override fun validate(arguments: JSONObject): Result<Unit> = parse(arguments).map { Unit }
@@ -59,7 +59,7 @@ class StartNavigationSemanticToolHandler(
     private fun parse(arguments: JSONObject): Result<StartNavigationRequest> = runCatching {
         val address = NavigationAddressText.normalize(arguments.getString("address"))
         require(address.isNotBlank()) { "address must not be blank" }
-        val mode = arguments.getString("mode").trim().uppercase(Locale.ROOT)
+        val mode = arguments.optString("mode", RouteModeName.WALKING).trim().uppercase(Locale.ROOT)
         require(mode in SUPPORTED_MODES) { "Unknown navigation mode: $mode" }
         require(mode == RouteModeName.WALKING) {
             "Only WALKING navigation is supported; requested mode $mode"
@@ -137,7 +137,7 @@ class StopNavigationSemanticToolHandler(
 
     override val definition = AssistantToolDefinition(
         name = "stop_navigation",
-        description = "Stop the active walking route and remove navigation guidance from the map",
+        description = "Cancel or stop the active turn-by-turn navigation and remove its route guidance from the map",
         parameters = JSONObject()
             .put("type", "object")
             .put("properties", JSONObject())
