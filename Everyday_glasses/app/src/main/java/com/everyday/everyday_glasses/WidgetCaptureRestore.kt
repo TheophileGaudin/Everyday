@@ -2,24 +2,22 @@ package com.everyday.everyday_glasses
 
 import android.content.Context
 import android.util.Log
-import android.view.ViewGroup
 import java.io.File
 
 /**
- * Helper class for saving and restoring widget states.
+ * Captures saveable properties from live widgets and restores those properties from
+ * [DashboardPersistence] descriptions.
  *
- * This class extracts all persistence-related logic from WidgetContainer,
- * handling the conversion between widgets and their persistent state DTOs.
+ * This class does not read/write durable storage, encode/decode JSON, decide when saving occurs,
+ * or own widget lifecycle registration and destruction.
  *
- * Responsibilities:
- * - Extract state from widgets into DTOs
- * - Recreate widgets from DTOs
- * - Validate bounds against screen size
+ * Some legacy bulk-restore methods still construct widgets. Move those construction paths into
+ * focused factories as their widget types are refactored; do not expand that legacy role.
  */
-class WidgetPersistenceHelper(private val context: Context) {
+class WidgetCaptureRestore(private val context: Context) {
 
     companion object {
-        private const val TAG = "WidgetPersistenceHelper"
+        private const val TAG = "WidgetCaptureRestore"
     }
 
     /** Widget restore events consumed by [WidgetContainer]. */
@@ -78,7 +76,7 @@ class WidgetPersistenceHelper(private val context: Context) {
      */
     private fun restoreCommonState(
         widget: BaseWidget,
-        state: WidgetPersistence.CommonWidgetFields,
+        state: DashboardPersistence.CommonWidgetFields,
         adjustedX: Float,
         adjustedY: Float
     ) {
@@ -103,9 +101,9 @@ class WidgetPersistenceHelper(private val context: Context) {
     /**
      * Get a single text widget state for persistence.
      */
-    fun getTextWidgetState(widget: TextBoxWidget): WidgetPersistence.TextWidgetState {
+    fun getTextWidgetState(widget: TextBoxWidget): DashboardPersistence.TextWidgetState {
         val c = extractCommonFields(widget)
-        return WidgetPersistence.TextWidgetState(
+        return DashboardPersistence.TextWidgetState(
             x = c.x, y = c.y, width = c.width, height = c.height,
             text = widget.text,
             html = widget.getHtmlContent(),
@@ -124,21 +122,21 @@ class WidgetPersistenceHelper(private val context: Context) {
      * Get all text widget states for persistence.
      * Includes HTML content for rich text formatting, minimize state, and pin state.
      */
-    fun getTextWidgetStates(widgets: List<TextBoxWidget>): List<WidgetPersistence.TextWidgetState> {
+    fun getTextWidgetStates(widgets: List<TextBoxWidget>): List<DashboardPersistence.TextWidgetState> {
         return widgets.map(::getTextWidgetState)
     }
 
     /**
      * Get all image widget states for persistence.
      */
-    fun getImageWidgetStates(widgets: List<ImageWidget>): List<WidgetPersistence.ImageWidgetState> {
+    fun getImageWidgetStates(widgets: List<ImageWidget>): List<DashboardPersistence.ImageWidgetState> {
         return widgets.mapNotNull { widget ->
             val imagePath = widget.getImagePath()
             if (imagePath.isBlank()) {
                 null
             } else {
                 val c = extractCommonFields(widget)
-                WidgetPersistence.ImageWidgetState(
+                DashboardPersistence.ImageWidgetState(
                     x = c.x, y = c.y, width = c.width, height = c.height,
                     imagePath = imagePath,
                     isMinimized = c.isMinimized,
@@ -151,13 +149,13 @@ class WidgetPersistenceHelper(private val context: Context) {
         }
     }
 
-    fun getImageWidgetState(widget: ImageWidget): WidgetPersistence.ImageWidgetState? =
+    fun getImageWidgetState(widget: ImageWidget): DashboardPersistence.ImageWidgetState? =
         getImageWidgetStates(listOf(widget)).singleOrNull()
 
-    fun getVideoWidgetStates(widgets: List<VideoWidget>): List<WidgetPersistence.VideoWidgetState> {
+    fun getVideoWidgetStates(widgets: List<VideoWidget>): List<DashboardPersistence.VideoWidgetState> {
         return widgets.map { widget ->
             val c = extractCommonFields(widget)
-            WidgetPersistence.VideoWidgetState(
+            DashboardPersistence.VideoWidgetState(
                 x = c.x,
                 y = c.y,
                 width = c.width,
@@ -175,22 +173,22 @@ class WidgetPersistenceHelper(private val context: Context) {
         }
     }
 
-    fun getVideoWidgetState(widget: VideoWidget): WidgetPersistence.VideoWidgetState =
+    fun getVideoWidgetState(widget: VideoWidget): DashboardPersistence.VideoWidgetState =
         getVideoWidgetStates(listOf(widget)).single()
 
     fun restoreVideoWidgetState(
         widget: VideoWidget,
-        state: WidgetPersistence.VideoWidgetState,
+        state: DashboardPersistence.VideoWidgetState,
         adjustedX: Float,
         adjustedY: Float,
     ) {
         restoreCommonState(widget, state, adjustedX, adjustedY)
     }
 
-    fun getPdfWidgetStates(widgets: List<PdfWidget>): List<WidgetPersistence.PdfWidgetState> {
+    fun getPdfWidgetStates(widgets: List<PdfWidget>): List<DashboardPersistence.PdfWidgetState> {
         return widgets.map { widget ->
             val c = extractCommonFields(widget)
-            WidgetPersistence.PdfWidgetState(
+            DashboardPersistence.PdfWidgetState(
                 x = c.x,
                 y = c.y,
                 width = c.width,
@@ -210,12 +208,12 @@ class WidgetPersistenceHelper(private val context: Context) {
         }
     }
 
-    fun getPdfWidgetState(widget: PdfWidget): WidgetPersistence.PdfWidgetState =
+    fun getPdfWidgetState(widget: PdfWidget): DashboardPersistence.PdfWidgetState =
         getPdfWidgetStates(listOf(widget)).single()
 
     fun restorePdfWidgetState(
         widget: PdfWidget,
-        state: WidgetPersistence.PdfWidgetState,
+        state: DashboardPersistence.PdfWidgetState,
         adjustedX: Float,
         adjustedY: Float,
     ) {
@@ -226,10 +224,10 @@ class WidgetPersistenceHelper(private val context: Context) {
      * Get status bar state for persistence.
      * Includes position, minimize state, and pin state.
      */
-    fun getStatusBarState(statusBarWidget: StatusBarWidget?): WidgetPersistence.StatusBarState? {
+    fun getStatusBarState(statusBarWidget: StatusBarWidget?): DashboardPersistence.StatusBarState? {
         return statusBarWidget?.let {
             val c = extractCommonFields(it)
-            WidgetPersistence.StatusBarState(
+            DashboardPersistence.StatusBarState(
                 x = c.x, y = c.y,
                 showTime = it.isTimeVisible(),
                 showDate = it.isDateVisible(),
@@ -247,13 +245,13 @@ class WidgetPersistenceHelper(private val context: Context) {
     /**
      * Get a single browser widget state for persistence.
      */
-    fun getBrowserWidgetState(widget: BrowserWidget): WidgetPersistence.BrowserWidgetState? {
+    fun getBrowserWidgetState(widget: BrowserWidget): DashboardPersistence.BrowserWidgetState? {
         if (!widget.shouldPersist) {
             return null
         }
 
         val c = extractCommonFields(widget)
-        return WidgetPersistence.BrowserWidgetState(
+        return DashboardPersistence.BrowserWidgetState(
             x = c.x, y = c.y, width = c.width, height = c.height,
             url = widget.getUrl() ?: "https://www.google.com",
             isMinimized = c.isMinimized,
@@ -267,7 +265,7 @@ class WidgetPersistenceHelper(private val context: Context) {
     /**
      * Get all browser widget states for persistence.
      */
-    fun getBrowserWidgetStates(browserWidgets: List<BrowserWidget>): List<WidgetPersistence.BrowserWidgetState> {
+    fun getBrowserWidgetStates(browserWidgets: List<BrowserWidget>): List<DashboardPersistence.BrowserWidgetState> {
         return browserWidgets
             .mapNotNull(::getBrowserWidgetState)
     }
@@ -275,10 +273,10 @@ class WidgetPersistenceHelper(private val context: Context) {
     /**
      * Get location widget state for persistence.
      */
-    fun getLocationWidgetState(locationWidget: LocationWidget?): WidgetPersistence.LocationWidgetState? {
+    fun getLocationWidgetState(locationWidget: LocationWidget?): DashboardPersistence.LocationWidgetState? {
         return locationWidget?.let {
             val c = extractCommonFields(it)
-            WidgetPersistence.LocationWidgetState(
+            DashboardPersistence.LocationWidgetState(
                 x = c.x, y = c.y, width = c.width, height = c.height,
                 showWeather = it.isWeatherVisible(),
                 showTemperature = it.isTemperatureVisible(),
@@ -293,9 +291,9 @@ class WidgetPersistenceHelper(private val context: Context) {
         }
     }
 
-    fun getMapWidgetState(widget: MapWidget?): WidgetPersistence.MapWidgetState? = widget?.let {
+    fun getMapWidgetState(widget: MapWidget?): DashboardPersistence.MapWidgetState? = widget?.let {
         val c = extractCommonFields(it)
-        WidgetPersistence.MapWidgetState(
+        DashboardPersistence.MapWidgetState(
             x = c.x, y = c.y, width = c.width, height = c.height,
             mode = it.mode.name, zoom = it.zoom.name,
             showLocation = it.isLocationVisible(), showCountry = it.isCountryVisible(),
@@ -310,10 +308,10 @@ class WidgetPersistenceHelper(private val context: Context) {
     /**
      * Get calendar widget state for persistence.
      */
-    fun getCalendarWidgetState(calendarWidget: CalendarWidget?): WidgetPersistence.CalendarWidgetState? {
+    fun getCalendarWidgetState(calendarWidget: CalendarWidget?): DashboardPersistence.CalendarWidgetState? {
         return calendarWidget?.let {
             val c = extractCommonFields(it)
-            WidgetPersistence.CalendarWidgetState(
+            DashboardPersistence.CalendarWidgetState(
                 x = c.x, y = c.y, width = c.width, height = c.height,
                 fontScale = it.getFontScale(),
                 isMinimized = c.isMinimized,
@@ -328,10 +326,10 @@ class WidgetPersistenceHelper(private val context: Context) {
     /**
      * Get mirror widget state for persistence.
      */
-    fun getMirrorWidgetState(screenMirrorWidget: ScreenMirrorWidget?): WidgetPersistence.MirrorWidgetState? {
+    fun getMirrorWidgetState(screenMirrorWidget: ScreenMirrorWidget?): DashboardPersistence.MirrorWidgetState? {
         return screenMirrorWidget?.let {
             val c = extractCommonFields(it)
-            WidgetPersistence.MirrorWidgetState(
+            DashboardPersistence.MirrorWidgetState(
                 x = c.x, y = c.y, width = c.width, height = c.height,
                 isMinimized = c.isMinimized,
                 isFullscreen = c.isFullscreen,
@@ -345,10 +343,10 @@ class WidgetPersistenceHelper(private val context: Context) {
     /**
      * Get news widget state for persistence.
      */
-    fun getNewsWidgetState(newsWidget: NewsWidget?): WidgetPersistence.NewsWidgetState? {
+    fun getNewsWidgetState(newsWidget: NewsWidget?): DashboardPersistence.NewsWidgetState? {
         return newsWidget?.let {
             val c = extractCommonFields(it)
-            WidgetPersistence.NewsWidgetState(
+            DashboardPersistence.NewsWidgetState(
                 x = c.x, y = c.y, width = c.width, height = c.height,
                 countryCode = it.getCountryCode(),
                 sourceSpec = it.getSourceSpec(),
@@ -363,10 +361,10 @@ class WidgetPersistenceHelper(private val context: Context) {
         }
     }
 
-    fun getNotificationsWidgetState(notificationsWidget: NotificationsWidget?): WidgetPersistence.NotificationsWidgetState? {
+    fun getNotificationsWidgetState(notificationsWidget: NotificationsWidget?): DashboardPersistence.NotificationsWidgetState? {
         return notificationsWidget?.let {
             val c = extractCommonFields(it)
-            WidgetPersistence.NotificationsWidgetState(
+            DashboardPersistence.NotificationsWidgetState(
                 x = c.x, y = c.y, width = c.width, height = c.height,
                 widgetFontScale = it.getWidgetFontScale(),
                 toastFontScale = it.getToastFontScale(),
@@ -383,10 +381,10 @@ class WidgetPersistenceHelper(private val context: Context) {
     /**
      * Get speedometer widget state for persistence.
      */
-    fun getSpeedometerWidgetState(speedometerWidget: SpeedometerWidget?): WidgetPersistence.SpeedometerWidgetState? {
+    fun getSpeedometerWidgetState(speedometerWidget: SpeedometerWidget?): DashboardPersistence.SpeedometerWidgetState? {
         return speedometerWidget?.let {
             val c = extractCommonFields(it)
-            WidgetPersistence.SpeedometerWidgetState(
+            DashboardPersistence.SpeedometerWidgetState(
                 x = c.x, y = c.y, width = c.width, height = c.height,
                 isMinimized = c.isMinimized,
                 isFullscreen = c.isFullscreen,
@@ -400,10 +398,10 @@ class WidgetPersistenceHelper(private val context: Context) {
     /**
      * Get subtitle widget state for persistence. Capture-enabled is deliberately omitted.
      */
-    fun getSubtitleWidgetState(subtitleWidget: SubtitleWidget?): WidgetPersistence.SubtitleWidgetState? {
+    fun getSubtitleWidgetState(subtitleWidget: SubtitleWidget?): DashboardPersistence.SubtitleWidgetState? {
         return subtitleWidget?.let {
             val c = extractCommonFields(it)
-            WidgetPersistence.SubtitleWidgetState(
+            DashboardPersistence.SubtitleWidgetState(
                 x = c.x, y = c.y, width = c.width, height = c.height,
                 phonePlaybackEnabled = it.options.phonePlaybackEnabled,
                 microphoneEnabled = it.options.microphoneEnabled,
@@ -420,10 +418,10 @@ class WidgetPersistenceHelper(private val context: Context) {
     /**
      * Get finance widget state for persistence.
      */
-    fun getFinanceWidgetState(financeWidget: FinanceWidget?): WidgetPersistence.FinanceWidgetState? {
+    fun getFinanceWidgetState(financeWidget: FinanceWidget?): DashboardPersistence.FinanceWidgetState? {
         return financeWidget?.let {
             val c = extractCommonFields(it)
-            WidgetPersistence.FinanceWidgetState(
+            DashboardPersistence.FinanceWidgetState(
                 x = c.x, y = c.y, width = c.width, height = c.height,
                 selectedSymbol = it.currentSymbol,
                 selectedRange = it.currentRange.range,
@@ -452,7 +450,7 @@ class WidgetPersistenceHelper(private val context: Context) {
      * @return List of restored TextBoxWidget instances
      */
     fun restoreTextWidgets(
-        states: List<WidgetPersistence.TextWidgetState>,
+        states: List<DashboardPersistence.TextWidgetState>,
         screenWidth: Int,
         screenHeight: Int
     ): List<TextBoxWidget> {
@@ -502,7 +500,7 @@ class WidgetPersistenceHelper(private val context: Context) {
      * Missing image files are skipped so one bad path does not block the rest.
      */
     fun restoreImageWidgets(
-        states: List<WidgetPersistence.ImageWidgetState>,
+        states: List<DashboardPersistence.ImageWidgetState>,
         screenWidth: Int,
         screenHeight: Int
     ): List<ImageWidget> {
@@ -543,7 +541,7 @@ class WidgetPersistenceHelper(private val context: Context) {
      */
     fun restoreStatusBarPosition(
         statusBarWidget: StatusBarWidget?,
-        state: WidgetPersistence.StatusBarState,
+        state: DashboardPersistence.StatusBarState,
         screenWidth: Int,
         screenHeight: Int
     ) {
@@ -579,55 +577,15 @@ class WidgetPersistenceHelper(private val context: Context) {
      * @param screenHeight Current screen height
      * @return List of restored BrowserWidget instances
      */
-    fun restoreBrowserWidgets(
-        states: List<WidgetPersistence.BrowserWidgetState>,
-        rootView: ViewGroup,
-        containerView: android.view.View,
-        screenWidth: Int,
-        screenHeight: Int
-    ): List<BrowserWidget> {
-        Log.d(TAG, "Restoring ${states.size} browser widgets")
-
-        return states.map { state ->
-            val adjustedX = state.x.coerceIn(0f, (screenWidth - state.width).coerceAtLeast(0f))
-            val adjustedY = state.y.coerceIn(0f, (screenHeight - state.height).coerceAtLeast(0f))
-            val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenWidth.toFloat())
-            val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenHeight.toFloat())
-
-            BrowserWidget(
-                context,
-                rootView,
-                adjustedX,
-                adjustedY,
-                adjustedWidth,
-                adjustedHeight
-            ).apply {
-                getWebView()?.loadUrl(state.url)
-
-                restoreCommonState(this, state, adjustedX, adjustedY)
-
-                listener = object : BrowserWidgetListener {
-                    override fun onFocusChanged(focused: Boolean) {
-                        onWidgetFocusChanged?.invoke(this@apply, focused)
-                    }
-                    override fun onStateChanged(state: BrowserWidget.State) {
-                        onWidgetStateChanged?.invoke()
-                    }
-                    override fun onKeyboardRequested(show: Boolean) {
-                        onBrowserKeyboardRequest?.invoke(show)
-                    }
-                }
-                // Fix z-order
-                val containerIndex = rootView.indexOfChild(containerView)
-                val insertIndex = if (containerIndex >= 0) containerIndex else 0
-                getWebView()?.let { webView ->
-                    if (webView.parent == rootView) {
-                        rootView.removeView(webView)
-                    }
-                    rootView.addView(webView, insertIndex)
-                }
-            }
-        }
+    /** Apply saved browser-specific and common fields to an already-created widget. */
+    fun restoreBrowserWidgetState(
+        widget: BrowserWidget,
+        state: DashboardPersistence.BrowserWidgetState,
+        adjustedX: Float,
+        adjustedY: Float,
+    ) {
+        widget.getWebView()?.loadUrl(state.url)
+        restoreCommonState(widget, state, adjustedX, adjustedY)
     }
 
     /**
@@ -640,7 +598,7 @@ class WidgetPersistenceHelper(private val context: Context) {
      */
     fun restoreLocationWidgetPosition(
         locationWidget: LocationWidget?,
-        state: WidgetPersistence.LocationWidgetState,
+        state: DashboardPersistence.LocationWidgetState,
         screenWidth: Int,
         screenHeight: Int
     ) {
@@ -670,7 +628,7 @@ class WidgetPersistenceHelper(private val context: Context) {
     }
 
     fun restoreMapWidgetPosition(
-        widget: MapWidget?, state: WidgetPersistence.MapWidgetState,
+        widget: MapWidget?, state: DashboardPersistence.MapWidgetState,
         screenWidth: Int, screenHeight: Int
     ) {
         widget ?: return
@@ -696,7 +654,7 @@ class WidgetPersistenceHelper(private val context: Context) {
      */
     fun restoreCalendarWidgetPosition(
         calendarWidget: CalendarWidget?,
-        state: WidgetPersistence.CalendarWidgetState,
+        state: DashboardPersistence.CalendarWidgetState,
         screenWidth: Int,
         screenHeight: Int
     ) {
@@ -725,7 +683,7 @@ class WidgetPersistenceHelper(private val context: Context) {
      */
     fun restoreMirrorWidgetPosition(
         screenMirrorWidget: ScreenMirrorWidget?,
-        state: WidgetPersistence.MirrorWidgetState,
+        state: DashboardPersistence.MirrorWidgetState,
         screenWidth: Int,
         screenHeight: Int
     ) {
@@ -754,7 +712,7 @@ class WidgetPersistenceHelper(private val context: Context) {
      */
     fun restoreFinanceWidgetPosition(
         financeWidget: FinanceWidget?,
-        state: WidgetPersistence.FinanceWidgetState,
+        state: DashboardPersistence.FinanceWidgetState,
         screenWidth: Int,
         screenHeight: Int
     ) {
@@ -786,7 +744,7 @@ class WidgetPersistenceHelper(private val context: Context) {
      */
     fun restoreNewsWidgetPosition(
         newsWidget: NewsWidget?,
-        state: WidgetPersistence.NewsWidgetState,
+        state: DashboardPersistence.NewsWidgetState,
         screenWidth: Int,
         screenHeight: Int
     ) {
@@ -812,7 +770,7 @@ class WidgetPersistenceHelper(private val context: Context) {
 
     fun restoreNotificationsWidgetPosition(
         notificationsWidget: NotificationsWidget?,
-        state: WidgetPersistence.NotificationsWidgetState,
+        state: DashboardPersistence.NotificationsWidgetState,
         screenWidth: Int,
         screenHeight: Int
     ) {
@@ -844,7 +802,7 @@ class WidgetPersistenceHelper(private val context: Context) {
      */
     fun restoreSpeedometerWidgetPosition(
         speedometerWidget: SpeedometerWidget?,
-        state: WidgetPersistence.SpeedometerWidgetState,
+        state: DashboardPersistence.SpeedometerWidgetState,
         screenWidth: Int,
         screenHeight: Int
     ) {
@@ -869,7 +827,7 @@ class WidgetPersistenceHelper(private val context: Context) {
      */
     fun restoreSubtitleWidgetPosition(
         subtitleWidget: SubtitleWidget?,
-        state: WidgetPersistence.SubtitleWidgetState,
+        state: DashboardPersistence.SubtitleWidgetState,
         screenWidth: Int,
         screenHeight: Int
     ) {

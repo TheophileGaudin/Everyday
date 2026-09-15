@@ -14,7 +14,7 @@ class MapPoiConfigTest {
             radiusM = 300,
             maxResults = 5
         )
-        val map = WidgetPersistence.MapWidgetState(
+        val map = DashboardPersistence.MapWidgetState(
             x = 10f,
             y = 20f,
             width = 210f,
@@ -28,10 +28,10 @@ class MapPoiConfigTest {
     @Test
     fun `missing persisted poi config means legacy Default`() {
         val codec = WidgetDocument.codecs.getValue(WidgetTypeId.MAP)
-        val payload = codec.encode(WidgetPersistence.MapWidgetState(10f, 20f, 210f, 210f))
+        val payload = codec.encode(DashboardPersistence.MapWidgetState(10f, 20f, 210f, 210f))
         payload.remove("poiConfig")
 
-        val restored = codec.decode(payload) as WidgetPersistence.MapWidgetState
+        val restored = codec.decode(payload) as DashboardPersistence.MapWidgetState
 
         assertEquals(PoiDisplayConfig.DEFAULT, restored.poiConfig)
         assertEquals(PoiDisplayConfigState.DEFAULT, restored.poiConfig.state)
@@ -94,7 +94,7 @@ class MapPoiConfigTest {
             showClosest = false,
             closestRadiusM = 300
         )
-        val map = WidgetPersistence.MapWidgetState(10f, 20f, 210f, 210f, poiConfig = config)
+        val map = DashboardPersistence.MapWidgetState(10f, 20f, 210f, 210f, poiConfig = config)
 
         val restored = roundTrip(WidgetTypeId.MAP, map)
 

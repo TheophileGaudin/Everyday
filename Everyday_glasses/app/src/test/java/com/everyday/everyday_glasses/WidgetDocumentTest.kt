@@ -42,14 +42,14 @@ class WidgetDocumentTest {
                     type = WidgetTypeId.TEXT,
                     instanceId = "text#41",
                     state = WidgetDocument.codecs.getValue(WidgetTypeId.TEXT).encode(
-                        WidgetPersistence.TextWidgetState(1f, 2f, 100f, 80f, "text")
+                        DashboardPersistence.TextWidgetState(1f, 2f, 100f, 80f, "text")
                     )
                 ),
                 WidgetDocument.PersistedWidgetRecord(
                     type = WidgetTypeId.BROWSER,
                     instanceId = "browser#9",
                     state = WidgetDocument.codecs.getValue(WidgetTypeId.BROWSER).encode(
-                        WidgetPersistence.BrowserWidgetState(3f, 4f, 120f, 90f, "https://example.com")
+                        DashboardPersistence.BrowserWidgetState(3f, 4f, 120f, 90f, "https://example.com")
                     )
                 )
             )
@@ -67,7 +67,7 @@ class WidgetDocumentTest {
     fun `unknown and malformed records are ignored without dropping valid records`() {
         val valid = dashboardOf(
             WidgetTypeId.TEXT,
-            WidgetPersistence.TextWidgetState(1f, 2f, 100f, 80f, "text", html = "<b>text</b>"),
+            DashboardPersistence.TextWidgetState(1f, 2f, 100f, 80f, "text", html = "<b>text</b>"),
             instanceId = "text#1"
         ).widgets.single()
 
@@ -103,7 +103,7 @@ class WidgetDocumentTest {
 
         assertEquals(listOf(valid.type), parsed.widgets.map { it.type })
         assertEquals(listOf("text#1"), parsed.widgets.map { it.instanceId })
-        assertNotNull(parsed.stateOf<WidgetPersistence.TextWidgetState>(WidgetTypeId.TEXT))
+        assertNotNull(parsed.stateOf<DashboardPersistence.TextWidgetState>(WidgetTypeId.TEXT))
     }
 
     @Test
@@ -132,7 +132,7 @@ class WidgetDocumentTest {
                 updatedAt = 200L,
                 dashboard = dashboardOf(
                     WidgetTypeId.MIRROR,
-                    WidgetPersistence.MirrorWidgetState(0f, 0f, 640f, 480f)
+                    DashboardPersistence.MirrorWidgetState(0f, 0f, 640f, 480f)
                 )
             )
         )

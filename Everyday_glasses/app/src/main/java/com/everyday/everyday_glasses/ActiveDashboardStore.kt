@@ -9,7 +9,7 @@ import android.util.Log
  * reopens.
  *
  * This class decides *when* that state is written. The bytes themselves are
- * [WidgetPersistence]'s job, and named layouts are [LayoutLibrary]'s.
+ * [DashboardPersistence]'s job, and named layouts are [LayoutLibrary]'s.
  *
  * Writes are debounced because the dashboard changes continuously while the user
  * drags and resizes widgets: a change schedules a write [debounceMs] later, and any
@@ -37,7 +37,7 @@ class ActiveDashboardStore(
     private var pendingSave: Runnable? = null
     private var dirty = false
 
-    fun load(): WidgetDocument.PersistedDashboard = WidgetPersistence.loadDashboard(context)
+    fun load(): WidgetDocument.PersistedDashboard = DashboardPersistence.loadDashboard(context)
 
     /** Writes immediately, cancelling any pending debounced write. */
     fun saveNow(): Boolean {
@@ -47,7 +47,7 @@ class ActiveDashboardStore(
             Log.d(TAG, "Skipping save: dashboard has not been restored yet")
             return false
         }
-        val saved = WidgetPersistence.saveDashboard(context, captureDashboard())
+        val saved = DashboardPersistence.saveDashboard(context, captureDashboard())
         if (saved) dirty = false
         return saved
     }
@@ -64,7 +64,7 @@ class ActiveDashboardStore(
                 Log.d(TAG, "Skipping debounced save: dashboard has not been restored yet")
                 return@Runnable
             }
-            if (WidgetPersistence.saveDashboard(context, captureDashboard())) {
+            if (DashboardPersistence.saveDashboard(context, captureDashboard())) {
                 dirty = false
             }
         }

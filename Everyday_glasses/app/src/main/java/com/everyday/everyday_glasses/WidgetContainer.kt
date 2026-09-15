@@ -1,17 +1,13 @@
 package com.everyday.everyday_glasses
 
 import android.content.Context
-import android.content.ContentUris
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PointF
 import android.graphics.RectF
-import android.net.Uri
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.provider.MediaStore
 import android.util.AttributeSet
 import android.util.Log
 import android.view.MotionEvent
@@ -34,12 +30,9 @@ import com.everyday.shared.command.AppCommandInvocation
 import com.everyday.shared.command.CommandScrollDirection
 import com.everyday.shared.command.CommandWidgetId
 import com.everyday.shared.transport.AssistantStatus
-import java.io.File
 import java.util.concurrent.CompletableFuture
-import java.util.Locale
 import kotlin.reflect.KClass
 import kotlin.math.roundToInt
-import com.everyday.everyday_glasses.video.VideoItem
 
 /**
  * Container view that manages dynamic widgets (text boxes, status bar, etc.).
@@ -47,7 +40,7 @@ import com.everyday.everyday_glasses.video.VideoItem
  * Responsibilities are delegated to helper classes:
  * - CursorStabilizer: Cursor physics and smoothing for glasses temple input
  * - WidgetRegistry: Widget collection and z-ordering
- * - WidgetPersistenceHelper: Save/restore widget states
+ * - WidgetwidgetCaptureRestore: Save/restore widget states
  * - ThreeDofOverlay: Visual overlay for 3DOF mode (dashed boundary)
  *
  * This class handles:
@@ -90,13 +83,30 @@ class WidgetContainer @JvmOverloads constructor(
     private val cursorStabilizer = CursorStabilizer()
     private val stabilizedCursorDelta = PointF()
     private val registry = WidgetRegistry()
-    private val persistenceHelper = WidgetPersistenceHelper(context)
+    private val widgetCaptureRestore = WidgetCaptureRestore(context)
+    private val videoQueueRepository = VideoQueueRepository(context)
     private val lifecycleController = WidgetLifecycleController(
         runOnUiThread = { action -> post(action) },
         onChanged = ::notifyPersistentContentChanged,
         registry = registry,
         onMutationStarted = { lifecycleMutationInProgress = true },
         onMutationFinished = { lifecycleMutationInProgress = false }
+    )
+    private fun browserWidgetFactory(rootView: ViewGroup) = BrowserWidgetFactory(
+        context = context,
+        rootLayout = rootView,
+        containerView = this,
+    )
+    private fun videoWidgetFactory(rootView: ViewGroup) = VideoWidgetFactory(
+        context = context,
+        rootLayout = rootView,
+        containerView = this,
+        queueRepository = videoQueueRepository,
+        onStateChanged = ::notifyTransientContentChanged,
+        onPlaybackVisibilityChanged = { sourceId, active ->
+            setBinocularMediaSourceActive(sourceId, active)
+            notifyMediaBrightnessCapChanged()
+        },
     )
     private val threeDofOverlay = ThreeDofOverlay()
     private val smartAlignment = SmartAlignmentHelper(registry)
@@ -513,14 +523,14 @@ class WidgetContainer @JvmOverloads constructor(
         WidgetLifecycleRegistration(
             descriptor = WidgetDescriptors[WidgetTypeId.BROWSER],
             widgetType = BrowserWidget::class,
-            stateType = WidgetPersistence.BrowserWidgetState::class,
+            stateType = DashboardPersistence.BrowserWidgetState::class,
             stateCodec = WidgetDocument.codecs[WidgetTypeId.BROWSER],
-            capture = persistenceHelper::getBrowserWidgetState,
+            capture = widgetCaptureRestore::getBrowserWidgetState,
             restore = ::restoreBrowserWidget,
             configure = ::configureBrowserWidget,
             register = { registry.add(it) },
             unregister = { widget ->
-                persistenceHelper.getBrowserWidgetState(widget)?.let {
+                widgetCaptureRestore.getBrowserWidgetState(widget)?.let {
                     storeClosedTemplate(WidgetTypeId.BROWSER, it)
                 }
                 if (focusedBrowserWidget === widget) setFocusedWidget(null)
@@ -541,13 +551,13 @@ class WidgetContainer @JvmOverloads constructor(
         WidgetLifecycleRegistration(
             descriptor = WidgetDescriptors[WidgetTypeId.TEXT],
             widgetType = TextBoxWidget::class,
-            stateType = WidgetPersistence.TextWidgetState::class,
+            stateType = DashboardPersistence.TextWidgetState::class,
             stateCodec = WidgetDocument.codecs[WidgetTypeId.TEXT],
-            capture = persistenceHelper::getTextWidgetState,
+            capture = widgetCaptureRestore::getTextWidgetState,
             restore = ::restoreTextWidget,
             register = { registry.add(it) },
             unregister = { widget ->
-                storeClosedTemplate(WidgetTypeId.TEXT, persistenceHelper.getTextWidgetState(widget))
+                storeClosedTemplate(WidgetTypeId.TEXT, widgetCaptureRestore.getTextWidgetState(widget))
                 if (focusedWidget === widget) setFocusedWidget(null)
                 if (activeWidget === widget) activeWidget = null
                 notifyPresentationTargetRemoved(widget)
@@ -562,9 +572,9 @@ class WidgetContainer @JvmOverloads constructor(
         WidgetLifecycleRegistration(
             descriptor = WidgetDescriptors[WidgetTypeId.IMAGE],
             widgetType = ImageWidget::class,
-            stateType = WidgetPersistence.ImageWidgetState::class,
+            stateType = DashboardPersistence.ImageWidgetState::class,
             stateCodec = WidgetDocument.codecs[WidgetTypeId.IMAGE],
-            capture = persistenceHelper::getImageWidgetState,
+            capture = widgetCaptureRestore::getImageWidgetState,
             restore = ::restoreImageWidget,
             register = { registry.add(it) },
             unregister = { widget ->
@@ -584,9 +594,9 @@ class WidgetContainer @JvmOverloads constructor(
         WidgetLifecycleRegistration(
             descriptor = WidgetDescriptors[WidgetTypeId.VIDEO],
             widgetType = VideoWidget::class,
-            stateType = WidgetPersistence.VideoWidgetState::class,
+            stateType = DashboardPersistence.VideoWidgetState::class,
             stateCodec = WidgetDocument.codecs[WidgetTypeId.VIDEO],
-            capture = persistenceHelper::getVideoWidgetState,
+            capture = widgetCaptureRestore::getVideoWidgetState,
             restore = ::restoreVideoWidget,
             register = { registry.add(it) },
             unregister = { widget ->
@@ -605,9 +615,9 @@ class WidgetContainer @JvmOverloads constructor(
         WidgetLifecycleRegistration(
             descriptor = WidgetDescriptors[WidgetTypeId.PDF],
             widgetType = PdfWidget::class,
-            stateType = WidgetPersistence.PdfWidgetState::class,
+            stateType = DashboardPersistence.PdfWidgetState::class,
             stateCodec = WidgetDocument.codecs[WidgetTypeId.PDF],
-            capture = persistenceHelper::getPdfWidgetState,
+            capture = widgetCaptureRestore::getPdfWidgetState,
             restore = ::restorePdfWidget,
             register = { registry.add(it) },
             unregister = { widget ->
@@ -702,11 +712,11 @@ class WidgetContainer @JvmOverloads constructor(
     init {
         setWillNotDraw(false)
         registerWidgetLifecycles()
-        setupPersistenceHelperCallbacks()
+        setupWidgetCaptureRestoreCallbacks()
         // Callers own the classified notification for unit changes; applying the derived
         // widget presentation here must not emit a second transient callback.
-        unitSettings.onChanged = { applyEffectiveUnitSettings(notify = false) }
-        applyEffectiveUnitSettings(notify = false)
+        unitSettings.onChanged = { applyEffectiveUnitSettings() }
+        applyEffectiveUnitSettings()
     }
 
     override fun onDetachedFromWindow() {
@@ -762,52 +772,52 @@ class WidgetContainer @JvmOverloads constructor(
             )
         }
 
-        bindSingleton(WidgetTypeId.STATUS, StatusBarWidget::class, WidgetPersistence.StatusBarState::class,
+        bindSingleton(WidgetTypeId.STATUS, StatusBarWidget::class, DashboardPersistence.StatusBarState::class,
             { statusBarWidget }, ::createStatusBarPresence, ::applyStatusBarState,
-            { persistenceHelper.getStatusBarState(it) },
+            { widgetCaptureRestore.getStatusBarState(it) },
             { storeClosedTemplate(WidgetTypeId.STATUS, it) })
-        bindSingleton(WidgetTypeId.LOCATION, LocationWidget::class, WidgetPersistence.LocationWidgetState::class,
+        bindSingleton(WidgetTypeId.LOCATION, LocationWidget::class, DashboardPersistence.LocationWidgetState::class,
             { locationWidget }, ::createLocationPresence, ::applyLocationState,
-            { persistenceHelper.getLocationWidgetState(it) },
+            { widgetCaptureRestore.getLocationWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.LOCATION, it) })
-        bindSingleton(WidgetTypeId.MAP, MapWidget::class, WidgetPersistence.MapWidgetState::class,
+        bindSingleton(WidgetTypeId.MAP, MapWidget::class, DashboardPersistence.MapWidgetState::class,
             { mapWidget }, ::createMapPresence, ::applyMapState,
-            { persistenceHelper.getMapWidgetState(it) },
+            { widgetCaptureRestore.getMapWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.MAP, it) },
             beforeRemove = MapWidget::release)
-        bindSingleton(WidgetTypeId.CALENDAR, CalendarWidget::class, WidgetPersistence.CalendarWidgetState::class,
+        bindSingleton(WidgetTypeId.CALENDAR, CalendarWidget::class, DashboardPersistence.CalendarWidgetState::class,
             { calendarWidget }, ::createCalendarPresence, ::applyCalendarState,
-            { persistenceHelper.getCalendarWidgetState(it) },
+            { widgetCaptureRestore.getCalendarWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.CALENDAR, it) })
-        bindSingleton(WidgetTypeId.FINANCE, FinanceWidget::class, WidgetPersistence.FinanceWidgetState::class,
+        bindSingleton(WidgetTypeId.FINANCE, FinanceWidget::class, DashboardPersistence.FinanceWidgetState::class,
             { financeWidget }, ::createFinancePresence, ::applyFinanceState,
-            { persistenceHelper.getFinanceWidgetState(it) },
+            { widgetCaptureRestore.getFinanceWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.FINANCE, it) },
             onMinimize = { widget, minimized ->
                 handleSingletonRegisteredMinimize(widget, minimized)
                 dataProvider?.onFinanceVisibilityChanged(!minimized)
                 if (!minimized) widget.requestData(force = false, reason = "finance_unminimized")
             })
-        bindSingleton(WidgetTypeId.NEWS, NewsWidget::class, WidgetPersistence.NewsWidgetState::class,
+        bindSingleton(WidgetTypeId.NEWS, NewsWidget::class, DashboardPersistence.NewsWidgetState::class,
             { newsWidget }, ::createNewsPresence, ::applyNewsState,
-            { persistenceHelper.getNewsWidgetState(it) },
+            { widgetCaptureRestore.getNewsWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.NEWS, it) })
-        bindSingleton(WidgetTypeId.NOTIFICATIONS, NotificationsWidget::class, WidgetPersistence.NotificationsWidgetState::class,
+        bindSingleton(WidgetTypeId.NOTIFICATIONS, NotificationsWidget::class, DashboardPersistence.NotificationsWidgetState::class,
             { notificationsWidget }, ::createNotificationsPresence, ::applyNotificationsState,
-            { persistenceHelper.getNotificationsWidgetState(it) },
+            { widgetCaptureRestore.getNotificationsWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.NOTIFICATIONS, it) })
-        bindSingleton(WidgetTypeId.SPEEDOMETER, SpeedometerWidget::class, WidgetPersistence.SpeedometerWidgetState::class,
+        bindSingleton(WidgetTypeId.SPEEDOMETER, SpeedometerWidget::class, DashboardPersistence.SpeedometerWidgetState::class,
             { speedometerWidget }, ::createSpeedometerPresence, ::applySpeedometerState,
-            { persistenceHelper.getSpeedometerWidgetState(it) },
+            { widgetCaptureRestore.getSpeedometerWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.SPEEDOMETER, it) },
             beforeRemove = { settingsController.dismissSpeedometerSettingsMenu() })
-        bindSingleton(WidgetTypeId.SUBTITLE, SubtitleWidget::class, WidgetPersistence.SubtitleWidgetState::class,
+        bindSingleton(WidgetTypeId.SUBTITLE, SubtitleWidget::class, DashboardPersistence.SubtitleWidgetState::class,
             { subtitleWidget }, ::createSubtitlePresence, ::applySubtitleState,
-            { persistenceHelper.getSubtitleWidgetState(it) },
+            { widgetCaptureRestore.getSubtitleWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.SUBTITLE, it) })
-        bindSingleton(WidgetTypeId.MIRROR, ScreenMirrorWidget::class, WidgetPersistence.MirrorWidgetState::class,
+        bindSingleton(WidgetTypeId.MIRROR, ScreenMirrorWidget::class, DashboardPersistence.MirrorWidgetState::class,
             { screenMirrorWidget }, ::createMirrorPresence, ::applyMirrorState,
-            { persistenceHelper.getMirrorWidgetState(it) },
+            { widgetCaptureRestore.getMirrorWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.MIRROR, it) },
             beforeRemove = { notifyMediaBrightnessCapChanged() })
 
@@ -830,8 +840,8 @@ class WidgetContainer @JvmOverloads constructor(
         updateMinimizedWidgetPositions()
     }
 
-    private fun setupPersistenceHelperCallbacks() {
-        persistenceHelper.listener = object : WidgetPersistenceListener {
+    private fun setupWidgetCaptureRestoreCallbacks() {
+        widgetCaptureRestore.listener = object : WidgetPersistenceListener {
             override fun onWidgetFocusChanged(widget: BaseWidget?, focused: Boolean) {
                 if (focused && widget != null) {
                     setFocusedWidget(widget)
@@ -968,34 +978,6 @@ class WidgetContainer @JvmOverloads constructor(
         return session != null
     }
 
-    /**
-     * Resolve a stable widget ID, optionally creating the target after any prior session has
-     * been restored. The creation callback is deliberately outside the controller so this API
-     * remains independent of concrete widget types.
-     */
-    fun presentWidget(
-        targetId: String,
-        spec: PresentationSpec,
-        createIfMissing: (() -> BaseWidget?)? = null
-    ): Boolean {
-        require(targetId.isNotBlank()) { "Presentation target ID must not be blank" }
-        var created = false
-        val session = presentationController.start(targetId, spec) {
-            var target = findWidgetByStableId(targetId)
-            if (target == null) {
-                target = createIfMissing?.invoke()
-                if (target != null) {
-                    created = true
-                    bindStableWidgetId(target, targetId)
-                }
-            }
-            target?.takeIf { widgetStableId(it) == targetId }?.let {
-                capturePresentationSnapshot(it, existedBeforePresentation = !created)
-            }
-        }
-        return session != null
-    }
-
     fun cancelPresentationForUserInput(): Boolean = presentationController.cancelForUserInput()
 
     fun dismissPresentation(): Boolean = presentationController.dismiss()
@@ -1009,12 +991,6 @@ class WidgetContainer @JvmOverloads constructor(
      */
     fun findBrowserWidgetByStableId(widgetId: String): BrowserWidget? =
         browserWidgets.firstOrNull { stableWidgetId(it) == widgetId }
-
-    /** Bind a Page Agent to this exact browser widget, active tab, and WebView. */
-    fun bindPageAgentBrowser(widgetId: String): PageAgentBrowserAdapter? =
-        findBrowserWidgetByStableId(widgetId)?.let { widget ->
-            BrowserWidgetPageAgentAdapter.bind(widgetId, widget)
-        }
 
     /**
      * Atomically capture the browser occupying page/video fullscreen and bind its current tab
@@ -1041,20 +1017,7 @@ class WidgetContainer @JvmOverloads constructor(
         return BrowserWidgetPageAgentAdapter.bind(stableId, widget)
     }
 
-    /** Stable ID of the browser currently occupying page/video fullscreen, if any. */
-    fun fullscreenBrowserWidgetStableId(): String? =
-        (fullscreenBrowserWidget ?: browserWidgets.firstOrNull { it.isInVideoFullscreen() })
-            ?.let(::stableWidgetId)
-
     private fun stableWidgetId(widget: BaseWidget): String = registry.stableId(widget)
-
-    private fun bindStableWidgetId(widget: BaseWidget, requestedId: String) {
-        require(registry.isRegistered(widget)) {
-            "Created presentation target must be registered before it is presented"
-        }
-        registry.rebindStableId(widget, requestedId)
-    }
-
     private fun findWidgetByStableId(targetId: String): BaseWidget? =
         registry.findByStableId(targetId)
 
@@ -1100,7 +1063,7 @@ class WidgetContainer @JvmOverloads constructor(
                 PresentationMode.WINDOWED -> if (widget.isFullscreen) widget.toggleFullscreen()
             }
             // Presentation z-order is temporary and must not rewrite the dashboard layout.
-            bringWidgetToFront(widget, notify = false)
+            bringWidgetToFront(widget)
         }
         notifyTransientContentChanged()
     }
@@ -1656,16 +1619,12 @@ class WidgetContainer @JvmOverloads constructor(
         }
     }
 
-    fun getSpeedUnit(): SpeedometerWidget.SpeedUnit = unitSettings.effectiveSpeedUnit()
-
     fun setSpeedVisibilityThreshold(thresholdKmh: Float) {
         val forceVisibleChanged = settingsController.setSpeedVisibilityThreshold(thresholdKmh)
         if (forceVisibleChanged && displayState != WakeSleepManager.DisplayState.OFF) {
             notifyTransientContentChanged()
         }
     }
-
-    fun getSpeedVisibilityThreshold(): Float = settingsController.getSpeedVisibilityThreshold()
 
     private fun createSpeedometerWidget(
         startX: Float,
@@ -1790,14 +1749,13 @@ class WidgetContainer @JvmOverloads constructor(
         )
     }
 
-    private fun applyEffectiveUnitSettings(notify: Boolean = true) {
+    private fun applyEffectiveUnitSettings() {
         val speedUnit = unitSettings.effectiveSpeedUnit()
         speedometerWidget?.setUnit(speedUnit)
         settingsController.setSpeedUnit(speedUnit)
         settingsController.setUnitSystemMode(unitSettings.globalMode)
         locationWidget?.setTemperatureUnit(unitSettings.effectiveTemperatureUnit())
         renderLocationWeather()
-        if (notify) notifyTransientContentChanged()
     }
 
     fun applyFinanceSnapshot(snapshot: FinanceSnapshot, notify: Boolean = true) {
@@ -1898,10 +1856,6 @@ class WidgetContainer @JvmOverloads constructor(
     fun currentFinanceVisibleConfigs(): List<FinanceDashboardTileConfig> =
         financeWidget?.getVisibleTileConfigs().orEmpty()
 
-    fun currentFinanceSemanticState(): FinanceWidgetSemanticState? =
-        financeWidget?.let { widget ->
-            widget.semanticState(widgetStableId(widget))
-        }
 
     /** Update an existing finance tile on the UI thread and keep the widget instance intact. */
     fun updateFinanceTile(request: FinanceTileUpdateRequest): CompletableFuture<FinanceTileUpdateResult> {
@@ -1985,15 +1939,10 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     // ==================== Z-Order Management ====================
-
-    private fun bringWidgetToFront(widget: BaseWidget, notify: Boolean = true) {
-        registry.bringToFront(widget, parent as? ViewGroup, this)
-        if (notify) notifyPersistentContentChanged()
-    }
-
+    private fun bringWidgetToFront(widget: BaseWidget) {registry.bringToFront(widget, parent as? ViewGroup, this)}
     private fun bringWidgetToFrontForInteraction(widget: BaseWidget) {
         val before = widget.zOrder
-        bringWidgetToFront(widget, notify = false)
+        bringWidgetToFront(widget)
         if (widget.zOrder != before) interactionZOrderChanged = true
     }
 
@@ -3091,7 +3040,7 @@ class WidgetContainer @JvmOverloads constructor(
         val beforeZOrder = widget.zOrder
         val result = runPersistentMutation(
             action = {
-                bringWidgetToFront(widget, notify = false)
+                bringWidgetToFront(widget)
                 val handled = widget.onTap(x, y)
                 // Selecting a file closes the picker through its callback, which is also a
                 // persistent widget removal even when the picker was already front-most.
@@ -3542,82 +3491,29 @@ class WidgetContainer @JvmOverloads constructor(
         }
     }
 
-    // ==================== Widget Creation ====================
-
     private fun handleMenuItemSelected(item: ContextMenu.MenuItem) {
         userInputActivity?.onUserInput(UserInputKind.SHORTCUT)
         commandRegistry.find(item.id)?.let { executeCommand(commandRegistry.invocation(it)) }
     }
 
-    /**
-     * Set the brightness value programmatically (used for restoring persisted state).
-     */
-    fun setBrightness(value: Float) {
-        settingsController.setBrightness(value)
-    }
+    // ==================== Setters and Getters ====================
 
-    /**
-     * Get the current brightness value (used for persistence).
-     */
-    fun getBrightness(): Float = settingsController.getBrightness()
 
-    fun setAdaptiveBrightnessEnabled(enabled: Boolean) {
-        settingsController.setAdaptiveBrightnessEnabled(enabled)
-    }
 
-    fun getAdaptiveBrightnessEnabled(): Boolean = settingsController.getAdaptiveBrightnessEnabled()
+    /** setters and getters for brightness and head-up */
+    fun setBrightness(value: Float) {settingsController.setBrightness(value)}
+    fun setAdaptiveBrightnessEnabled(enabled: Boolean) {settingsController.setAdaptiveBrightnessEnabled(enabled)}
+    fun setHeadUpTime(ms: Long) {settingsController.setHeadUpTime(ms)} /**Set the head-up time programmatically (used for restoring persisted state).*/
+    fun getHeadUpTime(): Long = settingsController.getHeadUpTime() /** Get the current head-up time (used for persistence).*/
+    fun setWakeDuration(ms: Long) {settingsController.setWakeDuration(ms)} /** Set the wake duration programmatically (used for restoring persisted state).*/
+    fun getWakeDuration(): Long = settingsController.getWakeDuration() /** Get the current wake duration (used for persistence). */
+    fun setAngleThreshold(degrees: Float) {settingsController.setAngleThreshold(degrees)} /** Set the angle threshold programmatically (used for restoring persisted state). */
+    fun getAngleThreshold(): Float = settingsController.getAngleThreshold() /** Get the current angle threshold (used for persistence). */
+    fun setHeadsUpEnabled(enabled: Boolean) {settingsController.setHeadsUpEnabled(enabled)} /** Set the heads-up enabled state programmatically (used for restoring persisted state). */
+    fun getHeadsUpEnabled(): Boolean = settingsController.getHeadsUpEnabled() /** Get the current heads-up enabled state (used for persistence). */
 
-    /**
-     * Set the head-up time programmatically (used for restoring persisted state).
-     */
-    fun setHeadUpTime(ms: Long) {
-        settingsController.setHeadUpTime(ms)
-    }
-
-    /**
-     * Get the current head-up time (used for persistence).
-     */
-    fun getHeadUpTime(): Long = settingsController.getHeadUpTime()
-
-    /**
-     * Set the wake duration programmatically (used for restoring persisted state).
-     */
-    fun setWakeDuration(ms: Long) {
-        settingsController.setWakeDuration(ms)
-    }
-
-    /**
-     * Get the current wake duration (used for persistence).
-     */
-    fun getWakeDuration(): Long = settingsController.getWakeDuration()
-
-    /**
-     * Set the angle threshold programmatically (used for restoring persisted state).
-     */
-    fun setAngleThreshold(degrees: Float) {
-        settingsController.setAngleThreshold(degrees)
-    }
-
-    /**
-     * Get the current angle threshold (used for persistence).
-     */
-    fun getAngleThreshold(): Float = settingsController.getAngleThreshold()
-
-    /**
-     * Set the heads-up enabled state programmatically (used for restoring persisted state).
-     */
-    fun setHeadsUpEnabled(enabled: Boolean) {
-        settingsController.setHeadsUpEnabled(enabled)
-    }
-
-    /**
-     * Get the current heads-up enabled state (used for persistence).
-     */
-    fun getHeadsUpEnabled(): Boolean = settingsController.getHeadsUpEnabled()
-
-    fun setGoogleAuthState(state: GoogleAuthState) {
-        settingsController.setGoogleAuthState(state)
-    }
+    /** setter for google authentication*/
+    fun setGoogleAuthState(state: GoogleAuthState) {settingsController.setGoogleAuthState(state)}
 
     /**
      * Get updated submenu items with current widget presence state.
@@ -3652,9 +3548,6 @@ class WidgetContainer @JvmOverloads constructor(
     fun setSmartAlignmentEnabled(enabled: Boolean) {
         smartAlignment.enabled = enabled
     }
-
-    fun isSmartAlignmentEnabled(): Boolean = smartAlignment.enabled
-
     fun setWidgetLayoutLocked(locked: Boolean, persist: Boolean = true) {
         if (isWidgetLayoutLocked == locked) {
             contextMenu?.setLayoutLockState(isWidgetLayoutLocked)
@@ -3676,7 +3569,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createStatusBarPresence(): StatusBarWidget {
-        closedTemplateState<WidgetPersistence.StatusBarState>(WidgetTypeId.STATUS)?.let {
+        closedTemplateState<DashboardPersistence.StatusBarState>(WidgetTypeId.STATUS)?.let {
             return applyStatusBarState(it)
         }
         val statusWidth = 220f
@@ -3687,7 +3580,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createLocationPresence(): LocationWidget {
-        closedTemplateState<WidgetPersistence.LocationWidgetState>(WidgetTypeId.LOCATION)?.let {
+        closedTemplateState<DashboardPersistence.LocationWidgetState>(WidgetTypeId.LOCATION)?.let {
             return applyLocationState(it)
         }
         val locWidth = 300f
@@ -3703,7 +3596,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createMapPresence(): MapWidget {
-        closedTemplateState<WidgetPersistence.MapWidgetState>(WidgetTypeId.MAP)?.let { return applyMapState(it) }
+        closedTemplateState<DashboardPersistence.MapWidgetState>(WidgetTypeId.MAP)?.let { return applyMapState(it) }
         val size = 210f
         return MapWidget(context, width - size - 24f, 24f, size, size).apply {
             invalidate = ::requestRepaint
@@ -3737,7 +3630,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createCalendarPresence(): CalendarWidget {
-        closedTemplateState<WidgetPersistence.CalendarWidgetState>(WidgetTypeId.CALENDAR)?.let {
+        closedTemplateState<DashboardPersistence.CalendarWidgetState>(WidgetTypeId.CALENDAR)?.let {
             return applyCalendarState(it)
         }
         val startX = (width - CalendarWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
@@ -3754,7 +3647,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createSpeedometerPresence(): SpeedometerWidget {
-        closedTemplateState<WidgetPersistence.SpeedometerWidgetState>(WidgetTypeId.SPEEDOMETER)?.let {
+        closedTemplateState<DashboardPersistence.SpeedometerWidgetState>(WidgetTypeId.SPEEDOMETER)?.let {
             return applySpeedometerState(it)
         }
         val speedWidth = 220f
@@ -3765,7 +3658,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createFinancePresence(): FinanceWidget {
-        closedTemplateState<WidgetPersistence.FinanceWidgetState>(WidgetTypeId.FINANCE)?.let {
+        closedTemplateState<DashboardPersistence.FinanceWidgetState>(WidgetTypeId.FINANCE)?.let {
             return applyFinanceState(it)
         }
         return FinanceWidget(20f, 20f, FinanceWidget.DEFAULT_WIDTH, FinanceWidget.DEFAULT_HEIGHT).apply {
@@ -3786,7 +3679,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createNewsPresence(): NewsWidget {
-        closedTemplateState<WidgetPersistence.NewsWidgetState>(WidgetTypeId.NEWS)?.let {
+        closedTemplateState<DashboardPersistence.NewsWidgetState>(WidgetTypeId.NEWS)?.let {
             return applyNewsState(it)
         }
         val startX = (width - NewsWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
@@ -3809,7 +3702,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createNotificationsPresence(): NotificationsWidget {
-        closedTemplateState<WidgetPersistence.NotificationsWidgetState>(WidgetTypeId.NOTIFICATIONS)?.let {
+        closedTemplateState<DashboardPersistence.NotificationsWidgetState>(WidgetTypeId.NOTIFICATIONS)?.let {
             return applyNotificationsState(it)
         }
         val startX = (width - NotificationsWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
@@ -3823,7 +3716,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createSubtitlePresence(): SubtitleWidget {
-        closedTemplateState<WidgetPersistence.SubtitleWidgetState>(WidgetTypeId.SUBTITLE)?.let {
+        closedTemplateState<DashboardPersistence.SubtitleWidgetState>(WidgetTypeId.SUBTITLE)?.let {
             return applySubtitleState(it).also { widget -> widget.setCaptureEnabled(true) }
         }
         val subtitleWidth = SubtitleWidget.DEFAULT_WIDTH.coerceAtMost(width * 0.82f)
@@ -3834,7 +3727,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createMirrorPresence(): ScreenMirrorWidget {
-        closedTemplateState<WidgetPersistence.MirrorWidgetState>(WidgetTypeId.MIRROR)?.let {
+        closedTemplateState<DashboardPersistence.MirrorWidgetState>(WidgetTypeId.MIRROR)?.let {
             return applyMirrorState(it)
         }
         return ScreenMirrorWidget(context, 20f, 20f, 180f, 320f).apply {
@@ -3846,14 +3739,17 @@ class WidgetContainer @JvmOverloads constructor(
         if (openClosedBrowserTemplate() != null) {
             return
         }
-        val boxWidth = width * 0.45f; val boxHeight = height * 0.5f
-        val adjustedX = x.coerceIn(0f, width - boxWidth); val adjustedY = y.coerceIn(0f, height - boxHeight)
-        val rootView = (parent as? ViewGroup) ?: return
-        val widget = BrowserWidget(context, rootView, adjustedX, adjustedY, boxWidth, boxHeight).apply {
-            configureBrowserWidget(this)
-        }
-        val containerIndex = rootView.indexOfChild(this); val insertIndex = if (containerIndex >= 0) containerIndex else 0
-        widget.getWebView()?.let { webView -> if (webView.parent == rootView) rootView.removeView(webView); rootView.addView(webView, insertIndex) }
+        val boxWidth = width * 0.45f
+        val boxHeight = height * 0.5f
+        val adjustedX = x.coerceIn(0f, width - boxWidth)
+        val adjustedY = y.coerceIn(0f, height - boxHeight)
+        val rootView = parent as? ViewGroup ?: return
+        val widget = browserWidgetFactory(rootView).create(
+            adjustedX,
+            adjustedY,
+            boxWidth,
+            boxHeight,
+        )
         runPersistentMutation {
             lifecycleController.open(browserLifecycle) { widget }
             notifyMediaBrightnessCapChanged()
@@ -3871,7 +3767,7 @@ class WidgetContainer @JvmOverloads constructor(
             }
             override fun onAddressFocusChanged(focused: Boolean) {
                 val beforeZOrder = map.zOrder
-                if (focused) bringWidgetToFront(map, notify = false)
+                if (focused) bringWidgetToFront(map)
                 notifyFocusChanged(
                     focused = focused,
                     persistent = focused && map.zOrder != beforeZOrder
@@ -3928,20 +3824,17 @@ class WidgetContainer @JvmOverloads constructor(
     /** Create a visible windowed browser for a normal assistant browser task. */
     fun createPageAgentBrowser(): PageAgentBrowserAdapter? {
         if (width <= 0 || height <= 0) return null
-        val rootView = (parent as? ViewGroup) ?: return null
+        val rootView = parent as? ViewGroup ?: return null
         val boxWidth = width * 0.45f
         val boxHeight = height * 0.5f
         val adjustedX = pendingCreateX.coerceIn(0f, width - boxWidth)
         val adjustedY = pendingCreateY.coerceIn(0f, height - boxHeight)
-        val widget = BrowserWidget(context, rootView, adjustedX, adjustedY, boxWidth, boxHeight).apply {
-            configureBrowserWidget(this)
-        }
-        val containerIndex = rootView.indexOfChild(this)
-        val insertIndex = if (containerIndex >= 0) containerIndex else 0
-        widget.getWebView()?.let { webView ->
-            if (webView.parent == rootView) rootView.removeView(webView)
-            rootView.addView(webView, insertIndex)
-        }
+        val widget = browserWidgetFactory(rootView).create(
+            adjustedX,
+            adjustedY,
+            boxWidth,
+            boxHeight,
+        )
         return runPersistentMutation(
             action = {
                 lifecycleController.open(browserLifecycle) { widget }?.let { opened ->
@@ -3956,7 +3849,7 @@ class WidgetContainer @JvmOverloads constructor(
                         }
                 }
             },
-            changed = { true }
+            changed = { true },
         )
     }
 
@@ -3968,7 +3861,7 @@ class WidgetContainer @JvmOverloads constructor(
 
         runPersistentMutation {
             if (widget.isMinimized) widget.toggleMinimize()
-            bringWidgetToFront(widget, notify = false)
+            bringWidgetToFront(widget)
             widget.setFocused(true)
             setFocusedWidget(widget)
             widget.navigateToAddress(address, autoFullscreenVideo = true)
@@ -3976,16 +3869,13 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createFullscreenBrowserWidget(): BrowserWidget? {
-        val rootView = (parent as? ViewGroup) ?: return null
-        val widget = BrowserWidget(context, rootView, 0f, 0f, width.toFloat(), height.toFloat()).apply {
-            configureBrowserWidget(this)
-        }
-        val containerIndex = rootView.indexOfChild(this)
-        val insertIndex = if (containerIndex >= 0) containerIndex else 0
-        widget.getWebView()?.let { webView ->
-            if (webView.parent == rootView) rootView.removeView(webView)
-            rootView.addView(webView, insertIndex)
-        }
+        val rootView = parent as? ViewGroup ?: return null
+        val widget = browserWidgetFactory(rootView).create(
+            0f,
+            0f,
+            width.toFloat(),
+            height.toFloat(),
+        )
         return runPersistentMutation {
             lifecycleController.open(browserLifecycle) { widget }
             notifyMediaBrightnessCapChanged()
@@ -3995,33 +3885,25 @@ class WidgetContainer @JvmOverloads constructor(
         }
     }
 
-    private fun removeBrowserWidget(widget: BrowserWidget) {
-        lifecycleController.close(widget)
-    }
-
     /**
      * Create a fullscreen browser widget that opens YouTube history.
      * Called when the YouTube button is tapped.
      */
     private fun createYouTubeBrowserWidget() {
-        val rootView = (parent as? ViewGroup) ?: return
-        // Create browser widget that fills the screen
-        val widget = BrowserWidget(context, rootView, 0f, 0f, width.toFloat(), height.toFloat()).apply {
-            configureBrowserWidget(this)
-        }
-        val containerIndex = rootView.indexOfChild(this); val insertIndex = if (containerIndex >= 0) containerIndex else 0
-        widget.getWebView()?.let { webView -> if (webView.parent == rootView) rootView.removeView(webView); rootView.addView(webView, insertIndex) }
+        val rootView = parent as? ViewGroup ?: return
+        val widget = browserWidgetFactory(rootView).create(
+            0f,
+            0f,
+            width.toFloat(),
+            height.toFloat(),
+        )
         runPersistentMutation {
             lifecycleController.open(browserLifecycle) { widget }
             notifyBrowserMinimumBrightnessChanged()
-
-            // Load YouTube history URL
             widget.getWebView()?.loadUrl("https://www.youtube.com/feed/history")
-
-            // Enter fullscreen mode immediately
             widget.toggleFullscreen()
-
-            widget.setFocused(true); setFocusedWidget(widget)
+            widget.setFocused(true)
+            setFocusedWidget(widget)
         }
     }
 
@@ -4033,117 +3915,20 @@ class WidgetContainer @JvmOverloads constructor(
         lifecycleController.open(imageLifecycle) { widget }
     }
 
-    private fun removeImageWidget(widget: ImageWidget) {
-        lifecycleController.close(widget)
-    }
-
-    fun createVideoWidget(uri: android.net.Uri, displayName: String, x: Float = -1f, y: Float = -1f) {
+    fun createVideoWidget(
+        uri: android.net.Uri,
+        displayName: String,
+        x: Float = -1f,
+        y: Float = -1f,
+    ) {
         val rootView = parent as? ViewGroup ?: return
         val createX = if (x >= 0f) x else ((width - 360f) / 2f).coerceAtLeast(0f)
         val createY = if (y >= 0f) y else ((height - 220f) / 2f).coerceAtLeast(0f)
-        val sourceId = "local-video-${uri.hashCode()}"
-        val widget = VideoWidget(
-            context = context,
-            rootLayout = rootView,
-            containerView = this,
-            contentUri = uri,
-            displayName = displayName,
-            x = createX,
-            y = createY,
-            queueItems = buildVideoQueue(uri, displayName),
-        ).apply {
-            listener = object : VideoWidgetListener {
-                override fun onStateChanged() = notifyTransientContentChanged()
-                override fun onPlaybackVisibilityChanged(active: Boolean) {
-                    setBinocularMediaSourceActive(sourceId, active)
-                    notifyMediaBrightnessCapChanged()
-                }
-            }
-        }
+        val widget = videoWidgetFactory(rootView).create(uri, displayName, createX, createY)
         runPersistentMutation {
             lifecycleController.open(videoLifecycle) { widget }
             widget.toggleFullscreen()
         }
-    }
-
-    /**
-     * Everyday's file browser chooses the initial file, while X3player's Previous/Next controls
-     * operate on the alphabetically sorted video siblings in that file's directory.
-     */
-    private fun buildVideoQueue(initialUri: Uri, initialDisplayName: String): List<VideoItem> {
-        val initial = VideoItem(
-            id = initialUri.hashCode().toLong(),
-            contentUri = initialUri,
-            displayName = initialDisplayName,
-        )
-        val initialPath = resolveVideoPath(initialUri) ?: return listOf(initial)
-        val parent = File(initialPath).parentFile ?: return listOf(initial)
-        val initialCanonicalPath = File(initialPath).canonicalPath
-        val files = parent.listFiles()
-            ?.asSequence()
-            ?.filter { it.isFile && it.extension.lowercase(Locale.US) in FileBrowserWidget.FileFilter.VIDEOS.extensions }
-            ?.sortedBy { it.name.lowercase(Locale.US) }
-            ?.toList()
-            .orEmpty()
-
-        if (files.isEmpty()) return listOf(initial)
-
-        return files.map { file ->
-            val canonicalPath = runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
-            val fileUri = if (canonicalPath == initialCanonicalPath) {
-                initialUri
-            } else {
-                queryVideoUriForPath(file.absolutePath) ?: Uri.fromFile(file)
-            }
-            VideoItem(
-                id = fileUri.hashCode().toLong(),
-                contentUri = fileUri,
-                displayName = file.name,
-            )
-        }.ifEmpty { listOf(initial) }
-    }
-
-    private fun resolveVideoPath(uri: Uri): String? {
-        if (uri.scheme.equals("file", ignoreCase = true)) return uri.path
-        return runCatching {
-            context.contentResolver.query(
-                uri,
-                arrayOf(MediaStore.Video.Media.DATA),
-                null,
-                null,
-                null,
-            )?.use { cursor ->
-                if (!cursor.moveToFirst()) null
-                else cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATA))
-            }
-        }.getOrNull()?.takeIf { it.isNotBlank() }
-    }
-
-    private fun queryVideoUriForPath(path: String): Uri? {
-        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
-        } else {
-            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-        }
-        return runCatching {
-            context.contentResolver.query(
-                collection,
-                arrayOf(MediaStore.Video.Media._ID),
-                "${MediaStore.Video.Media.DATA} = ?",
-                arrayOf(path),
-                null,
-            )?.use { cursor ->
-                if (!cursor.moveToFirst()) null
-                else ContentUris.withAppendedId(
-                    collection,
-                    cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)),
-                )
-            }
-        }.getOrNull()
-    }
-
-    private fun removeVideoWidget(widget: VideoWidget) {
-        lifecycleController.close(widget)
     }
 
     fun createPdfWidget(uri: android.net.Uri, displayName: String, x: Float = -1f, y: Float = -1f) {
@@ -4156,10 +3941,6 @@ class WidgetContainer @JvmOverloads constructor(
             lifecycleController.open(pdfLifecycle) { widget }
             widget.toggleFullscreen()
         }
-    }
-
-    private fun removePdfWidget(widget: PdfWidget) {
-        lifecycleController.close(widget)
     }
 
     /**
@@ -4227,10 +4008,6 @@ class WidgetContainer @JvmOverloads constructor(
             widget.setFocused(true)
             setFocusedWidget(widget)
         }
-    }
-
-    private fun removeWidget(widget: TextBoxWidget) {
-        lifecycleController.close(widget)
     }
 
     private fun setFocusedWidget(widget: BaseWidget?) {
@@ -4501,15 +4278,8 @@ class WidgetContainer @JvmOverloads constructor(
         activeWidget != null ||
         financeTileDragging ||
         formattingMenu?.isDragging() == true
-    fun isLongPressPending(): Boolean = longPressRunnable != null || formattingMenu?.isLongPressPending() == true
 
     // ==================== 3DOF Mode ====================
-
-    /**
-     * Check if 3DOF mode is currently active.
-     */
-    fun is3DofEnabled(): Boolean = is3DofEnabled
-
     /**
      * Set 3DOF mode enabled state. Called by ThreeDofManager.
      */
@@ -5322,9 +5092,6 @@ class WidgetContainer @JvmOverloads constructor(
         settingsController.setAssistantConfiguration(configuration, models, detail)
     }
 
-    private fun executeDefinition(definition: AppCommandDefinition): AppCommandResult =
-        executeCommand(commandRegistry.invocation(definition))
-
     private fun loadCommandLayout(name: String): Boolean {
         if (!isReady()) return false
         val builtIn = BuiltInLayouts.buildDashboard(name, width.toFloat(), height.toFloat())
@@ -5396,7 +5163,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun applyDefaultLayoutReplacingCurrent() {
         val defaultDashboard = BuiltInLayouts.buildDashboard(
-            WidgetPersistence.DEFAULT_LAYOUT_NAME,
+            DashboardPersistence.DEFAULT_LAYOUT_NAME,
             width.toFloat(),
             height.toFloat()
         ) ?: return
@@ -5443,18 +5210,24 @@ class WidgetContainer @JvmOverloads constructor(
         widget.toggleFullscreen()
     }
 
-    private fun restoreTextWidget(state: WidgetPersistence.TextWidgetState): TextBoxWidget? =
-        persistenceHelper.restoreTextWidgets(listOf(state), width, height).firstOrNull()
+    private fun restoreTextWidget(state: DashboardPersistence.TextWidgetState): TextBoxWidget? =
+        widgetCaptureRestore.restoreTextWidgets(listOf(state), width, height).firstOrNull()
 
-    private fun restoreBrowserWidget(state: WidgetPersistence.BrowserWidgetState): BrowserWidget? {
+    private fun restoreBrowserWidget(state: DashboardPersistence.BrowserWidgetState,): BrowserWidget? {
         val rootView = parent as? ViewGroup ?: return null
-        return persistenceHelper.restoreBrowserWidgets(listOf(state), rootView, this, width, height).firstOrNull()
+        val adjustedX = state.x.coerceIn(0f, (width - state.width).coerceAtLeast(0f))
+        val adjustedY = state.y.coerceIn(0f, (height - state.height).coerceAtLeast(0f))
+        val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, width.toFloat())
+        val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, height.toFloat())
+        return browserWidgetFactory(rootView)
+            .create(adjustedX, adjustedY, adjustedWidth, adjustedHeight)
+            .apply {widgetCaptureRestore.restoreBrowserWidgetState(this, state, adjustedX, adjustedY)}
     }
 
-    private fun restoreImageWidget(state: WidgetPersistence.ImageWidgetState): ImageWidget? =
-        persistenceHelper.restoreImageWidgets(listOf(state), width, height).firstOrNull()
+    private fun restoreImageWidget(state: DashboardPersistence.ImageWidgetState): ImageWidget? =
+        widgetCaptureRestore.restoreImageWidgets(listOf(state), width, height).firstOrNull()
 
-    private fun restoreVideoWidget(state: WidgetPersistence.VideoWidgetState): VideoWidget? {
+    private fun restoreVideoWidget(state: DashboardPersistence.VideoWidgetState): VideoWidget? {
         val rootView = parent as? ViewGroup ?: return null
         val uri = runCatching { android.net.Uri.parse(state.uri) }.getOrNull() ?: return null
         val readable = runCatching {
@@ -5466,31 +5239,16 @@ class WidgetContainer @JvmOverloads constructor(
         val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, height.toFloat())
         val adjustedX = state.x.coerceIn(0f, (width - adjustedWidth).coerceAtLeast(0f))
         val adjustedY = state.y.coerceIn(0f, (height - adjustedHeight).coerceAtLeast(0f))
-        val sourceId = "local-video-${uri.hashCode()}"
-        return VideoWidget(
-            context = context,
-            rootLayout = rootView,
-            containerView = this,
-            contentUri = uri,
-            displayName = state.displayName,
-            x = adjustedX,
-            y = adjustedY,
-            queueItems = buildVideoQueue(uri, state.displayName)
-        ).apply {
-            widgetWidth = adjustedWidth
-            widgetHeight = adjustedHeight
-            listener = object : VideoWidgetListener {
-                override fun onStateChanged() = notifyTransientContentChanged()
-                override fun onPlaybackVisibilityChanged(active: Boolean) {
-                    setBinocularMediaSourceActive(sourceId, active)
-                    notifyMediaBrightnessCapChanged()
-                }
+        return videoWidgetFactory(rootView)
+            .create(uri, state.displayName, adjustedX, adjustedY)
+            .apply {
+                widgetWidth = adjustedWidth
+                widgetHeight = adjustedHeight
+                widgetCaptureRestore.restoreVideoWidgetState(this, state, adjustedX, adjustedY)
             }
-            persistenceHelper.restoreVideoWidgetState(this, state, adjustedX, adjustedY)
-        }
     }
 
-    private fun restorePdfWidget(state: WidgetPersistence.PdfWidgetState): PdfWidget? {
+    private fun restorePdfWidget(state: DashboardPersistence.PdfWidgetState): PdfWidget? {
         val uri = runCatching { android.net.Uri.parse(state.uri) }.getOrNull() ?: return null
         val readable = runCatching {
             context.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
@@ -5513,13 +5271,13 @@ class WidgetContainer @JvmOverloads constructor(
             initialZoom = state.zoom
         ).apply {
             onStateChanged = { notifyTransientContentChanged() }
-            persistenceHelper.restorePdfWidgetState(this, state, adjustedX, adjustedY)
+            widgetCaptureRestore.restorePdfWidgetState(this, state, adjustedX, adjustedY)
         }
     }
 
     private fun openClosedTextTemplate(): TextBoxWidget? {
-        val template = closedTemplateState<WidgetPersistence.TextWidgetState>(WidgetTypeId.TEXT) ?: return null
-        val widget = persistenceHelper.restoreTextWidgets(listOf(template), width, height).firstOrNull() ?: return null
+        val template = closedTemplateState<DashboardPersistence.TextWidgetState>(WidgetTypeId.TEXT) ?: return null
+        val widget = widgetCaptureRestore.restoreTextWidgets(listOf(template), width, height).firstOrNull() ?: return null
         return runPersistentMutation {
             lifecycleController.open(textLifecycle) { widget }
             applyFullscreenState(widget, template.isFullscreen)
@@ -5532,14 +5290,11 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun openClosedBrowserTemplate(): BrowserWidget? {
-        val template = closedTemplateState<WidgetPersistence.BrowserWidgetState>(WidgetTypeId.BROWSER) ?: return null
-        val rootView = (parent as? ViewGroup) ?: return null
-        val widget = persistenceHelper
-            .restoreBrowserWidgets(listOf(template), rootView, this, width, height)
-            .firstOrNull()
-            ?: return null
+        val template =
+            closedTemplateState<DashboardPersistence.BrowserWidgetState>(WidgetTypeId.BROWSER)
+                ?: return null
+        val widget = restoreBrowserWidget(template) ?: return null
 
-        configureBrowserWidget(widget)
         return runPersistentMutation {
             lifecycleController.open(browserLifecycle) { widget }
             notifyMediaBrightnessCapChanged()
@@ -5570,11 +5325,11 @@ class WidgetContainer @JvmOverloads constructor(
      * Restore or create status bar widget with the given state.
      * Creates the widget if it doesn't exist, then restores its state.
      */
-    private fun applyStatusBarState(state: WidgetPersistence.StatusBarState): StatusBarWidget {
+    private fun applyStatusBarState(state: DashboardPersistence.StatusBarState): StatusBarWidget {
         val widget = StatusBarWidget(context, state.x, state.y, 220f, 110f).apply {
             onStateChanged = { notifyTransientContentChanged() }
         }
-        persistenceHelper.restoreStatusBarPosition(widget, state, width, height)
+        widgetCaptureRestore.restoreStatusBarPosition(widget, state, width, height)
         applyFullscreenState(widget, state.isFullscreen)
         return widget
     }
@@ -5591,7 +5346,7 @@ class WidgetContainer @JvmOverloads constructor(
      * Restore or create location widget with the given state.
      * Creates the widget if it doesn't exist, then restores its state.
      */
-    private fun applyMapState(state: WidgetPersistence.MapWidgetState): MapWidget {
+    private fun applyMapState(state: DashboardPersistence.MapWidgetState): MapWidget {
         val widget = MapWidget(context, state.x, state.y, state.width, state.height).apply {
             invalidate = ::requestRepaint
             configurePhoneRouteTransport(phoneRouteTransport)
@@ -5600,14 +5355,14 @@ class WidgetContainer @JvmOverloads constructor(
             pendingMapLocation?.let(::setLocation)
             setLocationMetadata(pendingMapLocationLabel, pendingMapCountryCode)
         }
-        persistenceHelper.restoreMapWidgetPosition(widget, state, width, height)
+        widgetCaptureRestore.restoreMapWidgetPosition(widget, state, width, height)
         applyFullscreenState(widget, state.isFullscreen)
         // Restore the projected preference only after fullscreen bounds/state exist.
         widget.restorePreferences(state.mode, state.zoom, state.showLocation, state.showCountry)
         return widget
     }
 
-    private fun applyLocationState(state: WidgetPersistence.LocationWidgetState): LocationWidget {
+    private fun applyLocationState(state: DashboardPersistence.LocationWidgetState): LocationWidget {
         val widget = LocationWidget(context, state.x, state.y, state.width, state.height).apply {
             onTemperatureUnitChanged = { unitSettings.toggleTemperatureOverride() }
             setTemperatureUnit(unitSettings.effectiveTemperatureUnit())
@@ -5616,7 +5371,7 @@ class WidgetContainer @JvmOverloads constructor(
             }
             setSunTimes(pendingLocationSunriseEpochMs, pendingLocationSunsetEpochMs)
         }
-        persistenceHelper.restoreLocationWidgetPosition(widget, state, width, height)
+        widgetCaptureRestore.restoreLocationWidgetPosition(widget, state, width, height)
         applyFullscreenState(widget, state.isFullscreen)
         return widget
     }
@@ -5624,13 +5379,13 @@ class WidgetContainer @JvmOverloads constructor(
     /**
      * Restore or create calendar widget with the given state.
      */
-    private fun applyCalendarState(state: WidgetPersistence.CalendarWidgetState): CalendarWidget {
+    private fun applyCalendarState(state: DashboardPersistence.CalendarWidgetState): CalendarWidget {
         val widget = CalendarWidget(state.x, state.y, state.width, state.height).apply {
             onStateChanged = { notifyTransientContentChanged() }
             setFontScale(state.fontScale)
             setSnapshot(pendingCalendarSnapshot)
         }
-        persistenceHelper.restoreCalendarWidgetPosition(widget, state, width, height)
+        widgetCaptureRestore.restoreCalendarWidgetPosition(widget, state, width, height)
         applyFullscreenState(widget, state.isFullscreen)
         return widget
     }
@@ -5638,7 +5393,7 @@ class WidgetContainer @JvmOverloads constructor(
     /**
      * Restore or create finance widget with the given state.
      */
-    private fun applyFinanceState(state: WidgetPersistence.FinanceWidgetState): FinanceWidget {
+    private fun applyFinanceState(state: DashboardPersistence.FinanceWidgetState): FinanceWidget {
         val widget = FinanceWidget(state.x, state.y, state.width, state.height).apply {
             listener = object : FinanceWidgetListener {
                 override fun onStateChanged() = notifyTransientContentChanged()
@@ -5649,7 +5404,7 @@ class WidgetContainer @JvmOverloads constructor(
             }
             pendingFinanceCountryCode?.let { setCountryCode(it) }
         }
-        persistenceHelper.restoreFinanceWidgetPosition(widget, state, width, height)
+        widgetCaptureRestore.restoreFinanceWidgetPosition(widget, state, width, height)
         applyFullscreenState(widget, state.isFullscreen)
         if (widget.isMinimized) {
             dataProvider?.onFinanceVisibilityChanged(false)
@@ -5663,7 +5418,7 @@ class WidgetContainer @JvmOverloads constructor(
     /**
      * Restore or create news widget with the given state.
      */
-    private fun applyNewsState(state: WidgetPersistence.NewsWidgetState): NewsWidget {
+    private fun applyNewsState(state: DashboardPersistence.NewsWidgetState): NewsWidget {
         val widget = NewsWidget(state.x, state.y, state.width, state.height).apply {
             listener = object : NewsWidgetListener {
                 override fun onStateChanged() = notifyTransientContentChanged()
@@ -5679,17 +5434,17 @@ class WidgetContainer @JvmOverloads constructor(
             }
             pendingNewsCountryCode?.let { setCountryCode(it) }
         }
-        persistenceHelper.restoreNewsWidgetPosition(widget, state, width, height)
+        widgetCaptureRestore.restoreNewsWidgetPosition(widget, state, width, height)
         applyFullscreenState(widget, state.isFullscreen)
         widget.requestData(force = true, reason = "widget_restored")
         return widget
     }
 
-    private fun applyNotificationsState(state: WidgetPersistence.NotificationsWidgetState): NotificationsWidget {
+    private fun applyNotificationsState(state: DashboardPersistence.NotificationsWidgetState): NotificationsWidget {
         val widget = NotificationsWidget(context, state.x, state.y, state.width, state.height, height.toFloat()).apply {
             onStateChanged = { notifyTransientContentChanged() }
         }
-        persistenceHelper.restoreNotificationsWidgetPosition(widget, state, width, height)
+        widgetCaptureRestore.restoreNotificationsWidgetPosition(widget, state, width, height)
         widget.setScreenHeight(height.toFloat())
         widget.setNotificationsSnapshot(latestNotificationsSnapshot)
         applyFullscreenState(widget, state.isFullscreen)
@@ -5699,9 +5454,9 @@ class WidgetContainer @JvmOverloads constructor(
     /**
      * Restore or create speedometer widget with the given state.
      */
-    private fun applySpeedometerState(state: WidgetPersistence.SpeedometerWidgetState): SpeedometerWidget {
+    private fun applySpeedometerState(state: DashboardPersistence.SpeedometerWidgetState): SpeedometerWidget {
         val widget = createSpeedometerWidget(state.x, state.y, state.width, state.height)
-        persistenceHelper.restoreSpeedometerWidgetPosition(widget, state, width, height)
+        widgetCaptureRestore.restoreSpeedometerWidgetPosition(widget, state, width, height)
         applyFullscreenState(widget, state.isFullscreen)
         return widget
     }
@@ -5709,7 +5464,7 @@ class WidgetContainer @JvmOverloads constructor(
     /**
      * Restore or create subtitle widget with capture off.
      */
-    private fun applySubtitleState(state: WidgetPersistence.SubtitleWidgetState): SubtitleWidget {
+    private fun applySubtitleState(state: DashboardPersistence.SubtitleWidgetState): SubtitleWidget {
         val widget = createSubtitleWidget(state.x, state.y, state.width, state.height, autoStart = false)
         widget.restoreOptions(
             phonePlaybackEnabled = state.phonePlaybackEnabled,
@@ -5717,7 +5472,7 @@ class WidgetContainer @JvmOverloads constructor(
             translationEnabled = state.translationEnabled
         )
         widget.setCaptureEnabled(false, notifyPhone = false)
-        persistenceHelper.restoreSubtitleWidgetPosition(widget, state, width, height)
+        widgetCaptureRestore.restoreSubtitleWidgetPosition(widget, state, width, height)
         applyFullscreenState(widget, state.isFullscreen)
         return widget
     }
@@ -5726,11 +5481,11 @@ class WidgetContainer @JvmOverloads constructor(
      * Restore or create mirror widget with the given state.
      * Creates the widget if it doesn't exist, then restores its state.
      */
-    private fun applyMirrorState(state: WidgetPersistence.MirrorWidgetState): ScreenMirrorWidget {
+    private fun applyMirrorState(state: DashboardPersistence.MirrorWidgetState): ScreenMirrorWidget {
         val widget = ScreenMirrorWidget(context, state.x, state.y, state.width, state.height).apply {
             configureScreenMirrorWidget(this)
         }
-        persistenceHelper.restoreMirrorWidgetPosition(widget, state, width, height)
+        widgetCaptureRestore.restoreMirrorWidgetPosition(widget, state, width, height)
         applyFullscreenState(widget, state.isFullscreen)
         widget.onDisplayVisibilityChanged(isMirrorWidgetVisible(widget))
         notifyMediaBrightnessCapChanged()

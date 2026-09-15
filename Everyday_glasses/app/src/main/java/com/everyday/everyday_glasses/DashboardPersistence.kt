@@ -14,16 +14,15 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Handles persistence of widget state.
+ * Defines saveable dashboard/widget descriptions and stores them in durable app storage.
  *
- * Uses app-specific storage (no special permissions required):
- * - context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) if available
- * - falls back to context.filesDir
+ * This object owns JSON encoding/decoding, active-dashboard and named-layout files, and storage
+ * failures. It does not inspect, construct, register or destroy live widget instances.
  *
- * Note: app-specific external storage does NOT survive uninstall (unlike public Documents).
+ * App-specific external storage does not survive uninstall.
  */
-object WidgetPersistence {
-    private const val TAG = "WidgetPersistence"
+object DashboardPersistence {
+    private const val TAG = "DashboardPersistence"
     private const val FILENAME = "everyday_active_dashboard.json"
     private const val LAYOUTS_FILENAME = "everyday_layouts.json"
     const val DEFAULT_LAYOUT_NAME = BuiltInLayouts.STANDARD

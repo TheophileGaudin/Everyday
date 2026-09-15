@@ -15,23 +15,23 @@ package com.everyday.everyday_glasses
 class LayoutLibrary(private val context: android.content.Context) {
 
     fun list(): List<WidgetDocument.PersistedDashboardLayoutRecord> =
-        WidgetPersistence.listDashboardLayouts(context)
+        DashboardPersistence.listDashboardLayouts(context)
 
     fun names(): List<String> = list().map { it.name }
 
     fun save(name: String, dashboard: WidgetDocument.PersistedDashboard): Boolean =
-        WidgetPersistence.saveDashboardLayout(context, name, dashboard)
+        DashboardPersistence.saveDashboardLayout(context, name, dashboard)
 
     fun load(name: String): WidgetDocument.PersistedDashboard? =
-        WidgetPersistence.loadDashboardLayout(context, name)
+        DashboardPersistence.loadDashboardLayout(context, name)
 
     /**
      * Deleting a layout can orphan the images it referenced, so this is one of the two
      * moments image storage is collected. The other is startup.
      */
     fun delete(name: String): Boolean {
-        if (!WidgetPersistence.deleteLayout(context, name)) return false
-        WidgetPersistence.pruneUnreferencedImages(context)
+        if (!DashboardPersistence.deleteLayout(context, name)) return false
+        DashboardPersistence.pruneUnreferencedImages(context)
         return true
     }
 }

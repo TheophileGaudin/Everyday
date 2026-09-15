@@ -219,8 +219,8 @@ class MainActivity : AppCompatActivity() {
             canSave = { !widgetContainer.isAwaitingDashboardRestore }
         )
         // Startup is one of the two moments an image can become unreachable; the other
-        // is deleting a layout. See WidgetPersistence.pruneUnreferencedImages.
-        WidgetPersistence.pruneUnreferencedImages(this)
+        // is deleting a layout. See DashboardPersistence.pruneUnreferencedImages.
+        DashboardPersistence.pruneUnreferencedImages(this)
         inputCoordinator = InputCoordinator(
             cursorView = cursorView,
             widgetContainer = widgetContainer,

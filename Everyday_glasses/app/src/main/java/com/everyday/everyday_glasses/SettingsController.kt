@@ -38,7 +38,7 @@ class SettingsController(
     private var dashboardSettings: DashboardSettings? = null
     private var speedometerSettingsMenu: SpeedometerSettingsMenu? = null
     private var hoverControlsLayoutEditor: HoverControlsLayoutEditor? = null
-    private var hoverControlPlacements: List<WidgetPersistence.HoverControlPlacementState>? = null
+    private var hoverControlPlacements: List<DashboardPersistence.HoverControlPlacementState>? = null
     private var hasHoverControlPlacements = false
     private var shortcutsSettingsMenu: ShortcutsSettingsMenu? = null
     private var hoverLayoutChangeEmitted = false
@@ -95,11 +95,11 @@ class SettingsController(
         notifyTransientContentChanged()
     }
 
-    fun getHoverControlPlacements(): List<WidgetPersistence.HoverControlPlacementState>? =
+    fun getHoverControlPlacements(): List<DashboardPersistence.HoverControlPlacementState>? =
         hoverControlsLayoutEditor?.exportPlacements()
             ?: hoverControlPlacements.takeIf { hasHoverControlPlacements }
 
-    fun applyHoverControlPlacements(placements: List<WidgetPersistence.HoverControlPlacementState>?) {
+    fun applyHoverControlPlacements(placements: List<DashboardPersistence.HoverControlPlacementState>?) {
         val migrated = placements?.map { placement ->
             if (placement.controlId == AssistantVoiceHoverControl.LEGACY_ID) {
                 placement.copy(controlId = AssistantVoiceHoverControl.ID)

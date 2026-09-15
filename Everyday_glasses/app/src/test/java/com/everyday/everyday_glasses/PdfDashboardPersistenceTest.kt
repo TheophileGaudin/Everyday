@@ -4,11 +4,11 @@ import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.roundTrip
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-class PdfWidgetPersistenceTest {
+class PdfDashboardPersistenceTest {
 
     @Test
     fun pdfWidgetRoundTripsThroughPersistedJson() {
-        val pdf = WidgetPersistence.PdfWidgetState(
+        val pdf = DashboardPersistence.PdfWidgetState(
             x = 30f,
             y = 20f,
             width = 360f,

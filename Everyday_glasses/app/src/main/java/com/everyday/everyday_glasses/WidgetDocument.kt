@@ -44,7 +44,7 @@ object WidgetDocument {
     data class PersistedDashboard(
         val widgets: List<PersistedWidgetRecord>,
         val closedTemplates: List<PersistedWidgetRecord> = emptyList(),
-        val hoverControls: List<WidgetPersistence.HoverControlPlacementState>? = null,
+        val hoverControls: List<DashboardPersistence.HoverControlPlacementState>? = null,
         val activeLayoutName: String? = null,
         val isLayoutLocked: Boolean = false,
         val isFirstRun: Boolean = false
@@ -73,11 +73,11 @@ object WidgetDocument {
             require(stateClass.isInstance(state)) {
                 "Expected ${stateClass.simpleName} for ${type.persistedId}, got ${state::class.simpleName}"
             }
-            return WidgetPersistence.encodeWidgetStatePayload(type, state)
+            return DashboardPersistence.encodeWidgetStatePayload(type, state)
         }
 
         override fun decode(payload: JSONObject): Any? =
-            WidgetPersistence.decodeWidgetStatePayload(type, payload)
+            DashboardPersistence.decodeWidgetStatePayload(type, payload)
     }
 
     /**
@@ -85,21 +85,21 @@ object WidgetDocument {
      * instead of adding another per-type persistence switch.
      */
     val codecs: Map<WidgetTypeId, WidgetStateCodec> = listOf(
-        PayloadCodec(WidgetTypeId.STATUS, WidgetPersistence.StatusBarState::class),
-        PayloadCodec(WidgetTypeId.LOCATION, WidgetPersistence.LocationWidgetState::class),
-        PayloadCodec(WidgetTypeId.MAP, WidgetPersistence.MapWidgetState::class),
-        PayloadCodec(WidgetTypeId.CALENDAR, WidgetPersistence.CalendarWidgetState::class),
-        PayloadCodec(WidgetTypeId.FINANCE, WidgetPersistence.FinanceWidgetState::class),
-        PayloadCodec(WidgetTypeId.NEWS, WidgetPersistence.NewsWidgetState::class),
-        PayloadCodec(WidgetTypeId.NOTIFICATIONS, WidgetPersistence.NotificationsWidgetState::class),
-        PayloadCodec(WidgetTypeId.SPEEDOMETER, WidgetPersistence.SpeedometerWidgetState::class),
-        PayloadCodec(WidgetTypeId.SUBTITLE, WidgetPersistence.SubtitleWidgetState::class),
-        PayloadCodec(WidgetTypeId.MIRROR, WidgetPersistence.MirrorWidgetState::class),
-        PayloadCodec(WidgetTypeId.BROWSER, WidgetPersistence.BrowserWidgetState::class),
-        PayloadCodec(WidgetTypeId.TEXT, WidgetPersistence.TextWidgetState::class),
-        PayloadCodec(WidgetTypeId.IMAGE, WidgetPersistence.ImageWidgetState::class),
-        PayloadCodec(WidgetTypeId.VIDEO, WidgetPersistence.VideoWidgetState::class),
-        PayloadCodec(WidgetTypeId.PDF, WidgetPersistence.PdfWidgetState::class)
+        PayloadCodec(WidgetTypeId.STATUS, DashboardPersistence.StatusBarState::class),
+        PayloadCodec(WidgetTypeId.LOCATION, DashboardPersistence.LocationWidgetState::class),
+        PayloadCodec(WidgetTypeId.MAP, DashboardPersistence.MapWidgetState::class),
+        PayloadCodec(WidgetTypeId.CALENDAR, DashboardPersistence.CalendarWidgetState::class),
+        PayloadCodec(WidgetTypeId.FINANCE, DashboardPersistence.FinanceWidgetState::class),
+        PayloadCodec(WidgetTypeId.NEWS, DashboardPersistence.NewsWidgetState::class),
+        PayloadCodec(WidgetTypeId.NOTIFICATIONS, DashboardPersistence.NotificationsWidgetState::class),
+        PayloadCodec(WidgetTypeId.SPEEDOMETER, DashboardPersistence.SpeedometerWidgetState::class),
+        PayloadCodec(WidgetTypeId.SUBTITLE, DashboardPersistence.SubtitleWidgetState::class),
+        PayloadCodec(WidgetTypeId.MIRROR, DashboardPersistence.MirrorWidgetState::class),
+        PayloadCodec(WidgetTypeId.BROWSER, DashboardPersistence.BrowserWidgetState::class),
+        PayloadCodec(WidgetTypeId.TEXT, DashboardPersistence.TextWidgetState::class),
+        PayloadCodec(WidgetTypeId.IMAGE, DashboardPersistence.ImageWidgetState::class),
+        PayloadCodec(WidgetTypeId.VIDEO, DashboardPersistence.VideoWidgetState::class),
+        PayloadCodec(WidgetTypeId.PDF, DashboardPersistence.PdfWidgetState::class)
     ).associateBy(WidgetStateCodec::type)
 
     fun isCurrentSchema(root: JSONObject): Boolean =
@@ -201,7 +201,7 @@ object WidgetDocument {
         }
     }
 
-    private fun parseHoverControls(array: JSONArray?): List<WidgetPersistence.HoverControlPlacementState>? {
+    private fun parseHoverControls(array: JSONArray?): List<DashboardPersistence.HoverControlPlacementState>? {
         if (array == null) return null
         return buildList {
             for (index in 0 until array.length()) {
@@ -209,7 +209,7 @@ object WidgetDocument {
                 val id = item.optString("id").trim()
                 if (id.isNotBlank()) {
                     add(
-                        WidgetPersistence.HoverControlPlacementState(
+                        DashboardPersistence.HoverControlPlacementState(
                             controlId = id,
                             col = item.optInt("col", 0),
                             row = item.optInt("row", 0)

@@ -155,14 +155,14 @@ class HoverControlsLayoutEditor(
         listener?.onDismissed()
     }
 
-    fun exportPlacements(): List<WidgetPersistence.HoverControlPlacementState> =
+    fun exportPlacements(): List<DashboardPersistence.HoverControlPlacementState> =
         controls.mapNotNull { control ->
             placements[control.id]?.let { cell ->
-                WidgetPersistence.HoverControlPlacementState(control.id, cell.col, cell.row)
+                DashboardPersistence.HoverControlPlacementState(control.id, cell.col, cell.row)
             }
         }
 
-    fun applyPersistedPlacements(states: List<WidgetPersistence.HoverControlPlacementState>?) {
+    fun applyPersistedPlacements(states: List<DashboardPersistence.HoverControlPlacementState>?) {
         if (states == null) {
             resetPlacementsToDefaultInternal(notify = false)
             return

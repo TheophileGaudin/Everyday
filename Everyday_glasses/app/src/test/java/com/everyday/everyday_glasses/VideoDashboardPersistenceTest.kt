@@ -4,11 +4,11 @@ import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.roundTrip
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-class VideoWidgetPersistenceTest {
+class VideoDashboardPersistenceTest {
 
     @Test
     fun videoWidgetRoundTripsThroughPersistedJson() {
-        val video = WidgetPersistence.VideoWidgetState(
+        val video = DashboardPersistence.VideoWidgetState(
             x = 40f,
             y = 30f,
             width = 360f,

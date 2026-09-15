@@ -302,7 +302,7 @@ class WidgetLifecycleController(
             restored = registration.restoreCandidate(state)?.also { widget ->
                 registerCandidate(widget, registration)
                 registry.rebindStableId(widget, record.instanceId)
-                if (state is WidgetPersistence.CommonWidgetFields &&
+                if (state is DashboardPersistence.CommonWidgetFields &&
                     state.isFullscreen && !widget.isMinimized && !widget.isFullscreen
                 ) {
                     widget.toggleFullscreen()

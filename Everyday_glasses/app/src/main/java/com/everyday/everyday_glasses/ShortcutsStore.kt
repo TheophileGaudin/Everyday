@@ -11,7 +11,7 @@ import com.everyday.shared.command.AppCommandInvocation
 /**
  * Persists the ordered command IDs assigned to the lemon hover control.
  *
- * Storage location mirrors [WidgetPersistence]: app-specific external Documents directory
+ * Storage location mirrors [DashboardPersistence]: app-specific external Documents directory
  * when available, falling back to `filesDir`.
  */
 object ShortcutsStore {
