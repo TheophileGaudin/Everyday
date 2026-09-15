@@ -3981,9 +3981,7 @@ class WidgetContainer @JvmOverloads constructor(
         host?.requestCursorCenter()
     }
 
-    private fun removeFileBrowserWidget(widget: FileBrowserWidget) {
-        lifecycleController.close(widget)
-    }
+    private fun removeFileBrowserWidget(widget: FileBrowserWidget) {lifecycleController.close(widget)}
 
     private fun buildTextBox(x: Float, y: Float, boxWidth: Float, boxHeight: Float): TextBoxWidget =
         TextBoxWidget(context, x, y, boxWidth, boxHeight).apply {
@@ -4029,10 +4027,7 @@ class WidgetContainer @JvmOverloads constructor(
         notifyFocusChanged(widget != null)
     }
 
-    fun unfocusAll() {
-        mapWidget?.takeIf { it.isAddressEntryFocused() }?.closeAddressEntry()
-        setFocusedWidget(null)
-    }
+    fun unfocusAll() {mapWidget?.takeIf { it.isAddressEntryFocused() }?.closeAddressEntry(); setFocusedWidget(null)}
 
     private fun updateMinimizedWidgetPositions() {
         if (width <= 0 || height <= 0) return
@@ -4229,55 +4224,19 @@ class WidgetContainer @JvmOverloads constructor(
         formattingMenu?.isUnderline = widget.isUnderlineActive()
     }
 
-    private fun handleBulletListToggled() {
-        runPersistentMutation {
-        (focusedWidget ?: fullscreenTextWidget)?.toggleBulletList()
-        }
-    }
-
-    private fun handleNumberedListToggled() {
-        runPersistentMutation {
-        (focusedWidget ?: fullscreenTextWidget)?.toggleNumberedList()
-        }
-    }
+    private fun handleBulletListToggled() {runPersistentMutation {(focusedWidget ?: fullscreenTextWidget)?.toggleBulletList()}}
+    private fun handleNumberedListToggled() {runPersistentMutation {(focusedWidget ?: fullscreenTextWidget)?.toggleNumberedList()}}
 
     // ==================== Public Accessors ====================
-
-    fun setPhoneClipboard(content: String?) {
-        phoneClipboard = content
-        // Update visible text edit menu with new clipboard content
-        updateTextEditMenuClipboard()
-    }
-    fun hasFocusedWidget(): Boolean =
-        focusedWidget != null || focusedBrowserWidget != null || mapWidget?.isAddressEntryFocused() == true
-    fun isMenuVisible(): Boolean =
-        contextMenu?.isVisible == true ||
-            textEditMenu?.isVisible == true ||
-            formattingMenu?.isVisible == true ||
-            layoutNamePrompt?.isVisible == true
-    fun isClosePopupVisible(): Boolean =
-        closeConfirmationPopup?.isVisible == true ||
-            layoutDeleteConfirmationPopup?.isVisible == true
-    fun isAnyPopupVisible(): Boolean =
-        isMenuVisible() || isClosePopupVisible() || pageAgentApprovalOverlay.isVisible()
-
-    fun showPageAgentApproval(
-        runId: String,
-        request: PageAgentConfirmationRequest,
-        respond: (Boolean) -> Unit
-    ) {
-        pageAgentApprovalOverlay.show(runId, request, respond)
-        ensureDrawnAboveNativeOverlays()
-    }
-
-    fun dismissPageAgentApproval(runId: String) {
-        pageAgentApprovalOverlay.dismiss(runId)
-    }
-    fun dismissMenu() { contextMenu?.dismiss(); textEditMenu?.dismiss(); formattingMenu?.dismiss(); layoutNamePrompt?.dismiss() }
-    fun isDragging(): Boolean =
-        activeWidget != null ||
-        financeTileDragging ||
-        formattingMenu?.isDragging() == true
+    fun setPhoneClipboard(content: String?)                                                                     {phoneClipboard = content ; updateTextEditMenuClipboard()} // Update visible text edit menu with new clipboard content
+    fun hasFocusedWidget():                                                                                     Boolean = focusedWidget != null || focusedBrowserWidget != null || mapWidget?.isAddressEntryFocused() == true
+    fun isMenuVisible():                                                                                        Boolean = contextMenu?.isVisible == true || textEditMenu?.isVisible == true || formattingMenu?.isVisible == true || layoutNamePrompt?.isVisible == true
+    fun isClosePopupVisible():                                                                                  Boolean = closeConfirmationPopup?.isVisible == true || layoutDeleteConfirmationPopup?.isVisible == true
+    fun isAnyPopupVisible():                                                                                    Boolean = isMenuVisible() || isClosePopupVisible() || pageAgentApprovalOverlay.isVisible()
+    fun showPageAgentApproval(runId: String, request: PageAgentConfirmationRequest, respond: (Boolean) -> Unit) {pageAgentApprovalOverlay.show(runId, request, respond); ensureDrawnAboveNativeOverlays()}
+    fun dismissPageAgentApproval(runId: String)                                                                 {pageAgentApprovalOverlay.dismiss(runId)}
+    fun dismissMenu()                                                                                           { contextMenu?.dismiss(); textEditMenu?.dismiss(); formattingMenu?.dismiss(); layoutNamePrompt?.dismiss() }
+    fun isDragging():                                                                                           Boolean = activeWidget != null || financeTileDragging || formattingMenu?.isDragging() == true
 
     // ==================== 3DOF Mode ====================
     /**
@@ -4291,7 +4250,6 @@ class WidgetContainer @JvmOverloads constructor(
             notifyTransientContentChanged()
         }
     }
-
     /**
      * Update the 3DOF content offset. Called by ThreeDofManager.
      * @param offsetX Horizontal offset in pixels (positive = content shifts right)
@@ -4303,36 +4261,15 @@ class WidgetContainer @JvmOverloads constructor(
         threeDofOverlay.setContentOffset(offsetX, offsetY)
         notifyTransientContentChanged()
     }
+    fun set3DofRoll(rollDeg: Float) {threeDofRollDeg = rollDeg ; notifyTransientContentChanged()}
+    fun set3DofTransitionProgress(progress: Float) {threeDofOverlay.setTransitionProgress(progress);notifyTransientContentChanged()} /** Set the 3DOF transition animation progress. @param progress Progress from 0.0 (start) to 1.0 (complete) */
+    private fun shouldApplyThreeDofTransform(): Boolean = displayState == WakeSleepManager.DisplayState.WAKE && !hasFullscreenWidget() && (is3DofEnabled || threeDofOverlay.isVisible())
 
-
-    fun set3DofRoll(rollDeg: Float) {
-        threeDofRollDeg = rollDeg
-        notifyTransientContentChanged()
-    }
-
-    /**
-     * Set the 3DOF transition animation progress.
-     * @param progress Progress from 0.0 (start) to 1.0 (complete)
-     */
-    fun set3DofTransitionProgress(progress: Float) {
-        threeDofOverlay.setTransitionProgress(progress)
-        notifyTransientContentChanged()
-    }
-
-    private fun shouldApplyThreeDofTransform(): Boolean =
-        displayState == WakeSleepManager.DisplayState.WAKE &&
-                !hasFullscreenWidget() &&
-                (is3DofEnabled || threeDofOverlay.isVisible())
-
-    /**
-     * Convert the fixed screen cursor to the coordinate space in which widgets are drawn.
-     */
+    /** Convert the fixed screen cursor to the coordinate space in which widgets are drawn. */
     fun screenToContentCoordinates(screenX: Float, screenY: Float): Pair<Float, Float> {
         if (!shouldApplyThreeDofTransform()) return Pair(screenX, screenY)
         return ThreeDofCoordinateMath.screenToContent(screenX = screenX, screenY = screenY, viewportWidth = width.toFloat(), viewportHeight = height.toFloat(), offsetX = threeDofOffsetX, offsetY = threeDofOffsetY, rollDeg = threeDofRollDeg,)
     }
-
-
     // ==================== Drawing ====================
 
     override fun onDraw(canvas: Canvas) {
@@ -4432,19 +4369,13 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun drawOverlayMenus(canvas: Canvas) {
-        val mapOverlayVisible = mapWidget?.let {
-            it.isAddressEntryVisible() || it.navigationState.choices.isNotEmpty()
-        } == true
-        if (isAnyPopupVisible() || mapOverlayVisible || focusedBrowserWidget?.isEditingAddress() == true || fullscreenBrowserWidget?.isEditingAddress() == true) {
-            ensureDrawnAboveNativeOverlays()
-        }
+        val mapOverlayVisible = mapWidget?.let {it.isAddressEntryVisible() || it.navigationState.choices.isNotEmpty()} == true
+        if (isAnyPopupVisible() || mapOverlayVisible || focusedBrowserWidget?.isEditingAddress() == true || fullscreenBrowserWidget?.isEditingAddress() == true) {ensureDrawnAboveNativeOverlays()}
         mapWidget?.drawScreenOverlay(canvas)
         contextMenu?.draw(canvas)
         textEditMenu?.draw(canvas)
         formattingMenu?.draw(canvas)
-        // Draw the hover-controls editor before the close-app confirmation so the popup
-        // appears on top of it when the user invokes Close from the editor's context menu.
-        settingsController.drawHoverControlsLayoutEditor(canvas)
+        settingsController.drawHoverControlsLayoutEditor(canvas)  // Draw the hover-controls editor before the close-app confirmation so the popup appears on top of it when the user invokes Close from the editor's context menu.
         closeConfirmationPopup?.draw(canvas)
         layoutDeleteConfirmationPopup?.draw(canvas)
         settingsController.draw(canvas)
@@ -5495,7 +5426,6 @@ class WidgetContainer @JvmOverloads constructor(
     fun isReady(): Boolean = width > 0 && height > 0
 
     // ==================== Screen Mirroring ====================
-
     fun setMirroringEnabled(enabled: Boolean, phoneIp: String? = null) {
         withTransientChangeBatch {
             screenMirrorWidget?.setMirroringEnabled(enabled, phoneIp)
@@ -5507,20 +5437,8 @@ class WidgetContainer @JvmOverloads constructor(
         }
     }
 
-    fun onTrimMemory(level: Int) {
-        browserWidgets.forEach { it.onTrimMemory(level) }
-    }
-
-    fun onLowMemory() {
-        browserWidgets.forEach { it.onLowMemory() }
-    }
-
-    fun clearDebugWebViewData(profileSummary: String) {
-        browserWidgets.forEach { it.clearDebugWebViewData(profileSummary) }
-    }
-
-    fun release() {
-        presentationController.dismiss()
-        lifecycleController.closeAll()
-    }
+    fun onTrimMemory(level: Int)                      {browserWidgets.forEach { it.onTrimMemory(level) }}
+    fun onLowMemory()                                 {browserWidgets.forEach { it.onLowMemory() }}
+    fun clearDebugWebViewData(profileSummary: String) {browserWidgets.forEach { it.clearDebugWebViewData(profileSummary) }}
+    fun release()                                     {presentationController.dismiss() ; lifecycleController.closeAll()}
 }
