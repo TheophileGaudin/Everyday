@@ -12,7 +12,7 @@
         android:layout_height="match_parent"/>
 
     <!-- Cursor overlay (on top of everything) -->
-    <com.everyday.everyday_glasses.CursorView
+    <com.everyday.everyday_glasses.ui.CursorView
         android:id="@+id/cursorView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"/>

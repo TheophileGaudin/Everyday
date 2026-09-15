@@ -1,5 +1,6 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.controllers.PhoneConnectionCoordinator
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

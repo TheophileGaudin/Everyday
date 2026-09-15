@@ -1,5 +1,7 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.data_models.WidgetDocument
+import com.everyday.everyday_glasses.stores.BuiltInLayouts
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals

@@ -1,5 +1,14 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.data_models.MapGeoPoint
+import com.everyday.everyday_glasses.data_models.MapPoi
+import com.everyday.everyday_glasses.data_models.MapPoiCategoryCatalog
+import com.everyday.everyday_glasses.data_models.MapPoiTier
+import com.everyday.everyday_glasses.data_models.PoiDisplayConfig
+import com.everyday.everyday_glasses.data_models.PoiDisplayConfigState
+import com.everyday.everyday_glasses.data_models.PoiDisplayMode
+import com.everyday.everyday_glasses.data_models.mapPoiTier
+import com.everyday.everyday_glasses.helpers.MapPoiSelector
 import org.junit.Assert.*
 import org.junit.Test
 import kotlin.random.Random
@@ -221,6 +230,12 @@ class MapPoiSelectorTest {
         val lon1 = Math.toRadians(origin.lon)
         val lat2 = kotlin.math.asin(kotlin.math.sin(lat1) * kotlin.math.cos(angular) + kotlin.math.cos(lat1) * kotlin.math.sin(angular) * kotlin.math.cos(bearing))
         val lon2 = lon1 + kotlin.math.atan2(kotlin.math.sin(bearing) * kotlin.math.sin(angular) * kotlin.math.cos(lat1), kotlin.math.cos(angular) - kotlin.math.sin(lat1) * kotlin.math.sin(lat2))
-        return MapPoi(id, name, category, mapPoiTier(category), MapGeoPoint(Math.toDegrees(lat2), Math.toDegrees(lon2)))
+        return MapPoi(
+            id,
+            name,
+            category,
+            mapPoiTier(category),
+            MapGeoPoint(Math.toDegrees(lat2), Math.toDegrees(lon2))
+        )
     }
 }

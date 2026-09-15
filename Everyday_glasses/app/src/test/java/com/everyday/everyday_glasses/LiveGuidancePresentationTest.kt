@@ -1,5 +1,10 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.data_models.MapGeoPoint
+import com.everyday.everyday_glasses.data_models.NavigationDestination
+import com.everyday.everyday_glasses.data_models.NavigationState
+import com.everyday.everyday_glasses.data_models.NavigationStatus
+import com.everyday.everyday_glasses.data_models.toCompactBannerText
 import com.everyday.shared.routing.GuidanceFixStatus
 import com.everyday.shared.routing.LiveGuidanceSnapshot
 import com.everyday.shared.routing.RouteManeuver
@@ -29,7 +34,11 @@ class LiveGuidancePresentationTest {
         val route = route(origin, destination)
         val state = NavigationState(
             status = NavigationStatus.ACTIVE,
-            destination = NavigationDestination("Museum", "Museum, London", MapGeoPoint(destination.lat, destination.lon)),
+            destination = NavigationDestination(
+                "Museum",
+                "Museum, London",
+                MapGeoPoint(destination.lat, destination.lon)
+            ),
             route = route,
             guidance = LiveGuidanceSnapshot(
                 progressMeters = 40.0,
@@ -66,7 +75,11 @@ class LiveGuidancePresentationTest {
         val route = route(origin, destination)
         val degraded = NavigationState(
             status = NavigationStatus.DEGRADED,
-            destination = NavigationDestination("Museum", "Museum, London", MapGeoPoint(destination.lat, destination.lon)),
+            destination = NavigationDestination(
+                "Museum",
+                "Museum, London",
+                MapGeoPoint(destination.lat, destination.lon)
+            ),
             route = route,
             errorMessage = "GPS stale; route held",
             guidance = snapshot(GuidanceFixStatus.STALE)

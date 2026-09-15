@@ -1,6 +1,16 @@
 package com.everyday.everyday_glasses
 
 import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.roundTrip
+import com.everyday.everyday_glasses.agent_tools.AssistantUiContext
+import com.everyday.everyday_glasses.agent_tools.AssistantWidgetContext
+import com.everyday.everyday_glasses.data_models.MapPoiCategoryCatalog
+import com.everyday.everyday_glasses.data_models.PoiDisplayConfig
+import com.everyday.everyday_glasses.data_models.PoiDisplayConfigState
+import com.everyday.everyday_glasses.data_models.PoiDisplayMode
+import com.everyday.everyday_glasses.data_models.WidgetDocument
+import com.everyday.everyday_glasses.data_models.WidgetTypeId
+import com.everyday.everyday_glasses.data_models.toAssistantSemanticFacts
+import com.everyday.everyday_glasses.stores.DashboardPersistence
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

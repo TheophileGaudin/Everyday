@@ -1,5 +1,6 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.data_models.destinationIndicatorIsOffscreen
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test

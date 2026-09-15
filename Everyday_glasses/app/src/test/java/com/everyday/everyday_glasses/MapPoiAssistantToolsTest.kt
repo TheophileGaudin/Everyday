@@ -1,5 +1,17 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.agent_tools.AssistantToolCall
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecution
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.agent_tools.AssistantUiContext
+import com.everyday.everyday_glasses.agent_tools.ConfigureMapPoisRequest
+import com.everyday.everyday_glasses.agent_tools.ConfigureMapPoisSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.assistantCompletedFuture
+import com.everyday.everyday_glasses.controllers.PresentationExpiryPolicy
+import com.everyday.everyday_glasses.controllers.PresentationMode
+import com.everyday.everyday_glasses.data_models.MapPoiCategoryCatalog
+import com.everyday.everyday_glasses.data_models.PoiDisplayConfig
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -96,18 +108,24 @@ class MapPoiAssistantToolsTest {
     @Test
     fun `tool validation rejects invalid ranges and unsafe expiry`() {
         val invalidRadius = handler.invoke(
-            AssistantToolCall("1", "configure_map_pois", JSONObject()
-                .put("categories", JSONArray().put("restaurant"))
-                .put("radius_m", 49)),
+            AssistantToolCall(
+                "1", "configure_map_pois", JSONObject()
+                    .put("categories", JSONArray().put("restaurant"))
+                    .put("radius_m", 49)
+            ),
             context()
         ).get()
         val invalidExpiry = handler.invoke(
-            AssistantToolCall("2", "configure_map_pois", JSONObject()
-                .put("categories", JSONArray().put("restaurant"))
-                .put("presentation", JSONObject()
-                    .put("mode", "fullscreen")
-                    .put("duration_seconds", 10)
-                    .put("on_expiry", "restore_previous"))),
+            AssistantToolCall(
+                "2", "configure_map_pois", JSONObject()
+                    .put("categories", JSONArray().put("restaurant"))
+                    .put(
+                        "presentation", JSONObject()
+                            .put("mode", "fullscreen")
+                            .put("duration_seconds", 10)
+                            .put("on_expiry", "restore_previous")
+                    )
+            ),
             context()
         ).get()
 

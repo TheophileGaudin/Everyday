@@ -1,5 +1,22 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.agent_tools.AssistantProviderTurn
+import com.everyday.everyday_glasses.agent_tools.AssistantTextContentFormatter
+import com.everyday.everyday_glasses.agent_tools.AssistantTextPresentationPolicy
+import com.everyday.everyday_glasses.agent_tools.AssistantTextPresentationRequest
+import com.everyday.everyday_glasses.agent_tools.AssistantToolCall
+import com.everyday.everyday_glasses.agent_tools.AssistantToolCatalog
+import com.everyday.everyday_glasses.agent_tools.AssistantToolDefinition
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecution
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.agent_tools.AssistantUiContext
+import com.everyday.everyday_glasses.agent_tools.GeminiInteractionResponseParser
+import com.everyday.everyday_glasses.agent_tools.PresentTextSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.geminiInteractionTools
+import com.everyday.everyday_glasses.controllers.AppCommandResult
+import com.everyday.everyday_glasses.controllers.PresentationMode
+import com.everyday.everyday_glasses.managers.AppCommandRegistry
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -175,7 +192,11 @@ class GeminiGroundedTextTest {
             presentText = { request ->
                 requests += request
                 CompletableFuture.completedFuture(
-                    AssistantToolExecution(true, AssistantToolExecutionCodes.SUCCESS, "Text presented")
+                    AssistantToolExecution(
+                        true,
+                        AssistantToolExecutionCodes.SUCCESS,
+                        "Text presented"
+                    )
                 )
             }
         )

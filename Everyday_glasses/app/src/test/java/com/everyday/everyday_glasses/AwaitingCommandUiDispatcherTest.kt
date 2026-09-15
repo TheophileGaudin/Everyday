@@ -1,5 +1,6 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.adapters.AwaitingCommandUiDispatcher
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull

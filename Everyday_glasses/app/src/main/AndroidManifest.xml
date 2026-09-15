@@ -81,7 +81,7 @@
 
         <!-- Foreground service for background operation (head-up wake, etc.) -->
         <service
-            android:name=".GlassesService"
+            android:name=".headup_wake.GlassesService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />

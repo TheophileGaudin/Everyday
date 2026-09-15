@@ -1,6 +1,14 @@
 package com.everyday.everyday_glasses
 
 import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.stateOf
+import com.everyday.everyday_glasses.data_models.MapViewMode
+import com.everyday.everyday_glasses.data_models.MapZoom
+import com.everyday.everyday_glasses.data_models.WidgetDocument
+import com.everyday.everyday_glasses.data_models.WidgetTypeId
+import com.everyday.everyday_glasses.stores.BuiltInLayouts
+import com.everyday.everyday_glasses.stores.DashboardPersistence
+import com.everyday.everyday_glasses.ui.CloseAppHoverControl
+import com.everyday.everyday_glasses.ui.YouTubeHistoryHoverControl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -169,9 +177,11 @@ class WidgetLayoutPersistenceTest {
         assertEquals(video, restored.stateOf<DashboardPersistence.VideoWidgetState>(WidgetTypeId.VIDEO))
         assertEquals(pdf, restored.stateOf<DashboardPersistence.PdfWidgetState>(WidgetTypeId.PDF))
         assertEquals(status, restored.stateOf<DashboardPersistence.StatusBarState>(WidgetTypeId.STATUS))
-        assertEquals(location, restored.stateOf<DashboardPersistence.LocationWidgetState>(WidgetTypeId.LOCATION))
+        assertEquals(location, restored.stateOf<DashboardPersistence.LocationWidgetState>(
+            WidgetTypeId.LOCATION))
         assertEquals(map, restored.stateOf<DashboardPersistence.MapWidgetState>(WidgetTypeId.MAP))
-        assertEquals(calendar, restored.stateOf<DashboardPersistence.CalendarWidgetState>(WidgetTypeId.CALENDAR))
+        assertEquals(calendar, restored.stateOf<DashboardPersistence.CalendarWidgetState>(
+            WidgetTypeId.CALENDAR))
         // Finance is the one type that does not round trip identically: a widget saved
         // with no tiles is rehydrated with one derived from its symbol and range.
         val restoredFinance = restored.stateOf<DashboardPersistence.FinanceWidgetState>(WidgetTypeId.FINANCE)
@@ -188,7 +198,8 @@ class WidgetLayoutPersistenceTest {
             speedometer,
             restored.stateOf<DashboardPersistence.SpeedometerWidgetState>(WidgetTypeId.SPEEDOMETER)
         )
-        assertEquals(subtitle, restored.stateOf<DashboardPersistence.SubtitleWidgetState>(WidgetTypeId.SUBTITLE))
+        assertEquals(subtitle, restored.stateOf<DashboardPersistence.SubtitleWidgetState>(
+            WidgetTypeId.SUBTITLE))
         assertEquals(mirror, restored.stateOf<DashboardPersistence.MirrorWidgetState>(WidgetTypeId.MIRROR))
 
         // Instance ids identify repeatable widgets across a reload.
@@ -198,9 +209,12 @@ class WidgetLayoutPersistenceTest {
         )
 
         // Closed templates and dashboard-level settings survive too.
-        assertEquals(closedText, restored.templateOf<DashboardPersistence.TextWidgetState>(WidgetTypeId.TEXT))
-        assertEquals(closedBrowser, restored.templateOf<DashboardPersistence.BrowserWidgetState>(WidgetTypeId.BROWSER))
-        assertEquals(closedMap, restored.templateOf<DashboardPersistence.MapWidgetState>(WidgetTypeId.MAP))
+        assertEquals(closedText, restored.templateOf<DashboardPersistence.TextWidgetState>(
+            WidgetTypeId.TEXT))
+        assertEquals(closedBrowser, restored.templateOf<DashboardPersistence.BrowserWidgetState>(
+            WidgetTypeId.BROWSER))
+        assertEquals(closedMap, restored.templateOf<DashboardPersistence.MapWidgetState>(
+            WidgetTypeId.MAP))
         assertNull(restored.closedTemplates.firstOrNull { it.type == WidgetTypeId.STATUS })
         assertEquals(2, restored.hoverControls!!.size)
         assertEquals(CloseAppHoverControl.ID, restored.hoverControls!![0].controlId)

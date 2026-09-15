@@ -1,5 +1,18 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.controllers.PresentationBounds
+import com.everyday.everyday_glasses.controllers.PresentationCancellable
+import com.everyday.everyday_glasses.controllers.PresentationController
+import com.everyday.everyday_glasses.controllers.PresentationExpiryPolicy
+import com.everyday.everyday_glasses.controllers.PresentationLifecycleDelegate
+import com.everyday.everyday_glasses.controllers.PresentationMode
+import com.everyday.everyday_glasses.controllers.PresentationProgress
+import com.everyday.everyday_glasses.controllers.PresentationScheduler
+import com.everyday.everyday_glasses.controllers.PresentationSession
+import com.everyday.everyday_glasses.controllers.PresentationSnapshot
+import com.everyday.everyday_glasses.controllers.PresentationSpec
+import com.everyday.everyday_glasses.controllers.UserInputActivity
+import com.everyday.everyday_glasses.controllers.UserInputKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -46,11 +59,33 @@ class PresentationLifecycleTest {
     @Test
     fun `duration validation accepts exact boundaries and rejects values outside them`() {
         PresentationSpec(PresentationMode.WINDOWED, 5, PresentationExpiryPolicy.CLOSE)
-        PresentationSpec(PresentationMode.FULLSCREEN, 120, PresentationExpiryPolicy.RESTORE_PREVIOUS)
+        PresentationSpec(
+            PresentationMode.FULLSCREEN,
+            120,
+            PresentationExpiryPolicy.RESTORE_PREVIOUS
+        )
 
-        assertFails { PresentationSpec(PresentationMode.WINDOWED, 4, PresentationExpiryPolicy.CLOSE) }
-        assertFails { PresentationSpec(PresentationMode.WINDOWED, 121, PresentationExpiryPolicy.CLOSE) }
-        assertFails { PresentationSpec(PresentationMode.WINDOWED, 0, PresentationExpiryPolicy.CLOSE) }
+        assertFails {
+            PresentationSpec(
+                PresentationMode.WINDOWED,
+                4,
+                PresentationExpiryPolicy.CLOSE
+            )
+        }
+        assertFails {
+            PresentationSpec(
+                PresentationMode.WINDOWED,
+                121,
+                PresentationExpiryPolicy.CLOSE
+            )
+        }
+        assertFails {
+            PresentationSpec(
+                PresentationMode.WINDOWED,
+                0,
+                PresentationExpiryPolicy.CLOSE
+            )
+        }
     }
 
     @Test
@@ -84,7 +119,11 @@ class PresentationLifecycleTest {
 
         val session = controller.start(
             "text#0",
-            PresentationSpec(PresentationMode.FULLSCREEN, 10, PresentationExpiryPolicy.RESTORE_PREVIOUS)
+            PresentationSpec(
+                PresentationMode.FULLSCREEN,
+                10,
+                PresentationExpiryPolicy.RESTORE_PREVIOUS
+            )
         ) { snapshot }
 
         assertNotNull(session)
@@ -117,10 +156,14 @@ class PresentationLifecycleTest {
             }
         )
 
-        controller.start("old", PresentationSpec(PresentationMode.FULLSCREEN, 10, PresentationExpiryPolicy.CLOSE)) {
+        controller.start("old",
+            PresentationSpec(PresentationMode.FULLSCREEN, 10, PresentationExpiryPolicy.CLOSE)
+        ) {
             PresentationSnapshot(true, true, snapshot.bounds, true, false, 1)
         }
-        controller.start("new", PresentationSpec(PresentationMode.WINDOWED, 10, PresentationExpiryPolicy.CLOSE)) {
+        controller.start("new",
+            PresentationSpec(PresentationMode.WINDOWED, 10, PresentationExpiryPolicy.CLOSE)
+        ) {
             order += "snapshot:$state"
             PresentationSnapshot(true, true, snapshot.bounds, false, false, 2)
         }
@@ -142,7 +185,9 @@ class PresentationLifecycleTest {
                 }
             }
         )
-        val session = controller.start("text#0", PresentationSpec(PresentationMode.WINDOWED, 10, PresentationExpiryPolicy.CLOSE)) {
+        val session = controller.start("text#0",
+            PresentationSpec(PresentationMode.WINDOWED, 10, PresentationExpiryPolicy.CLOSE)
+        ) {
             snapshot
         }!!
         assertTrue(controller.dismiss())
@@ -150,7 +195,9 @@ class PresentationLifecycleTest {
         assertNull(progress.last())
         assertFalse(controller.onTimerFired(session.token, 10_000L))
 
-        controller.start("text#1", PresentationSpec(PresentationMode.WINDOWED, 10, PresentationExpiryPolicy.CLOSE)) {
+        controller.start("text#1",
+            PresentationSpec(PresentationMode.WINDOWED, 10, PresentationExpiryPolicy.CLOSE)
+        ) {
             snapshot
         }
         assertTrue(controller.onTargetRemoved("text#1"))
@@ -179,7 +226,11 @@ class PresentationLifecycleTest {
         )
         val session = controller.start(
             "text#0",
-            PresentationSpec(PresentationMode.FULLSCREEN, 10, PresentationExpiryPolicy.LEAVE_WINDOWED)
+            PresentationSpec(
+                PresentationMode.FULLSCREEN,
+                10,
+                PresentationExpiryPolicy.LEAVE_WINDOWED
+            )
         ) { snapshot }!!
 
         controller.onTimerFired(session.token, 2_500L)
@@ -204,7 +255,9 @@ class PresentationLifecycleTest {
             controller.cancelForUserInput()
             delivered = true
         }
-        controller.start("map", PresentationSpec(PresentationMode.FULLSCREEN, 10, PresentationExpiryPolicy.CLOSE)) {
+        controller.start("map",
+            PresentationSpec(PresentationMode.FULLSCREEN, 10, PresentationExpiryPolicy.CLOSE)
+        ) {
             snapshot.copy(fullscreen = false)
         }
 

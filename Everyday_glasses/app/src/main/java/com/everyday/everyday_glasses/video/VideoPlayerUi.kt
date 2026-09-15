@@ -14,9 +14,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.content.ContextCompat
-import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
-import com.everyday.everyday_glasses.InteractionTimeouts
+import com.everyday.everyday_glasses.helpers.InteractionTimeouts
 import com.everyday.everyday_glasses.R
 import com.google.android.material.button.MaterialButton
 import java.util.Locale

@@ -1,5 +1,9 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.controllers.DestinationSearchFallbackReason
+import com.everyday.everyday_glasses.controllers.DestinationSearchListener
+import com.everyday.everyday_glasses.controllers.GlassesDestinationSearchCoordinator
+import com.everyday.everyday_glasses.controllers.GlassesDestinationSearchTransport
 import com.everyday.shared.routing.GeoPoint
 import com.everyday.shared.transport.*
 import org.junit.Assert.assertEquals
@@ -14,7 +18,8 @@ class GlassesDestinationSearchCoordinatorTest {
 
     @Test fun `phone result wins before hedge and stale result is ignored`() {
         val transport = FakeTransport()
-        val coordinator = GlassesDestinationSearchCoordinator({ transport }, hedgeMs = 1_000, deadlineMs = 2_000)
+        val coordinator =
+            GlassesDestinationSearchCoordinator({ transport }, hedgeMs = 1_000, deadlineMs = 2_000)
         var delivered = 0
         coordinator.listener = object : DestinationSearchListener {
             override fun onDestinationSearchResult(result: DestinationSearchResult) {
@@ -34,7 +39,8 @@ class GlassesDestinationSearchCoordinatorTest {
     @Test fun `slow phone starts one hedge and local winner cancels phone`() {
         val transport = FakeTransport()
         val latch = CountDownLatch(1)
-        val coordinator = GlassesDestinationSearchCoordinator({ transport }, hedgeMs = 10, deadlineMs = 1_000)
+        val coordinator =
+            GlassesDestinationSearchCoordinator({ transport }, hedgeMs = 10, deadlineMs = 1_000)
         coordinator.listener = object : DestinationSearchListener {
             override fun onDestinationSearchFallback(
                 request: DestinationSearchRequest,

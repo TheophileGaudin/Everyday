@@ -1,12 +1,23 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.data_models.WidgetDescriptors
+import com.everyday.everyday_glasses.data_models.WidgetInstancePolicy
+import com.everyday.everyday_glasses.data_models.WidgetTypeId
+import com.everyday.everyday_glasses.managers.WidgetLifecycleController
+import com.everyday.everyday_glasses.managers.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.managers.WidgetRegistry
+import com.everyday.everyday_glasses.ui.BaseWidget
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class WidgetLifecycleRegistrationTest {
     @Test
     fun `central registrations must cover every descriptor`() {
-        val controller = WidgetLifecycleController(runOnUiThread = { it() }, onChanged = {}, registry = WidgetRegistry())
+        val controller = WidgetLifecycleController(
+            runOnUiThread = { it() },
+            onChanged = {},
+            registry = WidgetRegistry()
+        )
 
         WidgetDescriptors.all.forEach { descriptor ->
             controller.register(
@@ -24,7 +35,11 @@ class WidgetLifecycleRegistrationTest {
 
     @Test
     fun `central registrations reject duplicate widget types`() {
-        val controller = WidgetLifecycleController(runOnUiThread = { it() }, onChanged = {}, registry = WidgetRegistry())
+        val controller = WidgetLifecycleController(
+            runOnUiThread = { it() },
+            onChanged = {},
+            registry = WidgetRegistry()
+        )
         val descriptor = WidgetDescriptors[WidgetTypeId.STATUS]
         val registration = WidgetLifecycleRegistration(
             descriptor = descriptor,

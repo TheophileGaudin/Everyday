@@ -2,6 +2,9 @@ package com.everyday.everyday_glasses
 
 import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.dashboardOf
 import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.stateOf
+import com.everyday.everyday_glasses.data_models.WidgetDocument
+import com.everyday.everyday_glasses.data_models.WidgetTypeId
+import com.everyday.everyday_glasses.stores.DashboardPersistence
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals

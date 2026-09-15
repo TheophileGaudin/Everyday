@@ -1,5 +1,20 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.agent_tools.AssistantToolCall
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.agent_tools.AssistantUiContext
+import com.everyday.everyday_glasses.agent_tools.AssistantWidgetContext
+import com.everyday.everyday_glasses.agent_tools.FinanceTileSemanticState
+import com.everyday.everyday_glasses.agent_tools.FinanceTileTarget
+import com.everyday.everyday_glasses.agent_tools.FinanceTileTargetMode
+import com.everyday.everyday_glasses.agent_tools.FinanceTileTargetResolver
+import com.everyday.everyday_glasses.agent_tools.FinanceTileUpdateRequest
+import com.everyday.everyday_glasses.agent_tools.FinanceTileUpdateResult
+import com.everyday.everyday_glasses.agent_tools.FinanceWidgetSemanticState
+import com.everyday.everyday_glasses.agent_tools.UpdateFinanceTileSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.toAssistantSemanticFacts
+import com.everyday.everyday_glasses.ui.FinanceWidget
 import com.everyday.shared.sync.FinanceAssetType
 import com.everyday.shared.sync.FinanceChartType
 import com.everyday.shared.sync.FinanceDataProvider

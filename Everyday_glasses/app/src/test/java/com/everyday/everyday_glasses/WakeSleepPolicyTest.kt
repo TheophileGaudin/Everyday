@@ -1,5 +1,7 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.managers.WakeSleepManager
+import com.everyday.everyday_glasses.managers.resolveDisplayState
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

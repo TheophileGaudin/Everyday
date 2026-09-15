@@ -3,6 +3,7 @@ package com.everyday.everyday_glasses
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.graphics.Color
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Looper
@@ -14,10 +15,74 @@ import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.everyday.everyday_glasses.adapters.DefaultNetworkStatusProvider
+import com.everyday.everyday_glasses.adapters.GoogleCalendarClient
+import com.everyday.everyday_glasses.agent_tools.AssistantAudioRecorder
+import com.everyday.everyday_glasses.agent_tools.AssistantConfiguration
+import com.everyday.everyday_glasses.agent_tools.AssistantModel
+import com.everyday.everyday_glasses.agent_tools.AssistantNetworkLease
+import com.everyday.everyday_glasses.agent_tools.AssistantPreferencesStore
+import com.everyday.everyday_glasses.agent_tools.AssistantStateObserver
+import com.everyday.everyday_glasses.agent_tools.AssistantUiContext
+import com.everyday.everyday_glasses.agent_tools.BrowserRoutingCoordinator
+import com.everyday.everyday_glasses.agent_tools.GeminiPageAgentProvider
+import com.everyday.everyday_glasses.agent_tools.GeminiVoiceAssistantProvider
+import com.everyday.everyday_glasses.agent_tools.PageAgentCoordinator
+import com.everyday.everyday_glasses.agent_tools.VoiceAssistantCoordinator
+import com.everyday.everyday_glasses.agent_tools.WidgetContainerBrowserRoutingHost
+import com.everyday.everyday_glasses.bindings.CursorActivityObserver
+import com.everyday.everyday_glasses.bindings.DisplaySettingsHandler
+import com.everyday.everyday_glasses.bindings.GoogleAccountHandler
+import com.everyday.everyday_glasses.bindings.TapGestureListener
+import com.everyday.everyday_glasses.bindings.ThreeDofObserver
+import com.everyday.everyday_glasses.bindings.WakeRequestListener
+import com.everyday.everyday_glasses.bindings.WidgetContentObserver
+import com.everyday.everyday_glasses.bindings.WidgetDataProvider
+import com.everyday.everyday_glasses.bindings.WidgetHost
 import com.everyday.everyday_glasses.binocular.BinocularContentClass
 import com.everyday.everyday_glasses.binocular.DisplayConfig
 import com.everyday.everyday_glasses.binocular.BinocularUpdateType
 import com.everyday.everyday_glasses.binocular.BinocularView
+import com.everyday.everyday_glasses.controllers.BrightnessController
+import com.everyday.everyday_glasses.controllers.DisplayPowerCallbacks
+import com.everyday.everyday_glasses.controllers.DisplayPowerController
+import com.everyday.everyday_glasses.controllers.FileImportCallbacks
+import com.everyday.everyday_glasses.controllers.FileImportCoordinator
+import com.everyday.everyday_glasses.controllers.FileImportError
+import com.everyday.everyday_glasses.controllers.GlassesDataSyncCoordinator
+import com.everyday.everyday_glasses.controllers.GoogleAuthCoordinator
+import com.everyday.everyday_glasses.controllers.GooglePhoneAuthStatus
+import com.everyday.everyday_glasses.controllers.GooglePhoneFallbackBridge
+import com.everyday.everyday_glasses.controllers.HeadUpSessionController
+import com.everyday.everyday_glasses.controllers.InputCoordinator
+import com.everyday.everyday_glasses.controllers.LocationSpeedController
+import com.everyday.everyday_glasses.controllers.PermissionCoordinator
+import com.everyday.everyday_glasses.controllers.PermissionCoordinatorCallbacks
+import com.everyday.everyday_glasses.controllers.PhoneConnectionCallbacks
+import com.everyday.everyday_glasses.controllers.PhoneConnectionCoordinator
+import com.everyday.everyday_glasses.controllers.StatusBarController
+import com.everyday.everyday_glasses.controllers.StatusBarControllerCallbacks
+import com.everyday.everyday_glasses.controllers.StatusBarDisplayState
+import com.everyday.everyday_glasses.controllers.UserInputActivity
+import com.everyday.everyday_glasses.controllers.UserInputKind
+import com.everyday.everyday_glasses.data_models.GoogleAccountSummary
+import com.everyday.everyday_glasses.data_models.GoogleAuthState
+import com.everyday.everyday_glasses.data_models.MapGeoPoint
+import com.everyday.everyday_glasses.data_models.PoiDisplayConfig
+import com.everyday.everyday_glasses.data_models.WidgetDocument
+import com.everyday.everyday_glasses.headup_wake.GlassesService
+import com.everyday.everyday_glasses.helpers.TapGestureDetector
+import com.everyday.everyday_glasses.managers.HeadUpWakeManager
+import com.everyday.everyday_glasses.managers.ThreeDofManager
+import com.everyday.everyday_glasses.managers.WakeSleepManager
+import com.everyday.everyday_glasses.stores.ActiveDashboardStore
+import com.everyday.everyday_glasses.stores.BuiltInLayouts
+import com.everyday.everyday_glasses.stores.DashboardPersistence
+import com.everyday.everyday_glasses.stores.GlassesSettingsStore
+import com.everyday.everyday_glasses.stores.GoogleAuthPreferencesStore
+import com.everyday.everyday_glasses.stores.HeadUpSettings
+import com.everyday.everyday_glasses.ui.CursorView
+import com.everyday.everyday_glasses.ui.FileBrowserWidget
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.NewsSnapshot
 import com.everyday.shared.sync.NewsSourceSpec
@@ -227,8 +292,12 @@ class MainActivity : AppCompatActivity() {
             tapGestureDetectorProvider = {
                 if (::tapGestureDetector.isInitialized) tapGestureDetector else null
             },
-            isAwake = {!::displayPowerController.isInitialized || displayPowerController.isAwake()},
-            wakeDisplay = {if (::displayPowerController.isInitialized) {displayPowerController.wakeFromUserAction("input")}},
+            isAwake = { !::displayPowerController.isInitialized || displayPowerController.isAwake() },
+            wakeDisplay = {
+                if (::displayPowerController.isInitialized) {
+                    displayPowerController.wakeFromUserAction("input")
+                }
+            },
             notifyUserActivity = ::notifyUserActivity,
             notifyTransientChange = ::notifyTransientBinocularChange,
             onTripleTap = ::handleTripleTap,
@@ -614,14 +683,14 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 override fun createVideoWidget(
-                    uri: android.net.Uri,
+                    uri: Uri,
                     displayName: String
                 ) {
                     widgetContainer.createVideoWidget(uri, displayName)
                 }
 
                 override fun createPdfWidget(
-                    uri: android.net.Uri,
+                    uri: Uri,
                     displayName: String
                 ) {
                     widgetContainer.createPdfWidget(uri, displayName)
@@ -665,7 +734,10 @@ class MainActivity : AppCompatActivity() {
                     phoneConnectionOrNull()?.onWifiDirectPermissionDenied()
                 }
 
-                override fun onFileBrowserAccessHandled() {widgetContainer.post {fileImportCoordinator.openFileBrowser()}} // The all-files settings path returns through onResume; post until the resumed view hierarchy is ready for widget work.
+                override fun onFileBrowserAccessHandled() {
+                    widgetContainer.post { fileImportCoordinator.openFileBrowser() }
+                } // The all-files settings path returns through onResume; post until the resumed view hierarchy is ready for widget work.
+
                 override fun onAssistantAudioPermissionResult(granted: Boolean) {
                     if (::voiceAssistantCoordinator.isInitialized) {
                         voiceAssistantCoordinator.onPermissionResult(granted)
@@ -704,17 +776,25 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     if (!connected) {
-                        statusBarController.onPhoneConnectionChanged(connected = false, phoneBatteryPercent = -1)
+                        statusBarController.onPhoneConnectionChanged(
+                            connected = false,
+                            phoneBatteryPercent = -1
+                        )
                         widgetContainer.unfocusAll()
                         widgetContainer.setMirroringEnabled(false)
                         widgetContainer.onSubtitlePhoneDisconnected()
                     } else {
-                        statusBarController.onPhoneConnectionChanged(connected = true, phoneBatteryPercent = phoneBatteryPercent)
+                        statusBarController.onPhoneConnectionChanged(
+                            connected = true,
+                            phoneBatteryPercent = phoneBatteryPercent
+                        )
                         widgetContainer.onPhoneReconnected()
                     }
                 }
 
-                override fun onPhoneBatteryChanged(phoneBatteryPercent: Int) {statusBarController.onPhoneBatteryChanged(phoneBatteryPercent)}
+                override fun onPhoneBatteryChanged(phoneBatteryPercent: Int) {
+                    statusBarController.onPhoneBatteryChanged(phoneBatteryPercent)
+                }
 
                 override fun onPointerReceived(pointer: TransportMessage.Pointer) {
                     handlePhonePointer(pointer)
@@ -739,7 +819,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 override fun onImageReceived(imageData: ByteArray, fileName: String) {
-                    Log.d(TAG,"Image received from phone: $fileName (${imageData.size} bytes)")
+                    Log.d(TAG, "Image received from phone: $fileName (${imageData.size} bytes)")
                     fileImportCoordinator.importReceivedImage(imageData, fileName)
                 }
 

@@ -1,5 +1,13 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.controllers.AppCommandCapabilities
+import com.everyday.everyday_glasses.controllers.AppCommandExecutor
+import com.everyday.everyday_glasses.controllers.AppCommandResult
+import com.everyday.everyday_glasses.controllers.CommandUiDispatcher
+import com.everyday.everyday_glasses.managers.AppCommandRegistry
+import com.everyday.everyday_glasses.managers.CommandAvailability
+import com.everyday.everyday_glasses.managers.CommandValidationResult
+import com.everyday.everyday_glasses.stores.ShortcutsStore
 import com.everyday.shared.command.AppCommandArguments
 import com.everyday.shared.command.AppCommandInvocation
 import com.everyday.shared.command.AppCommandProtocol
@@ -50,7 +58,9 @@ class AppCommandRegistryTest {
     @Test
     fun `shortcut persistence resolves the same commands after restart`() {
         val before = listOf(registry.invocation(registry.toggleStatus), registry.invocation("layout:Work"))
-        val after = ShortcutsStore.decode(ShortcutsStore.encode(before), AppCommandRegistry { listOf("Work") })
+        val after = ShortcutsStore.decode(
+            ShortcutsStore.encode(before),
+            AppCommandRegistry { listOf("Work") })
         assertEquals(before, after)
     }
 
@@ -122,7 +132,8 @@ class AppCommandRegistryTest {
     @Test
     fun `executor reports application failure when capability cannot complete command`() {
         val capabilities = FakeCapabilities().apply { loadLayoutSucceeds = false }
-        val executor = AppCommandExecutor(registry, capabilities, CommandUiDispatcher { action -> action() })
+        val executor =
+            AppCommandExecutor(registry, capabilities, CommandUiDispatcher { action -> action() })
 
         val result = executor.execute(registry.invocation("layout:Work"))
 

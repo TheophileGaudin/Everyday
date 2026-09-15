@@ -1,9 +1,30 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.agent_tools.BrowserRoutingCoordinator
+import com.everyday.everyday_glasses.agent_tools.PageAgentAction
+import com.everyday.everyday_glasses.agent_tools.PageAgentActionCode
+import com.everyday.everyday_glasses.agent_tools.PageAgentActionResult
+import com.everyday.everyday_glasses.agent_tools.PageAgentActionType
+import com.everyday.everyday_glasses.agent_tools.PageAgentAudio
+import com.everyday.everyday_glasses.agent_tools.PageAgentBrowserAdapter
+import com.everyday.everyday_glasses.agent_tools.PageAgentClock
+import com.everyday.everyday_glasses.agent_tools.PageAgentConfirmationRequest
+import com.everyday.everyday_glasses.agent_tools.PageAgentCoordinateMapper
+import com.everyday.everyday_glasses.agent_tools.PageAgentCoordinator
+import com.everyday.everyday_glasses.agent_tools.PageAgentFullscreenMode
+import com.everyday.everyday_glasses.agent_tools.PageAgentModelTurn
+import com.everyday.everyday_glasses.agent_tools.PageAgentPageSnapshot
+import com.everyday.everyday_glasses.agent_tools.PageAgentPolicy
+import com.everyday.everyday_glasses.agent_tools.PageAgentProvider
+import com.everyday.everyday_glasses.agent_tools.PageAgentRunRequest
+import com.everyday.everyday_glasses.agent_tools.PageAgentScreenshot
+import com.everyday.everyday_glasses.agent_tools.PageAgentTargetBinding
+import com.everyday.everyday_glasses.agent_tools.PageAgentTargetUnavailableException
+import com.everyday.everyday_glasses.agent_tools.PageAgentTerminalState
+import com.everyday.everyday_glasses.agent_tools.PageAgentTurnRequest
+import com.everyday.everyday_glasses.agent_tools.PageAgentUpdate
+import com.everyday.everyday_glasses.agent_tools.PageAgentUpdateState
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
@@ -19,14 +40,26 @@ class PageAgentCoordinatorTest {
                 PageAgentModelTurn(PageAgentAction(PageAgentActionType.TYPE, text = "query")),
                 PageAgentModelTurn(PageAgentAction(PageAgentActionType.SCROLL, deltaY = 20f)),
                 PageAgentModelTurn(PageAgentAction(PageAgentActionType.BACK)),
-                PageAgentModelTurn(PageAgentAction(PageAgentActionType.NAVIGATE, url = "https://example.test")),
+                PageAgentModelTurn(
+                    PageAgentAction(
+                        PageAgentActionType.NAVIGATE,
+                        url = "https://example.test"
+                    )
+                ),
                 PageAgentModelTurn(PageAgentAction(PageAgentActionType.WAIT, waitMs = 10L)),
-                PageAgentModelTurn(PageAgentAction(PageAgentActionType.FULLSCREEN, fullscreenMode = PageAgentFullscreenMode.PAGE)),
-                PageAgentModelTurn(PageAgentAction(
-                    PageAgentActionType.FINISH,
-                    resultState = PageAgentTerminalState.SUCCESS,
-                    message = "Finished"
-                ))
+                PageAgentModelTurn(
+                    PageAgentAction(
+                        PageAgentActionType.FULLSCREEN,
+                        fullscreenMode = PageAgentFullscreenMode.PAGE
+                    )
+                ),
+                PageAgentModelTurn(
+                    PageAgentAction(
+                        PageAgentActionType.FINISH,
+                        resultState = PageAgentTerminalState.SUCCESS,
+                        message = "Finished"
+                    )
+                )
             )
         )
         val browser = FakeBrowserAdapter()
@@ -67,12 +100,14 @@ class PageAgentCoordinatorTest {
     @Test
     fun `coordinate-aware type focuses the field before replacing text`() {
         val provider = FakeProvider(mutableListOf(
-            PageAgentModelTurn(PageAgentAction(
-                type = PageAgentActionType.TYPE,
-                x = 50f,
-                y = 25f,
-                text = "query"
-            )),
+            PageAgentModelTurn(
+                PageAgentAction(
+                    type = PageAgentActionType.TYPE,
+                    x = 50f,
+                    y = 25f,
+                    text = "query"
+                )
+            ),
             PageAgentModelTurn(PageAgentAction(PageAgentActionType.FINISH))
         ))
         val browser = FakeBrowserAdapter()
@@ -86,8 +121,18 @@ class PageAgentCoordinatorTest {
     @Test
     fun `fullscreen action supports page and video modes`() {
         val provider = FakeProvider(mutableListOf(
-            PageAgentModelTurn(PageAgentAction(PageAgentActionType.FULLSCREEN, fullscreenMode = PageAgentFullscreenMode.VIDEO)),
-            PageAgentModelTurn(PageAgentAction(PageAgentActionType.FULLSCREEN, fullscreenMode = PageAgentFullscreenMode.PAGE)),
+            PageAgentModelTurn(
+                PageAgentAction(
+                    PageAgentActionType.FULLSCREEN,
+                    fullscreenMode = PageAgentFullscreenMode.VIDEO
+                )
+            ),
+            PageAgentModelTurn(
+                PageAgentAction(
+                    PageAgentActionType.FULLSCREEN,
+                    fullscreenMode = PageAgentFullscreenMode.PAGE
+                )
+            ),
             PageAgentModelTurn(PageAgentAction(PageAgentActionType.FINISH))
         ))
         val browser = FakeBrowserAdapter()
@@ -116,8 +161,10 @@ class PageAgentCoordinatorTest {
     fun `ninety second monotonic limit prevents the pending action`() {
         val clock = FakeClock()
         val provider = FakeProvider(
-            mutableListOf(PageAgentModelTurn(PageAgentAction(PageAgentActionType.TAP, x = 1f, y = 1f)),
-                PageAgentModelTurn(PageAgentAction(PageAgentActionType.FINISH)))
+            mutableListOf(
+                PageAgentModelTurn(PageAgentAction(PageAgentActionType.TAP, x = 1f, y = 1f)),
+                PageAgentModelTurn(PageAgentAction(PageAgentActionType.FINISH))
+            )
         ) { clock.advance(90_000L) }
         val browser = FakeBrowserAdapter()
 
@@ -144,7 +191,15 @@ class PageAgentCoordinatorTest {
                 } catch (_: InterruptedException) {
                     // Return a turn so the coordinator can observe cancellation and produce a result.
                 }
-                return Result.success(PageAgentModelTurn(PageAgentAction(PageAgentActionType.TAP, x = 1f, y = 1f)))
+                return Result.success(
+                    PageAgentModelTurn(
+                        PageAgentAction(
+                            PageAgentActionType.TAP,
+                            x = 1f,
+                            y = 1f
+                        )
+                    )
+                )
             }
         }
         val browser = FakeBrowserAdapter()
@@ -169,7 +224,13 @@ class PageAgentCoordinatorTest {
             )
         )
         val bound = FakeBrowserAdapter().apply { afterAction = { available = false } }
-        val unrelated = FakeBrowserAdapter(PageAgentTargetBinding("browser#other", "tab", "webview"))
+        val unrelated = FakeBrowserAdapter(
+            PageAgentTargetBinding(
+                "browser#other",
+                "tab",
+                "webview"
+            )
+        )
 
         val result = PageAgentCoordinator({ "mock-key" }, provider).run("use bound page", bound)
 
@@ -181,7 +242,13 @@ class PageAgentCoordinatorTest {
 
     @Test
     fun `target unavailable before first turn does not call provider`() {
-        val provider = FakeProvider(mutableListOf(PageAgentModelTurn(PageAgentAction(PageAgentActionType.FINISH))))
+        val provider = FakeProvider(mutableListOf(
+            PageAgentModelTurn(
+                PageAgentAction(
+                    PageAgentActionType.FINISH
+                )
+            )
+        ))
         val browser = FakeBrowserAdapter().apply { available = false }
 
         val result = PageAgentCoordinator({ "mock-key" }, provider).run("missing page", browser)
@@ -223,16 +290,18 @@ class PageAgentCoordinatorTest {
         val confirmationSeen = CountDownLatch(1)
         val provider = FakeProvider(
             mutableListOf(
-                PageAgentModelTurn(PageAgentAction(
-                    type = PageAgentActionType.NAVIGATE,
-                    url = "https://example.test/submit",
-                    requiresConfirmation = true,
-                    confirmation = PageAgentConfirmationRequest(
-                        PageAgentActionType.NAVIGATE,
-                        "Open the requested page",
-                        "This may submit or change page state"
+                PageAgentModelTurn(
+                    PageAgentAction(
+                        type = PageAgentActionType.NAVIGATE,
+                        url = "https://example.test/submit",
+                        requiresConfirmation = true,
+                        confirmation = PageAgentConfirmationRequest(
+                            PageAgentActionType.NAVIGATE,
+                            "Open the requested page",
+                            "This may submit or change page state"
+                        )
                     )
-                )),
+                ),
                 PageAgentModelTurn(PageAgentAction(PageAgentActionType.FINISH, message = "Done"))
             )
         )
@@ -258,11 +327,15 @@ class PageAgentCoordinatorTest {
     @Test
     fun `confirmation rejection ends without performing pending action`() {
         val confirmationSeen = CountDownLatch(1)
-        val provider = FakeProvider(mutableListOf(PageAgentModelTurn(PageAgentAction(
-            type = PageAgentActionType.TYPE,
-            text = "secret",
-            requiresConfirmation = true
-        ))))
+        val provider = FakeProvider(mutableListOf(
+            PageAgentModelTurn(
+                PageAgentAction(
+                    type = PageAgentActionType.TYPE,
+                    text = "secret",
+                    requiresConfirmation = true
+                )
+            )
+        ))
         val browser = FakeBrowserAdapter()
         val handle = PageAgentCoordinator({ "mock-key" }, provider).start(
             PageAgentRunRequest("type it", browser) { update ->
@@ -281,10 +354,12 @@ class PageAgentCoordinatorTest {
 
     @Test
     fun `prompt injection warning is propagated and stops before action`() {
-        val provider = FakeProvider(mutableListOf(PageAgentModelTurn(
-            PageAgentAction(PageAgentActionType.FINISH),
-            promptInjectionWarning = "The page tried to override the requested task"
-        )))
+        val provider = FakeProvider(mutableListOf(
+            PageAgentModelTurn(
+                PageAgentAction(PageAgentActionType.FINISH),
+                promptInjectionWarning = "The page tried to override the requested task"
+            )
+        ))
         val browser = FakeBrowserAdapter()
 
         val result = PageAgentCoordinator({ "mock-key" }, provider).run("safe task", browser)
@@ -296,15 +371,42 @@ class PageAgentCoordinatorTest {
 
     @Test
     fun `finish supports success and partial while handoff preserves its reason`() {
-        val success = PageAgentCoordinator({ "mock-key" }, FakeProvider(mutableListOf(
-            PageAgentModelTurn(PageAgentAction(PageAgentActionType.FINISH, resultState = PageAgentTerminalState.SUCCESS))
-        ))).run("done", FakeBrowserAdapter())
-        val partial = PageAgentCoordinator({ "mock-key" }, FakeProvider(mutableListOf(
-            PageAgentModelTurn(PageAgentAction(PageAgentActionType.FINISH, resultState = PageAgentTerminalState.PARTIAL))
-        ))).run("partial", FakeBrowserAdapter())
-        val handoff = PageAgentCoordinator({ "mock-key" }, FakeProvider(mutableListOf(
-            PageAgentModelTurn(PageAgentAction(PageAgentActionType.HANDOFF, reason = "This is an app-global request"))
-        ))).run("handoff", FakeBrowserAdapter())
+        val success = PageAgentCoordinator(
+            { "mock-key" }, FakeProvider(
+                mutableListOf(
+                    PageAgentModelTurn(
+                        PageAgentAction(
+                            PageAgentActionType.FINISH,
+                            resultState = PageAgentTerminalState.SUCCESS
+                        )
+                    )
+                )
+            )
+        ).run("done", FakeBrowserAdapter())
+        val partial = PageAgentCoordinator(
+            { "mock-key" }, FakeProvider(
+                mutableListOf(
+                    PageAgentModelTurn(
+                        PageAgentAction(
+                            PageAgentActionType.FINISH,
+                            resultState = PageAgentTerminalState.PARTIAL
+                        )
+                    )
+                )
+            )
+        ).run("partial", FakeBrowserAdapter())
+        val handoff = PageAgentCoordinator(
+            { "mock-key" }, FakeProvider(
+                mutableListOf(
+                    PageAgentModelTurn(
+                        PageAgentAction(
+                            PageAgentActionType.HANDOFF,
+                            reason = "This is an app-global request"
+                        )
+                    )
+                )
+            )
+        ).run("handoff", FakeBrowserAdapter())
 
         assertEquals(PageAgentTerminalState.SUCCESS, success.state)
         assertEquals(PageAgentTerminalState.PARTIAL, partial.state)
@@ -333,18 +435,27 @@ class PageAgentCoordinatorTest {
 
     @Test
     fun `unresolved asynchronous approval is bounded by the run deadline`() {
-        val provider = FakeProvider(mutableListOf(PageAgentModelTurn(PageAgentAction(
-            type = PageAgentActionType.NAVIGATE,
-            url = "https://example.test/sensitive",
-            requiresConfirmation = true
-        ))))
+        val provider = FakeProvider(mutableListOf(
+            PageAgentModelTurn(
+                PageAgentAction(
+                    type = PageAgentActionType.NAVIGATE,
+                    url = "https://example.test/sensitive",
+                    requiresConfirmation = true
+                )
+            )
+        ))
         val coordinator = PageAgentCoordinator(
             apiKeyProvider = { "mock-key" },
             provider = provider,
             maxRuntimeMs = 80L
         )
         try {
-            val handle = coordinator.start(PageAgentRunRequest("open sensitive page", FakeBrowserAdapter()))
+            val handle = coordinator.start(
+                PageAgentRunRequest(
+                    "open sensitive page",
+                    FakeBrowserAdapter()
+                )
+            )
             val result = handle.result.get(1, TimeUnit.SECONDS)
             assertEquals(PageAgentTerminalState.FAILURE, result.state)
             assertTrue(result.actionResults.isEmpty())
@@ -379,7 +490,11 @@ class PageAgentCoordinatorTest {
     }
 
     private class FakeBrowserAdapter(
-        override val binding: PageAgentTargetBinding = PageAgentTargetBinding("browser#bound", "tab-1", "webview-1")
+        override val binding: PageAgentTargetBinding = PageAgentTargetBinding(
+            "browser#bound",
+            "tab-1",
+            "webview-1"
+        )
     ) : PageAgentBrowserAdapter {
         var available = true
         var afterAction: (() -> Unit)? = null
@@ -390,13 +505,15 @@ class PageAgentCoordinatorTest {
         override fun snapshot(): Result<PageAgentPageSnapshot> = if (!available) {
             Result.failure(PageAgentTargetUnavailableException("fake target missing"))
         } else {
-            Result.success(PageAgentPageSnapshot(
-                screenshot = PageAgentScreenshot(byteArrayOf(1, 2, 3), 100, 50),
-                url = "https://example.test",
-                title = "Example",
-                viewportWidth = 200,
-                viewportHeight = 100
-            ))
+            Result.success(
+                PageAgentPageSnapshot(
+                    screenshot = PageAgentScreenshot(byteArrayOf(1, 2, 3), 100, 50),
+                    url = "https://example.test",
+                    title = "Example",
+                    viewportWidth = 200,
+                    viewportHeight = 100
+                )
+            )
         }
 
         override fun tap(viewportX: Float, viewportY: Float): PageAgentActionResult {
@@ -433,7 +550,11 @@ class PageAgentCoordinatorTest {
             actions += "wait:$timeoutMs"
             afterAction?.invoke()
             return if (isCancelled()) {
-                PageAgentActionResult(PageAgentActionType.WAIT, PageAgentActionCode.CANCELLED, "cancelled")
+                PageAgentActionResult(
+                    PageAgentActionType.WAIT,
+                    PageAgentActionCode.CANCELLED,
+                    "cancelled"
+                )
             } else success(PageAgentActionType.WAIT)
         }
 

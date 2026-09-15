@@ -1,5 +1,11 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.agent_tools.AssistantUiContext
+import com.everyday.everyday_glasses.agent_tools.WebSearchProvider
+import com.everyday.everyday_glasses.agent_tools.WebSearchResult
+import com.everyday.everyday_glasses.agent_tools.WebSearchSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.parseDuckDuckGoResults
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -47,7 +53,8 @@ class WebSearchAssistantToolTest {
 
     @Test
     fun `empty search result cannot establish grounding`() {
-        val handler = WebSearchSemanticToolHandler(WebSearchProvider { _, _, _ -> Result.success(emptyList()) })
+        val handler =
+            WebSearchSemanticToolHandler(WebSearchProvider { _, _, _ -> Result.success(emptyList()) })
 
         val result = handler.execute(
             JSONObject().put("query", "missing"),

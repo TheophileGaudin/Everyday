@@ -1,5 +1,20 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecution
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.agent_tools.AssistantUiContext
+import com.everyday.everyday_glasses.agent_tools.StartNavigationSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.StopNavigationSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.assistantCompletedFuture
+import com.everyday.everyday_glasses.controllers.PresentationExpiryPolicy
+import com.everyday.everyday_glasses.controllers.PresentationMode
+import com.everyday.everyday_glasses.data_models.MapGeoPoint
+import com.everyday.everyday_glasses.data_models.NavigationDestination
+import com.everyday.everyday_glasses.data_models.NavigationPresentationDefaults
+import com.everyday.everyday_glasses.data_models.NavigationState
+import com.everyday.everyday_glasses.data_models.NavigationStatus
+import com.everyday.everyday_glasses.data_models.StartNavigationRequest
 import com.everyday.shared.routing.GeoPoint
 import com.everyday.shared.routing.RoutePolyline
 import com.everyday.shared.routing.RouteResult
@@ -108,7 +123,11 @@ class MapNavigationAssistantToolsTest {
         )
         val state = NavigationState(
             status = NavigationStatus.ACTIVE,
-            destination = NavigationDestination("Museum", "Museum, London", MapGeoPoint(51.501, -0.125)),
+            destination = NavigationDestination(
+                "Museum",
+                "Museum, London",
+                MapGeoPoint(51.501, -0.125)
+            ),
             route = route
         )
         val facts = state.toAssistantSemanticFacts().associate { it.key to it.value }

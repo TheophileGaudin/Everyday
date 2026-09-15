@@ -1,5 +1,7 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.controllers.headingFromRayNeoOpticalForward
+import com.everyday.everyday_glasses.ui.compassRelativeBearingDeg
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import kotlin.math.cos

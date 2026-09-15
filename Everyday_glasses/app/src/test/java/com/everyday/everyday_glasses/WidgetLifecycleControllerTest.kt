@@ -1,6 +1,13 @@
 package com.everyday.everyday_glasses
 
 import android.graphics.Canvas
+import com.everyday.everyday_glasses.data_models.WidgetDescriptors
+import com.everyday.everyday_glasses.data_models.WidgetDocument
+import com.everyday.everyday_glasses.data_models.WidgetTypeId
+import com.everyday.everyday_glasses.managers.WidgetLifecycleController
+import com.everyday.everyday_glasses.managers.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.managers.WidgetRegistry
+import com.everyday.everyday_glasses.ui.BaseWidget
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

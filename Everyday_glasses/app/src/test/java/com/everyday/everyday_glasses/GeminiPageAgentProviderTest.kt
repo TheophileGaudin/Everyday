@@ -1,5 +1,18 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.agent_tools.PageAgentActionCode
+import com.everyday.everyday_glasses.agent_tools.PageAgentActionResult
+import com.everyday.everyday_glasses.agent_tools.PageAgentActionType
+import com.everyday.everyday_glasses.agent_tools.PageAgentComputerUseState
+import com.everyday.everyday_glasses.agent_tools.PageAgentGeminiConfig
+import com.everyday.everyday_glasses.agent_tools.PageAgentGeminiResponseParser
+import com.everyday.everyday_glasses.agent_tools.PageAgentInteractionResponseParser
+import com.everyday.everyday_glasses.agent_tools.PageAgentInteractionState
+import com.everyday.everyday_glasses.agent_tools.PageAgentPolicy
+import com.everyday.everyday_glasses.agent_tools.PageAgentPromptBuilder
+import com.everyday.everyday_glasses.agent_tools.PageAgentScreenshot
+import com.everyday.everyday_glasses.agent_tools.PageAgentTerminalState
+import com.everyday.everyday_glasses.agent_tools.PageAgentTurnRequest
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals

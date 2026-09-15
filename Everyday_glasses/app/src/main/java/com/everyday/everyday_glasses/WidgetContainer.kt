@@ -8,6 +8,7 @@ import android.graphics.PointF
 import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.Log
 import android.view.MotionEvent
@@ -15,7 +16,139 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
+import com.everyday.everyday_glasses.adapters.AwaitingCommandUiDispatcher
+import com.everyday.everyday_glasses.agent_tools.AssistantConfiguration
+import com.everyday.everyday_glasses.agent_tools.AssistantModel
+import com.everyday.everyday_glasses.agent_tools.AssistantSemanticFact
+import com.everyday.everyday_glasses.agent_tools.AssistantSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.AssistantTextContentFormatter
+import com.everyday.everyday_glasses.agent_tools.AssistantTextPresentationRequest
+import com.everyday.everyday_glasses.agent_tools.AssistantToolCatalog
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecution
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.agent_tools.AssistantUiContext
+import com.everyday.everyday_glasses.agent_tools.AssistantVoiceHoverControl
+import com.everyday.everyday_glasses.agent_tools.AssistantWidgetContext
+import com.everyday.everyday_glasses.agent_tools.BrowserRoutingCoordinator
+import com.everyday.everyday_glasses.agent_tools.BrowserWidgetPageAgentAdapter
+import com.everyday.everyday_glasses.agent_tools.ConfigureMapPoisRequest
+import com.everyday.everyday_glasses.agent_tools.ConfigureMapPoisSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.DuckDuckGoWebSearchProvider
+import com.everyday.everyday_glasses.agent_tools.FinanceTileUpdateRequest
+import com.everyday.everyday_glasses.agent_tools.FinanceTileUpdateResult
+import com.everyday.everyday_glasses.agent_tools.InspectUiSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.NewsSourceUpdateResult
+import com.everyday.everyday_glasses.agent_tools.PageAgentApprovalOverlay
+import com.everyday.everyday_glasses.agent_tools.PageAgentBrowserAdapter
+import com.everyday.everyday_glasses.agent_tools.PageAgentConfirmationRequest
+import com.everyday.everyday_glasses.agent_tools.PresentTextSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.RequestScreenshotSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.RunBrowserTaskSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.SetNewsSourceSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.StartNavigationSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.StopNavigationSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.UpdateFinanceTileSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.WebSearchSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.toAssistantSemanticFacts
+import com.everyday.everyday_glasses.bindings.BrowserWidgetListener
+import com.everyday.everyday_glasses.bindings.DisplaySettingsHandler
+import com.everyday.everyday_glasses.bindings.FileBrowserWidgetListener
+import com.everyday.everyday_glasses.bindings.FinanceWidgetListener
+import com.everyday.everyday_glasses.bindings.GeminiSettingsListener
+import com.everyday.everyday_glasses.bindings.GoogleAccountHandler
+import com.everyday.everyday_glasses.bindings.MapWidgetListener
+import com.everyday.everyday_glasses.bindings.MirrorWidgetListener
+import com.everyday.everyday_glasses.bindings.NewsWidgetListener
+import com.everyday.everyday_glasses.bindings.SubtitleWidgetListener
+import com.everyday.everyday_glasses.bindings.TextBoxWidgetListener
+import com.everyday.everyday_glasses.bindings.WidgetContentObserver
+import com.everyday.everyday_glasses.bindings.WidgetDataProvider
+import com.everyday.everyday_glasses.bindings.WidgetHost
+import com.everyday.everyday_glasses.bindings.WidgetPersistenceListener
 import com.everyday.everyday_glasses.binocular.BinocularContentClass
+import com.everyday.everyday_glasses.controllers.AppCommandCapabilities
+import com.everyday.everyday_glasses.controllers.AppCommandExecutor
+import com.everyday.everyday_glasses.controllers.AppCommandResult
+import com.everyday.everyday_glasses.controllers.GlassesRouteTransport
+import com.everyday.everyday_glasses.controllers.HandlerPresentationScheduler
+import com.everyday.everyday_glasses.controllers.PresentationBounds
+import com.everyday.everyday_glasses.controllers.PresentationController
+import com.everyday.everyday_glasses.controllers.PresentationLifecycleDelegate
+import com.everyday.everyday_glasses.controllers.PresentationMode
+import com.everyday.everyday_glasses.controllers.PresentationProgress
+import com.everyday.everyday_glasses.controllers.PresentationSession
+import com.everyday.everyday_glasses.controllers.PresentationSnapshot
+import com.everyday.everyday_glasses.controllers.PresentationSpec
+import com.everyday.everyday_glasses.controllers.SettingsController
+import com.everyday.everyday_glasses.controllers.UserInputActivity
+import com.everyday.everyday_glasses.controllers.UserInputKind
+import com.everyday.everyday_glasses.data_models.GoogleAuthState
+import com.everyday.everyday_glasses.data_models.MapGeoPoint
+import com.everyday.everyday_glasses.data_models.NavigationOperationResult
+import com.everyday.everyday_glasses.data_models.NavigationPresentationDefaults
+import com.everyday.everyday_glasses.data_models.PoiDisplayConfig
+import com.everyday.everyday_glasses.data_models.StartNavigationRequest
+import com.everyday.everyday_glasses.data_models.WidgetDescriptor
+import com.everyday.everyday_glasses.data_models.WidgetDescriptors
+import com.everyday.everyday_glasses.data_models.WidgetDocument
+import com.everyday.everyday_glasses.data_models.WidgetTypeId
+import com.everyday.everyday_glasses.data_models.formatWalkingEta
+import com.everyday.everyday_glasses.data_models.toAssistantSemanticFacts
+import com.everyday.everyday_glasses.factories.BrowserWidgetFactory
+import com.everyday.everyday_glasses.factories.VideoWidgetFactory
+import com.everyday.everyday_glasses.helpers.CloseConfirmationHandler
+import com.everyday.everyday_glasses.helpers.ContextMenuHandler
+import com.everyday.everyday_glasses.helpers.CursorStabilizer
+import com.everyday.everyday_glasses.helpers.LayoutDeletionHandler
+import com.everyday.everyday_glasses.helpers.LayoutNameHandler
+import com.everyday.everyday_glasses.helpers.SmartAlignmentHelper
+import com.everyday.everyday_glasses.helpers.SmartAlignmentRenderer
+import com.everyday.everyday_glasses.helpers.TextEditCommandHandler
+import com.everyday.everyday_glasses.helpers.TextFormattingHandler
+import com.everyday.everyday_glasses.helpers.ThreeDofCoordinateMath
+import com.everyday.everyday_glasses.helpers.WidgetCaptureRestore
+import com.everyday.everyday_glasses.managers.AppCommandRegistry
+import com.everyday.everyday_glasses.managers.CommandAvailability
+import com.everyday.everyday_glasses.managers.UnitDisplayFormatter
+import com.everyday.everyday_glasses.managers.UnitSettings
+import com.everyday.everyday_glasses.managers.WakeSleepManager
+import com.everyday.everyday_glasses.managers.WidgetLayoutManager
+import com.everyday.everyday_glasses.managers.WidgetLifecycleController
+import com.everyday.everyday_glasses.managers.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.managers.WidgetRegistry
+import com.everyday.everyday_glasses.stores.BuiltInLayouts
+import com.everyday.everyday_glasses.stores.DashboardPersistence
+import com.everyday.everyday_glasses.stores.ImageWidgetStorage
+import com.everyday.everyday_glasses.stores.LayoutLibrary
+import com.everyday.everyday_glasses.stores.ShortcutsStore
+import com.everyday.everyday_glasses.stores.VideoQueueRepository
+import com.everyday.everyday_glasses.ui.BaseHoverControl
+import com.everyday.everyday_glasses.ui.BaseWidget
+import com.everyday.everyday_glasses.ui.BrowserWidget
+import com.everyday.everyday_glasses.ui.CalendarWidget
+import com.everyday.everyday_glasses.ui.CloseAppHoverControl
+import com.everyday.everyday_glasses.ui.CloseConfirmationPopup
+import com.everyday.everyday_glasses.ui.ContextMenu
+import com.everyday.everyday_glasses.ui.FileBrowserWidget
+import com.everyday.everyday_glasses.ui.FinanceWidget
+import com.everyday.everyday_glasses.ui.FormattingMenu
+import com.everyday.everyday_glasses.ui.ImageWidget
+import com.everyday.everyday_glasses.ui.LemonHoverControl
+import com.everyday.everyday_glasses.ui.LocationWidget
+import com.everyday.everyday_glasses.ui.MapWidget
+import com.everyday.everyday_glasses.ui.NewsWidget
+import com.everyday.everyday_glasses.ui.NotificationsWidget
+import com.everyday.everyday_glasses.ui.PdfWidget
+import com.everyday.everyday_glasses.ui.ScreenMirrorWidget
+import com.everyday.everyday_glasses.ui.SpeedometerWidget
+import com.everyday.everyday_glasses.ui.StatusBarWidget
+import com.everyday.everyday_glasses.ui.SubtitleWidget
+import com.everyday.everyday_glasses.ui.TextBoxWidget
+import com.everyday.everyday_glasses.ui.TextEditContextMenu
+import com.everyday.everyday_glasses.ui.ThreeDofOverlay
+import com.everyday.everyday_glasses.ui.VideoWidget
+import com.everyday.everyday_glasses.ui.WidgetLayoutDeleteConfirmationPopup
+import com.everyday.everyday_glasses.ui.WidgetLayoutNamePrompt
 import com.everyday.shared.sync.FinanceSnapshot
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.NewsSnapshot
@@ -136,7 +269,8 @@ class WidgetContainer @JvmOverloads constructor(
     private var formattingMenu: FormattingMenu? = null
     private var closeConfirmationPopup: CloseConfirmationPopup? = null
     private var layoutDeleteConfirmationPopup: WidgetLayoutDeleteConfirmationPopup? = null
-    private val pageAgentApprovalOverlay = PageAgentApprovalOverlay(::notifyPersistentContentChanged)
+    private val pageAgentApprovalOverlay =
+        PageAgentApprovalOverlay(::notifyPersistentContentChanged)
 
     private val commandRegistry by lazy {
         AppCommandRegistry { layoutLibrary.names() }
@@ -145,7 +279,10 @@ class WidgetContainer @JvmOverloads constructor(
         AppCommandExecutor(
             registry = commandRegistry,
             capabilities = commandCapabilities,
-            uiDispatcher = AwaitingCommandUiDispatcher(isUiThread = { Looper.myLooper() == Looper.getMainLooper() }, postToUiThread = { action -> post(action) },),
+            uiDispatcher = AwaitingCommandUiDispatcher(
+                isUiThread = { Looper.myLooper() == Looper.getMainLooper() },
+                postToUiThread = { action -> post(action) },
+            ),
         )
     }
 
@@ -313,15 +450,40 @@ class WidgetContainer @JvmOverloads constructor(
         setSmartAlignmentEnabled = { enabled -> smartAlignment.enabled = enabled },
         notifyBrightnessChanged = { value -> displaySettingsHandler?.applyBrightness(value) },
         executeBrightnessCommand = { value ->
-            executeCommand(AppCommandInvocation(commandRegistry.setBrightness.id, AppCommandArguments.Brightness(value)))
+            executeCommand(
+                AppCommandInvocation(
+                    commandRegistry.setBrightness.id,
+                    AppCommandArguments.Brightness(value)
+                )
+            )
         },
-        notifyAdaptiveBrightnessChanged = { enabled -> displaySettingsHandler?.applyAdaptiveBrightness(enabled) },
+        notifyAdaptiveBrightnessChanged = { enabled ->
+            displaySettingsHandler?.applyAdaptiveBrightness(
+                enabled
+            )
+        },
         notifyHeadUpTimeChanged = { ms -> displaySettingsHandler?.applyHeadUpTime(ms) },
         notifyWakeDurationChanged = { ms -> displaySettingsHandler?.applyWakeDuration(ms) },
-        notifyAngleThresholdChanged = { degrees -> displaySettingsHandler?.applyHeadUpAngleThreshold(degrees) },
-        notifyHeadsUpEnabledChanged = { enabled -> displaySettingsHandler?.applyHeadsUpEnabled(enabled) },
-        notifySmartAlignmentChanged = { enabled -> displaySettingsHandler?.applySmartAlignment(enabled) },
-        notifySpeedVisibilityThresholdChanged = { threshold -> displaySettingsHandler?.applySpeedVisibilityThreshold(threshold) },
+        notifyAngleThresholdChanged = { degrees ->
+            displaySettingsHandler?.applyHeadUpAngleThreshold(
+                degrees
+            )
+        },
+        notifyHeadsUpEnabledChanged = { enabled ->
+            displaySettingsHandler?.applyHeadsUpEnabled(
+                enabled
+            )
+        },
+        notifySmartAlignmentChanged = { enabled ->
+            displaySettingsHandler?.applySmartAlignment(
+                enabled
+            )
+        },
+        notifySpeedVisibilityThresholdChanged = { threshold ->
+            displaySettingsHandler?.applySpeedVisibilityThreshold(
+                threshold
+            )
+        },
         notifyUnitSystemModeChanged = { mode -> unitSettings.setGlobalMode(mode) },
         connectGoogle = { googleAccountHandler?.connectGoogleAccount() },
         grantCalendarAccess = { googleAccountHandler?.grantCalendarAccess() },
@@ -433,7 +595,7 @@ class WidgetContainer @JvmOverloads constructor(
     private val presentationController by lazy {
         PresentationController(
             scheduler = HandlerPresentationScheduler(handler),
-            nowElapsedMs = { android.os.SystemClock.elapsedRealtime() },
+            nowElapsedMs = { SystemClock.elapsedRealtime() },
             delegate = object : PresentationLifecycleDelegate {
                 override fun onPresentationStarted(session: PresentationSession) {
                     applyPresentation(session)
@@ -557,7 +719,10 @@ class WidgetContainer @JvmOverloads constructor(
             restore = ::restoreTextWidget,
             register = { registry.add(it) },
             unregister = { widget ->
-                storeClosedTemplate(WidgetTypeId.TEXT, widgetCaptureRestore.getTextWidgetState(widget))
+                storeClosedTemplate(
+                    WidgetTypeId.TEXT,
+                    widgetCaptureRestore.getTextWidgetState(widget)
+                )
                 if (focusedWidget === widget) setFocusedWidget(null)
                 if (activeWidget === widget) activeWidget = null
                 notifyPresentationTargetRemoved(widget)
@@ -772,24 +937,29 @@ class WidgetContainer @JvmOverloads constructor(
             )
         }
 
-        bindSingleton(WidgetTypeId.STATUS, StatusBarWidget::class, DashboardPersistence.StatusBarState::class,
+        bindSingleton(
+            WidgetTypeId.STATUS, StatusBarWidget::class, DashboardPersistence.StatusBarState::class,
             { statusBarWidget }, ::createStatusBarPresence, ::applyStatusBarState,
             { widgetCaptureRestore.getStatusBarState(it) },
             { storeClosedTemplate(WidgetTypeId.STATUS, it) })
-        bindSingleton(WidgetTypeId.LOCATION, LocationWidget::class, DashboardPersistence.LocationWidgetState::class,
+        bindSingleton(
+            WidgetTypeId.LOCATION, LocationWidget::class, DashboardPersistence.LocationWidgetState::class,
             { locationWidget }, ::createLocationPresence, ::applyLocationState,
             { widgetCaptureRestore.getLocationWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.LOCATION, it) })
-        bindSingleton(WidgetTypeId.MAP, MapWidget::class, DashboardPersistence.MapWidgetState::class,
+        bindSingleton(
+            WidgetTypeId.MAP, MapWidget::class, DashboardPersistence.MapWidgetState::class,
             { mapWidget }, ::createMapPresence, ::applyMapState,
             { widgetCaptureRestore.getMapWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.MAP, it) },
             beforeRemove = MapWidget::release)
-        bindSingleton(WidgetTypeId.CALENDAR, CalendarWidget::class, DashboardPersistence.CalendarWidgetState::class,
+        bindSingleton(
+            WidgetTypeId.CALENDAR, CalendarWidget::class, DashboardPersistence.CalendarWidgetState::class,
             { calendarWidget }, ::createCalendarPresence, ::applyCalendarState,
             { widgetCaptureRestore.getCalendarWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.CALENDAR, it) })
-        bindSingleton(WidgetTypeId.FINANCE, FinanceWidget::class, DashboardPersistence.FinanceWidgetState::class,
+        bindSingleton(
+            WidgetTypeId.FINANCE, FinanceWidget::class, DashboardPersistence.FinanceWidgetState::class,
             { financeWidget }, ::createFinancePresence, ::applyFinanceState,
             { widgetCaptureRestore.getFinanceWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.FINANCE, it) },
@@ -798,24 +968,29 @@ class WidgetContainer @JvmOverloads constructor(
                 dataProvider?.onFinanceVisibilityChanged(!minimized)
                 if (!minimized) widget.requestData(force = false, reason = "finance_unminimized")
             })
-        bindSingleton(WidgetTypeId.NEWS, NewsWidget::class, DashboardPersistence.NewsWidgetState::class,
+        bindSingleton(
+            WidgetTypeId.NEWS, NewsWidget::class, DashboardPersistence.NewsWidgetState::class,
             { newsWidget }, ::createNewsPresence, ::applyNewsState,
             { widgetCaptureRestore.getNewsWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.NEWS, it) })
-        bindSingleton(WidgetTypeId.NOTIFICATIONS, NotificationsWidget::class, DashboardPersistence.NotificationsWidgetState::class,
+        bindSingleton(
+            WidgetTypeId.NOTIFICATIONS, NotificationsWidget::class, DashboardPersistence.NotificationsWidgetState::class,
             { notificationsWidget }, ::createNotificationsPresence, ::applyNotificationsState,
             { widgetCaptureRestore.getNotificationsWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.NOTIFICATIONS, it) })
-        bindSingleton(WidgetTypeId.SPEEDOMETER, SpeedometerWidget::class, DashboardPersistence.SpeedometerWidgetState::class,
+        bindSingleton(
+            WidgetTypeId.SPEEDOMETER, SpeedometerWidget::class, DashboardPersistence.SpeedometerWidgetState::class,
             { speedometerWidget }, ::createSpeedometerPresence, ::applySpeedometerState,
             { widgetCaptureRestore.getSpeedometerWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.SPEEDOMETER, it) },
             beforeRemove = { settingsController.dismissSpeedometerSettingsMenu() })
-        bindSingleton(WidgetTypeId.SUBTITLE, SubtitleWidget::class, DashboardPersistence.SubtitleWidgetState::class,
+        bindSingleton(
+            WidgetTypeId.SUBTITLE, SubtitleWidget::class, DashboardPersistence.SubtitleWidgetState::class,
             { subtitleWidget }, ::createSubtitlePresence, ::applySubtitleState,
             { widgetCaptureRestore.getSubtitleWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.SUBTITLE, it) })
-        bindSingleton(WidgetTypeId.MIRROR, ScreenMirrorWidget::class, DashboardPersistence.MirrorWidgetState::class,
+        bindSingleton(
+            WidgetTypeId.MIRROR, ScreenMirrorWidget::class, DashboardPersistence.MirrorWidgetState::class,
             { screenMirrorWidget }, ::createMirrorPresence, ::applyMirrorState,
             { widgetCaptureRestore.getMirrorWidgetState(it) },
             { storeClosedTemplate(WidgetTypeId.MIRROR, it) },
@@ -1026,7 +1201,8 @@ class WidgetContainer @JvmOverloads constructor(
         existedBeforePresentation: Boolean
     ): PresentationSnapshot {
         val rendered = widget.getBounds()
-        val renderedBounds = PresentationBounds(rendered.left, rendered.top, rendered.right, rendered.bottom)
+        val renderedBounds =
+            PresentationBounds(rendered.left, rendered.top, rendered.right, rendered.bottom)
         val windowed = if (widget.isMinimized) {
             val width = widget.savedMinWidth.takeIf { it > 0f } ?: rendered.width()
             val height = widget.savedMinHeight.takeIf { it > 0f } ?: rendered.height()
@@ -1422,7 +1598,10 @@ class WidgetContainer @JvmOverloads constructor(
             }
         }
 
-        layoutDeleteConfirmationPopup = WidgetLayoutDeleteConfirmationPopup(w.toFloat(), h.toFloat()).apply {
+        layoutDeleteConfirmationPopup = WidgetLayoutDeleteConfirmationPopup(
+            w.toFloat(),
+            h.toFloat()
+        ).apply {
             handler = object : LayoutDeletionHandler {
                 override fun deleteLayout(name: String) {
                     layoutDeleteInProgress = true
@@ -3575,7 +3754,11 @@ class WidgetContainer @JvmOverloads constructor(
         val statusWidth = 220f
         val statusHeight = 110f
         return StatusBarWidget(
-            context, (width - statusWidth) / 2f, height - statusHeight - height * 0.15f, statusWidth, statusHeight
+            context,
+            (width - statusWidth) / 2f,
+            height - statusHeight - height * 0.15f,
+            statusWidth,
+            statusHeight
         ).apply { onStateChanged = { notifyTransientContentChanged() } }
     }
 
@@ -3965,7 +4148,14 @@ class WidgetContainer @JvmOverloads constructor(
                       else ((height - browserHeight) / 2f).coerceAtLeast(0f)
 
         val selectionHandler = onFileSelected
-        val widget = FileBrowserWidget(context, createX, createY, browserWidth, browserHeight, filter).apply {
+        val widget = FileBrowserWidget(
+            context,
+            createX,
+            createY,
+            browserWidth,
+            browserHeight,
+            filter
+        ).apply {
             listener = object : FileBrowserWidgetListener {
                 override fun onStateChanged(state: FileBrowserWidget.State) = notifyTransientContentChanged()
                 override fun onFileSelected(entry: FileBrowserWidget.FileEntry) {
@@ -4784,7 +4974,7 @@ class WidgetContainer @JvmOverloads constructor(
             true,
             AssistantToolExecutionCodes.SUCCESS,
             "Walking route active: destination=${state.destination?.label.orEmpty()}, " +
-                "eta=${formatWalkingEta(state.walkingEtaSeconds)}"
+                    "eta=${formatWalkingEta(state.walkingEtaSeconds)}"
         )
         is NavigationOperationResult.Ambiguous -> AssistantToolExecution(
             false,
@@ -4824,8 +5014,10 @@ class WidgetContainer @JvmOverloads constructor(
                         true,
                         AssistantToolExecutionCodes.SUCCESS,
                         "Map POIs configured: state=${request.config.state.name}, " +
-                            "categories=${request.config.categories.sorted().joinToString(",")}, " +
-                            "radius_m=${request.config.radiusM}, max_results=${request.config.maxResults}"
+                                "categories=${
+                                    request.config.categories.sorted().joinToString(",")
+                                }, " +
+                                "radius_m=${request.config.radiusM}, max_results=${request.config.maxResults}"
                     )
                 }
             }.onSuccess(result::complete)
@@ -4890,10 +5082,10 @@ class WidgetContainer @JvmOverloads constructor(
             as? TextBoxWidget
         val widget = targetedWidget ?: createAssistantTextWidget()
             ?: return AssistantToolExecution(
-                false,
-                AssistantToolExecutionCodes.EXECUTION_FAILED,
-                "Text widget could not be created"
-            )
+            false,
+            AssistantToolExecutionCodes.EXECUTION_FAILED,
+            "Text widget could not be created"
+        )
 
         val renderedContent = AssistantTextContentFormatter.render(request.content, request.sources)
         widget.setAssistantContent(renderedContent)
@@ -5372,7 +5564,14 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun applyNotificationsState(state: DashboardPersistence.NotificationsWidgetState): NotificationsWidget {
-        val widget = NotificationsWidget(context, state.x, state.y, state.width, state.height, height.toFloat()).apply {
+        val widget = NotificationsWidget(
+            context,
+            state.x,
+            state.y,
+            state.width,
+            state.height,
+            height.toFloat()
+        ).apply {
             onStateChanged = { notifyTransientContentChanged() }
         }
         widgetCaptureRestore.restoreNotificationsWidgetPosition(widget, state, width, height)

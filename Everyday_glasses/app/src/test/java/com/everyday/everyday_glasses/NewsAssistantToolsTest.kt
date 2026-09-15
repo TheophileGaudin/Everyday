@@ -1,5 +1,13 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.agent_tools.AssistantSemanticFact
+import com.everyday.everyday_glasses.agent_tools.AssistantToolCall
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.agent_tools.AssistantUiContext
+import com.everyday.everyday_glasses.agent_tools.AssistantWidgetContext
+import com.everyday.everyday_glasses.agent_tools.NewsSourceUpdateResult
+import com.everyday.everyday_glasses.agent_tools.SetNewsSourceSemanticToolHandler
 import com.everyday.shared.sync.NewsSourceSpec
 import org.json.JSONObject
 import org.junit.Assert.assertEquals

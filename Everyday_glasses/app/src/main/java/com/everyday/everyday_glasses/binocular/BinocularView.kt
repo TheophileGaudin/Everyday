@@ -16,8 +16,8 @@ import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import com.everyday.everyday_glasses.AssistantScreenshot
-import com.everyday.everyday_glasses.CursorView
+import com.everyday.everyday_glasses.agent_tools.AssistantScreenshot
+import com.everyday.everyday_glasses.ui.CursorView
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CompletableFuture
 

@@ -1,5 +1,35 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.agent_tools.AssistantModel
+import com.everyday.everyday_glasses.agent_tools.AssistantProviderTurn
+import com.everyday.everyday_glasses.agent_tools.AssistantToolCall
+import com.everyday.everyday_glasses.agent_tools.AssistantToolCatalog
+import com.everyday.everyday_glasses.agent_tools.AssistantToolDefinition
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecution
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.agent_tools.AssistantToolLoop
+import com.everyday.everyday_glasses.agent_tools.AssistantUiContext
+import com.everyday.everyday_glasses.agent_tools.BrowserRoutingCoordinator
+import com.everyday.everyday_glasses.agent_tools.BrowserRoutingHost
+import com.everyday.everyday_glasses.agent_tools.BrowserTaskPolicy
+import com.everyday.everyday_glasses.agent_tools.PageAgentAction
+import com.everyday.everyday_glasses.agent_tools.PageAgentActionCode
+import com.everyday.everyday_glasses.agent_tools.PageAgentActionResult
+import com.everyday.everyday_glasses.agent_tools.PageAgentActionType
+import com.everyday.everyday_glasses.agent_tools.PageAgentBrowserAdapter
+import com.everyday.everyday_glasses.agent_tools.PageAgentCoordinator
+import com.everyday.everyday_glasses.agent_tools.PageAgentFullscreenMode
+import com.everyday.everyday_glasses.agent_tools.PageAgentModelTurn
+import com.everyday.everyday_glasses.agent_tools.PageAgentPageSnapshot
+import com.everyday.everyday_glasses.agent_tools.PageAgentProvider
+import com.everyday.everyday_glasses.agent_tools.PageAgentScreenshot
+import com.everyday.everyday_glasses.agent_tools.PageAgentTargetBinding
+import com.everyday.everyday_glasses.agent_tools.PageAgentTargetUnavailableException
+import com.everyday.everyday_glasses.agent_tools.PageAgentTerminalState
+import com.everyday.everyday_glasses.agent_tools.PageAgentTurnRequest
+import com.everyday.everyday_glasses.agent_tools.PageAgentUiDispatcher
+import com.everyday.everyday_glasses.agent_tools.RunBrowserTaskSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.VoiceAssistantProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -15,7 +45,13 @@ class BrowserRoutingTest {
     fun `fullscreen voice route sends raw audio to page agent without main assistant call`() {
         val audioBytes = byteArrayOf(0, 1, 2, 3, 4, 5)
         val audioFile = tempAudio(audioBytes)
-        val provider = FakePageProvider(mutableListOf(PageAgentModelTurn(PageAgentAction(PageAgentActionType.FINISH))))
+        val provider = FakePageProvider(mutableListOf(
+            PageAgentModelTurn(
+                PageAgentAction(
+                    PageAgentActionType.FINISH
+                )
+            )
+        ))
         val browser = FakeBrowserAdapter()
         val host = FakeRoutingHost(fullscreen = browser)
         val pageAgent = PageAgentCoordinator({ "page-key" }, provider)
@@ -46,7 +82,10 @@ class BrowserRoutingTest {
         val provider = FakePageProvider(
             mutableListOf(
                 PageAgentModelTurn(
-                    PageAgentAction(PageAgentActionType.HANDOFF, reason = "The request is app-global")
+                    PageAgentAction(
+                        PageAgentActionType.HANDOFF,
+                        reason = "The request is app-global"
+                    )
                 )
             )
         )
@@ -104,7 +143,13 @@ class BrowserRoutingTest {
                 { "page-key" },
                 FakePageProvider(
                     mutableListOf(
-                        PageAgentModelTurn(PageAgentAction(PageAgentActionType.TAP, x = 1f, y = 1f)),
+                        PageAgentModelTurn(
+                            PageAgentAction(
+                                PageAgentActionType.TAP,
+                                x = 1f,
+                                y = 1f
+                            )
+                        ),
                         PageAgentModelTurn(PageAgentAction(PageAgentActionType.FINISH))
                     )
                 )
@@ -128,8 +173,20 @@ class BrowserRoutingTest {
 
     @Test
     fun `run_browser_task uses an existing browser and creates one only when absent`() {
-        val existingProvider = FakePageProvider(mutableListOf(PageAgentModelTurn(PageAgentAction(PageAgentActionType.FINISH))))
-        val existing = FakeBrowserAdapter(PageAgentTargetBinding("browser#existing", "tab", "webview"))
+        val existingProvider = FakePageProvider(mutableListOf(
+            PageAgentModelTurn(
+                PageAgentAction(
+                    PageAgentActionType.FINISH
+                )
+            )
+        ))
+        val existing = FakeBrowserAdapter(
+            PageAgentTargetBinding(
+                "browser#existing",
+                "tab",
+                "webview"
+            )
+        )
         val existingHost = FakeRoutingHost(existing = existing)
         val existingRouting = BrowserRoutingCoordinator(
             PageAgentCoordinator({ "page-key" }, existingProvider),
@@ -146,11 +203,22 @@ class BrowserRoutingTest {
 
         val createdProvider = FakePageProvider(
             mutableListOf(
-                PageAgentModelTurn(PageAgentAction(PageAgentActionType.FULLSCREEN, fullscreenMode = PageAgentFullscreenMode.VIDEO)),
+                PageAgentModelTurn(
+                    PageAgentAction(
+                        PageAgentActionType.FULLSCREEN,
+                        fullscreenMode = PageAgentFullscreenMode.VIDEO
+                    )
+                ),
                 PageAgentModelTurn(PageAgentAction(PageAgentActionType.FINISH))
             )
         )
-        val created = FakeBrowserAdapter(PageAgentTargetBinding("browser#created", "tab", "webview"))
+        val created = FakeBrowserAdapter(
+            PageAgentTargetBinding(
+                "browser#created",
+                "tab",
+                "webview"
+            )
+        )
         val createdHost = FakeRoutingHost(create = created)
         val createdRouting = BrowserRoutingCoordinator(
             PageAgentCoordinator({ "page-key" }, createdProvider),
@@ -172,13 +240,33 @@ class BrowserRoutingTest {
         val provider = FakePageProvider(
             mutableListOf(
                 PageAgentModelTurn(PageAgentAction(PageAgentActionType.TAP, x = 10f, y = 10f)),
-                PageAgentModelTurn(PageAgentAction(PageAgentActionType.TYPE, text = "better query")),
-                PageAgentModelTurn(PageAgentAction(PageAgentActionType.FINISH, message = "Search field filled")),
+                PageAgentModelTurn(
+                    PageAgentAction(
+                        PageAgentActionType.TYPE,
+                        text = "better query"
+                    )
+                ),
+                PageAgentModelTurn(
+                    PageAgentAction(
+                        PageAgentActionType.FINISH,
+                        message = "Search field filled"
+                    )
+                ),
                 PageAgentModelTurn(PageAgentAction(PageAgentActionType.TAP, x = 20f, y = 20f)),
                 PageAgentModelTurn(PageAgentAction(PageAgentActionType.WAIT, waitMs = 1L)),
                 PageAgentModelTurn(PageAgentAction(PageAgentActionType.TAP, x = 30f, y = 30f)),
-                PageAgentModelTurn(PageAgentAction(PageAgentActionType.FULLSCREEN, fullscreenMode = PageAgentFullscreenMode.VIDEO)),
-                PageAgentModelTurn(PageAgentAction(PageAgentActionType.FINISH, message = "Playing fullscreen"))
+                PageAgentModelTurn(
+                    PageAgentAction(
+                        PageAgentActionType.FULLSCREEN,
+                        fullscreenMode = PageAgentFullscreenMode.VIDEO
+                    )
+                ),
+                PageAgentModelTurn(
+                    PageAgentAction(
+                        PageAgentActionType.FINISH,
+                        message = "Playing fullscreen"
+                    )
+                )
             )
         )
         val browser = FakeBrowserAdapter()
@@ -327,7 +415,11 @@ class BrowserRoutingTest {
     }
 
     private class FakeBrowserAdapter(
-        override val binding: PageAgentTargetBinding = PageAgentTargetBinding("browser#bound", "tab", "webview")
+        override val binding: PageAgentTargetBinding = PageAgentTargetBinding(
+            "browser#bound",
+            "tab",
+            "webview"
+        )
     ) : PageAgentBrowserAdapter {
         var available = true
         var afterActionMakesUnavailable = false
@@ -378,7 +470,11 @@ class BrowserRoutingTest {
         override fun waitForPageChange(timeoutMs: Long, isCancelled: () -> Boolean): PageAgentActionResult {
             actions += "wait:$timeoutMs"
             return if (isCancelled()) {
-                PageAgentActionResult(PageAgentActionType.WAIT, PageAgentActionCode.CANCELLED, "cancelled")
+                PageAgentActionResult(
+                    PageAgentActionType.WAIT,
+                    PageAgentActionCode.CANCELLED,
+                    "cancelled"
+                )
             } else {
                 success(PageAgentActionType.WAIT)
             }

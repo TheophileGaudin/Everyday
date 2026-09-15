@@ -1,5 +1,29 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.agent_tools.AssistantModel
+import com.everyday.everyday_glasses.agent_tools.AssistantProviderTurn
+import com.everyday.everyday_glasses.agent_tools.AssistantScreenshot
+import com.everyday.everyday_glasses.agent_tools.AssistantSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.AssistantTextPresentationRequest
+import com.everyday.everyday_glasses.agent_tools.AssistantToolCall
+import com.everyday.everyday_glasses.agent_tools.AssistantToolCatalog
+import com.everyday.everyday_glasses.agent_tools.AssistantToolDefinition
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecution
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.agent_tools.AssistantToolLoop
+import com.everyday.everyday_glasses.agent_tools.AssistantUiContext
+import com.everyday.everyday_glasses.agent_tools.InspectUiSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.PresentTextSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.RequestScreenshotSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.VoiceAssistantProvider
+import com.everyday.everyday_glasses.agent_tools.WebSearchProvider
+import com.everyday.everyday_glasses.agent_tools.WebSearchResult
+import com.everyday.everyday_glasses.agent_tools.WebSearchSemanticToolHandler
+import com.everyday.everyday_glasses.agent_tools.assistantCompletedFuture
+import com.everyday.everyday_glasses.controllers.AppCommandResult
+import com.everyday.everyday_glasses.managers.AppCommandRegistry
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -15,7 +39,8 @@ class AssistantSemanticToolTest {
         val handler = RecordingHandler("synthetic_action")
         val catalog = AssistantToolCatalog(listOf(handler))
         val provider = FakeProvider()
-        val call = AssistantToolCall("call-1", "synthetic_action", JSONObject().put("value", "ready"))
+        val call =
+            AssistantToolCall("call-1", "synthetic_action", JSONObject().put("value", "ready"))
         val initialTurn = AssistantProviderTurn("interaction-1", listOf(call))
 
         val outcome = AssistantToolLoop(
@@ -205,39 +230,61 @@ class AssistantSemanticToolTest {
     @Test
     fun `successful custom web search grounds a later presentation and injects sources`() {
         val search = WebSearchSemanticToolHandler(WebSearchProvider { _, _, _ ->
-            Result.success(listOf(WebSearchResult("Evidence", "https://evidence.example/", "Current fact")))
+            Result.success(
+                listOf(
+                    WebSearchResult(
+                        "Evidence",
+                        "https://evidence.example/",
+                        "Current fact"
+                    )
+                )
+            )
         })
         val catalog = AssistantToolCatalog(listOf(search, PresentTextSemanticToolHandler()))
-        val searchCall = AssistantToolCall("search-1", "search_web", JSONObject().put("query", "current fact"))
+        val searchCall =
+            AssistantToolCall("search-1", "search_web", JSONObject().put("query", "current fact"))
         val presentCall = AssistantToolCall(
             "present-1",
             "present_text",
             JSONObject()
                 .put("content", "The current fact is supported.")
-                .put("presentation", JSONObject()
-                    .put("mode", "fullscreen")
-                    .put("duration_seconds", 10)
-                    .put("on_expiry", "close"))
+                .put(
+                    "presentation", JSONObject()
+                        .put("mode", "fullscreen")
+                        .put("duration_seconds", 10)
+                        .put("on_expiry", "close")
+                )
         )
         var continuation = 0
         val provider = object : VoiceAssistantProvider {
             override fun listModels(apiKey: String) = Result.success(emptyList<AssistantModel>())
             override fun probeAudioTools(apiKey: String, modelId: String) = Result.success(Unit)
             override fun startInteraction(apiKey: String, modelId: String, audioFile: File,
-                tools: List<AssistantToolDefinition>, uiContext: AssistantUiContext) = error("Prepared turn")
+                                          tools: List<AssistantToolDefinition>, uiContext: AssistantUiContext
+            ) = error("Prepared turn")
             override fun continueInteraction(apiKey: String, modelId: String, previousInteractionId: String,
-                tools: List<AssistantToolDefinition>, results: List<Pair<AssistantToolCall, AssistantToolExecution>>
+                                             tools: List<AssistantToolDefinition>, results: List<Pair<AssistantToolCall, AssistantToolExecution>>
             ): Result<AssistantProviderTurn> {
                 continuation++
-                return Result.success(AssistantProviderTurn(previousInteractionId,
-                    if (continuation == 1) listOf(presentCall) else emptyList()))
+                return Result.success(
+                    AssistantProviderTurn(
+                        previousInteractionId,
+                        if (continuation == 1) listOf(presentCall) else emptyList()
+                    )
+                )
             }
             override fun deleteUploadedFile(apiKey: String, name: String) = Unit
         }
         val presented = mutableListOf<AssistantTextPresentationRequest>()
         val context = executionContext().copy(presentText = { request ->
             presented += request
-            assistantCompletedFuture(AssistantToolExecution(true, AssistantToolExecutionCodes.SUCCESS, "Presented"))
+            assistantCompletedFuture(
+                AssistantToolExecution(
+                    true,
+                    AssistantToolExecutionCodes.SUCCESS,
+                    "Presented"
+                )
+            )
         })
 
         val outcome = AssistantToolLoop(
@@ -267,7 +314,7 @@ class AssistantSemanticToolTest {
             "Synthetic test action",
             JSONObject().put("type", "object").put(
                 "properties", JSONObject().put("value", JSONObject().put("type", "string"))
-            ).put("required", org.json.JSONArray().put("value"))
+            ).put("required", JSONArray().put("value"))
         )
         var validationCalls = 0
         var executionCalls = 0
@@ -286,7 +333,11 @@ class AssistantSemanticToolTest {
             context: AssistantToolExecutionContext
         ): CompletableFuture<AssistantToolExecution> = CompletableFuture.supplyAsync {
             executionCalls++
-            AssistantToolExecution(true, AssistantToolExecutionCodes.SUCCESS, "synthetic_action completed")
+            AssistantToolExecution(
+                true,
+                AssistantToolExecutionCodes.SUCCESS,
+                "synthetic_action completed"
+            )
         }
     }
 
