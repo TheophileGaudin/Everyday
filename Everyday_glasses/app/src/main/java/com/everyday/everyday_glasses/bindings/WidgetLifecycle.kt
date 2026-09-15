@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses.bindings
 
-import com.everyday.everyday_glasses.ui.BaseWidget
+import com.everyday.everyday_glasses.ui.widgets.BaseWidget
 
 interface WidgetLifecycle {
     fun onResume() {}

@@ -4,7 +4,7 @@ import android.content.Context
 import android.icu.util.LocaleData
 import android.icu.util.ULocale
 import android.os.Build
-import com.everyday.everyday_glasses.ui.SpeedometerWidget
+import com.everyday.everyday_glasses.ui.widgets.SpeedometerWidget
 import java.util.Locale
 
 enum class UnitSystemMode(val code: String) {

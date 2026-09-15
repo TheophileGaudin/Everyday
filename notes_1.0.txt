@@ -16,8 +16,8 @@ Tiered binocular update notifications
 Localized map refreshing
 
 Refactor
-
+General codebase refactor: files classified in categories for easier navigation by humans and agents
 Migrated a number of functionalities in WidgetContainer to dedicated services.
-Extracted a number of classes from MainActivity to reduce the number of responsibilities in this central file
+Extracted a number of classes from MainActivity and WidgetContainer to reduce the number of responsibilities in these central files
 Grouped a number of callbacks into interfaces.
 Defined boundary between active dashboard and listing of saved layouts

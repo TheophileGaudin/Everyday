@@ -3,10 +3,10 @@ package com.everyday.everyday_glasses.bindings
 import com.everyday.everyday_glasses.data_models.MapGeoPoint
 import com.everyday.everyday_glasses.data_models.NavigationOperationResult
 import com.everyday.everyday_glasses.data_models.PoiDisplayConfig
-import com.everyday.everyday_glasses.ui.BaseWidget
-import com.everyday.everyday_glasses.ui.BrowserWidget
-import com.everyday.everyday_glasses.ui.FileBrowserWidget
-import com.everyday.everyday_glasses.ui.TextBoxWidget
+import com.everyday.everyday_glasses.ui.widgets.BaseWidget
+import com.everyday.everyday_glasses.ui.widgets.BrowserWidget
+import com.everyday.everyday_glasses.ui.widgets.FileBrowserWidget
+import com.everyday.everyday_glasses.ui.widgets.TextBoxWidget
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.NewsSnapshot
 import com.everyday.shared.sync.NewsSourceSpec

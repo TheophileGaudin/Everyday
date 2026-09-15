@@ -14,7 +14,7 @@ import com.everyday.everyday_glasses.agent_tools.FinanceTileUpdateResult
 import com.everyday.everyday_glasses.agent_tools.FinanceWidgetSemanticState
 import com.everyday.everyday_glasses.agent_tools.UpdateFinanceTileSemanticToolHandler
 import com.everyday.everyday_glasses.agent_tools.toAssistantSemanticFacts
-import com.everyday.everyday_glasses.ui.FinanceWidget
+import com.everyday.everyday_glasses.ui.widgets.FinanceWidget
 import com.everyday.shared.sync.FinanceAssetType
 import com.everyday.shared.sync.FinanceChartType
 import com.everyday.shared.sync.FinanceDataProvider

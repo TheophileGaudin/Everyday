@@ -5,7 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.MotionEvent
-import com.everyday.everyday_glasses.ui.CursorView
+import com.everyday.everyday_glasses.ui.core.CursorView
 import com.everyday.everyday_glasses.helpers.TapGestureDetector
 import com.everyday.everyday_glasses.WidgetContainer
 import com.everyday.shared.transport.PointerAction

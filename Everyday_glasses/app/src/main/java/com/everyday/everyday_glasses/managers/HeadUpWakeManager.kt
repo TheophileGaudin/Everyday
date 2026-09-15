@@ -8,7 +8,7 @@ import android.hardware.SensorManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.everyday.everyday_glasses.ui.DashboardSettings
+import com.everyday.everyday_glasses.ui.core.DashboardSettings
 import com.everyday.everyday_glasses.bindings.WakeRequestListener
 import kotlin.math.atan2
 

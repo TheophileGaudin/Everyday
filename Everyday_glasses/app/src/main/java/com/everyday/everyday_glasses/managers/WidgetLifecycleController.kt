@@ -1,7 +1,7 @@
 package com.everyday.everyday_glasses.managers
 
 import android.os.Looper
-import com.everyday.everyday_glasses.ui.BaseWidget
+import com.everyday.everyday_glasses.ui.widgets.BaseWidget
 import com.everyday.everyday_glasses.stores.DashboardPersistence
 import com.everyday.everyday_glasses.data_models.WidgetDescriptor
 import com.everyday.everyday_glasses.data_models.WidgetDescriptors

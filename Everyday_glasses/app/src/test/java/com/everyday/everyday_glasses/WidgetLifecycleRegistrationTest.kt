@@ -6,7 +6,7 @@ import com.everyday.everyday_glasses.data_models.WidgetTypeId
 import com.everyday.everyday_glasses.managers.WidgetLifecycleController
 import com.everyday.everyday_glasses.managers.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.managers.WidgetRegistry
-import com.everyday.everyday_glasses.ui.BaseWidget
+import com.everyday.everyday_glasses.ui.widgets.BaseWidget
 import org.junit.Assert.assertThrows
 import org.junit.Test
 

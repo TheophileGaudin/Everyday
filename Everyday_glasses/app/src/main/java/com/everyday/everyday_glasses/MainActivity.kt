@@ -81,8 +81,8 @@ import com.everyday.everyday_glasses.stores.DashboardPersistence
 import com.everyday.everyday_glasses.stores.GlassesSettingsStore
 import com.everyday.everyday_glasses.stores.GoogleAuthPreferencesStore
 import com.everyday.everyday_glasses.stores.HeadUpSettings
-import com.everyday.everyday_glasses.ui.CursorView
-import com.everyday.everyday_glasses.ui.FileBrowserWidget
+import com.everyday.everyday_glasses.ui.core.CursorView
+import com.everyday.everyday_glasses.ui.widgets.FileBrowserWidget
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.NewsSnapshot
 import com.everyday.shared.sync.NewsSourceSpec

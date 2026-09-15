@@ -4,13 +4,13 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
-import com.everyday.everyday_glasses.ui.GlassesKeyboardView
+import com.everyday.everyday_glasses.ui.core.GlassesKeyboardView
 
 /**
  * Delegate that owns the GlassesKeyboardView instance, its visibility state,
  * the toggle-button bounds/paints, and all drawing and hit-testing helpers.
  *
- * Both [com.everyday.everyday_glasses.ui.TextBoxWidget] and [com.everyday.everyday_glasses.ui.BrowserWidget] compose this instead of duplicating
+ * Both [com.everyday.everyday_glasses.ui.widgets.TextBoxWidget] and [com.everyday.everyday_glasses.ui.widgets.BrowserWidget] compose this instead of duplicating
  * the same keyboard-overlay plumbing.
  */
 class KeyboardOverlayController {

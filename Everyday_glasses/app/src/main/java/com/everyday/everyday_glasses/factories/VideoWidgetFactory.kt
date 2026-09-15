@@ -4,7 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
-import com.everyday.everyday_glasses.ui.VideoWidget
+import com.everyday.everyday_glasses.ui.widgets.VideoWidget
 import com.everyday.everyday_glasses.bindings.VideoWidgetListener
 import com.everyday.everyday_glasses.stores.VideoQueueRepository
 

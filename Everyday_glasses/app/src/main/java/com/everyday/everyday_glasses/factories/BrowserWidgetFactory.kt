@@ -3,7 +3,7 @@ package com.everyday.everyday_glasses.factories
 import android.content.Context
 import android.view.View
 import android.view.ViewGroup
-import com.everyday.everyday_glasses.ui.BrowserWidget
+import com.everyday.everyday_glasses.ui.widgets.BrowserWidget
 
 /** Constructs BrowserWidget instances and places their native WebView below the canvas layer. */
 internal class BrowserWidgetFactory(

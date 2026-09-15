@@ -4,7 +4,7 @@ import android.graphics.Canvas
 import com.everyday.everyday_glasses.data_models.WidgetDescriptors
 import com.everyday.everyday_glasses.data_models.WidgetTypeId
 import com.everyday.everyday_glasses.managers.WidgetRegistry
-import com.everyday.everyday_glasses.ui.BaseWidget
+import com.everyday.everyday_glasses.ui.widgets.BaseWidget
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotSame

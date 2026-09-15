@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses.data_models
 
-import com.everyday.everyday_glasses.ui.BaseWidget
+import com.everyday.everyday_glasses.ui.widgets.BaseWidget
 
 /**
  * Lightweight wrapper for converting BaseWidget hover/drag state into the

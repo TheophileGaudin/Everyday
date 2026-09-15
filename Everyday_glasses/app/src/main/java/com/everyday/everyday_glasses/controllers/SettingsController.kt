@@ -8,16 +8,16 @@ import com.everyday.everyday_glasses.agent_tools.AssistantConfiguration
 import com.everyday.everyday_glasses.agent_tools.AssistantModel
 import com.everyday.everyday_glasses.agent_tools.AssistantModelSelectionMode
 import com.everyday.everyday_glasses.agent_tools.AssistantVoiceHoverControl
-import com.everyday.everyday_glasses.ui.BaseHoverControl
+import com.everyday.everyday_glasses.ui.hover_controls.BaseHoverControl
 import com.everyday.everyday_glasses.stores.DashboardPersistence
-import com.everyday.everyday_glasses.ui.DashboardSettings
+import com.everyday.everyday_glasses.ui.core.DashboardSettings
 import com.everyday.everyday_glasses.bindings.GeminiSettingsListener
 import com.everyday.everyday_glasses.data_models.GoogleAuthState
 import com.everyday.everyday_glasses.managers.HeadUpWakeManager
-import com.everyday.everyday_glasses.ui.HoverControlsLayoutEditor
-import com.everyday.everyday_glasses.ui.ShortcutsSettingsMenu
-import com.everyday.everyday_glasses.ui.SpeedometerSettingsMenu
-import com.everyday.everyday_glasses.ui.SpeedometerWidget
+import com.everyday.everyday_glasses.ui.hover_controls.HoverControlsLayoutEditor
+import com.everyday.everyday_glasses.ui.widgets.helpers.ShortcutsSettingsMenu
+import com.everyday.everyday_glasses.ui.widgets.helpers.SpeedometerSettingsMenu
+import com.everyday.everyday_glasses.ui.widgets.SpeedometerWidget
 import com.everyday.everyday_glasses.managers.UnitSystemMode
 import com.everyday.shared.command.AppCommandInvocation
 

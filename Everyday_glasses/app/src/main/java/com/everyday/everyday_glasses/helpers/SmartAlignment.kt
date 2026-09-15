@@ -3,7 +3,7 @@ package com.everyday.everyday_glasses.helpers
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import com.everyday.everyday_glasses.ui.BaseWidget
+import com.everyday.everyday_glasses.ui.widgets.BaseWidget
 import com.everyday.everyday_glasses.managers.WidgetRegistry
 import kotlin.math.abs
 

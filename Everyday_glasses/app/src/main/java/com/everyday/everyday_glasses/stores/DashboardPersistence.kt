@@ -4,7 +4,7 @@ import android.content.Context
 import android.os.Environment
 import android.util.AtomicFile
 import android.util.Log
-import com.everyday.everyday_glasses.ui.FinanceWidget
+import com.everyday.everyday_glasses.ui.widgets.FinanceWidget
 import com.everyday.everyday_glasses.data_models.MapViewMode
 import com.everyday.everyday_glasses.data_models.MapZoom
 import com.everyday.everyday_glasses.data_models.PoiDisplayConfig

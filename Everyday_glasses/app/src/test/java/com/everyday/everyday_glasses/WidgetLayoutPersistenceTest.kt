@@ -7,8 +7,8 @@ import com.everyday.everyday_glasses.data_models.WidgetDocument
 import com.everyday.everyday_glasses.data_models.WidgetTypeId
 import com.everyday.everyday_glasses.stores.BuiltInLayouts
 import com.everyday.everyday_glasses.stores.DashboardPersistence
-import com.everyday.everyday_glasses.ui.CloseAppHoverControl
-import com.everyday.everyday_glasses.ui.YouTubeHistoryHoverControl
+import com.everyday.everyday_glasses.ui.hover_controls.CloseAppHoverControl
+import com.everyday.everyday_glasses.ui.hover_controls.YouTubeHistoryHoverControl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull

@@ -3,7 +3,7 @@ package com.everyday.everyday_glasses.agent_tools
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import com.everyday.everyday_glasses.ui.BaseHoverControl
+import com.everyday.everyday_glasses.ui.hover_controls.BaseHoverControl
 import com.everyday.shared.transport.AssistantSessionState
 
 class AssistantVoiceHoverControl(private val onToggle: () -> Unit) :

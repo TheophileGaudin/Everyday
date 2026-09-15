@@ -3,7 +3,7 @@ package com.everyday.everyday_glasses.agent_tools
 import android.os.Handler
 import android.os.Looper
 import android.webkit.WebView
-import com.everyday.everyday_glasses.ui.BrowserWidget
+import com.everyday.everyday_glasses.ui.widgets.BrowserWidget
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
