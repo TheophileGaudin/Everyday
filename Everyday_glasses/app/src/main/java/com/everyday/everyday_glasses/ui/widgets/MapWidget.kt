@@ -54,7 +54,7 @@ import com.everyday.everyday_glasses.helpers.MapPoiSelection
 import com.everyday.everyday_glasses.helpers.MapPoiSelector
 import com.everyday.everyday_glasses.helpers.WidgetTheme
 import com.everyday.everyday_glasses.stores.MapRoadRepository
-import com.everyday.everyday_glasses.ui.core.GlassesKeyboardView
+import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 import com.everyday.shared.routing.GeoPoint
 import com.everyday.shared.routing.GuidanceFixStatus
 import com.everyday.shared.routing.LiveGuidanceUpdate

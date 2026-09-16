@@ -127,8 +127,8 @@ import com.everyday.everyday_glasses.ui.widgets.BaseWidget
 import com.everyday.everyday_glasses.ui.widgets.BrowserWidget
 import com.everyday.everyday_glasses.ui.widgets.CalendarWidget
 import com.everyday.everyday_glasses.ui.hover_controls.CloseAppHoverControl
-import com.everyday.everyday_glasses.ui.core.CloseConfirmationPopup
-import com.everyday.everyday_glasses.ui.core.ContextMenu
+import com.everyday.everyday_glasses.ui.components.CloseConfirmationPopup
+import com.everyday.everyday_glasses.ui.components.ContextMenu
 import com.everyday.everyday_glasses.ui.widgets.FileBrowserWidget
 import com.everyday.everyday_glasses.ui.widgets.FinanceWidget
 import com.everyday.everyday_glasses.ui.widgets.helpers.FormattingMenu
@@ -145,10 +145,10 @@ import com.everyday.everyday_glasses.ui.widgets.StatusBarWidget
 import com.everyday.everyday_glasses.ui.widgets.SubtitleWidget
 import com.everyday.everyday_glasses.ui.widgets.TextBoxWidget
 import com.everyday.everyday_glasses.ui.widgets.helpers.TextEditContextMenu
-import com.everyday.everyday_glasses.ui.core.ThreeDofOverlay
+import com.everyday.everyday_glasses.ui.components.ThreeDofOverlay
 import com.everyday.everyday_glasses.ui.widgets.VideoWidget
-import com.everyday.everyday_glasses.ui.core.WidgetLayoutDeleteConfirmationPopup
-import com.everyday.everyday_glasses.ui.core.WidgetLayoutNamePrompt
+import com.everyday.everyday_glasses.ui.components.WidgetLayoutDeleteConfirmationPopup
+import com.everyday.everyday_glasses.ui.components.WidgetLayoutNamePrompt
 import com.everyday.shared.sync.FinanceSnapshot
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.NewsSnapshot

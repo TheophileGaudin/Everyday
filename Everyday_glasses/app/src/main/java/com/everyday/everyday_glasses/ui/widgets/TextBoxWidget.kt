@@ -22,7 +22,7 @@ import com.everyday.everyday_glasses.controllers.KeyboardOverlayController
 import com.everyday.everyday_glasses.data_models.WidgetInteractionState
 import com.everyday.everyday_glasses.data_models.WidgetTypeId
 import com.everyday.everyday_glasses.helpers.WidgetTheme
-import com.everyday.everyday_glasses.ui.core.GlassesKeyboardView
+import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 
 /**
  * A dynamic text box widget that can be moved, resized, deleted, and toggled fullscreen.

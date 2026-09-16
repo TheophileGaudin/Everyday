@@ -37,7 +37,7 @@ import com.everyday.everyday_glasses.agent_tools.PageAgentScreenshot
 import com.everyday.everyday_glasses.controllers.KeyboardOverlayController
 import com.everyday.everyday_glasses.data_models.WidgetInteractionState
 import com.everyday.everyday_glasses.data_models.WidgetTypeId
-import com.everyday.everyday_glasses.ui.core.GlassesKeyboardView
+import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.net.URLEncoder

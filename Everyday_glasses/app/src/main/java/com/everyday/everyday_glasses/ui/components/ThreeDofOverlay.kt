@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.ui.core
+package com.everyday.everyday_glasses.ui.components
 
 import android.graphics.Canvas
 import android.graphics.Color

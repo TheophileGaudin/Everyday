@@ -10,7 +10,7 @@ import com.everyday.everyday_glasses.agent_tools.AssistantModelSelectionMode
 import com.everyday.everyday_glasses.agent_tools.AssistantVoiceHoverControl
 import com.everyday.everyday_glasses.ui.hover_controls.BaseHoverControl
 import com.everyday.everyday_glasses.stores.DashboardPersistence
-import com.everyday.everyday_glasses.ui.core.DashboardSettings
+import com.everyday.everyday_glasses.ui.components.DashboardSettings
 import com.everyday.everyday_glasses.bindings.GeminiSettingsListener
 import com.everyday.everyday_glasses.data_models.GoogleAuthState
 import com.everyday.everyday_glasses.managers.HeadUpWakeManager
