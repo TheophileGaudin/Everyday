@@ -2,7 +2,6 @@ package com.everyday.everyday_glasses.google
 
 import android.app.Activity
 import android.util.Log
-import com.everyday.everyday_glasses.google.GoogleAuthStateStore
 import com.everyday.shared.sync.CalendarSnapshot
 import java.io.IOException
 import java.util.concurrent.Executor
@@ -91,7 +90,7 @@ class GoogleAuthCoordinator(
         onStateChanged?.invoke(currentState)
     }
 
-    fun beginConnect(activity: Activity?) {
+    fun beginConnect() {
         if (currentState.isPhoneFallbackMode) {
             requestPhoneFallbackAuthorization()
             return
@@ -121,7 +120,7 @@ class GoogleAuthCoordinator(
         }
 
         if (store.loadRefreshToken().isNullOrBlank() && !hasValidInMemoryToken()) {
-            beginConnect(activity)
+            beginConnect()
             return
         }
 
@@ -141,18 +140,18 @@ class GoogleAuthCoordinator(
         }
 
         if (!isConfigured()) {
-            publish(GoogleAuthState.Companion.googleUnavailable(account, CONFIG_DETAIL))
+            publish(GoogleAuthState.googleUnavailable(account, CONFIG_DETAIL))
             return
         }
 
         if (hasValidInMemoryToken()) {
-            saveStableState(GoogleAuthState.Companion.calendarAuthorized(account, "Calendar access granted"))
+            saveStableState(GoogleAuthState.calendarAuthorized(account, "Calendar access granted"))
             return
         }
 
         val refreshToken = store.loadRefreshToken()
         if (refreshToken.isNullOrBlank()) {
-            saveStableState(GoogleAuthState.Companion.signedIn(account, RECONNECT_DETAIL))
+            saveStableState(GoogleAuthState.signedIn(account, RECONNECT_DETAIL))
             return
         }
 
@@ -160,11 +159,11 @@ class GoogleAuthCoordinator(
             result.exceptionOrNull()?.let { throwable ->
                 when (throwable) {
                     is GoogleUserActionRequiredException -> saveStableState(
-                        GoogleAuthState.Companion.signedIn(account, RECONNECT_DETAIL)
+                        GoogleAuthState.signedIn(account, RECONNECT_DETAIL)
                     )
 
                     is GoogleUserCanceledException -> saveStableState(
-                        GoogleAuthState.Companion.calendarDenied(account, "Calendar access denied")
+                        GoogleAuthState.calendarDenied(account, "Calendar access denied")
                     )
 
                     else -> publish(classifyError(account, throwable))
@@ -192,7 +191,7 @@ class GoogleAuthCoordinator(
 
         inMemoryAccessToken = null
         store.clear()
-        publish(GoogleAuthState.Companion.signedOut("Signed out"))
+        publish(GoogleAuthState.signedOut("Signed out"))
     }
 
     fun onPhoneAuthStateChanged(
@@ -202,14 +201,14 @@ class GoogleAuthCoordinator(
     ) {
         when (status) {
             GooglePhoneAuthStatus.SIGNED_OUT -> saveStableState(
-                GoogleAuthState.Companion.phoneFallbackRequired(
+                GoogleAuthState.phoneFallbackRequired(
                     account = account ?: currentState.account,
                     detail = detail ?: PHONE_FALLBACK_DETAIL
                 )
             )
 
             GooglePhoneAuthStatus.AUTHORIZING -> publish(
-                GoogleAuthState.Companion.signingIn(
+                GoogleAuthState.signingIn(
                     account = account ?: currentState.account,
                     detail = detail ?: "Complete Google authorization on your phone",
                     authMode = GoogleAuthState.AuthMode.PHONE_FALLBACK
@@ -220,20 +219,20 @@ class GoogleAuthCoordinator(
                 val resolvedAccount = account ?: currentState.account
                 if (resolvedAccount != null) {
                     saveStableState(
-                        GoogleAuthState.Companion.calendarAuthorized(
+                        GoogleAuthState.calendarAuthorized(
                             resolvedAccount,
                             detail ?: "Calendar data is being synced from the phone",
                             authMode = GoogleAuthState.AuthMode.PHONE_FALLBACK
                         )
                     )
                 } else {
-                    saveStableState(GoogleAuthState.Companion.phoneFallbackRequired(detail = detail ?: PHONE_FALLBACK_DETAIL))
+                    saveStableState(GoogleAuthState.phoneFallbackRequired(detail = detail ?: PHONE_FALLBACK_DETAIL))
                 }
                 phoneFallbackBridge?.requestCalendarSnapshot()
             }
 
             GooglePhoneAuthStatus.ERROR -> publish(
-                GoogleAuthState.Companion.phoneFallbackRequired(
+                GoogleAuthState.phoneFallbackRequired(
                     account = account ?: currentState.account,
                     detail = detail ?: PHONE_FALLBACK_DETAIL
                 )
@@ -245,7 +244,7 @@ class GoogleAuthCoordinator(
         val account = snapshot.account?.let { GoogleAccountSummary(it.email, it.displayName) }
             ?: currentState.account ?: return
         saveStableState(
-            GoogleAuthState.Companion.calendarAuthorized(
+            GoogleAuthState.calendarAuthorized(
                 account,
                 detail = "Calendar data synced from phone",
                 authMode = GoogleAuthState.AuthMode.PHONE_FALLBACK
@@ -276,7 +275,7 @@ class GoogleAuthCoordinator(
         currentValidAccessToken()?.let { accessToken ->
             currentState.account?.let { account ->
                 if (!currentState.isCalendarAuthorized) {
-                    saveStableState(GoogleAuthState.Companion.calendarAuthorized(account, "Calendar access granted"))
+                    saveStableState(GoogleAuthState.calendarAuthorized(account, "Calendar access granted"))
                 }
             }
             callback(Result.success(accessToken))
@@ -290,7 +289,7 @@ class GoogleAuthCoordinator(
                 startDeviceAuthorizationFlow()
             } else {
                 currentState.account?.let { account ->
-                    saveStableState(GoogleAuthState.Companion.signedIn(account, RECONNECT_DETAIL))
+                    saveStableState(GoogleAuthState.signedIn(account, RECONNECT_DETAIL))
                 }
                 callback(Result.failure(GoogleUserActionRequiredException(RECONNECT_DETAIL)))
             }
@@ -299,7 +298,7 @@ class GoogleAuthCoordinator(
 
         if (!networkStatusProvider.isConnected()) {
             val failure = IOException("Network error")
-            publish(GoogleAuthState.Companion.networkError(currentState.account, "Network error"))
+            publish(GoogleAuthState.networkError(currentState.account, "Network error"))
             callback(Result.failure(failure))
             return
         }
@@ -316,7 +315,7 @@ class GoogleAuthCoordinator(
 
     private fun requestPhoneFallbackAuthorization() {
         saveStableState(
-            GoogleAuthState.Companion.phoneFallbackRequired(
+            GoogleAuthState.phoneFallbackRequired(
                 account = currentState.account,
                 detail = PHONE_FALLBACK_DETAIL
             )
@@ -329,13 +328,13 @@ class GoogleAuthCoordinator(
 
         val fallbackState = currentState.account?.let {
             if (currentState.isCalendarAuthorized) {
-                GoogleAuthState.Companion.calendarAuthorized(it, currentState.detail, authMode = currentState.authMode)
+                GoogleAuthState.calendarAuthorized(it, currentState.detail, authMode = currentState.authMode)
             } else {
-                GoogleAuthState.Companion.signedIn(it, currentState.detail, authMode = currentState.authMode)
+                GoogleAuthState.signedIn(it, currentState.detail, authMode = currentState.authMode)
             }
-        } ?: GoogleAuthState.Companion.signedOut(authMode = GoogleAuthState.AuthMode.DIRECT_DEVICE)
+        } ?: GoogleAuthState.signedOut(authMode = GoogleAuthState.AuthMode.DIRECT_DEVICE)
 
-        publish(GoogleAuthState.Companion.signingIn(account = fallbackState.account, detail = "Preparing Google verification..."))
+        publish(GoogleAuthState.signingIn(account = fallbackState.account, detail = "Preparing Google verification..."))
 
         executor.execute {
             try {
@@ -352,7 +351,7 @@ class GoogleAuthCoordinator(
                 )
 
                 publish(
-                    GoogleAuthState.Companion.awaitingDeviceVerification(
+                    GoogleAuthState.awaitingDeviceVerification(
                         account = fallbackState.account,
                         verificationUri = response.verificationUri,
                         userCode = response.userCode,
@@ -407,8 +406,8 @@ class GoogleAuthCoordinator(
                 ))
                 pendingTokenCallback = null
                 flow.fallbackState.account?.let {
-                    saveStableState(GoogleAuthState.Companion.calendarDenied(it, "Calendar access denied"))
-                } ?: saveStableState(GoogleAuthState.Companion.signedOut("Google sign-in canceled"))
+                    saveStableState(GoogleAuthState.calendarDenied(it, "Calendar access denied"))
+                } ?: saveStableState(GoogleAuthState.signedOut("Google sign-in canceled"))
                 return
             } catch (unsupported: GoogleOAuthScopeUnsupportedException) {
                 activeFlow = null
@@ -425,7 +424,7 @@ class GoogleAuthCoordinator(
     private fun switchToPhoneFallback(detail: String) {
         pendingTokenCallback?.invoke(Result.failure(GoogleUserActionRequiredException(detail)))
         pendingTokenCallback = null
-        saveStableState(GoogleAuthState.Companion.phoneFallbackRequired(account = currentState.account, detail = detail))
+        saveStableState(GoogleAuthState.phoneFallbackRequired(account = currentState.account, detail = detail))
         phoneFallbackBridge?.requestPhoneAuthorization()
     }
 
@@ -433,8 +432,8 @@ class GoogleAuthCoordinator(
         val profile = tokenResponse.idToken?.let(::parseGoogleIdToken)
         val account = when {
             !profile?.email.isNullOrBlank() -> GoogleAccountSummary(
-                email = profile?.email.orEmpty(),
-                displayName = profile?.displayName
+                email = profile.email,
+                displayName = profile.displayName
             )
 
             currentState.account != null -> currentState.account!!
@@ -448,7 +447,7 @@ class GoogleAuthCoordinator(
         )
 
         tokenResponse.refreshToken?.let { store.saveRefreshToken(it) }
-        saveStableState(GoogleAuthState.Companion.calendarAuthorized(account, "Calendar access granted"))
+        saveStableState(GoogleAuthState.calendarAuthorized(account, "Calendar access granted"))
 
         pendingTokenCallback?.invoke(Result.success(tokenResponse.accessToken))
         pendingTokenCallback = null
@@ -471,9 +470,9 @@ class GoogleAuthCoordinator(
                 )
 
                 val account = resolveAccountForTokenResponse(tokenResponse)
-                saveStableState(GoogleAuthState.Companion.calendarAuthorized(account, "Calendar access granted"))
+                saveStableState(GoogleAuthState.calendarAuthorized(account, "Calendar access granted"))
                 callback(Result.success(tokenResponse.accessToken))
-            } catch (invalidGrant: GoogleOAuthInvalidGrantException) {
+            } catch (_: GoogleOAuthInvalidGrantException) {
                 handleRefreshTokenExpired(allowUi, callback)
             } catch (unsupported: GoogleOAuthScopeUnsupportedException) {
                 switchToPhoneFallback(unsupported.message ?: PHONE_FALLBACK_DETAIL)
@@ -496,14 +495,14 @@ class GoogleAuthCoordinator(
         if (allowUi) {
             pendingTokenCallback = callback
             if (account != null) {
-                saveStableState(GoogleAuthState.Companion.signedIn(account, RECONNECT_DETAIL))
+                saveStableState(GoogleAuthState.signedIn(account, RECONNECT_DETAIL))
             }
             startDeviceAuthorizationFlow()
             return
         }
 
         if (account != null) {
-            saveStableState(GoogleAuthState.Companion.signedIn(account, RECONNECT_DETAIL))
+            saveStableState(GoogleAuthState.signedIn(account, RECONNECT_DETAIL))
         }
         callback(Result.failure(GoogleUserActionRequiredException(RECONNECT_DETAIL)))
     }
@@ -521,8 +520,8 @@ class GoogleAuthCoordinator(
         val profile = tokenResponse.idToken?.let(::parseGoogleIdToken)
         if (!profile?.email.isNullOrBlank()) {
             return GoogleAccountSummary(
-                email = profile?.email.orEmpty(),
-                displayName = profile?.displayName ?: currentState.account?.displayName
+                email = profile.email,
+                displayName = profile.displayName ?: currentState.account?.displayName
             )
         }
 
@@ -532,18 +531,18 @@ class GoogleAuthCoordinator(
 
     private fun classifyError(account: GoogleAccountSummary?, throwable: Throwable): GoogleAuthState {
         if (!networkStatusProvider.isConnected()) {
-            return GoogleAuthState.Companion.networkError(account, "Network error", authMode = currentState.authMode)
+            return GoogleAuthState.networkError(account, "Network error", authMode = currentState.authMode)
         }
 
         return when (throwable) {
-            is GoogleOAuthScopeUnsupportedException -> GoogleAuthState.Companion.phoneFallbackRequired(account, throwable.message)
-            is GoogleOAuthClientConfigurationException -> GoogleAuthState.Companion.googleUnavailable(account, throwable.message)
-            is GoogleOAuthInvalidGrantException -> GoogleAuthState.Companion.signedIn(
-                account ?: return GoogleAuthState.Companion.signedOut(RECONNECT_DETAIL),
+            is GoogleOAuthScopeUnsupportedException -> GoogleAuthState.phoneFallbackRequired(account, throwable.message)
+            is GoogleOAuthClientConfigurationException -> GoogleAuthState.googleUnavailable(account, throwable.message)
+            is GoogleOAuthInvalidGrantException -> GoogleAuthState.signedIn(
+                account ?: return GoogleAuthState.signedOut(RECONNECT_DETAIL),
                 RECONNECT_DETAIL
             )
 
-            else -> GoogleAuthState.Companion.googleUnavailable(
+            else -> GoogleAuthState.googleUnavailable(
                 account,
                 throwable.message ?: "Google auth failed",
                 authMode = currentState.authMode
@@ -609,7 +608,7 @@ class GoogleAuthCoordinator(
 
     private fun ensureConfigured(): Boolean {
         if (!isConfigured()) {
-            publish(GoogleAuthState.Companion.googleUnavailable(currentState.account, CONFIG_DETAIL))
+            publish(GoogleAuthState.googleUnavailable(currentState.account, CONFIG_DETAIL))
             return false
         }
         return true
@@ -617,7 +616,7 @@ class GoogleAuthCoordinator(
 
     private fun ensureNetwork(): Boolean {
         if (!networkStatusProvider.isConnected()) {
-            publish(GoogleAuthState.Companion.networkError(currentState.account, "Network error", authMode = currentState.authMode))
+            publish(GoogleAuthState.networkError(currentState.account, "Network error", authMode = currentState.authMode))
             return false
         }
         return true

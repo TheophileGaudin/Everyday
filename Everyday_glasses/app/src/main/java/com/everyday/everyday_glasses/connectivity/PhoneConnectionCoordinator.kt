@@ -3,16 +3,6 @@ package com.everyday.everyday_glasses.connectivity
 import android.content.Context
 import android.net.wifi.p2p.WifiP2pDevice
 import android.util.Log
-import com.everyday.everyday_glasses.connectivity.AssistantControlListener
-import com.everyday.everyday_glasses.connectivity.DestinationSearchMessageListener
-import com.everyday.everyday_glasses.connectivity.MirrorSessionListener
-import com.everyday.everyday_glasses.connectivity.RemoteAuthListener
-import com.everyday.everyday_glasses.connectivity.RemoteContentListener
-import com.everyday.everyday_glasses.connectivity.RemoteInputListener
-import com.everyday.everyday_glasses.connectivity.RouteMessageListener
-import com.everyday.everyday_glasses.connectivity.SubtitleMessageListener
-import com.everyday.everyday_glasses.connectivity.SyncMessageListener
-import com.everyday.everyday_glasses.connectivity.TransportConnectionListener
 import com.everyday.everyday_glasses.contracts.WifiDirectConnectionListener
 import com.everyday.everyday_glasses.google.GoogleAccountSummary
 import com.everyday.everyday_glasses.google.GooglePhoneAuthStatus
@@ -89,7 +79,7 @@ interface PhoneConnectionCallbacks {
 class PhoneConnectionCoordinator(
     context: Context,
     private val callbacks: PhoneConnectionCallbacks,
-    private val preferredPhoneAddress: String? = null,
+    preferredPhoneAddress: String? = null,
     private val preferredWifiDirectDeviceAddress: String? = null
 ) : SyncMessenger, GlassesRouteTransport, GlassesDestinationSearchTransport {
 
@@ -288,9 +278,9 @@ class PhoneConnectionCoordinator(
         }
 
         rfcommClient.remoteInputListener = object : RemoteInputListener {
-            override fun onPointerReceived(data: TransportMessage.Pointer) {
+            override fun onPointerReceived(pointer: TransportMessage.Pointer) {
                 if (released) return
-                callbacks.onPointerReceived(data)
+                callbacks.onPointerReceived(pointer)
             }
 
             override fun onKeyReceived(key: String) {
@@ -298,14 +288,14 @@ class PhoneConnectionCoordinator(
                 callbacks.onKeyReceived(key)
             }
 
-            override fun onLongPressWithClipboard(clipboardContent: String?) {
+            override fun onLongPressWithClipboard(clipboard: String?) {
                 if (released) return
-                callbacks.onLongPressWithClipboard(clipboardContent)
+                callbacks.onLongPressWithClipboard(clipboard)
             }
 
-            override fun onClipboardReceived(clipboardContent: String) {
+            override fun onClipboardReceived(clipboard: String) {
                 if (released) return
-                callbacks.onClipboardReceived(clipboardContent)
+                callbacks.onClipboardReceived(clipboard)
             }
         }
 

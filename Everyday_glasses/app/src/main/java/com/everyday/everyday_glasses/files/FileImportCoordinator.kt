@@ -333,7 +333,7 @@ class FileImportCoordinator(
                 } catch (error: ImportFailure) {
                     Log.e(TAG, "Failed to import $label: ${error.error}", error)
                     if (!released) postUi { callbacks.showFileImportError(error.error) }
-                } catch (error: InterruptedException) {
+                } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                     Log.d(TAG, "Import interrupted: $label")
                 } catch (error: Throwable) {

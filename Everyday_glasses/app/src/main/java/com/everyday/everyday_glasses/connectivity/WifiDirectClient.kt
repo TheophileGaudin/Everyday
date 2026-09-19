@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.net.NetworkInfo
 import android.net.wifi.p2p.*
 import android.os.Build
 import android.os.Handler
@@ -16,8 +15,8 @@ import android.util.Log
 import com.everyday.everyday_glasses.contracts.WifiDirectConnectionListener
 
 /**
- * Handles WiFi Direct connection on the glasses side.
- * Discovers and connects to the phone's WiFi Direct group.
+ * Handles Wi-Fi Direct connection on the glasses side.
+ * Discovers and connects to the phone's Wi-Fi Direct group.
  */
 class WifiDirectClient(private val context: Context) {
 
@@ -96,14 +95,20 @@ class WifiDirectClient(private val context: Context) {
                     }
 
                     WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> {
-                        val networkInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            intent.getParcelableExtra(WifiP2pManager.EXTRA_NETWORK_INFO, NetworkInfo::class.java)
-                        } else {
-                            @Suppress("DEPRECATION")
-                            intent.getParcelableExtra(WifiP2pManager.EXTRA_NETWORK_INFO)
-                        }
+                        val p2pInfo: WifiP2pInfo? =
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                intent.getParcelableExtra(
+                                    WifiP2pManager.EXTRA_WIFI_P2P_INFO,
+                                    WifiP2pInfo::class.java
+                                )
+                            } else {
+                                @Suppress("DEPRECATION")
+                                intent.getParcelableExtra(
+                                    WifiP2pManager.EXTRA_WIFI_P2P_INFO
+                                )
+                            }
 
-                        if (networkInfo?.isConnected == true) {
+                        if (p2pInfo?.groupFormed == true) {
                             requestConnectionInfo()
                         } else {
                             Log.d(TAG, "Disconnected from WiFi Direct")
@@ -177,7 +182,7 @@ class WifiDirectClient(private val context: Context) {
     }
 
     /**
-     * Connect to a specific WiFi Direct device (the phone).
+     * Connect to a specific Wi-Fi Direct device (the phone).
      */
     @SuppressLint("MissingPermission") // Guarded by canUseWifiDirect().
     fun connectToDevice(device: WifiP2pDevice): Boolean {
@@ -212,12 +217,6 @@ class WifiDirectClient(private val context: Context) {
     fun disconnect(): Boolean {
         if (!canUseWifiDirect()) return false
         wifiP2pManager?.removeGroup(channel, null)
-        return true
-    }
-
-    fun stopDiscovery(): Boolean {
-        if (!canUseWifiDirect()) return false
-        wifiP2pManager?.stopPeerDiscovery(channel, null)
         return true
     }
 

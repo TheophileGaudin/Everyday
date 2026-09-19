@@ -19,16 +19,6 @@ import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
 import androidx.core.app.ActivityCompat
-import com.everyday.everyday_glasses.connectivity.AssistantControlListener
-import com.everyday.everyday_glasses.connectivity.DestinationSearchMessageListener
-import com.everyday.everyday_glasses.connectivity.MirrorSessionListener
-import com.everyday.everyday_glasses.connectivity.RemoteAuthListener
-import com.everyday.everyday_glasses.connectivity.RemoteContentListener
-import com.everyday.everyday_glasses.connectivity.RemoteInputListener
-import com.everyday.everyday_glasses.connectivity.RouteMessageListener
-import com.everyday.everyday_glasses.connectivity.SubtitleMessageListener
-import com.everyday.everyday_glasses.connectivity.SyncMessageListener
-import com.everyday.everyday_glasses.connectivity.TransportConnectionListener
 import com.everyday.everyday_glasses.map.GlassesDestinationSearchTransport
 import com.everyday.everyday_glasses.map.GlassesRouteTransport
 import com.everyday.everyday_glasses.google.GooglePhoneAuthStatus
@@ -168,7 +158,7 @@ class RfcommClient(
         batteryUpdateRunnable?.let { handler.removeCallbacks(it) }
         batteryUpdateRunnable = null
 
-        try { socket?.close() } catch (e: IOException) {}
+        try { socket?.close() } catch (_: IOException) {}
         flushRxLogOnDisconnect("stop()")
         socket = null
         outputStream = null
@@ -207,7 +197,7 @@ class RfcommClient(
     
     /**
      * Send request to phone to send its current clipboard content.
-     * This is useful when opening paste menu to ensure we have latest clipboard.
+     * This is useful when opening paste menu to ensure we have the latest clipboard.
      */
     fun requestClipboard(): Boolean =
         enqueueMessage(TransportMessage.ClipboardRequest, "request clipboard")
@@ -391,7 +381,7 @@ class RfcommClient(
                     // Use insecure socket for better compatibility
                     Log.d(TAG, "Creating RFCOMM socket...")
                     socket = phone.createRfcommSocketToServiceRecord(SPP_UUID)
-                    try { bluetoothAdapter?.cancelDiscovery() } catch (e: SecurityException) {}
+                    try { bluetoothAdapter?.cancelDiscovery() } catch (_: SecurityException) {}
 
                     Log.d(TAG, "Attempting to connect...")
                     socket?.connect()
@@ -425,7 +415,7 @@ class RfcommClient(
                 } catch (e: IOException) {
                     Log.e(TAG, "Connection failed: ${e.message}")
                     postIfActive { transportConnectionListener?.onStatusChanged("Connection failed, retrying...") }
-                    try { socket?.close() } catch (e2: IOException) {}
+                    try { socket?.close() } catch (_: IOException) {}
                     socket = null
                     outputStream = null
                     Thread.sleep(2000)
@@ -471,7 +461,7 @@ class RfcommClient(
         val phoneClassDevices = phoneLikeDevices.filter { device ->
             device.bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.PHONE
         }
-        val candidates = if (phoneClassDevices.isNotEmpty()) phoneClassDevices else phoneLikeDevices
+        val candidates = phoneClassDevices.ifEmpty { phoneLikeDevices }
         val selected = candidates.singleOrNull()
         Log.d(TAG, "Selected device: ${selected?.name ?: "none (candidates=${candidates.size})"}")
         return selected
@@ -506,7 +496,7 @@ class RfcommClient(
                         )
                     }
                 }
-            } catch (e: IOException) {
+            } catch (_: IOException) {
                 Log.d(TAG, "Connection lost")
             }
 
