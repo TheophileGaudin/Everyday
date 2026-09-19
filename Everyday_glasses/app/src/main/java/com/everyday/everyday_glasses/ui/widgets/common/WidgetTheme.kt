@@ -1,6 +1,7 @@
 package com.everyday.everyday_glasses.ui.widgets.common
 
 import android.graphics.Color
+import androidx.core.graphics.toColorInt
 
 /**
  * Shared widget visual constants.
@@ -21,19 +22,19 @@ object WidgetTheme {
     }
 
     object ColorValue {
-        val hoverBorder: Int = Color.parseColor("#6666AA")
-        val primaryButton: Int = Color.parseColor("#4488AA")
-        val pinIdleButton: Int = Color.parseColor("#666688")
-        val pinnedButton: Int = Color.parseColor("#44AA66")
-        val resizeHandle: Int = Color.parseColor("#888899")
-        val dangerButton: Int = Color.parseColor("#AA4444")
-        val focusedBorder: Int = Color.parseColor("#4444AA")
-        val selectionHighlight: Int = Color.parseColor("#806699FF")
-        val scrollbarTrack: Int = Color.parseColor("#22666688")
-        val scrollbarThumb: Int = Color.parseColor("#66888899")
+        val hoverBorder: Int = "#6666AA".toColorInt()
+        val primaryButton: Int = "#4488AA".toColorInt()
+        val pinIdleButton: Int = "#666688".toColorInt()
+        val pinnedButton: Int = "#44AA66".toColorInt()
+        val resizeHandle: Int = "#888899".toColorInt()
+        val dangerButton: Int = "#AA4444".toColorInt()
+        val focusedBorder: Int = "#4444AA".toColorInt()
+        val selectionHighlight: Int = "#806699FF".toColorInt()
+        val scrollbarTrack: Int = "#22666688".toColorInt()
+        val scrollbarThumb: Int = "#66888899".toColorInt()
         val streamErrorBorder: Int = dangerButton
-        val streamErrorText: Int = Color.parseColor("#FF6666")
-        val stopButton: Int = Color.parseColor("#D32F2F")
-        val warningText: Int = Color.parseColor("#FFAA00")
+        val streamErrorText: Int = "#FF6666".toColorInt()
+        val stopButton: Int = "#D32F2F".toColorInt()
+        val warningText: Int = "#FFAA00".toColorInt()
     }
 }

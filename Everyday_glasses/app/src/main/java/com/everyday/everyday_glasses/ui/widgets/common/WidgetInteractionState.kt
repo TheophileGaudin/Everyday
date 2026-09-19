@@ -16,9 +16,6 @@ data class WidgetInteractionState(
             else -> baseState
         }
 
-    val isHoveringWidget: Boolean
-        get() = baseState != BaseWidget.BaseState.IDLE
-
     fun <T> toChromeLocal(
         idle: T,
         content: T,

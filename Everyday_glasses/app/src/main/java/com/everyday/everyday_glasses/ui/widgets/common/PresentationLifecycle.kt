@@ -62,8 +62,6 @@ data class PresentationSnapshot(
     val pinned: Boolean = true
 )
 
-typealias PresentationWidgetSnapshot = PresentationSnapshot
-
 enum class PresentationEndReason {
     EXPIRED,
     REPLACED,
@@ -142,8 +140,6 @@ class PresentationController(
     var activeSession: PresentationSession? = null
         private set
 
-    val isActive: Boolean get() = activeSession != null
-
     /**
      * Starts a presentation after deterministically restoring any previous session.
      * [snapshotProvider] runs only after the previous session has ended.
@@ -206,9 +202,6 @@ class PresentationController(
         }
         return true
     }
-
-    fun progressAt(atElapsedMs: Long = nowElapsedMs()): PresentationProgress? =
-        activeSession?.let { progressAt(it, atElapsedMs) }
 
     private fun progressAt(session: PresentationSession, atElapsedMs: Long): PresentationProgress {
         val elapsed = (atElapsedMs - session.startedAtElapsedMs).coerceAtLeast(0L)

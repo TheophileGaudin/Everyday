@@ -1,11 +1,11 @@
 package com.everyday.everyday_glasses.ui.widgets.common
 
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
 import com.everyday.everyday_glasses.ui.widgets.BaseWidget
 import kotlin.math.abs
+import androidx.core.graphics.toColorInt
 
 /**
  * Hook injected into BaseWidget so the container can adjust drag/resize positions
@@ -145,29 +145,29 @@ class SmartAlignmentHelper(private val registry: WidgetRegistry) : SnapProvider 
             }
         }
 
-        return if (bestKind != null) bestDelta to Guide(isVertical, bestPosition, bestKind!!)
+        return if (bestKind != null) bestDelta to Guide(isVertical, bestPosition, bestKind)
         else 0f to null
     }
 }
 
 /**
- * Renders the active alignment guide lines as thin coloured strokes spanning the
+ * Renders the active alignment guide lines as thin colored strokes spanning the
  * screen. Drawn on top of widgets but below menus.
  */
 class SmartAlignmentRenderer {
 
     private val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#FF66CC")
+        color = "#FF66CC".toColorInt()
         strokeWidth = 1f
         style = Paint.Style.STROKE
     }
     private val centerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#FFD24A")
+        color = "#FFD24A".toColorInt()
         strokeWidth = 1f
         style = Paint.Style.STROKE
     }
     private val screenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#66CCFF")
+        color = "#66CCFF".toColorInt()
         strokeWidth = 1f
         style = Paint.Style.STROKE
     }
