@@ -43,8 +43,6 @@ class WidgetCaptureRestore(private val context: Context) {
     private val onWidgetFocusChanged: ((BaseWidget?, Boolean) -> Unit)?
         get() = listener?.let { value -> { widget, focused -> value.onWidgetFocusChanged(widget, focused) } }
     private val onWidgetStateChanged: (() -> Unit)? get() = listener?.let { value -> { value.onWidgetStateChanged() } }
-    private val onBrowserKeyboardRequest: ((Boolean) -> Unit)?
-        get() = listener?.let { value -> { show -> value.onBrowserKeyboardRequested(show) } }
 
     // ==================== Common-field helpers ====================
 
@@ -85,7 +83,7 @@ class WidgetCaptureRestore(private val context: Context) {
     }
 
     /**
-     * Restore isPinned and minimize state on a widget from a [CommonWidgetFields] state.
+     * Restore isPinned and minimize state on a widget from a [DashboardPersistence.CommonWidgetFields] state.
      *
      * @param widget The widget to restore state on
      * @param state  The persisted common fields
@@ -134,14 +132,6 @@ class WidgetCaptureRestore(private val context: Context) {
             savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
             isPinned = c.isPinned
         )
-    }
-
-    /**
-     * Get all text widget states for persistence.
-     * Includes HTML content for rich text formatting, minimize state, and pin state.
-     */
-    fun getTextWidgetStates(widgets: List<TextBoxWidget>): List<DashboardPersistence.TextWidgetState> {
-        return widgets.map(::getTextWidgetState)
     }
 
     /**
@@ -278,14 +268,6 @@ class WidgetCaptureRestore(private val context: Context) {
             savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
             isPinned = c.isPinned
         )
-    }
-
-    /**
-     * Get all browser widget states for persistence.
-     */
-    fun getBrowserWidgetStates(browserWidgets: List<BrowserWidget>): List<DashboardPersistence.BrowserWidgetState> {
-        return browserWidgets
-            .mapNotNull(::getBrowserWidgetState)
     }
 
     /**
@@ -478,8 +460,8 @@ class WidgetCaptureRestore(private val context: Context) {
             // Validate bounds against current screen size
             val adjustedX = state.x.coerceIn(0f, (screenWidth - state.width).coerceAtLeast(0f))
             val adjustedY = state.y.coerceIn(0f, (screenHeight - state.height).coerceAtLeast(0f))
-            val adjustedWidth = state.width.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenWidth.toFloat())
-            val adjustedHeight = state.height.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenHeight.toFloat())
+            val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenWidth.toFloat())
+            val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenHeight.toFloat())
 
             TextBoxWidget(
                 context,
@@ -531,8 +513,8 @@ class WidgetCaptureRestore(private val context: Context) {
                 return@mapNotNull null
             }
 
-            val adjustedWidth = state.width.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenWidth.toFloat())
-            val adjustedHeight = state.height.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenHeight.toFloat())
+            val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenWidth.toFloat())
+            val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenHeight.toFloat())
             val adjustedX = state.x.coerceIn(0f, (screenWidth - adjustedWidth).coerceAtLeast(0f))
             val adjustedY = state.y.coerceIn(0f, (screenHeight - adjustedHeight).coerceAtLeast(0f))
 
@@ -584,17 +566,7 @@ class WidgetCaptureRestore(private val context: Context) {
             )
         }
     }
-
-    /**
-     * Restore browser widgets from saved states.
-     *
-     * @param states The list of saved browser widget states
-     * @param rootView The root ViewGroup to add WebViews to
-     * @param containerView The WidgetContainer view (for z-ordering)
-     * @param screenWidth Current screen width
-     * @param screenHeight Current screen height
-     * @return List of restored BrowserWidget instances
-     */
+    
     /** Apply saved browser-specific and common fields to an already-created widget. */
     fun restoreBrowserWidgetState(
         widget: BrowserWidget,
@@ -623,8 +595,8 @@ class WidgetCaptureRestore(private val context: Context) {
         locationWidget?.let { loc ->
             val adjustedX = state.x.coerceIn(0f, (screenWidth - state.width).coerceAtLeast(0f))
             val adjustedY = state.y.coerceIn(0f, (screenHeight - state.height).coerceAtLeast(0f))
-            val adjustedWidth = state.width.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenWidth.toFloat())
-            val adjustedHeight = state.height.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenHeight.toFloat())
+            val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenWidth.toFloat())
+            val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenHeight.toFloat())
 
             loc.setPosition(adjustedX, adjustedY)
             loc.widgetWidth = adjustedWidth
@@ -650,8 +622,8 @@ class WidgetCaptureRestore(private val context: Context) {
         screenWidth: Int, screenHeight: Int
     ) {
         widget ?: return
-        val adjustedWidth = state.width.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenWidth.toFloat())
-        val adjustedHeight = state.height.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenHeight.toFloat())
+        val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenWidth.toFloat())
+        val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenHeight.toFloat())
         val adjustedX = state.x.coerceIn(0f, (screenWidth - adjustedWidth).coerceAtLeast(0f))
         val adjustedY = state.y.coerceIn(0f, (screenHeight - adjustedHeight).coerceAtLeast(0f))
         widget.setPosition(adjustedX, adjustedY)
@@ -679,8 +651,8 @@ class WidgetCaptureRestore(private val context: Context) {
         calendarWidget?.let { widget ->
             val adjustedX = state.x.coerceIn(0f, (screenWidth - state.width).coerceAtLeast(0f))
             val adjustedY = state.y.coerceIn(0f, (screenHeight - state.height).coerceAtLeast(0f))
-            val adjustedWidth = state.width.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenWidth.toFloat())
-            val adjustedHeight = state.height.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenHeight.toFloat())
+            val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenWidth.toFloat())
+            val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenHeight.toFloat())
 
             widget.setPosition(adjustedX, adjustedY)
             widget.widgetWidth = adjustedWidth
@@ -708,8 +680,8 @@ class WidgetCaptureRestore(private val context: Context) {
         screenMirrorWidget?.let { mirror ->
             val adjustedX = state.x.coerceIn(0f, (screenWidth - state.width).coerceAtLeast(0f))
             val adjustedY = state.y.coerceIn(0f, (screenHeight - state.height).coerceAtLeast(0f))
-            val adjustedWidth = state.width.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenWidth.toFloat())
-            val adjustedHeight = state.height.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenHeight.toFloat())
+            val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenWidth.toFloat())
+            val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenHeight.toFloat())
 
             mirror.setPosition(adjustedX, adjustedY)
             mirror.widgetWidth = adjustedWidth
@@ -737,8 +709,8 @@ class WidgetCaptureRestore(private val context: Context) {
         financeWidget?.let { fw ->
             val adjustedX = state.x.coerceIn(0f, (screenWidth - state.width).coerceAtLeast(0f))
             val adjustedY = state.y.coerceIn(0f, (screenHeight - state.height).coerceAtLeast(0f))
-            val adjustedWidth = state.width.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenWidth.toFloat())
-            val adjustedHeight = state.height.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenHeight.toFloat())
+            val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenWidth.toFloat())
+            val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenHeight.toFloat())
 
             fw.setPosition(adjustedX, adjustedY)
             fw.widgetWidth = adjustedWidth
@@ -769,8 +741,8 @@ class WidgetCaptureRestore(private val context: Context) {
         newsWidget?.let { nw ->
             val adjustedX = state.x.coerceIn(0f, (screenWidth - state.width).coerceAtLeast(0f))
             val adjustedY = state.y.coerceIn(0f, (screenHeight - state.height).coerceAtLeast(0f))
-            val adjustedWidth = state.width.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenWidth.toFloat())
-            val adjustedHeight = state.height.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenHeight.toFloat())
+            val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenWidth.toFloat())
+            val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenHeight.toFloat())
 
             nw.setPosition(adjustedX, adjustedY)
             nw.widgetWidth = adjustedWidth
@@ -795,8 +767,8 @@ class WidgetCaptureRestore(private val context: Context) {
         notificationsWidget?.let { widget ->
             val adjustedX = state.x.coerceIn(0f, (screenWidth - state.width).coerceAtLeast(0f))
             val adjustedY = state.y.coerceIn(0f, (screenHeight - state.height).coerceAtLeast(0f))
-            val adjustedWidth = state.width.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenWidth.toFloat())
-            val adjustedHeight = state.height.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenHeight.toFloat())
+            val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenWidth.toFloat())
+            val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenHeight.toFloat())
 
             widget.setPosition(adjustedX, adjustedY)
             widget.widgetWidth = adjustedWidth
@@ -827,8 +799,8 @@ class WidgetCaptureRestore(private val context: Context) {
         speedometerWidget?.let { sw ->
             val adjustedX = state.x.coerceIn(0f, (screenWidth - state.width).coerceAtLeast(0f))
             val adjustedY = state.y.coerceIn(0f, (screenHeight - state.height).coerceAtLeast(0f))
-            val adjustedWidth = state.width.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenWidth.toFloat())
-            val adjustedHeight = state.height.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenHeight.toFloat())
+            val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenWidth.toFloat())
+            val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenHeight.toFloat())
 
             sw.setPosition(adjustedX, adjustedY)
             sw.widgetWidth = adjustedWidth
@@ -852,8 +824,8 @@ class WidgetCaptureRestore(private val context: Context) {
         subtitleWidget?.let { sw ->
             val adjustedX = state.x.coerceIn(0f, (screenWidth - state.width).coerceAtLeast(0f))
             val adjustedY = state.y.coerceIn(0f, (screenHeight - state.height).coerceAtLeast(0f))
-            val adjustedWidth = state.width.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenWidth.toFloat())
-            val adjustedHeight = state.height.coerceIn(BaseWidget.Companion.MIN_WIDGET_SIZE, screenHeight.toFloat())
+            val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenWidth.toFloat())
+            val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenHeight.toFloat())
 
             sw.setPosition(adjustedX, adjustedY)
             sw.widgetWidth = adjustedWidth

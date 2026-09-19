@@ -191,7 +191,7 @@ object WidgetDocument {
         return buildList {
             for (index in 0 until records.length()) {
                 val record = records.optJSONObject(index) ?: continue
-                val type = WidgetTypeId.values().firstOrNull {
+                val type = WidgetTypeId.entries.firstOrNull {
                     it.persistedId == record.optString(KEY_TYPE)
                 } ?: continue
                 val instanceId = record.optString(KEY_INSTANCE_ID).trim()

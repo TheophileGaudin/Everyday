@@ -10,6 +10,7 @@ import android.os.Environment
 import android.provider.Settings
 import android.util.Log
 import androidx.core.app.ActivityCompat
+import androidx.core.net.toUri
 
 /** Application reactions to permission outcomes. */
 interface PermissionCoordinatorCallbacks {
@@ -93,9 +94,8 @@ class PermissionCoordinator(
     fun hasFileBrowserAccess(): Boolean {
         val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        } else
             hasPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
-        } else true
 
         Log.d(
             TAG,
@@ -210,7 +210,7 @@ class PermissionCoordinator(
         }
 
         val missingPermissions = buildList {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            if (true &&
                 !hasPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
             ) {
                 add(Manifest.permission.READ_EXTERNAL_STORAGE)
@@ -242,13 +242,13 @@ class PermissionCoordinator(
 
         val appSettingsIntent = Intent(
             Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-            Uri.parse("package:${activity.packageName}")
+            "package:${activity.packageName}".toUri()
         )
 
         runCatching {
             activity.startActivity(appSettingsIntent)
         }.recoverCatching {
-            activity.startActivity(
+        activity.startActivity(
                 Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
             )
         }.onFailure { error ->

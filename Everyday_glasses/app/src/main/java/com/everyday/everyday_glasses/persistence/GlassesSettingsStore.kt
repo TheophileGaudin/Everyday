@@ -2,6 +2,7 @@ package com.everyday.everyday_glasses.persistence
 
 import android.content.Context
 import com.everyday.everyday_glasses.headup_wake.HeadUpWakeManager
+import androidx.core.content.edit
 
 data class HeadUpSettings(
     val holdTimeMs: Long,
@@ -34,19 +35,19 @@ class GlassesSettingsStore(context: Context) {
     )
 
     fun saveHeadUpSettings(settings: HeadUpSettings) {
-        preferences.edit()
-            .putLong(KEY_HEAD_UP_TIME, settings.holdTimeMs)
-            .putLong(KEY_WAKE_DURATION, settings.wakeDurationMs)
-            .putFloat(KEY_ANGLE_THRESHOLD, settings.angleThresholdDegrees)
-            .putBoolean(KEY_HEADSUP_ENABLED, settings.enabled)
-            .apply()
+        preferences.edit {
+            putLong(KEY_HEAD_UP_TIME, settings.holdTimeMs)
+                .putLong(KEY_WAKE_DURATION, settings.wakeDurationMs)
+                .putFloat(KEY_ANGLE_THRESHOLD, settings.angleThresholdDegrees)
+                .putBoolean(KEY_HEADSUP_ENABLED, settings.enabled)
+        }
     }
 
     fun loadSmartAlignmentEnabled(): Boolean =
         preferences.getBoolean(KEY_SMART_ALIGNMENT, DEFAULT_SMART_ALIGNMENT)
 
     fun saveSmartAlignmentEnabled(enabled: Boolean) {
-        preferences.edit().putBoolean(KEY_SMART_ALIGNMENT, enabled).apply()
+        preferences.edit { putBoolean(KEY_SMART_ALIGNMENT, enabled) }
     }
 
     private companion object {

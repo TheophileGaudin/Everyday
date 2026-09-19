@@ -2,10 +2,12 @@ package com.everyday.everyday_glasses.permissions
 
 import android.Manifest
 import android.os.Build
+import androidx.annotation.RequiresApi
 
 /** Pure permission-selection rules kept separate from Activity state. */
 internal object PermissionRequestPolicy {
 
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     fun wifiDirectRuntimePermission(sdkInt: Int): String? =
         if (sdkInt >= Build.VERSION_CODES.TIRAMISU) {
             Manifest.permission.NEARBY_WIFI_DEVICES
@@ -13,6 +15,7 @@ internal object PermissionRequestPolicy {
             null
         }
 
+    @RequiresApi(Build.VERSION_CODES.S)
     fun startupPermissions(
         sdkInt: Int,
         hasPermission: (String) -> Boolean

@@ -1,21 +1,16 @@
 package com.everyday.everyday_glasses.persistence
 
-import android.content.Context
 import android.util.Log
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
 
 class WidgetLayoutManager(
-    private val context: Context,
     private val layouts: LayoutLibrary,
-    private val canApplyLayout: () -> Boolean,
     private val captureDashboard: () -> WidgetDocument.PersistedDashboard,
-    private val applyDashboard: (WidgetDocument.PersistedDashboard) -> Unit,
     private val buildDeliveredLayout: (String) -> WidgetDocument.PersistedDashboard?,
     private val showNamePrompt: (String) -> Unit,
     private val showNameError: (String) -> Unit,
     private val dismissNamePrompt: () -> Unit,
     private val showDeleteConfirmation: (String) -> Unit,
-    private val beforeApplyLayout: () -> Unit,
     private val notifyTransientContentChanged: () -> Unit,
     private val notifyPersistentContentChanged: () -> Unit
 ) {
@@ -24,19 +19,7 @@ class WidgetLayoutManager(
     }
 
     var activeLayoutName: String? = null
-
-    private fun loadLayoutByNameOrDelivered(name: String): WidgetDocument.PersistedDashboard? {
-        return buildDeliveredLayout(name) ?: layouts.load(name)
-    }
-
     private fun isDeliveredWithoutSavedOverride(name: String): Boolean = BuiltInLayouts.isDelivered(name)
-
-    private fun canonicalLoadName(name: String): String {
-        val trimmed = name.trim()
-        return BuiltInLayouts.DELIVERED_LAYOUTS.firstOrNull { it.equals(trimmed, ignoreCase = true) }
-            ?: trimmed
-    }
-
     fun requestDeleteLayout(name: String): Boolean {
         if (isDeliveredWithoutSavedOverride(name)) {
             notifyTransientContentChanged()
@@ -105,16 +88,4 @@ class WidgetLayoutManager(
         notifyTransientContentChanged()
     }
 
-    private fun loadLayoutByName(name: String) {
-        if (!canApplyLayout()) return
-        val state = loadLayoutByNameOrDelivered(name) ?: return
-        val loadedName = canonicalLoadName(name)
-        Log.d(TAG, "Loading widget layout '$loadedName'")
-        beforeApplyLayout()
-        applyDashboard(state)
-        activeLayoutName = loadedName
-        // Loading a layout is a user mutation.  The dashboard restore itself suppresses
-        // notifications, so emit the single persistent signal after the active name changes.
-        notifyPersistentContentChanged()
-    }
 }

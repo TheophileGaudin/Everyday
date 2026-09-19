@@ -42,7 +42,7 @@ object ShortcutsStore {
                 val definition = registry.find(invocation.commandId) ?: continue
                 if (!definition.shortcutEligible || registry.validate(invocation) !is CommandValidationResult.Valid) continue
                 if (deduped.none { it.commandId == invocation.commandId }) deduped.add(invocation)
-                if (deduped.size >= AppCommandRegistry.Companion.MAX_LEMON_COMMANDS) break
+                if (deduped.size >= AppCommandRegistry.MAX_LEMON_COMMANDS) break
             }
             val target = file(context)
             target.parentFile?.mkdirs()
@@ -71,7 +71,7 @@ object ShortcutsStore {
             val definition = registry.find(id) ?: continue
             if (!definition.shortcutEligible || result.any { it.commandId == id }) continue
             result += registry.invocation(definition)
-            if (result.size >= AppCommandRegistry.Companion.MAX_LEMON_COMMANDS) break
+            if (result.size >= AppCommandRegistry.MAX_LEMON_COMMANDS) break
         }
         return result.ifEmpty { registry.defaultShortcutInvocations }
     }

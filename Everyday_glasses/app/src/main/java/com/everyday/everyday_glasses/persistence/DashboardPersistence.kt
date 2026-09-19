@@ -68,8 +68,8 @@ object DashboardPersistence {
         put("x", state.x.toDouble())
         put("y", state.y.toDouble())
         if (includeSize && state is SizedWidgetFields) {
-            put("width", (state as SizedWidgetFields).width.toDouble())
-            put("height", (state as SizedWidgetFields).height.toDouble())
+            put("width", state.width.toDouble())
+            put("height", state.height.toDouble())
         }
         put("isMinimized", state.isMinimized)
         put("isFullscreen", state.isFullscreen)
@@ -246,7 +246,7 @@ object DashboardPersistence {
         val zoom: String = MapZoom.MEDIUM.name,
         val showLocation: Boolean = true,
         val showCountry: Boolean = true,
-        val poiConfig: PoiDisplayConfig = PoiDisplayConfig.Companion.DEFAULT,
+        val poiConfig: PoiDisplayConfig = PoiDisplayConfig.DEFAULT,
         override val isMinimized: Boolean = false,
         override val isFullscreen: Boolean = false,
         override val savedMinX: Float = 0f,
@@ -602,10 +602,6 @@ object DashboardPersistence {
         val trimmed = name?.trim() ?: return false
         return trimmed.equals(DEFAULT_LAYOUT_NAME, ignoreCase = true)
     }
-
-    private fun sanitizeLayoutName(name: String?): String? =
-        name?.trim()?.takeIf { it.isNotBlank() }
-
 
     private fun writeDashboardLayoutRecords(
         context: Context,
@@ -968,7 +964,7 @@ object DashboardPersistence {
         }
 
     private fun parsePoiConfig(obj: JSONObject?): PoiDisplayConfig {
-        if (obj == null) return PoiDisplayConfig.Companion.DEFAULT
+        if (obj == null) return PoiDisplayConfig.DEFAULT
         return runCatching {
             val state = runCatching {
                 PoiDisplayConfigState.valueOf(obj.optString("state", PoiDisplayConfigState.CUSTOM.name))
@@ -978,7 +974,7 @@ object DashboardPersistence {
             // variable cannot have that change discarded merely because its old state flag stayed
             // DEFAULT.
             if (state == PoiDisplayConfigState.DEFAULT && !obj.has("mode")) {
-                return@runCatching PoiDisplayConfig.Companion.DEFAULT
+                return@runCatching PoiDisplayConfig.DEFAULT
             }
             val categoriesJson = obj.optJSONArray("categories") ?: error("POI categories missing")
             val categories = buildSet {
@@ -988,10 +984,10 @@ object DashboardPersistence {
             // Recreate them through the compatibility factory so the previous voice behavior
             // remains stable.
             if (!obj.has("mode")) {
-                return@runCatching PoiDisplayConfig.Companion.custom(
+                return@runCatching PoiDisplayConfig.custom(
                     categories = categories,
-                    radiusM = obj.optInt("radiusM", PoiDisplayConfig.Companion.DEFAULT_RADIUS_M),
-                    maxResults = obj.optInt("maxResults", PoiDisplayConfig.Companion.DEFAULT_MAX_RESULTS)
+                    radiusM = obj.optInt("radiusM", PoiDisplayConfig.DEFAULT_RADIUS_M),
+                    maxResults = obj.optInt("maxResults", PoiDisplayConfig.DEFAULT_MAX_RESULTS)
                 )
             }
             val mode = runCatching {
@@ -1005,26 +1001,26 @@ object DashboardPersistence {
             }
             val importantCategories = stringSet(
                 "importantCategories",
-                PoiDisplayConfig.Companion.DEFAULT_IMPORTANT_CATEGORIES
+                PoiDisplayConfig.DEFAULT_IMPORTANT_CATEGORIES
             )
             val importantRadii = buildMap {
                 val json = obj.optJSONObject("importantRadiiM")
                 if (json == null) {
-                    putAll(PoiDisplayConfig.Companion.DEFAULT_IMPORTANT_RADII_M)
+                    putAll(PoiDisplayConfig.DEFAULT_IMPORTANT_RADII_M)
                 } else {
                     json.keys().forEach { category -> put(category, json.getInt(category)) }
                 }
             }
             val normalCategories = stringSet(
                 "normalCategories",
-                PoiDisplayConfig.Companion.DEFAULT_NORMAL_CATEGORIES
+                PoiDisplayConfig.DEFAULT_NORMAL_CATEGORIES
             )
             val candidate = PoiDisplayConfig(
                 categories = categories,
-                radiusM = obj.optInt("radiusM", PoiDisplayConfig.Companion.DEFAULT_RADIUS_M),
+                radiusM = obj.optInt("radiusM", PoiDisplayConfig.DEFAULT_RADIUS_M),
                 maxResults = obj.optInt(
                     "maxResults",
-                    PoiDisplayConfig.Companion.DEFAULT_MAX_RESULTS
+                    PoiDisplayConfig.DEFAULT_MAX_RESULTS
                 ),
                 state = PoiDisplayConfigState.CUSTOM,
                 mode = mode,
@@ -1033,36 +1029,36 @@ object DashboardPersistence {
                 normalCategories = normalCategories,
                 normalMaxResults = obj.optInt(
                     "normalMaxResults",
-                    PoiDisplayConfig.Companion.DEFAULT_NORMAL_MAX_RESULTS
+                    PoiDisplayConfig.DEFAULT_NORMAL_MAX_RESULTS
                 ),
                 showClosest = obj.optBoolean(
                     "showClosest",
-                    PoiDisplayConfig.Companion.DEFAULT_SHOW_CLOSEST
+                    PoiDisplayConfig.DEFAULT_SHOW_CLOSEST
                 ),
                 closestRadiusM = obj.optInt(
                     "closestRadiusM",
-                    PoiDisplayConfig.Companion.DEFAULT_CLOSEST_RADIUS_M
+                    PoiDisplayConfig.DEFAULT_CLOSEST_RADIUS_M
                 ),
                 balanceCategories = obj.optBoolean("balanceCategories", false)
             )
             if (
                 candidate.mode == PoiDisplayMode.DEFAULT &&
-                candidate.categories == PoiDisplayConfig.Companion.DEFAULT.categories &&
-                candidate.radiusM == PoiDisplayConfig.Companion.DEFAULT.radiusM &&
-                candidate.maxResults == PoiDisplayConfig.Companion.DEFAULT.maxResults &&
-                candidate.importantCategories == PoiDisplayConfig.Companion.DEFAULT.importantCategories &&
-                candidate.importantRadiiM == PoiDisplayConfig.Companion.DEFAULT.importantRadiiM &&
-                candidate.normalCategories == PoiDisplayConfig.Companion.DEFAULT.normalCategories &&
-                candidate.normalMaxResults == PoiDisplayConfig.Companion.DEFAULT.normalMaxResults &&
-                candidate.showClosest == PoiDisplayConfig.Companion.DEFAULT.showClosest &&
-                candidate.closestRadiusM == PoiDisplayConfig.Companion.DEFAULT.closestRadiusM &&
+                candidate.categories == PoiDisplayConfig.DEFAULT.categories &&
+                candidate.radiusM == PoiDisplayConfig.DEFAULT.radiusM &&
+                candidate.maxResults == PoiDisplayConfig.DEFAULT.maxResults &&
+                candidate.importantCategories == PoiDisplayConfig.DEFAULT.importantCategories &&
+                candidate.importantRadiiM == PoiDisplayConfig.DEFAULT.importantRadiiM &&
+                candidate.normalCategories == PoiDisplayConfig.DEFAULT.normalCategories &&
+                candidate.normalMaxResults == PoiDisplayConfig.DEFAULT.normalMaxResults &&
+                candidate.showClosest == PoiDisplayConfig.DEFAULT.showClosest &&
+                candidate.closestRadiusM == PoiDisplayConfig.DEFAULT.closestRadiusM &&
                 !candidate.balanceCategories
             ) {
-                PoiDisplayConfig.Companion.DEFAULT
+                PoiDisplayConfig.DEFAULT
             } else {
                 candidate
             }
-        }.getOrDefault(PoiDisplayConfig.Companion.DEFAULT)
+        }.getOrDefault(PoiDisplayConfig.DEFAULT)
     }
 
     private fun parseCalendarPayload(payload: JSONObject): CalendarWidgetState? =
@@ -1127,7 +1123,7 @@ object DashboardPersistence {
                 )
             }
         }
-        if (parsed.isNotEmpty()) return parsed.take(FinanceWidget.Companion.MAX_TILES)
+        if (parsed.isNotEmpty()) return parsed.take(FinanceWidget.MAX_TILES)
         return listOf(
             FinanceDashboardTileConfig(
                 id = "index_${fallbackSymbol}_${fallbackRange}",
