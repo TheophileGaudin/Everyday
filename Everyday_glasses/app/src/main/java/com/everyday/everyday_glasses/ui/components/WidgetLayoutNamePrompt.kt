@@ -4,7 +4,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
-import com.everyday.everyday_glasses.ui.components.LayoutNameHandler
+import androidx.core.graphics.toColorInt
 
 /**
  * Small modal prompt used for naming saved widget layouts.
@@ -39,12 +39,12 @@ class WidgetLayoutNamePrompt(
     }
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#EE222222")
+        color = "#EE222222".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#666666")
+        color = "#666666".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 2f
     }
@@ -57,12 +57,12 @@ class WidgetLayoutNamePrompt(
     }
 
     private val inputPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#151526")
+        color = "#151526".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val inputBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#5B8DEF")
+        color = "#5B8DEF".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 2f
     }
@@ -74,23 +74,23 @@ class WidgetLayoutNamePrompt(
     }
 
     private val errorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#FFB0A8")
+        color = "#FFB0A8".toColorInt()
         textSize = 14f
         textAlign = Paint.Align.LEFT
     }
 
     private val selectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#665B8DEF")
+        color = "#665B8DEF".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val primaryButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#4A90D9")
+        color = "#4A90D9".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val secondaryButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#616161")
+        color = "#616161".toColorInt()
         style = Paint.Style.FILL
     }
 

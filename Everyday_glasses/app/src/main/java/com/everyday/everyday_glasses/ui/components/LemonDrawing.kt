@@ -9,6 +9,7 @@ import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
+import androidx.core.graphics.toColorInt
 
 /**
  * Procedural lemon-slice icon, transcribed from the matplotlib reference. Used by the
@@ -19,18 +20,18 @@ import kotlin.math.sin
  */
 object LemonDrawing {
 
-    // Colours from the reference.
-    private val COLOR_RIND = Color.parseColor("#FFD400")
-    private val COLOR_WHITE_RING = Color.WHITE
-    private val COLOR_GOLD_RING = Color.parseColor("#D8B900")
-    private val COLOR_SEGMENT = Color.parseColor("#FFD51F")
-    private val COLOR_SEGMENT_SELECTED = Color.parseColor("#FFF06A")
-    private val COLOR_SEGMENT_BORDER = Color.WHITE
-    private val COLOR_RIND_BORDER = Color.parseColor("#40000000")
-    private val COLOR_SEED = Color.WHITE
-    private val COLOR_SEED_BORDER = Color.parseColor("#73000000")
-    private val COLOR_PITH = Color.WHITE
-    private val COLOR_PITH_INNER_BORDER = Color.parseColor("#D2D2D2")
+    // Colors from the reference.
+    private val COLOR_RIND = "#FFD400".toColorInt()
+    private const val COLOR_WHITE_RING = Color.WHITE
+    private val COLOR_GOLD_RING = "#D8B900".toColorInt()
+    private val COLOR_SEGMENT = "#FFD51F".toColorInt()
+    private val COLOR_SEGMENT_SELECTED = "#FFF06A".toColorInt()
+    private const val COLOR_SEGMENT_BORDER = Color.WHITE
+    private val COLOR_RIND_BORDER = "#40000000".toColorInt()
+    private const val COLOR_SEED = Color.WHITE
+    private val COLOR_SEED_BORDER = "#73000000".toColorInt()
+    private const val COLOR_PITH = Color.WHITE
+    private val COLOR_PITH_INNER_BORDER = "#D2D2D2".toColorInt()
 
     // Radii as fractions of the bounding-box radius.
     private const val OUTER_R = 1.00f

@@ -1,5 +1,6 @@
 package com.everyday.everyday_glasses.ui.components
 
+import android.annotation.SuppressLint
 import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -16,6 +17,8 @@ import com.everyday.everyday_glasses.settings.UnitSystemMode
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.sin
+import androidx.core.content.res.ResourcesCompat
+import androidx.core.graphics.toColorInt
 
 /**
  * A standalone modal menu for app settings (brightness, head-up wake settings).
@@ -56,6 +59,7 @@ class DashboardSettings(
     }
 
     companion object {
+        @Suppress("unused")
         private const val TAG = "DashboardSettings"
         private const val BASE_SCREEN_WIDTH = 640f
         private const val BASE_SCREEN_HEIGHT = 480f
@@ -149,9 +153,6 @@ class DashboardSettings(
         }
 
     var googleAuthState: GoogleAuthState = GoogleAuthState.signedOut()
-        set(value) {
-            field = value
-        }
 
     var geminiConfigured = false
     var geminiReady = false
@@ -231,12 +232,12 @@ class DashboardSettings(
     private val menuRect = RectF()
     private val closeButtonRect = RectF()
     private val headsUpIconBitmap: Bitmap? = BitmapFactory.decodeResource(resources, R.drawable.ic_heads_up_cutout)
-    private val googleIconDrawable: Drawable? = resources.getDrawable(R.drawable.ic_google_g, null)
+    private val googleIconDrawable: Drawable? = ResourcesCompat.getDrawable(resources, R.drawable.ic_google_g, null)
 
     // Main menu elements
     private val brightnessTrackRect = RectF()
     private val unitSystemRect = RectF()
-    private val unitSegmentRects = Array(UnitSystemMode.values().size) { RectF() }
+    private val unitSegmentRects = Array(UnitSystemMode.entries.size) { RectF() }
     private val mainButtons = mutableListOf(
         MainButtonSpec(MainButton.HEADSUP),
         MainButtonSpec(MainButton.GOOGLE),
@@ -270,12 +271,12 @@ class DashboardSettings(
 
     // Paints
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#EE222222") // Slightly transparent dark background
+        color = "#EE222222".toColorInt() // Slightly transparent dark background
         style = Paint.Style.FILL
     }
 
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#555555")
+        color = "#555555".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 2f
     }
@@ -299,7 +300,7 @@ class DashboardSettings(
     }
 
     private val closeButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#E53935") // Red
+        color = "#E53935".toColorInt() // Red
         style = Paint.Style.FILL
     }
 
@@ -311,7 +312,7 @@ class DashboardSettings(
     }
 
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#CCCCCC")
+        color = "#CCCCCC".toColorInt()
         textSize = 16f
         textAlign = Paint.Align.LEFT
     }
@@ -323,22 +324,22 @@ class DashboardSettings(
     }
 
     private val buttonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#1F5F9E")  // Darker blue button for icon contrast
+        color = "#1F5F9E".toColorInt()  // Darker blue button for icon contrast
         style = Paint.Style.FILL
     }
 
     private val secondaryButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#616161")
+        color = "#616161".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val unitControlPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#454545")
+        color = "#454545".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val unitSelectedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#1F75B8")
+        color = "#1F75B8".toColorInt()
         style = Paint.Style.FILL
     }
 
@@ -357,18 +358,18 @@ class DashboardSettings(
     }
 
     private val googleStatusBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#2A2A2A")
+        color = "#2A2A2A".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val googleStatusBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#5A5A5A")
+        color = "#5A5A5A".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 2f
     }
 
     private val googleHeadingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#BDBDBD")
+        color = "#BDBDBD".toColorInt()
         textSize = 15f
         textAlign = Paint.Align.LEFT
     }
@@ -381,23 +382,23 @@ class DashboardSettings(
     }
 
     private val googleDetailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#D7D7D7")
+        color = "#D7D7D7".toColorInt()
         textSize = 15f
         textAlign = Paint.Align.LEFT
     }
 
     private val backButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#666666")  // Gray back button
+        color = "#666666".toColorInt()  // Gray back button
         style = Paint.Style.FILL
     }
 
     private val toggleOnPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#4CAF50")  // Green when enabled
+        color = "#4CAF50".toColorInt()  // Green when enabled
         style = Paint.Style.FILL
     }
 
     private val toggleOffPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#666666")  // Gray when disabled
+        color = "#666666".toColorInt()  // Gray when disabled
         style = Paint.Style.FILL
     }
 
@@ -464,92 +465,137 @@ class DashboardSettings(
         val trackLeft = menuRect.left + SLIDER_MARGIN_X
         val trackRight = menuRect.right - SLIDER_MARGIN_X
 
-        if (currentView == ViewMode.MAIN) {
-            // Main menu layout
-            val firstSliderY = menuRect.top + 90f
+        when (currentView) {
+            ViewMode.MAIN -> {
+                // Main menu layout
+                val firstSliderY = menuRect.top + 90f
 
-            // Brightness uses roughly two thirds of its former row; units occupy the right third.
-            val unitWidth = 96f
-            val rowGap = 14f
-            val unitLeft = trackRight - unitWidth
-            brightnessTrackRect.set(trackLeft, firstSliderY - 10f, unitLeft - rowGap, firstSliderY + 10f)
-            unitSystemRect.set(unitLeft, firstSliderY - 16f, trackRight, firstSliderY + 16f)
-            val segmentWidth = unitSystemRect.width() / unitSegmentRects.size
-            unitSegmentRects.forEachIndexed { index, rect ->
-                rect.set(
-                    unitSystemRect.left + index * segmentWidth,
-                    unitSystemRect.top,
-                    unitSystemRect.left + (index + 1) * segmentWidth,
-                    unitSystemRect.bottom
+                // Brightness uses roughly two thirds of its former row; units occupy the right third.
+                val unitWidth = 96f
+                val rowGap = 14f
+                val unitLeft = trackRight - unitWidth
+                brightnessTrackRect.set(
+                    trackLeft,
+                    firstSliderY - 10f,
+                    unitLeft - rowGap,
+                    firstSliderY + 10f
+                )
+                unitSystemRect.set(unitLeft, firstSliderY - 16f, trackRight, firstSliderY + 16f)
+                val segmentWidth = unitSystemRect.width() / unitSegmentRects.size
+                unitSegmentRects.forEachIndexed { index, rect ->
+                    rect.set(
+                        unitSystemRect.left + index * segmentWidth,
+                        unitSystemRect.top,
+                        unitSystemRect.left + (index + 1) * segmentWidth,
+                        unitSystemRect.bottom
+                    )
+                }
+
+                layoutMainButtons(trackLeft, trackRight, firstSliderY + 34f)
+            }
+            ViewMode.HEADSUP -> {
+                // Heads-up submenu layout
+                val firstSliderY = menuRect.top + 90f
+
+                // Back button (smaller, at top left)
+                val backButtonLeft = menuRect.left + CLOSE_BUTTON_MARGIN
+                val backButtonTop = menuRect.top + CLOSE_BUTTON_MARGIN
+                backButtonRect.set(
+                    backButtonLeft,
+                    backButtonTop,
+                    backButtonLeft + CLOSE_BUTTON_SIZE,
+                    backButtonTop + CLOSE_BUTTON_SIZE
+                )
+
+                // Toggle for enable/disable at the top (below title)
+                val toggleY = firstSliderY - 30f
+                val toggleLeft = trackRight - TOGGLE_WIDTH
+                toggleRect.set(toggleLeft, toggleY, toggleLeft + TOGGLE_WIDTH, toggleY + TOGGLE_HEIGHT)
+
+                // Head-up time slider (first slider in submenu)
+                val headUpTimeY = firstSliderY + 40f
+                headUpTimeTrackRect.set(trackLeft, headUpTimeY - 10f, trackRight, headUpTimeY + 10f)
+
+                // Wake duration slider (second)
+                val wakeDurationY = headUpTimeY + SLIDER_SPACING
+                wakeDurationTrackRect.set(trackLeft, wakeDurationY - 10f, trackRight, wakeDurationY + 10f)
+
+                // Angle threshold slider (third)
+                val angleThresholdY = wakeDurationY + SLIDER_SPACING
+                angleThresholdTrackRect.set(
+                    trackLeft,
+                    angleThresholdY - 10f,
+                    trackRight,
+                    angleThresholdY + 10f
                 )
             }
+            ViewMode.GOOGLE -> {
+                val statusTop = menuRect.top + 74f
+                googleStatusRect.set(trackLeft, statusTop, trackRight, statusTop + GOOGLE_STATUS_BOX_HEIGHT)
 
-            layoutMainButtons(trackLeft, trackRight, firstSliderY + 34f)
-        } else if (currentView == ViewMode.HEADSUP) {
-            // Heads-up submenu layout
-            val firstSliderY = menuRect.top + 90f
+                val primaryTop = googleStatusRect.bottom + 18f
+                googlePrimaryButtonRect.set(trackLeft, primaryTop, trackRight, primaryTop + BUTTON_HEIGHT)
 
-            // Back button (smaller, at top left)
-            val backButtonLeft = menuRect.left + CLOSE_BUTTON_MARGIN
-            val backButtonTop = menuRect.top + CLOSE_BUTTON_MARGIN
-            backButtonRect.set(backButtonLeft, backButtonTop, backButtonLeft + CLOSE_BUTTON_SIZE, backButtonTop + CLOSE_BUTTON_SIZE)
+                val secondaryTop = googlePrimaryButtonRect.bottom + 12f
+                googleSecondaryButtonRect.set(
+                    trackLeft,
+                    secondaryTop,
+                    trackRight,
+                    secondaryTop + BUTTON_HEIGHT
+                )
 
-            // Toggle for enable/disable at the top (below title)
-            val toggleY = firstSliderY - 30f
-            val toggleLeft = trackRight - TOGGLE_WIDTH
-            toggleRect.set(toggleLeft, toggleY, toggleLeft + TOGGLE_WIDTH, toggleY + TOGGLE_HEIGHT)
+                val geminiTop = googleSecondaryButtonRect.bottom + 8f
+                geminiKeyButtonRect.set(trackLeft, geminiTop, trackRight, geminiTop + 38f)
+                geminiModelButtonRect.set(
+                    trackLeft,
+                    geminiKeyButtonRect.bottom + 6f,
+                    trackRight,
+                    geminiKeyButtonRect.bottom + 44f
+                )
+                geminiRemoveButtonRect.set(
+                    trackLeft,
+                    geminiModelButtonRect.bottom + 6f,
+                    trackRight,
+                    geminiModelButtonRect.bottom + 44f
+                )
 
-            // Head-up time slider (first slider in submenu)
-            val headUpTimeY = firstSliderY + 40f
-            headUpTimeTrackRect.set(trackLeft, headUpTimeY - 10f, trackRight, headUpTimeY + 10f)
+                val backButtonLeft = menuRect.left + CLOSE_BUTTON_MARGIN
+                val backButtonTop = menuRect.top + CLOSE_BUTTON_MARGIN
+                backButtonRect.set(
+                    backButtonLeft,
+                    backButtonTop,
+                    backButtonLeft + CLOSE_BUTTON_SIZE,
+                    backButtonTop + CLOSE_BUTTON_SIZE
+                )
+            }
+            else -> {
+                val backButtonLeft = menuRect.left + CLOSE_BUTTON_MARGIN
+                val backButtonTop = menuRect.top + CLOSE_BUTTON_MARGIN
+                backButtonRect.set(
+                    backButtonLeft,
+                    backButtonTop,
+                    backButtonLeft + CLOSE_BUTTON_SIZE,
+                    backButtonTop + CLOSE_BUTTON_SIZE
+                )
 
-            // Wake duration slider (second)
-            val wakeDurationY = headUpTimeY + SLIDER_SPACING
-            wakeDurationTrackRect.set(trackLeft, wakeDurationY - 10f, trackRight, wakeDurationY + 10f)
+                val firstRowTop = menuRect.top + 80f
+                adaptiveBrightnessRowRect.set(trackLeft, firstRowTop, trackRight, firstRowTop + 34f)
+                adaptiveBrightnessBoxRect.set(
+                    trackLeft,
+                    firstRowTop + 6f,
+                    trackLeft + CHECKBOX_SIZE,
+                    firstRowTop + 6f + CHECKBOX_SIZE
+                )
 
-            // Angle threshold slider (third)
-            val angleThresholdY = wakeDurationY + SLIDER_SPACING
-            angleThresholdTrackRect.set(trackLeft, angleThresholdY - 10f, trackRight, angleThresholdY + 10f)
-        } else if (currentView == ViewMode.GOOGLE) {
-            val statusTop = menuRect.top + 74f
-            googleStatusRect.set(trackLeft, statusTop, trackRight, statusTop + GOOGLE_STATUS_BOX_HEIGHT)
-
-            val primaryTop = googleStatusRect.bottom + 18f
-            googlePrimaryButtonRect.set(trackLeft, primaryTop, trackRight, primaryTop + BUTTON_HEIGHT)
-
-            val secondaryTop = googlePrimaryButtonRect.bottom + 12f
-            googleSecondaryButtonRect.set(trackLeft, secondaryTop, trackRight, secondaryTop + BUTTON_HEIGHT)
-
-            val geminiTop = googleSecondaryButtonRect.bottom + 8f
-            geminiKeyButtonRect.set(trackLeft, geminiTop, trackRight, geminiTop + 38f)
-            geminiModelButtonRect.set(trackLeft, geminiKeyButtonRect.bottom + 6f, trackRight, geminiKeyButtonRect.bottom + 44f)
-            geminiRemoveButtonRect.set(trackLeft, geminiModelButtonRect.bottom + 6f, trackRight, geminiModelButtonRect.bottom + 44f)
-
-            val backButtonLeft = menuRect.left + CLOSE_BUTTON_MARGIN
-            val backButtonTop = menuRect.top + CLOSE_BUTTON_MARGIN
-            backButtonRect.set(backButtonLeft, backButtonTop, backButtonLeft + CLOSE_BUTTON_SIZE, backButtonTop + CLOSE_BUTTON_SIZE)
-        } else {
-            val backButtonLeft = menuRect.left + CLOSE_BUTTON_MARGIN
-            val backButtonTop = menuRect.top + CLOSE_BUTTON_MARGIN
-            backButtonRect.set(backButtonLeft, backButtonTop, backButtonLeft + CLOSE_BUTTON_SIZE, backButtonTop + CLOSE_BUTTON_SIZE)
-
-            val firstRowTop = menuRect.top + 80f
-            adaptiveBrightnessRowRect.set(trackLeft, firstRowTop, trackRight, firstRowTop + 34f)
-            adaptiveBrightnessBoxRect.set(
-                trackLeft,
-                firstRowTop + 6f,
-                trackLeft + CHECKBOX_SIZE,
-                firstRowTop + 6f + CHECKBOX_SIZE
-            )
-
-            val smartAlignTop = adaptiveBrightnessRowRect.bottom + 20f
-            smartAlignmentRowRect.set(trackLeft, smartAlignTop, trackRight, smartAlignTop + 34f)
-            smartAlignmentBoxRect.set(
-                trackLeft,
-                smartAlignTop + 6f,
-                trackLeft + CHECKBOX_SIZE,
-                smartAlignTop + 6f + CHECKBOX_SIZE
-            )
+                val smartAlignTop = adaptiveBrightnessRowRect.bottom + 20f
+                smartAlignmentRowRect.set(trackLeft, smartAlignTop, trackRight, smartAlignTop + 34f)
+                smartAlignmentBoxRect.set(
+                    trackLeft,
+                    smartAlignTop + 6f,
+                    trackLeft + CHECKBOX_SIZE,
+                    smartAlignTop + 6f + CHECKBOX_SIZE
+                )
+            }
         }
     }
 
@@ -694,7 +740,7 @@ class DashboardSettings(
     private fun drawUnitSystemControl(canvas: Canvas) {
         canvas.drawText("Units", unitSystemRect.left, unitSystemRect.top + LABEL_OFFSET_Y + 16f, labelPaint)
         canvas.drawRoundRect(unitSystemRect, 8f, 8f, unitControlPaint)
-        UnitSystemMode.values().forEachIndexed { index, mode ->
+        UnitSystemMode.entries.forEachIndexed { index, mode ->
             val rect = unitSegmentRects[index]
             if (mode == unitSystemMode) canvas.drawRoundRect(rect, 7f, 7f, unitSelectedPaint)
             if (index > 0) canvas.drawLine(rect.left, rect.top + 5f, rect.left, rect.bottom - 5f, borderPaint)
@@ -793,7 +839,7 @@ class DashboardSettings(
         val dirX = cos(angle).toFloat()
         val dirY = sin(angle).toFloat()
         val tangentX = -dirY
-        val tangentY = dirX
+        @Suppress("UnnecessaryVariable", "RedundantSuppression") val tangentY = dirX
 
         val tipX = cx + dirX * tipRadius
         val tipY = cy + dirY * tipRadius
@@ -968,6 +1014,7 @@ class DashboardSettings(
     /**
      * Draw the heads-up settings submenu.
      */
+    @SuppressLint("DefaultLocale")
     private fun drawHeadsUpSubmenu(canvas: Canvas) {
         // Draw Title
         val titleY = menuRect.top + 45f
@@ -1169,10 +1216,10 @@ class DashboardSettings(
         val trackY = trackRect.centerY()
 
         // Use dimmed colors if disabled
-        val labelColor = if (enabled) Color.parseColor("#CCCCCC") else Color.parseColor("#666666")
-        val valueColor = if (enabled) Color.WHITE else Color.parseColor("#888888")
-        val trackColor = if (enabled) Color.GRAY else Color.parseColor("#444444")
-        val thumbColor = if (enabled) Color.WHITE else Color.parseColor("#888888")
+        val labelColor = if (enabled) "#CCCCCC".toColorInt() else "#666666".toColorInt()
+        val valueColor = if (enabled) Color.WHITE else "#888888".toColorInt()
+        val trackColor = if (enabled) Color.GRAY else "#444444".toColorInt()
+        val thumbColor = if (enabled) Color.WHITE else "#888888".toColorInt()
 
         labelPaint.color = labelColor
         valuePaint.color = valueColor
@@ -1193,7 +1240,7 @@ class DashboardSettings(
         canvas.drawCircle(thumbX, trackY, THUMB_RADIUS, thumbPaint)
 
         // Reset colors
-        labelPaint.color = Color.parseColor("#CCCCCC")
+        labelPaint.color = "#CCCCCC".toColorInt()
         valuePaint.color = Color.WHITE
         trackPaint.color = Color.GRAY
         thumbPaint.color = Color.WHITE
@@ -1321,7 +1368,7 @@ class DashboardSettings(
         if (currentView == ViewMode.MAIN) {
             unitSegmentRects.firstOrNull { it.contains(x, y) }?.let { tapped ->
                 val index = unitSegmentRects.indexOf(tapped)
-                setUnitSystemMode(UnitSystemMode.values()[index], notify = true)
+                setUnitSystemMode(UnitSystemMode.entries[index], notify = true)
                 return true
             }
             mainButtons.firstOrNull { it.rect.contains(x, y) }?.let { button ->
@@ -1508,7 +1555,7 @@ class DashboardSettings(
      * WidgetContainer calls this with either real coordinates or (-inf, -inf) when cursor hides.
      * Currently a no-op, but kept for API symmetry with other menus/widgets.
      */
-    fun updateHover(x: Float, y: Float) {
+    fun updateHover(@Suppress("unused") x: Float, @Suppress("unused") y: Float) {
         // No hover visuals for now.
         // In the future, you can track hovered states for buttons/thumb etc.
         // Example: closeHovered = closeButtonRect.contains(x, y)

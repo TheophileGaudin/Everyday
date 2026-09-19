@@ -5,10 +5,10 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.util.Log
-import com.everyday.everyday_glasses.ui.components.ContextMenuHandler
 import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
 import kotlin.math.max
 import kotlin.math.min
+import androidx.core.graphics.toColorInt
 
 /**
  * Head-locked context menu optimized for the 640x480 glasses display.
@@ -80,25 +80,25 @@ class ContextMenu(
 
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#2a2a3e")
+        color = "#2a2a3e".toColorInt()
     }
 
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 2f
-        color = Color.parseColor("#4a4a6e")
+        color = "#4a4a6e".toColorInt()
     }
 
     private val itemPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#3a3a5e")
+    color = "#3a3a5e".toColorInt()
     }
 
     private val hoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#5050AA")
+        color = "#5050AA".toColorInt()
     }
 
     private val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#202033")
+        color = "#202033".toColorInt()
     }
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -113,7 +113,7 @@ class ContextMenu(
     }
 
     private val activeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#6699FF")
+        color = "#6699FF".toColorInt()
         textSize = 24f
     }
 
@@ -123,7 +123,7 @@ class ContextMenu(
     }
 
     private val disabledTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#777777")
+        color = "#777777".toColorInt()
         textSize = 24f
     }
 
@@ -142,11 +142,11 @@ class ContextMenu(
     }
 
     private val scrollbarTrackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#353550")
+        color = "#353550".toColorInt()
     }
 
     private val scrollbarThumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#8888CC")
+        color = "#8888CC".toColorInt()
     }
 
     init {
@@ -375,7 +375,7 @@ class ContextMenu(
 
         val bounds = currentMenuBounds()
         val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#40000000")
+            color = "#40000000".toColorInt()
         }
 
         canvas.drawRoundRect(
@@ -620,7 +620,7 @@ class ContextMenu(
             canvas.drawText(">", rect.right - 20f, arrowY, arrowPaint)
         } else if (selectable && item.isEnabled && item.id.startsWith("toggle_")) {
             val indicatorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#6699FF")
+                color = "#6699FF".toColorInt()
             }
             canvas.drawCircle(rect.right - 16f, rect.centerY(), 4f, indicatorPaint)
         }

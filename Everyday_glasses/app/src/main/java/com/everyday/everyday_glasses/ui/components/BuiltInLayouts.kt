@@ -46,7 +46,7 @@ object BuiltInLayouts {
     )
 
     /**
-     * Builds a layout by name. Returns null when the name is not one of the recognised
+     * Builds a layout by name. Returns null when the name is not one of the recognized
      * built-ins; callers should fall back to a user-saved layout in that case.
      */
     fun buildDashboard(name: String, screenWidth: Float, screenHeight: Float): WidgetDocument.PersistedDashboard? {
@@ -214,8 +214,8 @@ object BuiltInLayouts {
     // Subtitles only.
     // -----------------------------------------------------------------------------------
     private fun subtitlesLayout(w: Float, h: Float): WidgetDocument.PersistedDashboard {
-        val subW = (w * 0.85f).coerceAtMost(SubtitleWidget.Companion.DEFAULT_WIDTH * 1.6f)
-        val subH = (h * 0.32f).coerceAtLeast(SubtitleWidget.Companion.DEFAULT_HEIGHT)
+        val subW = (w * 0.85f).coerceAtMost(SubtitleWidget.DEFAULT_WIDTH * 1.6f)
+        val subH = (h * 0.32f).coerceAtLeast(SubtitleWidget.DEFAULT_HEIGHT)
         return dashboard(
             SUBTITLES,
             mapOf(

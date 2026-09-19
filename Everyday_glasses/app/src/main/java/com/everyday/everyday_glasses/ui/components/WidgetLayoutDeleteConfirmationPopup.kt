@@ -4,7 +4,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
-import com.everyday.everyday_glasses.ui.components.LayoutDeletionHandler
+import androidx.core.graphics.toColorInt
 
 class WidgetLayoutDeleteConfirmationPopup(
     private val screenWidth: Float,
@@ -34,13 +34,13 @@ class WidgetLayoutDeleteConfirmationPopup(
     var handler: LayoutDeletionHandler? = null
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#2a2a3e")
+        color = "#2a2a3e".toColorInt()
     }
 
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 2f
-        color = Color.parseColor("#4a4a6e")
+        color = "#4a4a6e".toColorInt()
     }
 
     private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -51,25 +51,25 @@ class WidgetLayoutDeleteConfirmationPopup(
     }
 
     private val detailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#D7D7D7")
+        color = "#D7D7D7".toColorInt()
         textSize = 17f
         textAlign = Paint.Align.CENTER
     }
 
     private val deleteButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#D32F2F")
+        color = "#D32F2F".toColorInt()
     }
 
     private val deleteButtonHoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#E53935")
+        color = "#E53935".toColorInt()
     }
 
     private val backButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#424242")
+        color = "#424242".toColorInt()
     }
 
     private val backButtonHoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#616161")
+        color = "#616161".toColorInt()
     }
 
     private val buttonTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -80,7 +80,7 @@ class WidgetLayoutDeleteConfirmationPopup(
     }
 
     private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#60000000")
+        color = "#60000000".toColorInt()
     }
 
     fun show(name: String) {
@@ -177,6 +177,7 @@ class WidgetLayoutDeleteConfirmationPopup(
         canvas.drawText("Back", backButtonRect.centerX(), backY, buttonTextPaint)
     }
 
+    @Suppress("SameParameterValue")
     private fun fitText(value: String, maxWidth: Float): String {
         if (detailPaint.measureText(value) <= maxWidth) return value
         var trimmed = value

@@ -4,6 +4,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import androidx.core.graphics.toColorInt
 
 /**
  * A soft keyboard for the glasses app, styled like a typical US English Android keyboard.
@@ -96,12 +97,12 @@ class GlassesKeyboardView(
     )
 
     // Colors
-    private val keyColor = Color.parseColor("#404050")
-    private val keyPressedColor = Color.parseColor("#6060AA")
-    private val specialKeyColor = Color.parseColor("#303040")
-    private val spaceKeyColor = Color.parseColor("#505060")
-    private val shiftActiveColor = Color.parseColor("#5070AA")
-    private val backgroundColor = Color.parseColor("#202030")
+    private val keyColor = "#404050".toColorInt()
+    private val keyPressedColor = "#6060AA".toColorInt()
+    private val specialKeyColor = "#303040".toColorInt()
+    private val spaceKeyColor = "#505060".toColorInt()
+    private val shiftActiveColor = "#5070AA".toColorInt()
+    private val backgroundColor = "#202030".toColorInt()
 
     // Position offset (set by the widget when drawing)
     private var offsetX = 0f
@@ -225,7 +226,7 @@ class GlassesKeyboardView(
 
             if (key == "SPACE") {
                 // Draw a subtle line for space bar
-                paint.color = Color.parseColor("#606070")
+                paint.color = "#606070".toColorInt()
                 paint.strokeWidth = 2f
                 val lineY = rect.centerY()
                 val lineMargin = rect.width() * 0.3f

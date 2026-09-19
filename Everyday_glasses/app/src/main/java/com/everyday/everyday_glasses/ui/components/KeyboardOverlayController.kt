@@ -4,6 +4,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import androidx.core.graphics.toColorInt
 
 /**
  * Delegate that owns the GlassesKeyboardView instance, its visibility state,
@@ -34,7 +35,7 @@ class KeyboardOverlayController {
     val buttonBounds = RectF()
 
     private val buttonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#4488AA")
+        color = "#4488AA".toColorInt()
     }
 
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -62,8 +63,8 @@ class KeyboardOverlayController {
      */
     fun updateLayout(areaWidth: Float, areaHeight: Float, areaLeft: Float, areaTop: Float) {
         if (!isVisible) return
-        val kbHeight = (areaHeight * GlassesKeyboardView.Companion.HEIGHT_RATIO)
-            .coerceAtLeast(GlassesKeyboardView.Companion.MIN_HEIGHT)
+        val kbHeight = (areaHeight * GlassesKeyboardView.HEIGHT_RATIO)
+            .coerceAtLeast(GlassesKeyboardView.MIN_HEIGHT)
         if (keyboard == null) {
             keyboard = GlassesKeyboardView(areaWidth, kbHeight).apply {
                 onKeyPressed = { key -> this@KeyboardOverlayController.onKeyPressed?.invoke(key) }
