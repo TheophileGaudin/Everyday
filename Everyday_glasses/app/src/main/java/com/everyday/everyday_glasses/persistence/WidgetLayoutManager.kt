@@ -6,7 +6,6 @@ import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
 class WidgetLayoutManager(
     private val layouts: LayoutLibrary,
     private val captureDashboard: () -> WidgetDocument.PersistedDashboard,
-    private val buildDeliveredLayout: (String) -> WidgetDocument.PersistedDashboard?,
     private val showNamePrompt: (String) -> Unit,
     private val showNameError: (String) -> Unit,
     private val dismissNamePrompt: () -> Unit,
