@@ -19,9 +19,9 @@ import android.util.Log
 import androidx.core.text.HtmlCompat
 import com.everyday.everyday_glasses.bindings.TextBoxWidgetListener
 import com.everyday.everyday_glasses.controllers.KeyboardOverlayController
-import com.everyday.everyday_glasses.data_models.WidgetInteractionState
+import com.everyday.everyday_glasses.ui.widgets.common.WidgetInteractionState
 import com.everyday.everyday_glasses.data_models.WidgetTypeId
-import com.everyday.everyday_glasses.helpers.WidgetTheme
+import com.everyday.everyday_glasses.ui.widgets.common.WidgetTheme
 import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 
 /**

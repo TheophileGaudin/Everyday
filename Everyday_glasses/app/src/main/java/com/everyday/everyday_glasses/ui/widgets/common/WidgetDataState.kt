@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.data_models
+package com.everyday.everyday_glasses.ui.widgets.common
 
 /**
  * Shared loading/error display state for widgets backed by async snapshots.

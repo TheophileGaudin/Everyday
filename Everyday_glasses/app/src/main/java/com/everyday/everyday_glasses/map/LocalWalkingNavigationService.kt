@@ -1,14 +1,5 @@
-package com.everyday.everyday_glasses.controllers
+package com.everyday.everyday_glasses.map
 
-import com.everyday.everyday_glasses.map.CancellableForwardGeocoder
-import com.everyday.everyday_glasses.map.ForwardGeocoder
-import com.everyday.everyday_glasses.map.GeocodingRanker
-import com.everyday.everyday_glasses.map.GeocodingResolution
-import com.everyday.everyday_glasses.map.MapGeoPoint
-import com.everyday.everyday_glasses.map.MapsCoForwardGeocoder
-import com.everyday.everyday_glasses.map.NavigationAddressText
-import com.everyday.everyday_glasses.map.NavigationState
-import com.everyday.everyday_glasses.map.RankedGeocodingCandidate
 import com.everyday.shared.routing.GeoPoint
 import com.everyday.shared.routing.OverpassRouteDataSource
 import com.everyday.shared.routing.RouteCalculationResult

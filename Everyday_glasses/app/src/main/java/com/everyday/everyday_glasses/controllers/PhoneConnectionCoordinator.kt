@@ -17,6 +17,7 @@ import com.everyday.everyday_glasses.bindings.SyncMessageListener
 import com.everyday.everyday_glasses.bindings.TransportConnectionListener
 import com.everyday.everyday_glasses.adapters.WifiDirectClient
 import com.everyday.everyday_glasses.bindings.WifiDirectConnectionListener
+import com.everyday.everyday_glasses.google.GooglePhoneAuthStatus
 import com.everyday.shared.sync.SyncError
 import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot

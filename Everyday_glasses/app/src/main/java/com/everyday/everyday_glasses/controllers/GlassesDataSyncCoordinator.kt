@@ -11,6 +11,7 @@ import com.everyday.everyday_glasses.map.MapGeoPoint
 import com.everyday.everyday_glasses.google.NetworkStatusProvider
 import com.everyday.everyday_glasses.map.PoiDisplayConfig
 import com.everyday.everyday_glasses.WidgetContainer
+import com.everyday.everyday_glasses.google.GoogleAuthCoordinator
 import com.everyday.shared.sync.CalendarAccount
 import com.everyday.shared.sync.CalendarEventSnapshot
 import com.everyday.shared.sync.CalendarSnapshot

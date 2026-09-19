@@ -8,7 +8,7 @@ import com.everyday.everyday_glasses.map.PoiDisplayConfig
 import com.everyday.everyday_glasses.map.PoiDisplayConfigState
 import com.everyday.everyday_glasses.map.PoiDisplayMode
 import com.everyday.everyday_glasses.map.mapPoiTier
-import com.everyday.everyday_glasses.helpers.MapPoiSelector
+import com.everyday.everyday_glasses.map.MapPoiSelector
 import org.junit.Assert.*
 import org.junit.Test
 import kotlin.random.Random

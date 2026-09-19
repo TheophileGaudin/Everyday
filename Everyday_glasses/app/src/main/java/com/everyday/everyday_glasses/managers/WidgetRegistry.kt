@@ -22,7 +22,7 @@ import com.everyday.everyday_glasses.ui.widgets.TextBoxWidget
 import com.everyday.everyday_glasses.ui.widgets.VideoWidget
 import com.everyday.everyday_glasses.data_models.WidgetDescriptor
 import com.everyday.everyday_glasses.data_models.WidgetDescriptors
-import com.everyday.everyday_glasses.helpers.WidgetHitTestCache
+import com.everyday.everyday_glasses.ui.widgets.common.WidgetHitTestCache
 import com.everyday.everyday_glasses.data_models.WidgetInstancePolicy
 import com.everyday.everyday_glasses.data_models.WidgetTypeId
 import java.util.IdentityHashMap

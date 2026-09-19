@@ -8,10 +8,10 @@ import android.graphics.RectF
 import android.util.Log
 import com.everyday.everyday_glasses.bindings.WidgetLifecycle
 import com.everyday.everyday_glasses.bindings.WidgetLifecycleListener
-import com.everyday.everyday_glasses.data_models.WidgetInteractionState
+import com.everyday.everyday_glasses.ui.widgets.common.WidgetInteractionState
 import com.everyday.everyday_glasses.data_models.WidgetTypeId
 import com.everyday.everyday_glasses.helpers.SnapProvider
-import com.everyday.everyday_glasses.helpers.WidgetTheme
+import com.everyday.everyday_glasses.ui.widgets.common.WidgetTheme
 
 /**
  * Abstract base class for all widgets in the Everyday glasses app.

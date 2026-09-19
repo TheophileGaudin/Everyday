@@ -1,25 +1,8 @@
-package com.everyday.everyday_glasses.controllers
+package com.everyday.everyday_glasses.google
 
 import android.app.Activity
 import android.util.Log
-import com.everyday.everyday_glasses.google.GoogleAccountSummary
-import com.everyday.everyday_glasses.google.GoogleAuthState
 import com.everyday.everyday_glasses.stores.GoogleAuthStateStore
-import com.everyday.everyday_glasses.google.GoogleOAuthAccessDeniedException
-import com.everyday.everyday_glasses.google.GoogleOAuthAuthorizationPendingException
-import com.everyday.everyday_glasses.google.GoogleOAuthClientConfigurationException
-import com.everyday.everyday_glasses.google.GoogleOAuthDeviceService
-import com.everyday.everyday_glasses.google.GoogleOAuthExpiredTokenException
-import com.everyday.everyday_glasses.google.GoogleOAuthInvalidGrantException
-import com.everyday.everyday_glasses.google.GoogleOAuthScopeUnsupportedException
-import com.everyday.everyday_glasses.google.GoogleOAuthSlowDownException
-import com.everyday.everyday_glasses.google.GoogleOAuthTokenResponse
-import com.everyday.everyday_glasses.google.GoogleOAuthTokenService
-import com.everyday.everyday_glasses.google.GoogleUserActionRequiredException
-import com.everyday.everyday_glasses.google.GoogleUserCanceledException
-import com.everyday.everyday_glasses.google.HttpUrlConnectionGoogleOAuthDeviceService
-import com.everyday.everyday_glasses.google.HttpUrlConnectionGoogleOAuthTokenService
-import com.everyday.everyday_glasses.google.NetworkStatusProvider
 import com.everyday.shared.sync.CalendarSnapshot
 import java.io.IOException
 import java.util.concurrent.Executor

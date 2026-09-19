@@ -1,12 +1,12 @@
-package com.everyday.everyday_glasses.helpers
+package com.everyday.everyday_glasses.map
 
-import com.everyday.everyday_glasses.map.MapGeoPoint
-import com.everyday.everyday_glasses.map.MapPoi
-import com.everyday.everyday_glasses.map.MapPoiCategoryCatalog
-import com.everyday.everyday_glasses.map.MapPoiTier
-import com.everyday.everyday_glasses.map.MapZoom
-import com.everyday.everyday_glasses.map.PoiDisplayConfig
-import kotlin.math.*
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.pow
+import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.random.Random
 
 data class MapPoiSelection(
@@ -241,7 +241,12 @@ class MapPoiSelector(private val random: Random = Random.Default) {
         fun bearingDeg(a: MapGeoPoint, b: MapGeoPoint): Double {
             val lat1 = Math.toRadians(a.lat); val lat2 = Math.toRadians(b.lat)
             val dLon = Math.toRadians(b.lon - a.lon)
-            return (Math.toDegrees(atan2(sin(dLon) * cos(lat2), cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon))) + 360.0) % 360.0
+            return (Math.toDegrees(
+                atan2(
+                    sin(dLon) * cos(lat2),
+                    cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
+                )
+            ) + 360.0) % 360.0
         }
     }
 }

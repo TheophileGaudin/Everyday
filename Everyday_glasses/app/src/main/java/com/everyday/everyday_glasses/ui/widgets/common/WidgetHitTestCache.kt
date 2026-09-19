@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.helpers
+package com.everyday.everyday_glasses.ui.widgets.common
 
 /** Caches only membership/z-order; geometry and eligibility are evaluated per hit test. */
 internal class WidgetHitTestCache<T>(

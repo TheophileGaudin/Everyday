@@ -35,7 +35,7 @@ import com.everyday.everyday_glasses.assistant.page_agent.PageAgentFullscreenMod
 import com.everyday.everyday_glasses.assistant.page_agent.PageAgentPageSnapshot
 import com.everyday.everyday_glasses.assistant.page_agent.PageAgentScreenshot
 import com.everyday.everyday_glasses.controllers.KeyboardOverlayController
-import com.everyday.everyday_glasses.data_models.WidgetInteractionState
+import com.everyday.everyday_glasses.ui.widgets.common.WidgetInteractionState
 import com.everyday.everyday_glasses.data_models.WidgetTypeId
 import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 import org.json.JSONObject

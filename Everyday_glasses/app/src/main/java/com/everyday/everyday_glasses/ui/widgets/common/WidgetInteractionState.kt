@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.data_models
+package com.everyday.everyday_glasses.ui.widgets.common
 
 import com.everyday.everyday_glasses.ui.widgets.BaseWidget
 

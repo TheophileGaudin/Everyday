@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.factories
+package com.everyday.everyday_glasses.ui.widgets.helpers
 
 import android.content.Context
 import android.view.View

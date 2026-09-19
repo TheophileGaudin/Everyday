@@ -6,9 +6,9 @@ import com.everyday.everyday_glasses.google.GoogleOAuthScopeUnsupportedException
 import com.everyday.everyday_glasses.google.GoogleOAuthTokenResponse
 import com.everyday.everyday_glasses.google.GoogleOAuthTokenService
 import com.everyday.everyday_glasses.google.NetworkStatusProvider
-import com.everyday.everyday_glasses.controllers.GoogleAuthCoordinator
-import com.everyday.everyday_glasses.controllers.GooglePhoneAuthStatus
-import com.everyday.everyday_glasses.controllers.GooglePhoneFallbackBridge
+import com.everyday.everyday_glasses.google.GoogleAuthCoordinator
+import com.everyday.everyday_glasses.google.GooglePhoneAuthStatus
+import com.everyday.everyday_glasses.google.GooglePhoneFallbackBridge
 import com.everyday.everyday_glasses.google.GoogleAccountSummary
 import com.everyday.everyday_glasses.google.GoogleAuthState
 import com.everyday.everyday_glasses.stores.GoogleAuthStateStore

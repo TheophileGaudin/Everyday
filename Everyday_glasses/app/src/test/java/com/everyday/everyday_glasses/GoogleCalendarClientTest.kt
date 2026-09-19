@@ -5,7 +5,7 @@ import com.everyday.everyday_glasses.google.GoogleCalendarClient
 import com.everyday.everyday_glasses.google.GoogleCalendarEvent
 import com.everyday.everyday_glasses.google.GoogleCalendarTransport
 import com.everyday.everyday_glasses.google.GoogleCalendarUnauthorizedException
-import com.everyday.everyday_glasses.controllers.GoogleCalendarTokenProvider
+import com.everyday.everyday_glasses.google.GoogleCalendarTokenProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

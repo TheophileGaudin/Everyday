@@ -18,7 +18,7 @@ import com.everyday.everyday_glasses.controllers.GlassesPhoneRoutingCoordinator
 import com.everyday.everyday_glasses.controllers.GlassesRouteFallbackReason
 import com.everyday.everyday_glasses.controllers.GlassesRouteTransport
 import com.everyday.everyday_glasses.controllers.KeyboardOverlayController
-import com.everyday.everyday_glasses.controllers.LocalWalkingNavigationService
+import com.everyday.everyday_glasses.map.LocalWalkingNavigationService
 import com.everyday.everyday_glasses.controllers.PresentationSpec
 import com.everyday.everyday_glasses.controllers.RouteResolutionListener
 import com.everyday.everyday_glasses.map.DevicePose
@@ -50,9 +50,9 @@ import com.everyday.everyday_glasses.map.mapPoiTier
 import com.everyday.everyday_glasses.map.navigationFailureMessage
 import com.everyday.everyday_glasses.map.toCompactBannerText
 import com.everyday.everyday_glasses.helpers.GroundProjection
-import com.everyday.everyday_glasses.helpers.MapPoiSelection
-import com.everyday.everyday_glasses.helpers.MapPoiSelector
-import com.everyday.everyday_glasses.helpers.WidgetTheme
+import com.everyday.everyday_glasses.map.MapPoiSelection
+import com.everyday.everyday_glasses.map.MapPoiSelector
+import com.everyday.everyday_glasses.ui.widgets.common.WidgetTheme
 import com.everyday.everyday_glasses.stores.MapRoadRepository
 import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 import com.everyday.shared.routing.GeoPoint

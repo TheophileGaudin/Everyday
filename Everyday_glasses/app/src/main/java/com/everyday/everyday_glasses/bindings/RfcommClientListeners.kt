@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses.bindings
 
-import com.everyday.everyday_glasses.controllers.GooglePhoneAuthStatus
+import com.everyday.everyday_glasses.google.GooglePhoneAuthStatus
 import com.everyday.everyday_glasses.google.GoogleAccountSummary
 import com.everyday.shared.sync.SyncError
 import com.everyday.shared.sync.SyncSnapshot

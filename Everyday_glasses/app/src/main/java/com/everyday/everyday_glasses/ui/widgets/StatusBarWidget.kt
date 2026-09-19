@@ -7,7 +7,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.text.TextPaint
 import android.util.Log
-import com.everyday.everyday_glasses.data_models.WidgetInteractionState
+import com.everyday.everyday_glasses.ui.widgets.common.WidgetInteractionState
 import com.everyday.everyday_glasses.data_models.WidgetTypeId
 
 /**

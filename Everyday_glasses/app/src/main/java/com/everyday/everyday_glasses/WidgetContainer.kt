@@ -94,8 +94,8 @@ import com.everyday.everyday_glasses.data_models.WidgetDocument
 import com.everyday.everyday_glasses.data_models.WidgetTypeId
 import com.everyday.everyday_glasses.map.formatWalkingEta
 import com.everyday.everyday_glasses.map.toAssistantSemanticFacts
-import com.everyday.everyday_glasses.factories.BrowserWidgetFactory
-import com.everyday.everyday_glasses.factories.VideoWidgetFactory
+import com.everyday.everyday_glasses.ui.widgets.helpers.BrowserWidgetFactory
+import com.everyday.everyday_glasses.ui.widgets.helpers.VideoWidgetFactory
 import com.everyday.everyday_glasses.helpers.CloseConfirmationHandler
 import com.everyday.everyday_glasses.helpers.ContextMenuHandler
 import com.everyday.everyday_glasses.helpers.CursorStabilizer

@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.controllers.LocalWalkingNavigationService
+import com.everyday.everyday_glasses.map.LocalWalkingNavigationService
 import com.everyday.everyday_glasses.map.GeocodingCandidate
 import com.everyday.everyday_glasses.map.GeocodingResolution
 import com.everyday.everyday_glasses.map.MapGeoPoint

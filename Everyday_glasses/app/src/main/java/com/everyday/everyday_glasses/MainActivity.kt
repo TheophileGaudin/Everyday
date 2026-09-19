@@ -50,9 +50,9 @@ import com.everyday.everyday_glasses.controllers.FileImportCallbacks
 import com.everyday.everyday_glasses.controllers.FileImportCoordinator
 import com.everyday.everyday_glasses.controllers.FileImportError
 import com.everyday.everyday_glasses.controllers.GlassesDataSyncCoordinator
-import com.everyday.everyday_glasses.controllers.GoogleAuthCoordinator
-import com.everyday.everyday_glasses.controllers.GooglePhoneAuthStatus
-import com.everyday.everyday_glasses.controllers.GooglePhoneFallbackBridge
+import com.everyday.everyday_glasses.google.GoogleAuthCoordinator
+import com.everyday.everyday_glasses.google.GooglePhoneAuthStatus
+import com.everyday.everyday_glasses.google.GooglePhoneFallbackBridge
 import com.everyday.everyday_glasses.controllers.HeadUpSessionController
 import com.everyday.everyday_glasses.controllers.InputCoordinator
 import com.everyday.everyday_glasses.controllers.LocationSpeedController

@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.helpers
+package com.everyday.everyday_glasses.ui.widgets.common
 
 import android.graphics.Color
 
