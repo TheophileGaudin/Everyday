@@ -3,7 +3,6 @@ package com.everyday.everyday_glasses.google
 import android.app.Activity
 import android.os.Handler
 import android.os.Looper
-import com.everyday.everyday_glasses.google.GoogleCalendarTokenProvider
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException

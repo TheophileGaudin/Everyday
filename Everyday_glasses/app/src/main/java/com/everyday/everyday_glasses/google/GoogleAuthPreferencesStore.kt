@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
+import androidx.core.content.edit
 
 interface GoogleAuthStateStore {
     fun loadState(): GoogleAuthState
@@ -44,26 +45,26 @@ class GoogleAuthPreferencesStore(context: Context) : GoogleAuthStateStore {
     }
 
     override fun saveState(state: GoogleAuthState) {
-        val persisted = PersistedGoogleAuthState.Companion.fromAuthState(state)
-        prefs.edit()
-            .putString(KEY_EMAIL, persisted.accountEmail)
-            .putString(KEY_DISPLAY_NAME, persisted.accountDisplayName)
-            .putString(KEY_AUTH_MODE, persisted.authMode)
-            .putBoolean(KEY_CALENDAR_AUTHORIZED, persisted.isCalendarAuthorized)
-            .putBoolean(KEY_CALENDAR_DENIED, persisted.isCalendarDenied)
-            .putBoolean(KEY_PHONE_FALLBACK_REQUIRED, persisted.requiresPhoneFallback)
-            .apply()
+        val persisted = PersistedGoogleAuthState.fromAuthState(state)
+        prefs.edit {
+            putString(KEY_EMAIL, persisted.accountEmail)
+                .putString(KEY_DISPLAY_NAME, persisted.accountDisplayName)
+                .putString(KEY_AUTH_MODE, persisted.authMode)
+                .putBoolean(KEY_CALENDAR_AUTHORIZED, persisted.isCalendarAuthorized)
+                .putBoolean(KEY_CALENDAR_DENIED, persisted.isCalendarDenied)
+                .putBoolean(KEY_PHONE_FALLBACK_REQUIRED, persisted.requiresPhoneFallback)
+        }
     }
 
     override fun loadRefreshToken(): String? = securePrefs.getString(KEY_REFRESH_TOKEN, null)
 
     override fun saveRefreshToken(token: String?) {
-        securePrefs.edit().putString(KEY_REFRESH_TOKEN, token).apply()
+        securePrefs.edit { putString(KEY_REFRESH_TOKEN, token) }
     }
 
     override fun clear() {
-        prefs.edit().clear().apply()
-        securePrefs.edit().clear().apply()
+        prefs.edit { clear() }
+        securePrefs.edit { clear() }
     }
 
     private fun createSecurePrefs(): SharedPreferences {

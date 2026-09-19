@@ -929,7 +929,7 @@ class MainActivity : AppCompatActivity() {
 
         widgetContainer.googleAccountHandler = object : GoogleAccountHandler {
             override fun connectGoogleAccount() {
-                googleAuthCoordinator.beginConnect(this@MainActivity)
+                googleAuthCoordinator.beginConnect()
             }
 
             override fun grantCalendarAccess() {

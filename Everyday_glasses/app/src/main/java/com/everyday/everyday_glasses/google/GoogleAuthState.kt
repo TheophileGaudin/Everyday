@@ -33,9 +33,6 @@ data class GoogleAuthState(
         PHONE_FALLBACK
     }
 
-    val hasAccount: Boolean
-        get() = account != null
-
     val isCalendarAuthorized: Boolean
         get() = status == Status.CALENDAR_AUTHORIZED
 
