@@ -19,8 +19,6 @@ data class AssistantSemanticFact(
         .put("value", value)
 }
 
-typealias AssistantWidgetFact = AssistantSemanticFact
-
 /**
  * Small, non-content snapshot of the glasses UI that can be sent with a voice request.
  *
@@ -44,7 +42,6 @@ data class AssistantWidgetContext(
     val facts: List<AssistantSemanticFact> = emptyList()
 ) {
     val identity: String get() = stableId
-    val semanticFacts: List<AssistantSemanticFact> get() = facts
 
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)

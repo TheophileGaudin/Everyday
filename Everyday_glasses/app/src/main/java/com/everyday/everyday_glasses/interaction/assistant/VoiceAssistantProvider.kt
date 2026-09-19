@@ -75,7 +75,7 @@ data class AssistantProviderTurn(
         return AssistantProviderAnswer(
             text = text,
             sources = (sources + additionalSources).distinctBy { it.url },
-            grounded = searchAttempted || groundedByTool
+            grounded = true
         )
     }
 }

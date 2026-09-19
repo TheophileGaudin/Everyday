@@ -47,7 +47,7 @@ class SetNewsSourceSemanticToolHandler(
             .put("required", JSONArray().put("kind"))
     )
 
-    override fun validate(arguments: JSONObject): Result<Unit> = parse(arguments).map { Unit }
+    override fun validate(arguments: JSONObject): Result<Unit> = parse(arguments).map { }
 
     override fun execute(
         arguments: JSONObject,

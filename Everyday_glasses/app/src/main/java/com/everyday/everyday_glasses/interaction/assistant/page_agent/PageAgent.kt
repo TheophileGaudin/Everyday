@@ -117,8 +117,6 @@ data class PageAgentAudio(
     override fun hashCode(): Int = 31 * bytes.contentHashCode() + mimeType.hashCode()
 }
 
-typealias PageAgentAudioInput = PageAgentAudio
-
 data class PageAgentPageSnapshot(
     val screenshot: PageAgentScreenshot,
     val url: String,
@@ -323,6 +321,7 @@ typealias PageAgentApprovalRequester = (
 
 internal class PageAgentRunControl(val runId: String) {
     val cancelled = AtomicBoolean(false)
+    @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
     private val approvalMonitor = Object()
     @Volatile var workerThread: Thread? = null
     @Volatile private var approvalPending = false
@@ -606,7 +605,7 @@ class PageAgentCoordinator(
             }
 
             val snapshot = runCatching { browser.snapshot() }
-                .getOrElse { failure -> Result.failure<PageAgentPageSnapshot>(failure) }
+                .getOrElse { failure -> Result.failure(failure) }
                 .getOrElse { failure ->
                 val state = if (failure is PageAgentTargetUnavailableException) {
                     PageAgentTerminalState.TARGET_UNAVAILABLE
@@ -642,7 +641,7 @@ class PageAgentCoordinator(
             )
 
             val turn = runCatching { provider.nextTurn(apiKey, modelId, request) }
-                .getOrElse { failure -> Result.failure<PageAgentModelTurn>(failure) }
+                .getOrElse { failure -> Result.failure(failure) }
                 .getOrElse { failure ->
                 if (control.cancelled.get()) {
                     return finish(control, emit, result(

@@ -63,7 +63,7 @@ data class BrowserRouteStart(
 )
 
 /**
- * Routes browser work to the Work Package 06 Page Agent.
+ * Routes browser work to the Page Agent.
  *
  * A recorded voice route carries the original audio bytes to every Page Agent turn. The
  * coordinator never invokes the main assistant itself; the voice coordinator decides whether
@@ -283,7 +283,7 @@ class RunBrowserTaskSemanticToolHandler(
         require(arguments.getString("task").trim().isNotBlank()) { "task must not be blank" }
         require(arguments.getString("task").length <= 10_000) { "task is too long" }
         arguments.optString("target_widget_id").takeIf { it.isNotBlank() }
-    }.map { Unit }
+    }.map {}
 
     override fun execute(
         arguments: JSONObject,

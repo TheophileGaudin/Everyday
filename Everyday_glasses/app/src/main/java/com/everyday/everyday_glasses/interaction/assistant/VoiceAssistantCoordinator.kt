@@ -102,7 +102,7 @@ class VoiceAssistantCoordinator(
     private var lastKeepalive = 0L
     private var generation = 0
 
-    private val localTimeout = Runnable { activeSession?.let { stop(it, submit = true) } }
+    private val localTimeout = Runnable { activeSession?.let { stop(it) } }
     private val keepaliveWatchdog = object : Runnable {
         override fun run() {
             if (activeOrigin != AssistantSessionOrigin.PHONE || state != AssistantSessionState.LISTENING) return
@@ -147,7 +147,7 @@ class VoiceAssistantCoordinator(
 
     fun toggleLocal() {
         if (state == AssistantSessionState.LISTENING && activeOrigin == AssistantSessionOrigin.GLASSES) {
-            activeSession?.let { stop(it, submit = true) }
+            activeSession?.let { stop(it) }
         } else start(UUID.randomUUID().toString(), AssistantSessionOrigin.GLASSES)
     }
 
@@ -164,7 +164,7 @@ class VoiceAssistantCoordinator(
         when (control.action) {
             AssistantControlAction.START -> start(control.sessionId, AssistantSessionOrigin.PHONE)
             AssistantControlAction.KEEPALIVE -> if (matches(control.sessionId, AssistantSessionOrigin.PHONE)) lastKeepalive = System.currentTimeMillis()
-            AssistantControlAction.STOP -> stop(control.sessionId, submit = true)
+            AssistantControlAction.STOP -> stop(control.sessionId)
             AssistantControlAction.CANCEL -> cancel(control.sessionId, null)
         }
     }
@@ -265,17 +265,14 @@ class VoiceAssistantCoordinator(
         }
     }
 
-    private fun stop(sessionId: String, submit: Boolean) {
+    private fun stop(sessionId: String) {
         if (!matches(sessionId, activeOrigin)) {
             Log.w(TAG, "Ignoring stop session=$sessionId active=$activeSession state=${state.wireName}")
             return
         }
         main.removeCallbacks(localTimeout)
         main.removeCallbacks(keepaliveWatchdog)
-        if (!submit) {
-            cancel(sessionId, null)
-            return
-        }
+
         val origin = activeOrigin
         val id = activeSession
         val file = recorder.stop().getOrElse { failure ->

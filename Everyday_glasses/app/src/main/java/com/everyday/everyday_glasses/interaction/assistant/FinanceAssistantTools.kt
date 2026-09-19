@@ -53,10 +53,6 @@ data class FinanceTileSemanticState(
     val range: FinanceTimeRange,
     val chartStyle: FinanceChartType
 ) {
-    val tileId: String get() = id
-    val configurationId: String get() = id
-    val chartType: FinanceChartType get() = chartStyle
-
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
         .put("visible", visible)
@@ -82,8 +78,6 @@ data class FinanceWidgetSemanticState(
 ) {
     val visible: Boolean get() = !minimized
     val windowed: Boolean get() = !fullscreen
-    val selectedTile: FinanceTileSemanticState?
-        get() = tiles.firstOrNull { it.id == selectedTileId }
 
     fun toJson(): JSONObject = JSONObject()
         .put("widget_id", widgetId)
@@ -225,7 +219,7 @@ class UpdateFinanceTileSemanticToolHandler(
                         "slot", JSONObject()
                             .put("type", "integer")
                             .put("minimum", 0)
-                            .put("maximum", FinanceWidget.Companion.MAX_TILES - 1)
+                            .put("maximum", FinanceWidget.MAX_TILES - 1)
                             .put("description", "Optional dashboard placement slot")
                     )
                     .put(
@@ -237,7 +231,7 @@ class UpdateFinanceTileSemanticToolHandler(
             .put("required", JSONArray().put("instrument"))
     )
 
-    override fun validate(arguments: JSONObject): Result<Unit> = parse(arguments).map { Unit }
+    override fun validate(arguments: JSONObject): Result<Unit> = parse(arguments).map {}
 
     override fun execute(
         arguments: JSONObject,
@@ -311,7 +305,7 @@ class UpdateFinanceTileSemanticToolHandler(
     private fun rangeSchema(): JSONObject = JSONObject()
         .put("type", "string")
         .put("enum", JSONArray().apply {
-            FinanceTimeRange.values().forEach {
+            FinanceTimeRange.entries.forEach {
                 put(it.range)
                 put(it.label)
             }
@@ -320,7 +314,7 @@ class UpdateFinanceTileSemanticToolHandler(
     private fun parseRange(raw: String): FinanceTimeRange? {
         if (raw.isBlank()) return null
         val normalized = raw.trim().uppercase(Locale.US).replace(" ", "")
-        return FinanceTimeRange.values().firstOrNull {
+        return FinanceTimeRange.entries.firstOrNull {
             it.range.equals(raw.trim(), ignoreCase = true) ||
                 it.label.equals(raw.trim(), ignoreCase = true) ||
                 it.range.replace(" ", "").uppercase(Locale.US) == normalized
@@ -342,8 +336,8 @@ class UpdateFinanceTileSemanticToolHandler(
             arguments.has("placement") && !arguments.isNull("placement") -> arguments.getInt("placement")
             else -> return null
         }
-        require(raw in 0 until FinanceWidget.Companion.MAX_TILES) {
-            "Finance tile slot must be between 0 and ${FinanceWidget.Companion.MAX_TILES - 1}"
+        require(raw in 0 until FinanceWidget.MAX_TILES) {
+            "Finance tile slot must be between 0 and ${FinanceWidget.MAX_TILES - 1}"
         }
         return raw
     }

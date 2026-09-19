@@ -38,21 +38,21 @@ class ConfigureMapPoisSemanticToolHandler(
                     .put(
                         "radius_m", JSONObject()
                             .put("type", "integer")
-                            .put("minimum", PoiDisplayConfig.Companion.MIN_RADIUS_M)
-                            .put("maximum", PoiDisplayConfig.Companion.MAX_RADIUS_M)
+                            .put("minimum", PoiDisplayConfig.MIN_RADIUS_M)
+                            .put("maximum", PoiDisplayConfig.MAX_RADIUS_M)
                     )
                     .put(
                         "max_results", JSONObject()
                             .put("type", "integer")
-                            .put("minimum", PoiDisplayConfig.Companion.MIN_RESULTS)
-                            .put("maximum", PoiDisplayConfig.Companion.MAX_RESULTS)
+                            .put("minimum", PoiDisplayConfig.MIN_RESULTS)
+                            .put("maximum", PoiDisplayConfig.MAX_RESULTS)
                     )
                     .put("reset_default", JSONObject().put("type", "boolean"))
                     .put("presentation", presentationSchema())
             )
     )
 
-    override fun validate(arguments: JSONObject): Result<Unit> = parse(arguments).map { Unit }
+    override fun validate(arguments: JSONObject): Result<Unit> = parse(arguments).map { }
 
     override fun execute(
         arguments: JSONObject,
@@ -79,7 +79,7 @@ class ConfigureMapPoisSemanticToolHandler(
             require(!arguments.has("categories")) { "reset_default cannot include categories" }
             require(!arguments.has("radius_m")) { "reset_default cannot include radius_m" }
             require(!arguments.has("max_results")) { "reset_default cannot include max_results" }
-            return@runCatching ConfigureMapPoisRequest(PoiDisplayConfig.Companion.DEFAULT, presentation)
+            return@runCatching ConfigureMapPoisRequest(PoiDisplayConfig.DEFAULT, presentation)
         }
 
         val rawCategories = arguments.optJSONArray("categories")
@@ -102,10 +102,10 @@ class ConfigureMapPoisSemanticToolHandler(
         val maxResults = when {
             arguments.has("max_results") -> arguments.getInt("max_results")
             arguments.has("result_count") -> arguments.getInt("result_count")
-            else -> PoiDisplayConfig.Companion.DEFAULT_MAX_RESULTS
+            else -> PoiDisplayConfig.DEFAULT_MAX_RESULTS
         }
         ConfigureMapPoisRequest(
-            config = PoiDisplayConfig.Companion.custom(requestedCategories, radius, maxResults),
+            config = PoiDisplayConfig.custom(requestedCategories, radius, maxResults),
             presentation = presentation
         )
     }

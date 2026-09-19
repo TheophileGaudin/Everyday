@@ -1,7 +1,9 @@
 package com.everyday.everyday_glasses.interaction.assistant
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.core.content.edit
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 
@@ -69,13 +71,14 @@ class AssistantPreferencesStore(context: Context) {
         return keySaved && modelSaved
     }
 
+    @SuppressLint("UseKtx") /** The KTX edit function does not return whether saving succeeded which is what we need here */
     fun saveModel(modelId: String, mode: AssistantModelSelectionMode): Boolean = prefs.edit()
         .putString(KEY_MODEL_ID, modelId)
         .putString(KEY_SELECTION_MODE, mode.name)
         .commit()
 
     fun clearApiKey() {
-        securePrefs?.edit()?.remove(KEY_API_KEY)?.commit()
+        securePrefs?.edit {remove(KEY_API_KEY)}
     }
 
     fun isCapabilityProbed(modelId: String): Boolean =
@@ -84,7 +87,7 @@ class AssistantPreferencesStore(context: Context) {
     fun markCapabilityProbed(modelId: String) {
         val models = prefs.getStringSet(KEY_PROBED_MODELS, emptySet()).orEmpty().toMutableSet()
         models += modelId
-        prefs.edit().putStringSet(KEY_PROBED_MODELS, models).apply()
+        prefs.edit {putStringSet(KEY_PROBED_MODELS, models)}
     }
 }
 

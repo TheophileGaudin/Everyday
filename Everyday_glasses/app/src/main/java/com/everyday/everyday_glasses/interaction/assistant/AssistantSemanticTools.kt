@@ -20,6 +20,17 @@ data class AssistantScreenshot(
         require(height > 0) { "Screenshot height must be positive" }
         require(mimeType.isNotBlank()) { "Screenshot MIME type must not be blank" }
     }
+
+    override fun equals(other: Any?): Boolean =
+        other is AssistantScreenshot &&
+                bytes.contentEquals(other.bytes) &&
+                width == other.width &&
+                height == other.height &&
+                mimeType == other.mimeType
+
+    override fun hashCode(): Int =
+        31 * (31 * (31 * bytes.contentHashCode() + width) + height) +
+                mimeType.hashCode()
 }
 
 /**
@@ -46,12 +57,6 @@ data class AssistantToolExecutionContext(
         )
     }
 )
-
-/** Compatibility name for callers that use the shorter context terminology. */
-typealias AssistantToolContext = AssistantToolExecutionContext
-
-/** Compatibility name for callers that use the shorter handler terminology. */
-typealias AssistantToolHandler = AssistantSemanticToolHandler
 
 /**
  * Extensible semantic assistant action.
@@ -236,7 +241,7 @@ class PresentTextSemanticToolHandler : AssistantSemanticToolHandler {
         parsePresentation(arguments).getOrThrow()
         parseSources(arguments).getOrThrow()
         arguments.optString("target_widget_id").takeIf { it.isNotBlank() }
-    }.map { Unit }
+    }.map {}
 
     override fun execute(
         arguments: JSONObject,

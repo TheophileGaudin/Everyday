@@ -11,6 +11,7 @@ class AssistantNetworkLease(context: Context) : AutoCloseable {
     private val wifiManager = context.applicationContext
         .getSystemService(Context.WIFI_SERVICE) as WifiManager
     private val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+    @Suppress("DEPRECATION")
     private val wifiLock = wifiManager.createWifiLock(
         WifiManager.WIFI_MODE_FULL_HIGH_PERF,
         "Everyday_glasses::AssistantWifi"

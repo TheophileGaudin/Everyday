@@ -80,7 +80,7 @@ private class AppCommandSemanticToolHandler(
         command.description,
         commandSchema(command.argumentKind)
     )
-    override fun validate(arguments: JSONObject): Result<Unit> = decodeInvocation(arguments).map { Unit }
+    override fun validate(arguments: JSONObject): Result<Unit> = decodeInvocation(arguments).map {}
 
     override fun execute(
         arguments: JSONObject,
@@ -115,7 +115,7 @@ private class AppCommandLayoutSemanticToolHandler(
         ).put("required", JSONArray().put("name"))
     )
 
-    override fun validate(arguments: JSONObject): Result<Unit> = decodeInvocation(arguments).map { Unit }
+    override fun validate(arguments: JSONObject): Result<Unit> = decodeInvocation(arguments).map {}
 
     override fun execute(
         arguments: JSONObject,
@@ -180,8 +180,6 @@ class AssistantToolCatalog private constructor(
     fun declarations(): List<AssistantToolDefinition> = handlerList
         .filter { it.isAdvertised }
         .map { it.definition }
-
-    fun hasHandler(name: String): Boolean = handlersByName.containsKey(name)
 
     fun validate(call: AssistantToolCall): Result<Unit> = runCatching {
         val handler = handlersByName[call.name] ?: error("Unknown tool")
