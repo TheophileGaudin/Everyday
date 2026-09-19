@@ -27,8 +27,8 @@ import kotlin.math.roundToInt
  */
 class VideoWidget(
     private val context: Context,
-    private val rootLayout: ViewGroup,
-    private val containerView: View,
+    rootLayout: ViewGroup,
+    containerView: View,
     val contentUri: Uri,
     val displayName: String,
     x: Float,
@@ -129,12 +129,11 @@ class VideoWidget(
         get() = controller.shouldAutoplayOnResume
 
     /** Forward a cursor tap in WidgetContainer content coordinates to X3player's controls. */
-    fun handleContentTap(px: Float, py: Float): Boolean {
-        if (isMinimized || released) return true
+    fun handleContentTap(px: Float, py: Float) {
+        if (isMinimized || released) return
         val localX = (px - x).coerceIn(0f, widgetWidth.coerceAtLeast(1f) - 1f)
         val localY = (py - y).coerceIn(0f, widgetHeight.coerceAtLeast(1f) - 1f)
         dispatchSyntheticTap(localX, localY)
-        return true
     }
 
     /** Forward an Everyday double tap to X3player's progress/overlay behavior. */
@@ -150,13 +149,12 @@ class VideoWidget(
     private fun dispatchSyntheticTap(localX: Float, localY: Float) {
         val target = playerUi.root
         val now = SystemClock.uptimeMillis()
-        val downTime = now
-        val down = MotionEvent.obtain(downTime, now, MotionEvent.ACTION_DOWN, localX, localY, 0)
+        val down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, localX, localY, 0)
         down.source = InputDevice.SOURCE_TOUCHSCREEN
         target.dispatchTouchEvent(down)
         down.recycle()
 
-        val up = MotionEvent.obtain(downTime, now + 40L, MotionEvent.ACTION_UP, localX, localY, 0)
+        val up = MotionEvent.obtain(now, now + 40L, MotionEvent.ACTION_UP, localX, localY, 0)
         up.source = InputDevice.SOURCE_TOUCHSCREEN
         target.dispatchTouchEvent(up)
         up.recycle()

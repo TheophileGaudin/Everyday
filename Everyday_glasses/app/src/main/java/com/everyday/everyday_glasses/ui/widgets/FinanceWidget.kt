@@ -26,6 +26,8 @@ import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
+import androidx.core.graphics.toColorInt
+import androidx.core.graphics.withClip
 
 class FinanceWidget(
     x: Float,
@@ -95,21 +97,12 @@ class FinanceWidget(
     private var tiles = mutableListOf(defaultTile("^GSPC"))
 
     var listener: FinanceWidgetListener? = null
-    private val onStateChanged: (() -> Unit)? get() = listener?.let { value -> { value.onStateChanged() } }
-    private val onDataRequested: ((List<FinanceDashboardTileConfig>, List<String>, Boolean, String) -> Unit)?
-        get() = listener?.let { value -> { configs, ids, force, reason -> value.onDataRequested(configs, ids, force, reason) } }
-
-    private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        textSize = 15f
-        isFakeBoldText = true
-    }
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textSize = 16f
     }
     private val smallPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#C8C8D8")
+        color = "#C8C8D8".toColorInt()
         textSize = 10f
     }
     private val valuePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -118,53 +111,53 @@ class FinanceWidget(
         textAlign = Paint.Align.RIGHT
     }
     private val positivePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#44CC66")
+        color = "#44CC66".toColorInt()
         textSize = 14f
         textAlign = Paint.Align.RIGHT
         isFakeBoldText = true
     }
     private val negativePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#CC4444")
+        color = "#CC4444".toColorInt()
         textSize = 14f
         textAlign = Paint.Align.RIGHT
         isFakeBoldText = true
     }
     private val linePositivePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#44CC66")
+        color = "#44CC66".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 2f
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
     private val lineNegativePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#CC4444")
+        color = "#CC4444".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 2f
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
     private val lineFillPositivePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#1A44CC66")
+        color = "#1A44CC66".toColorInt()
         style = Paint.Style.FILL
     }
     private val lineFillNegativePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#1ACC4444")
+        color = "#1ACC4444".toColorInt()
         style = Paint.Style.FILL
     }
     private val candleUpPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#44CC66")
+        color = "#44CC66".toColorInt()
         style = Paint.Style.FILL
     }
     private val candleDownPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#CC4444")
+        color = "#CC4444".toColorInt()
         style = Paint.Style.FILL
     }
     private val candleWickPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#CCCCCC")
+        color = "#CCCCCC".toColorInt()
         strokeWidth = 1.4f
     }
     private val panelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#CC141426")
+        color = "#CC141426".toColorInt()
         style = Paint.Style.FILL
     }
     private val tilePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -172,12 +165,12 @@ class FinanceWidget(
         style = Paint.Style.FILL
     }
     private val selectedTilePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#664A90D9")
+        color = "#664A90D9".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 1f
     }
     private val dropSlotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#66888888")
+        color = "#66888888".toColorInt()
         style = Paint.Style.FILL
     }
     private val borderLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -186,15 +179,15 @@ class FinanceWidget(
         strokeWidth = 1f
     }
     private val navPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#33384D")
+        color = "#33384D".toColorInt()
         style = Paint.Style.FILL
     }
     private val navActivePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#4A90D9")
+        color = "#4A90D9".toColorInt()
         style = Paint.Style.FILL
     }
     private val centerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#AAAAAA")
+        color = "#AAAAAA".toColorInt()
         textSize = 13f
         textAlign = Paint.Align.CENTER
     }
@@ -267,9 +260,6 @@ class FinanceWidget(
             topLeftVisibleTileId = topLeftId
         )
     }
-
-    fun getSemanticState(widgetId: String = STABLE_ID): FinanceWidgetSemanticState =
-        semanticState(widgetId)
 
     /**
      * Update one existing tile without replacing the widget or its layout. Omitted range and
@@ -389,7 +379,7 @@ class FinanceWidget(
     }
 
     fun onTap(px: Float, py: Float): Boolean {
-        if (dropdownVisible) return handleDropdownTap(px, py)
+        if (dropdownVisible) {handleDropdownTap(px, py); return true}
         if (handleTilingMenuTap(px, py)) return true
         if (handleTileControlTap(px, py)) return true
 
@@ -619,15 +609,16 @@ class FinanceWidget(
 
     private fun drawCandleChart(canvas: Canvas, rect: RectF, candles: List<FinanceCandle>) {
         if (candles.isEmpty() || rect.width() <= 0f || rect.height() <= 0f) return
-        val visible = candles
-        val minPrice = visible.minOf { it.low }
-        val maxPrice = visible.maxOf { it.high }
+        val minPrice = candles.minOf { it.low }
+        val maxPrice = candles.maxOf { it.high }
         val priceRange = (maxPrice - minPrice).coerceAtLeast(0.01f)
-        val slot = rect.width() / visible.size
+        val slot = rect.width() / candles.size
         val bodyWidth = (slot * 0.55f).coerceIn(1f, 10f)
-        visible.forEachIndexed { i, candle ->
+        candles.forEachIndexed { i, candle ->
             val cx = rect.left + slot * i + slot / 2f
-            fun yFor(value: Float): Float = rect.bottom - ((value - minPrice) / priceRange) * rect.height()
+            fun yFor(value: Float): Float =
+                rect.bottom - ((value - minPrice) / priceRange) * rect.height()
+
             val highY = yFor(candle.high)
             val lowY = yFor(candle.low)
             val openY = yFor(candle.open)
@@ -664,19 +655,19 @@ class FinanceWidget(
         val panel = dropdownPanelBounds()
         canvas.drawRoundRect(panel, 6f, 6f, panelPaint)
         canvas.drawRoundRect(panel, 6f, 6f, borderLinePaint)
-        canvas.save()
-        canvas.clipRect(panel)
-        val instruments = FinanceDataProvider.allInstruments
-        var rowTop = panel.top - dropdownScrollOffset
-        instruments.forEach { instrument ->
-            val row = RectF(panel.left, rowTop, panel.right, rowTop + ROW_HEIGHT)
-            if (row.bottom >= panel.top && row.top <= panel.bottom) {
-                val label = "${instrument.displayName}  ${instrument.assetType.name.lowercase(Locale.US)}"
-                canvas.drawText(label, row.left + 8f, row.centerY() + 5f, settingsTextPaint)
+        canvas.withClip(panel) {
+            val instruments = FinanceDataProvider.allInstruments
+            var rowTop = panel.top - dropdownScrollOffset
+            instruments.forEach { instrument ->
+                val row = RectF(panel.left, rowTop, panel.right, rowTop + ROW_HEIGHT)
+                if (row.bottom >= panel.top && row.top <= panel.bottom) {
+                    val label =
+                        "${instrument.displayName}  ${instrument.assetType.name.lowercase(Locale.US)}"
+                    drawText(label, row.left + 8f, row.centerY() + 5f, settingsTextPaint)
+                }
+                rowTop += ROW_HEIGHT
             }
-            rowTop += ROW_HEIGHT
         }
-        canvas.restore()
     }
 
     private fun handleTilingMenuTap(px: Float, py: Float): Boolean {
@@ -754,29 +745,42 @@ class FinanceWidget(
         return true
     }
 
-    private fun handleDropdownTap(px: Float, py: Float): Boolean {
+    private fun handleDropdownTap(px: Float, py: Float) {
         val panel = dropdownPanelBounds()
         if (!panel.contains(px, py)) {
             dropdownVisible = false
-            return true
+            return
         }
-        val index = ((py - panel.top + dropdownScrollOffset) / ROW_HEIGHT).toInt()
-        val instrument = FinanceDataProvider.allInstruments.getOrNull(index) ?: return true
+
+        val index =
+            ((py - panel.top + dropdownScrollOffset) / ROW_HEIGHT).toInt()
+        val instrument =
+            FinanceDataProvider.allInstruments.getOrNull(index) ?: return
+
         val tileIndex = dropdownTileIndex.coerceIn(0, tiles.lastIndex)
         tiles[tileIndex] = tiles[tileIndex].copy(
             assetType = instrument.assetType,
             symbol = instrument.symbol,
             chartType = when {
-                instrument.assetType == FinanceAssetType.CRYPTO -> FinanceChartType.CANDLE
-                instrument.assetType == FinanceAssetType.FX && tiles[tileIndex].chartType == FinanceChartType.CANDLE -> FinanceChartType.CANDLE
+                instrument.assetType == FinanceAssetType.CRYPTO ->
+                    FinanceChartType.CANDLE
+
+                instrument.assetType == FinanceAssetType.FX &&
+                        tiles[tileIndex].chartType == FinanceChartType.CANDLE ->
+                    FinanceChartType.CANDLE
+
                 else -> FinanceChartType.LINE
             }
         )
+
         dropdownVisible = false
         updateLegacySelection()
-        requestTileIfVisible(tileIndex, force = true, reason = "tile_symbol_changed")
+        requestTileIfVisible(
+            tileIndex,
+            force = true,
+            reason = "tile_symbol_changed"
+        )
         listener?.onStateChanged()
-        return true
     }
 
     private fun layoutTiles() {
@@ -805,12 +809,8 @@ class FinanceWidget(
             val top = gridTop + row * (tileH + gap)
             slotBounds.add(slot to RectF(left, top, left + tileW, top + tileH))
         }
-        visibleIndices.forEachIndexed { position, tileIndex ->
-            val slot = if (isFullscreen) {
-                slotForIndex(tileIndex).coerceIn(0, slotCount - 1)
-            } else {
-                position
-            }
+        visibleIndices.forEachIndexed { _, tileIndex ->
+            val slot = slotForIndex(tileIndex).coerceIn(0, slotCount - 1)
             slotBounds.firstOrNull { it.first == slot }?.let { (_, rect) ->
                 tileBounds.add(tileIndex to RectF(rect))
             }
@@ -949,7 +949,7 @@ class FinanceWidget(
 
     fun canStartTileDrag(px: Float, py: Float): Boolean {
         if (!isFullscreen || tiles.size <= 1 || dropdownVisible || settingsVisible) return false
-        if (isFullscreen && fullscreenTilingMenuVisible && tilingMenuBounds.contains(px, py)) return false
+        if (fullscreenTilingMenuVisible && tilingMenuBounds.contains(px, py)) { return false }
         if (tileControlBounds.any { it.bounds.contains(px, py) }) return false
         return tileBounds.any { it.second.contains(px, py) }
     }
@@ -1040,7 +1040,7 @@ class FinanceWidget(
 
     private fun defaultTile(symbol: String): FinanceDashboardTileConfig =
         FinanceDashboardTileConfig(
-            id = tileIdFor(FinanceAssetType.INDEX, symbol, FinanceTimeRange.ONE_DAY.range),
+            id = defaultTileIdFor(symbol, FinanceTimeRange.ONE_DAY.range),
             assetType = FinanceAssetType.INDEX,
             symbol = symbol,
             range = FinanceTimeRange.ONE_DAY.range,
@@ -1095,11 +1095,8 @@ class FinanceWidget(
         currentRange = FinanceTimeRange.fromRange(first.range)
     }
 
-    private fun seriesKey(assetType: FinanceAssetType, symbol: String, range: String): String =
-        "${assetType.name}:$symbol:$range"
-
-    private fun tileIdFor(assetType: FinanceAssetType, symbol: String, range: String): String =
-        "${assetType.name.lowercase(Locale.US)}_${symbol}_$range"
+    private fun seriesKey(assetType: FinanceAssetType, symbol: String, range: String): String = "${assetType.name}:$symbol:$range"
+    private fun defaultTileIdFor(symbol: String, range: String): String = "${FinanceAssetType.INDEX.name.lowercase(Locale.US)}_${symbol}_$range"
 
     private fun formatPercent(value: Float): String =
         if (value >= 0f) String.format(Locale.US, "+%.2f%%", value) else String.format(Locale.US, "%.2f%%", value)

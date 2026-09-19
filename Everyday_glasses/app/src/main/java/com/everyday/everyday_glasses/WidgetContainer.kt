@@ -3159,9 +3159,7 @@ class WidgetContainer @JvmOverloads constructor(
         handleBaseTap(widget, x, y)
 
     private fun handleVideoWidgetTap(widget: VideoWidget, x: Float, y: Float): Boolean =
-        handleBaseTap(widget, x, y) { hit ->
-            if (hit == BaseWidget.BaseHitArea.CONTENT) widget.handleContentTap(x, y) else true
-        }
+        handleBaseTap(widget, x, y) { hit -> if (hit == BaseWidget.BaseHitArea.CONTENT) {widget.handleContentTap(x, y)}; true}
 
     private fun handleBrowserWidgetTap(widget: BrowserWidget, x: Float, y: Float): Boolean {
         val hit = widget.hitTest(x, y)
@@ -3200,7 +3198,7 @@ class WidgetContainer @JvmOverloads constructor(
             if (hit == BaseWidget.BaseHitArea.CONTENT) {
                 val before = widget.currentPage to widget.zoom
                 runClassifiedInput(
-                    action = { widget.handleContentTap(x, y) },
+                    action = { widget.handleContentTap(x, y); true },
                     changed = { (widget.currentPage to widget.zoom) != before }
                 )
             } else {
@@ -3747,7 +3745,6 @@ class WidgetContainer @JvmOverloads constructor(
         val statusWidth = 220f
         val statusHeight = 110f
         return StatusBarWidget(
-            context,
             (width - statusWidth) / 2f,
             height - statusHeight - height * 0.15f,
             statusWidth,
@@ -3883,7 +3880,7 @@ class WidgetContainer @JvmOverloads constructor(
         }
         val startX = (width - NotificationsWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
         return NotificationsWidget(
-            context, startX, 20f, NotificationsWidget.DEFAULT_WIDTH,
+            startX, 20f, NotificationsWidget.DEFAULT_WIDTH,
             NotificationsWidget.DEFAULT_HEIGHT, height.toFloat()
         ).apply {
             onStateChanged = { notifyTransientContentChanged() }
@@ -4167,7 +4164,7 @@ class WidgetContainer @JvmOverloads constructor(
     private fun removeFileBrowserWidget(widget: FileBrowserWidget) {lifecycleController.close(widget)}
 
     private fun buildTextBox(x: Float, y: Float, boxWidth: Float, boxHeight: Float): TextBoxWidget =
-        TextBoxWidget(context, x, y, boxWidth, boxHeight).apply {
+        TextBoxWidget(x, y, boxWidth, boxHeight).apply {
             listener = object : TextBoxWidgetListener {
                 override fun onFocusChanged(focused: Boolean) {
                     if (focused) setFocusedWidget(this@apply)
@@ -5442,7 +5439,7 @@ class WidgetContainer @JvmOverloads constructor(
      * Creates the widget if it doesn't exist, then restores its state.
      */
     private fun applyStatusBarState(state: DashboardPersistence.StatusBarState): StatusBarWidget {
-        val widget = StatusBarWidget(context, state.x, state.y, 220f, 110f).apply {
+        val widget = StatusBarWidget(state.x, state.y, 220f, 110f).apply {
             onStateChanged = { notifyTransientContentChanged() }
         }
         widgetCaptureRestore.restoreStatusBarPosition(widget, state, width, height)
@@ -5558,7 +5555,6 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun applyNotificationsState(state: DashboardPersistence.NotificationsWidgetState): NotificationsWidget {
         val widget = NotificationsWidget(
-            context,
             state.x,
             state.y,
             state.width,

@@ -22,6 +22,8 @@ import com.everyday.shared.sync.NewsSourceKind
 import com.everyday.shared.sync.NewsSourceSpec
 import java.util.Locale
 import kotlin.math.abs
+import androidx.core.graphics.toColorInt
+import androidx.core.graphics.withClip
 
 /**
  * Google News RSS widget.
@@ -64,8 +66,6 @@ class NewsWidget(
         private const val FONT_SCALE_MAX = 1.55f
         private const val FONT_SCALE_STEP = 0.10f
         private const val FONT_MENU_WIDTH = 178f
-        private const val FONT_MENU_HEIGHT = 58f
-        private const val FONT_MENU_BUTTON_SIZE = 40f
         private const val OPTIONS_PANEL_WIDTH = 390f
         private const val OPTIONS_PANEL_MIN_HEIGHT = 246f
         private const val OPTIONS_PANEL_MAX_HEIGHT = 300f
@@ -114,10 +114,6 @@ class NewsWidget(
 
     var listener: NewsWidgetListener? = null
     private val onStateChanged: (() -> Unit)? get() = listener?.let { value -> { value.onStateChanged() } }
-    private val onDataRequested: ((String, Boolean, String) -> Unit)?
-        get() = listener?.let { value -> { country, force, reason -> value.onDataRequested(country, force, reason) } }
-    private val onSourceInputFocusChanged: ((Boolean) -> Unit)?
-        get() = listener?.let { value -> { focused -> value.onSourceInputFocusChanged(focused) } }
 
     // Overlay arrows
     private val leftArrowBounds = RectF()
@@ -145,7 +141,7 @@ class NewsWidget(
     // ==================== Paints ====================
 
     private val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#B0BEC5")
+        color = "#B0BEC5".toColorInt()
         textSize = 14f
     }
 
@@ -155,13 +151,13 @@ class NewsWidget(
     }
 
     private val borderBadgeBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#667FA1C4")
+        color = "#667FA1C4".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 2f
     }
 
     private val borderBadgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#D6E3F8")
+        color = "#D6E3F8".toColorInt()
         textSize = 13f
         textAlign = Paint.Align.CENTER
     }
@@ -183,29 +179,29 @@ class NewsWidget(
     }
 
     private val bodyPaintFullscreen = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#E0E0E0")
+        color = "#E0E0E0".toColorInt()
         textSize = BASE_BODY_FULLSCREEN_SIZE
     }
 
     private val statusPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#90A4AE")
+        color = "#90A4AE".toColorInt()
         textSize = 16f
         textAlign = Paint.Align.RIGHT
     }
 
     private val centerInfoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#9E9E9E")
+        color = "#9E9E9E".toColorInt()
         textSize = BASE_CENTER_INFO_SIZE
         textAlign = Paint.Align.CENTER
     }
 
     private val arrowBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#A0000000")
+        color = "#A0000000".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val arrowBackgroundHoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#CC4488AA")
+        color = "#CC4488AA".toColorInt()
         style = Paint.Style.FILL
     }
 
@@ -218,33 +214,28 @@ class NewsWidget(
     }
 
     private val scrollbarTrackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#33445566")
+        color = "#33445566".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val scrollbarThumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#88AECBFF")
+        color = "#88AECBFF".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val fontMenuBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#DD111827")
+        color = "#DD111827".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val fontMenuBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#667FA1C4")
+        color = "#667FA1C4".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 2f
     }
 
     private val fontMenuButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#334A6178")
-        style = Paint.Style.FILL
-    }
-
-    private val fontMenuButtonHoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#5578A7D5")
+        color = "#334A6178".toColorInt()
         style = Paint.Style.FILL
     }
 
@@ -267,12 +258,12 @@ class NewsWidget(
     }
 
     private val sourcePanelRowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#334A6178")
+        color = "#334A6178".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val sourcePanelRowSelectedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#5578A7D5")
+        color = "#5578A7D5".toColorInt()
         style = Paint.Style.FILL
     }
 
@@ -282,17 +273,17 @@ class NewsWidget(
     }
 
     private val sourcePanelSecondaryPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#B0BEC5")
+        color = "#B0BEC5".toColorInt()
         textSize = 12f
     }
 
     private val sourcePanelErrorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#FFB4AB")
+        color = "#FFB4AB".toColorInt()
         textSize = 12f
     }
 
     private val sourcePanelButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#405D7A96")
+        color = "#405D7A96".toColorInt()
         style = Paint.Style.FILL
     }
 
@@ -303,12 +294,12 @@ class NewsWidget(
     }
 
     private val fullscreenOptionsPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#CC111827")
+        color = "#CC111827".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val fullscreenOptionsBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#99AECBFF")
+        color = "#99AECBFF".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 2f
     }
@@ -627,10 +618,9 @@ class NewsWidget(
         val lineHeight = lineHeight(titlePaintWindow)
         val maxLinesByHeight = maxOf(1, (availableHeight / lineHeight).toInt())
         val titleLines = toWrappedLines(item.title, titlePaintWindow, maxWidth)
-        val maxLines = maxLinesByHeight
 
-        val drawLines = if (titleLines.size > maxLines) {
-            titleLines.take(maxLines - 1) + ellipsizeLine(titleLines[maxLines - 1], titlePaintWindow, maxWidth)
+        val drawLines = if (titleLines.size > maxLinesByHeight) {
+            titleLines.take(maxLinesByHeight - 1) + ellipsizeLine(titleLines[maxLinesByHeight - 1], titlePaintWindow, maxWidth)
         } else {
             titleLines
         }
@@ -671,15 +661,13 @@ class NewsWidget(
         }
 
         // Body (scrollable)
-        canvas.save()
-        canvas.clipRect(layout.bodyViewport)
-
-        var bodyY = layout.bodyViewport.top + layout.bodyLineHeight - contentScrollOffset
-        for (line in layout.bodyLines) {
-            canvas.drawText(line, left, bodyY, bodyPaintFullscreen)
-            bodyY += layout.bodyLineHeight
+        canvas.withClip(layout.bodyViewport) {
+            var bodyY = layout.bodyViewport.top + layout.bodyLineHeight - contentScrollOffset
+            for (line in layout.bodyLines) {
+                drawText(line, left, bodyY, bodyPaintFullscreen)
+                bodyY += layout.bodyLineHeight
+            }
         }
-        canvas.restore()
 
         if (shouldShowChrome()) {
             drawFullscreenFooter(canvas, item)
@@ -766,24 +754,6 @@ class NewsWidget(
         drawArrow(canvas, rightArrowBounds, ArrowDirection.RIGHT, hoveredArrow == ArrowDirection.RIGHT)
     }
 
-    private fun drawFontMenu(canvas: Canvas) {
-        canvas.drawRoundRect(fontMenuBounds, 12f, 12f, fontMenuBackgroundPaint)
-        canvas.drawRoundRect(fontMenuBounds, 12f, 12f, fontMenuBorderPaint)
-
-        val decreasePaint = if (hoveredFontMenuAction == FontMenuAction.DECREASE) fontMenuButtonHoverPaint else fontMenuButtonPaint
-        val increasePaint = if (hoveredFontMenuAction == FontMenuAction.INCREASE) fontMenuButtonHoverPaint else fontMenuButtonPaint
-        canvas.drawRoundRect(decreaseFontBounds, 10f, 10f, decreasePaint)
-        canvas.drawRoundRect(increaseFontBounds, 10f, 10f, increasePaint)
-
-        val labelY = fontMenuBounds.centerY() - (fontMenuLabelPaint.descent() + fontMenuLabelPaint.ascent()) / 2f
-        canvas.drawText("Text ${(fontScale * 100f).toInt()}%", fontMenuBounds.centerX(), labelY, fontMenuLabelPaint)
-
-        val decreaseY = decreaseFontBounds.centerY() - (fontMenuButtonTextPaint.descent() + fontMenuButtonTextPaint.ascent()) / 2f
-        val increaseY = increaseFontBounds.centerY() - (fontMenuButtonTextPaint.descent() + fontMenuButtonTextPaint.ascent()) / 2f
-        canvas.drawText("-", decreaseFontBounds.centerX(), decreaseY, fontMenuButtonTextPaint)
-        canvas.drawText("+", increaseFontBounds.centerX(), increaseY, fontMenuButtonTextPaint)
-    }
-
     private fun drawSourcePanel(canvas: Canvas) {
         canvas.drawRoundRect(sourcePanelBounds, 12f, 12f, fontMenuBackgroundPaint)
         canvas.drawRoundRect(sourcePanelBounds, 12f, 12f, fontMenuBorderPaint)
@@ -865,15 +835,6 @@ class NewsWidget(
             labelY,
             sourcePanelSecondaryPaint
         )
-    }
-
-    private fun truncateSourceTextLegacy(value: String, width: Float, paint: Paint): String {
-        if (paint.measureText(value) <= width) return value
-        var result = value
-        while (result.length > 1 && paint.measureText("$result…") > width) {
-            result = result.dropLast(1)
-        }
-        return "$result…"
     }
 
     private fun truncateSourceText(value: String, width: Float, paint: Paint): String {
@@ -1158,16 +1119,13 @@ class NewsWidget(
     }
 
     private fun buildFullscreenLayout(): FullscreenLayout {
-        val item = newsItems.getOrNull(currentIndex)
-        if (item == null) {
-            return FullscreenLayout(
-                titleLines = emptyList(),
-                bodyLines = emptyList(),
-                bodyViewport = RectF(contentBounds),
-                bodyLineHeight = lineHeight(bodyPaintFullscreen),
-                maxScroll = 0f
-            )
-        }
+        val item = newsItems.getOrNull(currentIndex) ?: return FullscreenLayout(
+            titleLines = emptyList(),
+            bodyLines = emptyList(),
+            bodyViewport = RectF(contentBounds),
+            bodyLineHeight = lineHeight(bodyPaintFullscreen),
+            maxScroll = 0f
+        )
 
         val left = contentBounds.left + FULLSCREEN_PADDING
         val right = contentBounds.right - FULLSCREEN_PADDING

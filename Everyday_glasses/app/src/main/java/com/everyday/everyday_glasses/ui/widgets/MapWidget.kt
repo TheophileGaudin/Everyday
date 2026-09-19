@@ -76,6 +76,7 @@ import java.text.Normalizer
 import java.util.UUID
 import java.util.concurrent.Executors
 import kotlin.math.*
+import androidx.core.graphics.withClip
 
 /** Circular, heading-up minimap with an interactive fullscreen map. */
 class MapWidget(
@@ -264,9 +265,6 @@ class MapWidget(
     private val poiImportantCategoryBounds = mutableMapOf<String, RectF>()
     private val poiNormalCategoryBounds = mutableMapOf<String, RectF>()
     private val poiImportantRadiusTracks = mutableMapOf<String, RectF>()
-    // Kept for the legacy drawing helpers below; the active panel uses the mode-aware bounds.
-    private val poiRadiusTrack = RectF(); private val poiCountTrack = RectF()
-    private val poiCategoryBounds = mutableListOf<RectF>()
     private var hoverX = Float.NEGATIVE_INFINITY; private var hoverY = Float.NEGATIVE_INFINITY
     private var showPoiConfig = false
     private var pendingPoiConfig = PoiDisplayConfig.DEFAULT
@@ -276,9 +274,6 @@ class MapWidget(
     private var nearestCategorySelectionStartsFresh = false
     private var poiScrollOffset = 0f
     private var poiContentHeight = 0f
-    private var pendingPoiCategories: MutableSet<String> = linkedSetOf()
-    private var pendingPoiRadiusM = PoiDisplayConfig.DEFAULT_RADIUS_M
-    private var pendingPoiMaxResults = PoiDisplayConfig.DEFAULT_MAX_RESULTS
     private val navigationBannerBounds = RectF()
     private val navigationStopBounds = RectF()
     private val addressDialogBounds = RectF()
@@ -585,7 +580,7 @@ class MapWidget(
             openAddressEntry()
             return true
         }
-        // Fullscreen double-tap is reserved for leaving the fullscreen map.  Settings is now
+        // Fullscreen double-tap is reserved for leaving the fullscreen map.  Settings are now
         // an explicit control so it cannot conflict with this gesture.
         showOptions = false
         showPoiConfig = false
@@ -635,7 +630,7 @@ class MapWidget(
             }
         }
         if (navigationChoiceCancelBounds.contains(px, py)) { stopNavigation(); return true }
-        if (showPoiConfig) return handlePoiConfigTap(px, py)
+        if (showPoiConfig) {handlePoiConfigTap(px, py); return true}
         if (showOptions) {
             when {
                 locationOptionBounds.contains(px, py) -> showLocation = !showLocation
@@ -1268,7 +1263,7 @@ class MapWidget(
         }.getOrNull() ?: return
         applyGuidanceUpdate(update)
         if (update.arrivedNow) {
-            clearPendingReroute("arrived")
+            clearPendingReroute()
         } else if (update.shouldRequestReroute) {
             beginReroute(fix.point, nowMonotonicTimeMs)
         }
@@ -1340,7 +1335,7 @@ class MapWidget(
         phoneRouting.request(request)
     }
 
-    private fun clearPendingReroute(reason: String) {
+    private fun clearPendingReroute() {
         val hadRequest = activePhoneRouteRequestId != null
         activePhoneRouteGeneration = null
         activePhoneRouteRequestId = null
@@ -1348,7 +1343,7 @@ class MapWidget(
         activePhoneRoutePurpose = null
         reroutePending = false
         liveGuidance.finishReroute()
-        if (hadRequest) phoneRouting.cancelActive(reason)
+        if (hadRequest) phoneRouting.cancelActive("arrived")
     }
 
     private fun finishNavigationFailure(
@@ -1474,10 +1469,21 @@ class MapWidget(
         val radius = (min(c.width(), mapBottom - c.top) * (if (isFullscreen) .42f else .5f) - 3f).coerceAtLeast(8f)
         val pendingLabels = mutableListOf<PoiLabel>()
         clip.reset(); clip.addCircle(cx, cy, radius, Path.Direction.CW)
-        canvas.save(); canvas.clipPath(clip)
-        position?.let { if (mode == MapViewMode.TOP_DOWN) drawTopDown(canvas, it, cx, cy, radius, pendingLabels) else drawProjected(canvas, it, c) }
-            ?: canvas.drawText("Waiting for location", cx, cy, label.apply { textAlign = Paint.Align.CENTER })
-        canvas.restore(); canvas.drawCircle(cx, cy, radius, rim)
+        canvas.withClip(clip) {
+            position?.let {
+                if (mode == MapViewMode.TOP_DOWN) {
+                    drawTopDown(this, it, cx, cy, radius, pendingLabels)
+                } else {
+                    drawProjected(this, it, c)
+                }
+            } ?: drawText(
+                "Waiting for location",
+                cx,
+                cy,
+                label.apply { textAlign = Paint.Align.CENTER }
+            )
+        }
+        canvas.drawCircle(cx, cy, radius, rim)
         if (position != null && mode == MapViewMode.TOP_DOWN) drawNorthIndicator(canvas, cx, cy, radius)
         position?.let {
             drawOffscreenImportantPois(canvas, it, cx, cy, radius, pendingLabels)
@@ -1681,7 +1687,7 @@ class MapWidget(
         val directionX = sin(angle).toFloat()
         val directionY = -cos(angle).toFloat()
         val perpendicularX = -directionY
-        val perpendicularY = directionX
+        @Suppress("UnnecessaryVariable", "RedundantSuppression") val perpendicularY = directionX
         val tipX = cx + directionX * (radius - 4f)
         val tipY = cy + directionY * (radius - 4f)
         val baseX = tipX - directionX * 17f
@@ -1781,8 +1787,8 @@ class MapWidget(
                 }
                 if (chosen == null) { baseline = candidateBaseline; chosen = RectF(left, baseline + fm.ascent, left + width, baseline + fm.descent) }
             }
-            occupied += chosen!!
-            canvas.drawText(text, chosen!!.left + 2f, baseline, label)
+            occupied += chosen
+            canvas.drawText(text, chosen.left + 2f, baseline, label)
         }
     }
 
@@ -1800,11 +1806,6 @@ class MapWidget(
         canvas.drawLine(cx - 7f, cy + 12f, cx + 7f, cy + 12f, trainOutline)
         canvas.drawLine(cx - 5f, cy + 9f, cx - 8f, cy + 12f, trainOutline)
         canvas.drawLine(cx + 5f, cy + 9f, cx + 8f, cy + 12f, trainOutline)
-    }
-    private fun headingCardinal(value: Float): String {
-        val directions = arrayOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")
-        val index = ((value + 22.5f) / 45f).toInt() % directions.size
-        return directions[index]
     }
     private fun drawLocationFooter(canvas: Canvas, c: RectF, cx: Float) {
         val debugBaseline = c.bottom - 3f
@@ -2174,16 +2175,15 @@ class MapWidget(
         poiClosestRadiusTrack.setEmpty()
         poiNearestRadiusTrack.setEmpty()
         poiNearestCountTrack.setEmpty()
-        canvas.save()
-        canvas.clipRect(panelLeft + 6f, viewportTop, panelRight - 6f, viewportBottom)
-        var y = viewportTop + 18f - poiScrollOffset
-        y = if (pendingPoiConfig.isDefaultMode) {
-            drawDefaultPoiSettings(canvas, panelLeft, panelRight, y)
-        } else {
-            drawNearestPoiSettings(canvas, panelLeft, panelRight, y)
+        canvas.withClip(panelLeft + 6f, viewportTop, panelRight - 6f, viewportBottom) {
+            var y = viewportTop + 18f - poiScrollOffset
+            y = if (pendingPoiConfig.isDefaultMode) {
+                drawDefaultPoiSettings(this, panelLeft, panelRight, y)
+            } else {
+                drawNearestPoiSettings(this, panelLeft, panelRight, y)
+            }
+            poiContentHeight = y + poiScrollOffset + 14f
         }
-        poiContentHeight = y + poiScrollOffset + 14f
-        canvas.restore()
 
         val maxScroll = (poiContentHeight - viewportBottom).coerceAtLeast(0f)
         poiScrollOffset = poiScrollOffset.coerceIn(0f, maxScroll)
@@ -2279,7 +2279,7 @@ class MapWidget(
                 label.textAlign = Paint.Align.LEFT
                 canvas.drawText(definition.label, left + 14f, y + 11f, label)
                 label.textAlign = Paint.Align.RIGHT
-                canvas.drawText("${radius} m", right - 14f, y + 11f, label)
+                canvas.drawText("$radius m", right - 14f, y + 11f, label)
                 val track = RectF(left + 126f, y + 18f, right - 14f, y + 29f)
                 poiImportantRadiusTracks[definition.id] = track
                 drawPoiTrack(canvas, track, radius, PoiDisplayConfig.MIN_IMPORTANT_RADIUS_M, PoiDisplayConfig.MAX_IMPORTANT_RADIUS_M)
@@ -2409,110 +2409,6 @@ class MapWidget(
         else -> chip
     }
 
-    private fun drawPoiConfigPanelLegacy(canvas: Canvas) {
-        val c = contentBounds
-        val panelLeft = c.left + 18f
-        val panelRight = c.right - 18f
-        val panelTop = c.top + 10f
-        val panelBottom = (panelTop + 456f).coerceAtMost(c.bottom - 8f)
-        poiConfigBounds.set(panelLeft, panelTop, panelRight, panelBottom)
-        canvas.drawRoundRect(poiConfigBounds, 12f, 12f, optionsBackground)
-        canvas.drawRoundRect(poiConfigBounds, 12f, 12f, rim)
-
-        label.textAlign = Paint.Align.LEFT
-        label.textSize = 17f
-        canvas.drawText("Configure map POIs", panelLeft + 14f, panelTop + 25f, label)
-        label.textSize = 12f
-        canvas.drawText("Select categories", panelLeft + 14f, panelTop + 43f, label)
-
-        poiCategoryBounds.clear()
-        val columns = 2
-        val categoryRowHeight = 25f
-        val categoryTop = panelTop + 50f
-        val categoryWidth = (poiConfigBounds.width() - 28f) / columns
-        MapPoiCategoryCatalog.definitions.forEachIndexed { index, definition ->
-            val row = index / columns
-            val column = index % columns
-            val bounds = RectF(
-                panelLeft + 8f + column * categoryWidth,
-                categoryTop + row * categoryRowHeight,
-                panelLeft + 8f + (column + 1) * categoryWidth - 4f,
-                categoryTop + row * categoryRowHeight + categoryRowHeight - 3f
-            )
-            poiCategoryBounds += bounds
-            val selected = definition.id in pendingPoiCategories
-            canvas.drawRoundRect(
-                bounds,
-                6f,
-                6f,
-                if (bounds.contains(hoverX, hoverY)) chipHover else if (selected) chipHover else chip
-            )
-            label.textSize = 11f
-            label.textAlign = Paint.Align.LEFT
-            canvas.drawText(
-                if (selected) "✓ ${definition.label}" else definition.label,
-                bounds.left + 6f,
-                bounds.centerY() + 4f,
-                label
-            )
-        }
-
-        val categoryRows = (MapPoiCategoryCatalog.definitions.size + columns - 1) / columns
-        val sliderStartY = categoryTop + categoryRows * categoryRowHeight + 14f
-        drawPoiSlider(
-            canvas,
-            "Radius",
-            "${pendingPoiRadiusM} m",
-            poiRadiusTrack,
-            sliderStartY,
-            PoiDisplayConfig.MIN_RADIUS_M,
-            PoiDisplayConfig.MAX_RADIUS_M,
-            pendingPoiRadiusM
-        )
-        drawPoiSlider(
-            canvas,
-            "Results",
-            pendingPoiMaxResults.toString(),
-            poiCountTrack,
-            sliderStartY + 52f,
-            PoiDisplayConfig.MIN_RESULTS,
-            PoiDisplayConfig.MAX_RESULTS,
-            pendingPoiMaxResults
-        )
-
-        val actionTop = sliderStartY + 90f
-        val actionWidth = (poiConfigBounds.width() - 38f) / 2f
-        poiDefaultBounds.set(panelLeft + 12f, actionTop, panelLeft + 12f + actionWidth, actionTop + 38f)
-        poiApplyBounds.set(panelRight - 12f - actionWidth, actionTop, panelRight - 12f, actionTop + 38f)
-        drawPoiAction(canvas, poiDefaultBounds, "Default")
-        drawPoiAction(canvas, poiApplyBounds, "Apply")
-        label.textAlign = Paint.Align.LEFT
-    }
-
-    private fun drawPoiSlider(
-        canvas: Canvas,
-        title: String,
-        value: String,
-        bounds: RectF,
-        y: Float,
-        minValue: Int,
-        maxValue: Int,
-        currentValue: Int
-    ) {
-        val c = poiConfigBounds
-        label.textAlign = Paint.Align.LEFT
-        label.textSize = 13f
-        canvas.drawText(title, c.left + 14f, y + 14f, label)
-        label.textAlign = Paint.Align.RIGHT
-        canvas.drawText(value, c.right - 14f, y + 14f, label)
-        val left = c.left + 100f
-        val right = c.right - 92f
-        bounds.set(left, y + 24f, right, y + 38f)
-        canvas.drawRoundRect(bounds, 7f, 7f, chip)
-        val fraction = ((currentValue - minValue).toFloat() / (maxValue - minValue).toFloat()).coerceIn(0f, 1f)
-        val knobX = bounds.left + fraction * bounds.width()
-        canvas.drawCircle(knobX, bounds.centerY(), 8f, if (bounds.contains(hoverX, hoverY)) chipHover else poiPaint)
-    }
 
     private fun drawPoiAction(canvas: Canvas, bounds: RectF, text: String) {
         canvas.drawRoundRect(bounds, 8f, 8f, if (bounds.contains(hoverX, hoverY)) chipHover else chip)
@@ -2521,11 +2417,11 @@ class MapWidget(
         canvas.drawText(text, bounds.centerX(), bounds.centerY() + 5f, label)
     }
 
-    private fun handlePoiConfigTap(px: Float, py: Float): Boolean {
+    private fun handlePoiConfigTap(px: Float, py: Float) {
         if (!poiConfigBounds.contains(px, py)) {
             showPoiConfig = false
             invalidate?.invoke()
-            return true
+            return
         }
         // The fixed action row must win over any expanded slider hitbox near the bottom edge.
         if (poiCancelBounds.contains(px, py)) {
@@ -2537,26 +2433,26 @@ class MapWidget(
             poiScrollOffset = 0f
             showPoiConfig = false
             invalidate?.invoke()
-            return true
+            return
         }
         if (poiDefaultBounds.contains(px, py)) {
             pendingPoiConfig = PoiDisplayConfig.DEFAULT
             poiScrollOffset = 0f
             invalidate?.invoke()
-            return true
+            return
         }
         if (poiApplyBounds.contains(px, py)) {
             applyPoiDisplayConfig(pendingPoiConfig)
             showPoiConfig = false
             invalidate?.invoke()
-            return true
+            return
         }
         if (poiModeDefaultBounds.contains(px, py)) {
             pendingPoiConfig = pendingPoiConfig.asDefaultMode()
             nearestCategorySelectionStartsFresh = false
             poiScrollOffset = 0f
             invalidate?.invoke()
-            return true
+            return
         }
         if (poiModeNearestBounds.contains(px, py)) {
             val enteringNearestFromDefault = pendingPoiConfig.isDefaultMode
@@ -2564,7 +2460,7 @@ class MapWidget(
             nearestCategorySelectionStartsFresh = enteringNearestFromDefault
             poiScrollOffset = 0f
             invalidate?.invoke()
-            return true
+            return
         }
         if (!pendingPoiConfig.isDefaultMode) {
             poiNearestCategoryBounds.forEach { (category, bounds) ->
@@ -2584,7 +2480,7 @@ class MapWidget(
                         mode = PoiDisplayMode.NEAREST
                     )
                     invalidate?.invoke()
-                    return true
+                    return
                 }
             }
         }
@@ -2622,7 +2518,7 @@ class MapWidget(
                         )
                     }
                     invalidate?.invoke()
-                    return true
+                    return
                 }
             }
             poiNormalCategoryBounds.forEach { (category, bounds) ->
@@ -2643,7 +2539,7 @@ class MapWidget(
                         mode = PoiDisplayMode.DEFAULT
                     )
                     invalidate?.invoke()
-                    return true
+                    return
                 }
             }
             poiImportantRadiusTracks.forEach { (category, bounds) ->
@@ -2656,7 +2552,7 @@ class MapWidget(
                         mode = PoiDisplayMode.DEFAULT
                     )
                     invalidate?.invoke()
-                    return true
+                    return
                 }
             }
             if (poiNormalCountTrack.contains(px, py)) {
@@ -2666,7 +2562,7 @@ class MapWidget(
                     mode = PoiDisplayMode.DEFAULT
                 )
                 invalidate?.invoke()
-                return true
+                return
             }
             if (poiClosestToggleBounds.contains(px, py)) {
                 pendingPoiConfig = pendingPoiConfig.copy(
@@ -2675,7 +2571,7 @@ class MapWidget(
                     mode = PoiDisplayMode.DEFAULT
                 )
                 invalidate?.invoke()
-                return true
+                return
             }
             if (poiClosestRadiusTrack.contains(px, py)) {
                 pendingPoiConfig = pendingPoiConfig.copy(
@@ -2684,7 +2580,7 @@ class MapWidget(
                     mode = PoiDisplayMode.DEFAULT
                 )
                 invalidate?.invoke()
-                return true
+                return
             }
         } else {
             if (poiNearestRadiusTrack.contains(px, py)) {
@@ -2694,7 +2590,7 @@ class MapWidget(
                     mode = PoiDisplayMode.NEAREST
                 )
                 invalidate?.invoke()
-                return true
+                return
             }
             if (poiNearestCountTrack.contains(px, py)) {
                 pendingPoiConfig = pendingPoiConfig.copy(
@@ -2703,56 +2599,10 @@ class MapWidget(
                     mode = PoiDisplayMode.NEAREST
                 )
                 invalidate?.invoke()
-                return true
+                return
             }
         }
-        return true
-    }
-
-    private fun handlePoiConfigTapLegacy(px: Float, py: Float): Boolean {
-        if (!poiConfigBounds.contains(px, py)) {
-            showPoiConfig = false
-            invalidate?.invoke()
-            return true
-        }
-        poiCategoryBounds.forEachIndexed { index, bounds ->
-            if (bounds.contains(px, py)) {
-                val category = MapPoiCategoryCatalog.definitions[index].id
-                if (category in pendingPoiCategories && pendingPoiCategories.size > 1) {
-                    pendingPoiCategories.remove(category)
-                } else if (category !in pendingPoiCategories) {
-                    pendingPoiCategories.add(category)
-                }
-                invalidate?.invoke()
-                return true
-            }
-        }
-        if (poiRadiusTrack.contains(px, py)) {
-            pendingPoiRadiusM = sliderValue(px, poiRadiusTrack, PoiDisplayConfig.MIN_RADIUS_M, PoiDisplayConfig.MAX_RADIUS_M, 50)
-            invalidate?.invoke()
-            return true
-        }
-        if (poiCountTrack.contains(px, py)) {
-            pendingPoiMaxResults = sliderValue(px, poiCountTrack, PoiDisplayConfig.MIN_RESULTS, PoiDisplayConfig.MAX_RESULTS, 1)
-            invalidate?.invoke()
-            return true
-        }
-        if (poiDefaultBounds.contains(px, py)) {
-            applyPoiDisplayConfig(PoiDisplayConfig.DEFAULT)
-            showPoiConfig = false
-            invalidate?.invoke()
-            return true
-        }
-        if (poiApplyBounds.contains(px, py)) {
-            val config = runCatching {
-                PoiDisplayConfig.custom(pendingPoiCategories, pendingPoiRadiusM, pendingPoiMaxResults)
-            }.getOrNull()
-            if (config != null) applyPoiDisplayConfig(config)
-            showPoiConfig = false
-            invalidate?.invoke()
-            return true
-        }
-        return true
+        return
     }
 
     private fun sliderValue(px: Float, bounds: RectF, minValue: Int, maxValue: Int, step: Int): Int {
@@ -2765,16 +2615,16 @@ class MapWidget(
         activePoiSliderCategory = null
         if (pendingPoiConfig.isDefaultMode) {
             poiImportantRadiusTracks.forEach { (category, bounds) ->
-                if (expandRect(bounds, 20f).contains(px, py)) {
+                if (expandRect(bounds).contains(px, py)) {
                     activePoiSliderCategory = category
                     return PoiSlider.IMPORTANT_RADIUS
                 }
             }
-            if (expandRect(poiNormalCountTrack, 20f).contains(px, py)) return PoiSlider.NORMAL_COUNT
-            if (expandRect(poiClosestRadiusTrack, 20f).contains(px, py)) return PoiSlider.CLOSEST_RADIUS
+            if (expandRect(poiNormalCountTrack).contains(px, py)) return PoiSlider.NORMAL_COUNT
+            if (expandRect(poiClosestRadiusTrack).contains(px, py)) return PoiSlider.CLOSEST_RADIUS
         } else {
-            if (expandRect(poiNearestRadiusTrack, 20f).contains(px, py)) return PoiSlider.NEAREST_RADIUS
-            if (expandRect(poiNearestCountTrack, 20f).contains(px, py)) return PoiSlider.NEAREST_COUNT
+            if (expandRect(poiNearestRadiusTrack).contains(px, py)) return PoiSlider.NEAREST_RADIUS
+            if (expandRect(poiNearestCountTrack).contains(px, py)) return PoiSlider.NEAREST_COUNT
         }
         return PoiSlider.NONE
     }
@@ -2788,14 +2638,14 @@ class MapWidget(
             PoiSlider.NEAREST_COUNT -> poiNearestCountTrack
             PoiSlider.NONE -> null
         } ?: return RectF()
-        return expandRect(track, 20f)
+        return expandRect(track)
     }
 
-    private fun expandRect(rect: RectF, margin: Float): RectF = RectF(
-        rect.left - margin,
-        rect.top - margin,
-        rect.right + margin,
-        rect.bottom + margin
+    private fun expandRect(rect: RectF): RectF = RectF(
+        rect.left - MARGIN,
+        rect.top - MARGIN,
+        rect.right + MARGIN,
+        rect.bottom + MARGIN
     )
 
     private fun updatePoiSliderFromTouch(px: Float, slider: PoiSlider) {
@@ -2877,6 +2727,7 @@ class MapWidget(
         private const val ADDRESS_DIALOG_HEIGHT = 148f
         private const val POSE_FRAME_INTERVAL_MS = 16L
         private const val POSE_HEADING_INVALIDATION_THRESHOLD_DEG = 0.25f
+        private const val MARGIN = 20.0f
     }
 }
 

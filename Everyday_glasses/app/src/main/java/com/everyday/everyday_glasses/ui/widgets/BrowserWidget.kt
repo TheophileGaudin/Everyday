@@ -1,5 +1,6 @@
 package com.everyday.everyday_glasses.ui.widgets
 
+import android.annotation.SuppressLint
 import android.content.ComponentCallbacks2
 import android.content.Context
 import android.graphics.Canvas
@@ -41,6 +42,9 @@ import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.net.URLEncoder
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.toColorInt
+import androidx.core.graphics.withClip
 
 /**
  * A widget that displays a web browser.
@@ -144,6 +148,13 @@ class BrowserWidget(
     inner class MyWebView(context: Context) : WebView(context) {
         private val handler = Handler(Looper.getMainLooper())
         private var pendingKeyboardHide: Runnable? = null
+
+        var currentPageScale: Float = 1f
+            private set
+
+        fun recordPageScale(scale: Float) {
+            currentPageScale = scale.coerceAtLeast(0.1f)
+        }
         
         public override fun computeVerticalScrollRange(): Int = super.computeVerticalScrollRange()
         public override fun computeVerticalScrollOffset(): Int = super.computeVerticalScrollOffset()
@@ -175,9 +186,8 @@ class BrowserWidget(
         }
 
         override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-            if (!isDispatchingSyntheticTouch) {
-                return true
-            }
+            if (!isDispatchingSyntheticTouch) {return true}
+            if (event.actionMasked == MotionEvent.ACTION_UP) {scheduleKeyboardHide()}
             return super.dispatchTouchEvent(event)
         }
 
@@ -239,7 +249,7 @@ class BrowserWidget(
         if (captureWidth <= 0 || captureHeight <= 0) return null
 
         val bitmap = runCatching {
-            Bitmap.createBitmap(captureWidth, captureHeight, Bitmap.Config.ARGB_8888)
+            createBitmap(captureWidth, captureHeight)
         }.getOrNull() ?: return null
         val output = ByteArrayOutputStream()
         return try {
@@ -501,7 +511,7 @@ class BrowserWidget(
 
     // Paints (close button paints inherited from BaseWidget)
     private val navBarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#E6202025") // Dark semi-transparent background
+        color = "#E6202025".toColorInt() // Dark semi-transparent background
     }
 
     private val navButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -509,7 +519,7 @@ class BrowserWidget(
     }
 
     private val navButtonHoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#40FFFFFF")
+        color = "#40FFFFFF".toColorInt()
     }
 
     private val navButtonDisabledPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -524,32 +534,32 @@ class BrowserWidget(
     }
 
     private val navIconDisabledPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#55FFFFFF")
+        color = "#55FFFFFF".toColorInt()
         strokeWidth = 2f
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
     }
 
     private val urlBarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#33000000")
+    color = "#33000000".toColorInt()
     }
 
     private val urlEditorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#F0202028")
+        color = "#F0202028".toColorInt()
     }
 
     private val urlEditorBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#CCFFFFFF")
+        color = "#CCFFFFFF".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 1.5f
     }
 
     private val urlSelectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#664488FF")
+        color = "#664488FF".toColorInt()
     }
 
     private val urlScrollbarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#88FFFFFF")
+        color = "#88FFFFFF".toColorInt()
     }
 
     private val urlTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -560,19 +570,19 @@ class BrowserWidget(
 
     // Tab bar paints
     private val tabBarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#CC181820")
+        color = "#CC181820".toColorInt()
     }
 
     private val tabActivePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#44FFFFFF")
+        color = "#44FFFFFF".toColorInt()
     }
 
     private val tabInactivePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#22FFFFFF")
+        color = "#22FFFFFF".toColorInt()
     }
 
     private val tabHoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#33FFFFFF")
+        color = "#33FFFFFF".toColorInt()
     }
 
     private val tabTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -582,14 +592,14 @@ class BrowserWidget(
     }
 
     private val tabCloseIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#AAFFFFFF")
+        color = "#AAFFFFFF".toColorInt()
         strokeWidth = 1.5f
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
     }
 
     private val newTabButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#22FFFFFF")
+        color = "#22FFFFFF".toColorInt()
     }
 
     private val newTabIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -600,11 +610,11 @@ class BrowserWidget(
     }
 
     private val loadingScrimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#66000000")
+        color = "#66000000".toColorInt()
     }
 
     private val loadingSpinnerTrackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#44FFFFFF")
+        color = "#44FFFFFF".toColorInt()
         strokeWidth = 4f
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
@@ -671,10 +681,6 @@ class BrowserWidget(
 
     // Callbacks (onCloseRequested is inherited from BaseWidget)
     var listener: BrowserWidgetListener? = null
-    private val onStateChanged: ((State) -> Unit)? get() = listener?.let { value -> { value.onStateChanged(it) } }
-    private val onFocusChanged: ((Boolean) -> Unit)? get() = listener?.let { value -> { value.onFocusChanged(it) } }
-    private val onRequestKeyboard: ((Boolean) -> Unit)? get() = listener?.let { value -> { value.onKeyboardRequested(it) } }
-
     private var isFocused = false
 
     init {
@@ -707,7 +713,6 @@ class BrowserWidget(
         instance.onPause()
         instance.webChromeClient = null
         instance.onFocusChangeListener = null
-        instance.setOnTouchListener(null)
         instance.removeAllViews()
         instance.destroy()
     }
@@ -1167,7 +1172,7 @@ class BrowserWidget(
         // Also try to deactivate IME for this view
         try {
             imm.restartInput(target)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             // Ignore if this fails
         }
     }
@@ -1240,6 +1245,7 @@ class BrowserWidget(
     /**
      * Create and configure a WebView for a tab.
      */
+    @SuppressLint("SetJavaScriptEnabled")
     private fun createWebViewForTab(tabId: Int, preferredIndex: Int? = null): MyWebView {
         val webView = MyWebView(context)
 
@@ -1259,14 +1265,6 @@ class BrowserWidget(
             }
         }
 
-        // Single debounced hide on touch
-        webView.setOnTouchListener { _, event ->
-            if (event.action == MotionEvent.ACTION_UP) {
-                webView.scheduleKeyboardHide()
-            }
-            false
-        }
-
         // Configure WebView
         webView.settings.apply {
             javaScriptEnabled = true
@@ -1282,7 +1280,10 @@ class BrowserWidget(
             offscreenPreRaster = false
             setSupportMultipleWindows(true)
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                isAlgorithmicDarkeningAllowed = true
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                @Suppress("DEPRECATION")
                 forceDark = WebSettings.FORCE_DARK_ON
             }
         }
@@ -1345,6 +1346,15 @@ class BrowserWidget(
                 recreateTabWebView(tabId, tabs.find { it.id == tabId }?.url)
                 return true
             }
+
+            override fun onScaleChanged(
+                view: WebView?,
+                oldScale: Float,
+                newScale: Float
+            ) {
+                super.onScaleChanged(view, oldScale, newScale)
+                tabWebView.recordPageScale(newScale)
+            }
         }
 
         webView.webChromeClient = object : WebChromeClient() {
@@ -1401,8 +1411,8 @@ class BrowserWidget(
                 notifyStateChanged()
             }
 
-            override fun getDefaultVideoPoster(): Bitmap? {
-                return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+            override fun getDefaultVideoPoster(): Bitmap {
+                return createBitmap(1, 1)
             }
 
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
@@ -1544,7 +1554,7 @@ class BrowserWidget(
 
         var currentX = tabBarBounds.left + TAB_SPACING
 
-        for (i in tabs.indices) {
+        repeat(tabs.size) {
             val tabRect = RectF(
                 currentX,
                 tabBarBounds.top + 2f,
@@ -1573,11 +1583,6 @@ class BrowserWidget(
             tabBarBounds.bottom - 2f
         )
     }
-
-    /**
-     * Get the tab count.
-     */
-    fun getTabCount(): Int = tabs.size
 
     private fun updateWebViewLayout() {
         syncLiveWebViewState()
@@ -1705,28 +1710,7 @@ class BrowserWidget(
         listener?.onStateChanged(state)
     }
 
-    /**
-     * Show keyboard.
-     */
-    fun showKeyboard() {
-        if (keyboardOverlay.show()) {
-            updateKeyboardLayout()
-            updateWebViewLayout()
-            listener?.onStateChanged(state)
-        }
-    }
-
-    /**
-     * Hide keyboard.
-     */
-    fun hideKeyboard() {
-        if (keyboardOverlay.hide()) {
-            updateWebViewLayout()
-            listener?.onStateChanged(state)
-        }
-    }
-
-    /**
+     /**
      * Get the keyboard for external hover/tap handling.
      */
     fun getKeyboard(): GlassesKeyboardView? = keyboardOverlay.getKeyboard()
@@ -1789,6 +1773,7 @@ class BrowserWidget(
         syncLoadingAnimation()
     }
 
+    @Suppress("DEPRECATION")
     fun onTrimMemory(level: Int) {
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
             if (!shouldKeepLiveWebView()) {
@@ -1842,12 +1827,6 @@ class BrowserWidget(
         tabs.clear()
     }
 
-    fun onHostPause() = onPause()
-
-    fun onHostResume() = onResume()
-
-    fun destroy() = onDestroy()
-    
     /**
      * Helper to notify state changed callback.
      */
@@ -1886,54 +1865,6 @@ class BrowserWidget(
         webView?.visibility = if (shouldKeepLiveWebView()) View.VISIBLE else View.GONE
         
         notifyStateChanged()
-        return true
-    }
-    
-
-    /**
-     * Toggles play/pause on the fullscreen video by simulating a tap on the video view.
-     */
-    private fun toggleVideoPlayPause() {
-        customView?.let { videoView ->
-            // Find the actual video surface and tap it
-            // Most video players respond to a tap by toggling play/pause
-            val centerX = videoView.width / 2f
-            val centerY = videoView.height / 2f
-            
-            val downTime = SystemClock.uptimeMillis()
-            val eventTime = downTime
-            
-            // Send touch down
-            val downEvent = MotionEvent.obtain(
-                downTime, eventTime,
-                MotionEvent.ACTION_DOWN,
-                centerX, centerY, 0
-            )
-            videoView.dispatchTouchEvent(downEvent)
-            downEvent.recycle()
-            
-            // Send touch up
-            val upEvent = MotionEvent.obtain(
-                downTime, eventTime + 50,
-                MotionEvent.ACTION_UP,
-                centerX, centerY, 0
-            )
-            videoView.dispatchTouchEvent(upEvent)
-            upEvent.recycle()
-            
-            Log.d(TAG, "Dispatched tap to video view at ($centerX, $centerY)")
-        }
-    }
-    
-    /**
-     * Handle tap events when in video fullscreen mode.
-     * Called from WidgetContainer to forward taps.
-     * @return true if handled (in video fullscreen), false otherwise
-     */
-    fun handleVideoFullscreenTap(): Boolean {
-        if (!isVideoFullscreen) return false
-        // Simulate tap on video view to toggle play/pause
-        toggleVideoPlayPause()
         return true
     }
 
@@ -2012,7 +1943,7 @@ class BrowserWidget(
         val localX = (px - contentBounds.left).coerceIn(0f, activeWebView.width.toFloat().coerceAtLeast(1f) - 1f)
         val localY = (py - (contentBounds.top + NAV_BAR_HEIGHT + TAB_BAR_HEIGHT))
             .coerceIn(0f, activeWebView.height.toFloat().coerceAtLeast(1f) - 1f)
-        val cssScale = activeWebView.scale.coerceAtLeast(0.1f)
+        val cssScale = activeWebView.currentPageScale
         val cssX = localX / cssScale
         val cssY = localY / cssScale
 
@@ -2837,48 +2768,48 @@ class BrowserWidget(
         val firstBaseline = urlEditorBounds.top + URL_EDITOR_PADDING - urlTextPaint.fontMetrics.ascent
         val endLine = (urlEditorScrollLine + visibleRows).coerceAtMost(lines.size)
 
-        canvas.save()
-        canvas.clipRect(
+        canvas.withClip(
             urlEditorBounds.left + URL_EDITOR_PADDING,
             urlEditorBounds.top + URL_EDITOR_PADDING,
             urlEditorBounds.right - URL_EDITOR_PADDING,
             urlEditorBounds.bottom - URL_EDITOR_PADDING
-        )
-
-        for (i in urlEditorScrollLine until endLine) {
-            val line = lines[i]
-            val y = firstBaseline + (i - urlEditorScrollLine) * lineHeight
-            if (isUrlTextSelected && line.isNotEmpty()) {
-                val selectedRight = urlEditorBounds.left + URL_EDITOR_PADDING + urlTextPaint.measureText(line)
-                canvas.drawRect(
-                    urlEditorBounds.left + URL_EDITOR_PADDING,
-                    y + urlTextPaint.fontMetrics.ascent,
-                    selectedRight,
-                    y + urlTextPaint.fontMetrics.descent,
-                    urlSelectionPaint
-                )
+        ) {
+            for (i in urlEditorScrollLine until endLine) {
+                val line = lines[i]
+                val y = firstBaseline + (i - urlEditorScrollLine) * lineHeight
+                if (isUrlTextSelected && line.isNotEmpty()) {
+                    val selectedRight =
+                        urlEditorBounds.left + URL_EDITOR_PADDING + urlTextPaint.measureText(line)
+                    drawRect(
+                        urlEditorBounds.left + URL_EDITOR_PADDING,
+                        y + urlTextPaint.fontMetrics.ascent,
+                        selectedRight,
+                        y + urlTextPaint.fontMetrics.descent,
+                        urlSelectionPaint
+                    )
+                }
+                drawText(line, urlEditorBounds.left + URL_EDITOR_PADDING, y, urlTextPaint)
             }
-            canvas.drawText(line, urlEditorBounds.left + URL_EDITOR_PADDING, y, urlTextPaint)
-        }
 
-        if (!isUrlTextSelected) {
-            val lastVisibleIndex = endLine - 1
-            val cursorLine = lines.lastIndex.coerceAtLeast(0)
-            if (cursorLine in urlEditorScrollLine..lastVisibleIndex) {
-                val line = lines.getOrElse(cursorLine) { "" }
-                val cursorX = (urlEditorBounds.left + URL_EDITOR_PADDING + urlTextPaint.measureText(line))
-                    .coerceAtMost(urlEditorBounds.right - URL_EDITOR_PADDING)
-                val y = firstBaseline + (cursorLine - urlEditorScrollLine) * lineHeight
-                canvas.drawLine(
-                    cursorX,
-                    y + urlTextPaint.fontMetrics.ascent,
-                    cursorX,
-                    y + urlTextPaint.fontMetrics.descent,
-                    navIconPaint
-                )
+            if (!isUrlTextSelected) {
+                val lastVisibleIndex = endLine - 1
+                val cursorLine = lines.lastIndex.coerceAtLeast(0)
+                if (cursorLine in urlEditorScrollLine..lastVisibleIndex) {
+                    val line = lines.getOrElse(cursorLine) { "" }
+                    val cursorX =
+                        (urlEditorBounds.left + URL_EDITOR_PADDING + urlTextPaint.measureText(line))
+                            .coerceAtMost(urlEditorBounds.right - URL_EDITOR_PADDING)
+                    val y = firstBaseline + (cursorLine - urlEditorScrollLine) * lineHeight
+                    drawLine(
+                        cursorX,
+                        y + urlTextPaint.fontMetrics.ascent,
+                        cursorX,
+                        y + urlTextPaint.fontMetrics.descent,
+                        navIconPaint
+                    )
+                }
             }
         }
-        canvas.restore()
 
         if (lines.size > URL_EDITOR_MAX_ROWS) {
             val trackTop = urlEditorBounds.top + URL_EDITOR_PADDING
@@ -2910,9 +2841,9 @@ class BrowserWidget(
             val tab = tabs[i]
 
             // Determine tab paint
-            val paint = when {
-                i == activeTabIndex -> tabActivePaint
-                i == hoveringTabIndex || i == hoveringTabClose -> tabHoverPaint
+            val paint = when (i) {
+                activeTabIndex -> tabActivePaint
+                hoveringTabIndex, hoveringTabClose -> tabHoverPaint
                 else -> tabInactivePaint
             }
 
@@ -2922,10 +2853,14 @@ class BrowserWidget(
             // Draw tab title (truncated)
             val title = tab.title.take(15).let { if (tab.title.length > 15) "$it…" else it }
             val titleY = tabRect.centerY() - (tabTextPaint.descent() + tabTextPaint.ascent()) / 2
-            canvas.save()
-            canvas.clipRect(tabRect.left + 6f, tabRect.top, tabRect.right - TAB_CLOSE_SIZE - 4f, tabRect.bottom)
-            canvas.drawText(title, tabRect.left + 6f, titleY, tabTextPaint)
-            canvas.restore()
+            canvas.withClip(
+                tabRect.left + 6f,
+                tabRect.top,
+                tabRect.right - TAB_CLOSE_SIZE - 4f,
+                tabRect.bottom
+            ) {
+                drawText(title, tabRect.left + 6f, titleY, tabTextPaint)
+            }
 
             // Draw close button (X)
             val closeRect = tabCloseBounds.getOrNull(i)

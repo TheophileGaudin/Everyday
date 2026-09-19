@@ -1,6 +1,5 @@
 package com.everyday.everyday_glasses.ui.widgets
 
-import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -15,9 +14,10 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.ceil
+import androidx.core.graphics.toColorInt
+import androidx.core.graphics.withClip
 
 class NotificationsWidget(
-    private val context: Context,
     x: Float,
     y: Float,
     width: Float,
@@ -79,11 +79,11 @@ class NotificationsWidget(
     var onStateChanged: (() -> Unit)? = null
 
     private val rowBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#141A22")
+        color = "#141A22".toColorInt()
         style = Paint.Style.FILL
     }
     private val rowBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#334A6178")
+        color = "#334A6178".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 1.5f
     }
@@ -92,24 +92,24 @@ class NotificationsWidget(
         textSize = BASE_TITLE_SIZE
     }
     private val bodyPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#D5DCE5")
+        color = "#D5DCE5".toColorInt()
         textSize = BASE_BODY_SIZE
     }
     private val metaPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#8EA0B5")
+        color = "#8EA0B5".toColorInt()
         textSize = BASE_META_SIZE
     }
     private val centerPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#9AA6B2")
+        color = "#9AA6B2".toColorInt()
         textSize = 18f
         textAlign = Paint.Align.CENTER
     }
     private val toastBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#EE0D1117")
+        color = "#EE0D1117".toColorInt()
         style = Paint.Style.FILL
     }
     private val toastBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#88AECBFF")
+        color = "#88AECBFF".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 2f
     }
@@ -118,23 +118,23 @@ class NotificationsWidget(
         textSize = BASE_TOAST_TITLE_SIZE
     }
     private val toastBodyPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#E5EAF0")
+        color = "#E5EAF0".toColorInt()
         textSize = BASE_TOAST_BODY_SIZE
     }
     private val scrollbarTrackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#33445566")
+        color = "#33445566".toColorInt()
         style = Paint.Style.FILL
     }
     private val scrollbarThumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#88AECBFF")
+        color = "#88AECBFF".toColorInt()
         style = Paint.Style.FILL
     }
     private val fontMenuBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#EE111827")
+        color = "#EE111827".toColorInt()
         style = Paint.Style.FILL
     }
     private val fontMenuBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#667FA1C4")
+        color = "#667FA1C4".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 2f
     }
@@ -144,11 +144,11 @@ class NotificationsWidget(
         textAlign = Paint.Align.CENTER
     }
     private val fontButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#334A6178")
+        color = "#334A6178".toColorInt()
         style = Paint.Style.FILL
     }
     private val fontButtonHoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#5578A7D5")
+        color = "#5578A7D5".toColorInt()
         style = Paint.Style.FILL
     }
     private val fontButtonTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -389,14 +389,14 @@ class NotificationsWidget(
             canvas.drawText(ellipsize(item.title, toastTitlePaint, toastViewport.width()), left, y, toastTitlePaint)
         }
 
-        canvas.save()
-        canvas.clipRect(toastViewport)
-        var bodyY = toastViewport.top + lineHeight(metaPaint) + lineHeight(toastTitlePaint) * 2f - toastScrollOffset
-        layout.lines.forEach { line ->
-            canvas.drawText(line, left, bodyY, toastBodyPaint)
-            bodyY += layout.lineHeight
+        canvas.withClip(toastViewport) {
+            var bodyY =
+                toastViewport.top + lineHeight(metaPaint) + lineHeight(toastTitlePaint) * 2f - toastScrollOffset
+            layout.lines.forEach { line ->
+                drawText(line, left, bodyY, toastBodyPaint)
+                bodyY += layout.lineHeight
+            }
         }
-        canvas.restore()
         drawToastScrollbar(canvas, layout)
     }
 

@@ -9,6 +9,7 @@ import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.settings.UnitDisplayFormatter
 import java.util.Locale
 import kotlin.math.abs
+import androidx.core.graphics.toColorInt
 
 /**
  * Speedometer widget that displays movement speed from local or phone location updates.
@@ -31,7 +32,7 @@ class SpeedometerWidget(
 
         companion object {
             fun fromCode(code: String?): SpeedUnit {
-                return values().firstOrNull { it.code.equals(code, ignoreCase = true) } ?: KMH
+                return SpeedUnit.entries.firstOrNull { it.code.equals(code, ignoreCase = true) } ?: KMH
             }
         }
     }
@@ -56,18 +57,18 @@ class SpeedometerWidget(
     }
 
     private val unitTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#C6D0DA")
+        color = "#C6D0DA".toColorInt()
         textSize = 22f
         textAlign = Paint.Align.CENTER
     }
 
     private val unitChipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#335060")
+        color = "#335060".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val unitChipHoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#4480A0")
+        color = "#4480A0".toColorInt()
         style = Paint.Style.FILL
     }
 

@@ -12,6 +12,7 @@ import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.widgets.helpers.WeatherIconMapper
 import com.everyday.everyday_glasses.settings.TemperatureUnit
 import java.util.Calendar
+import androidx.core.graphics.toColorInt
 
 class LocationWidget(
     private val context: Context,
@@ -89,28 +90,28 @@ class LocationWidget(
     }
 
     private val toggleMenuBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#DD111827")
+        color = "#DD111827".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val toggleMenuBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#667FA1C4")
+        color = "#667FA1C4".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 2f
     }
 
     private val toggleRowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#334A6178")
+        color = "#334A6178".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val unitChipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#335060")
+        color = "#335060".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val unitChipHoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#4480A0")
+        color = "#4480A0".toColorInt()
         style = Paint.Style.FILL
     }
 
@@ -122,7 +123,7 @@ class LocationWidget(
     }
 
     private val toggleRowHoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#5578A7D5")
+        color = "#5578A7D5".toColorInt()
         style = Paint.Style.FILL
     }
 
@@ -133,13 +134,13 @@ class LocationWidget(
     }
 
     private val toggleValueOnPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#8BC34A")
+        color = "#8BC34A".toColorInt()
         textSize = 16f
         textAlign = Paint.Align.RIGHT
     }
 
     private val toggleValueOffPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#B0BEC5")
+        color = "#B0BEC5".toColorInt()
         textSize = 16f
         textAlign = Paint.Align.RIGHT
     }
@@ -178,7 +179,7 @@ class LocationWidget(
     private var cachedIconFilename = ""
     private val iconDestRect = RectF()
     private val toggleMenuBounds = RectF()
-    private val toggleRowBounds = Array(LocationElement.values().size) { RectF() }
+    private val toggleRowBounds = Array(LocationElement.entries.size) { RectF() }
 
     init {
         updateToggleMenuBounds()
@@ -228,15 +229,6 @@ class LocationWidget(
         val t = token.trim()
         if (t.length != 2) return false
         return t[0].isLetter() && t[1].isLetter()
-    }
-
-    fun setLocationData(addr: String, weatherDesc: String, temp: String) {
-        val (location, country) = splitAddressParts(addr)
-        address = location
-        countryText = country
-        weatherDescription = weatherDesc
-        temperature = temp
-        refreshWeatherIconIfNeeded(force = true)
     }
 
     fun setLocationData(addr: String, weatherInfo: String) {
@@ -311,7 +303,7 @@ class LocationWidget(
     fun handleToggleMenuTapOrDismiss(px: Float, py: Float): Boolean {
         if (!showToggleMenu) return false
 
-        val tappedElement = LocationElement.values().firstOrNull { toggleRowBounds[it.ordinal].contains(px, py) }
+        val tappedElement = LocationElement.entries.firstOrNull { toggleRowBounds[it.ordinal].contains(px, py) }
         if (tappedElement != null) {
             toggleElement(tappedElement)
         } else {
@@ -356,13 +348,13 @@ class LocationWidget(
         val sunrise = sunriseEpochMs
         val sunset = sunsetEpochMs
         if (sunrise != null && sunset != null && sunrise < sunset) {
-            return nowMs < sunrise || nowMs >= sunset
+            return nowMs !in sunrise..<sunset
         }
 
         val calendar = Calendar.getInstance()
         calendar.timeInMillis = nowMs
         val hour = calendar.get(Calendar.HOUR_OF_DAY)
-        return hour < 6 || hour >= 18
+        return hour !in 6..<18
     }
 
     private fun loadIconFromAssets(filename: String): Bitmap? {
@@ -379,7 +371,7 @@ class LocationWidget(
     override fun updateHover(px: Float, py: Float) {
         updateHoverState(px, py)
         hoveredToggleElement = if (showToggleMenu) {
-            LocationElement.values().firstOrNull { toggleRowBounds[it.ordinal].contains(px, py) }
+            LocationElement.entries.firstOrNull { toggleRowBounds[it.ordinal].contains(px, py) }
         } else {
             null
         }
@@ -473,8 +465,7 @@ class LocationWidget(
         } else {
             1f
         }
-        val iconHeight = largeFontSize
-        val iconWidth = if (icon != null || weatherDescription.isNotEmpty()) iconHeight * aspectRatio else 0f
+        val iconWidth = if (icon != null || weatherDescription.isNotEmpty()) largeFontSize * aspectRatio else 0f
 
         textPaint.textSize = largeFontSize
         val tempWidth = textPaint.measureText(temperature)
@@ -487,7 +478,7 @@ class LocationWidget(
                 topStartX,
                 startY,
                 topStartX + iconWidth,
-                startY + iconHeight
+                startY + largeFontSize
             )
             canvas.drawBitmap(icon, null, iconDestRect, null)
         }
@@ -495,7 +486,7 @@ class LocationWidget(
         val tempX = topStartX + iconWidth + topGap
         val fontMetrics = textPaint.fontMetrics
         val textHeight = fontMetrics.descent - fontMetrics.ascent
-        val tempY = startY + (iconHeight - textHeight) / 2f - fontMetrics.ascent
+        val tempY = startY + (largeFontSize - textHeight) / 2f - fontMetrics.ascent
         if (showTemperature) {
             canvas.drawText(temperature, tempX, tempY, textPaint)
         }
@@ -547,12 +538,12 @@ class LocationWidget(
 
     private fun updateToggleMenuBounds() {
         val menuWidth = TOGGLE_MENU_WIDTH.coerceAtMost((widgetWidth - 32f).coerceAtLeast(120f))
-        val menuHeight = TOGGLE_MENU_PADDING * 2 + TOGGLE_MENU_ROW_HEIGHT * LocationElement.values().size
+        val menuHeight = TOGGLE_MENU_PADDING * 2 + TOGGLE_MENU_ROW_HEIGHT * LocationElement.entries.size
         val left = widgetBounds.centerX() - menuWidth / 2f
         val top = contentBounds.top + 8f
         toggleMenuBounds.set(left, top, left + menuWidth, top + menuHeight)
 
-        LocationElement.values().forEachIndexed { index, _ ->
+        LocationElement.entries.forEachIndexed { index, _ ->
             val rowTop = toggleMenuBounds.top + TOGGLE_MENU_PADDING + index * TOGGLE_MENU_ROW_HEIGHT
             toggleRowBounds[index].set(
                 toggleMenuBounds.left + TOGGLE_MENU_PADDING,
@@ -576,7 +567,7 @@ class LocationWidget(
         canvas.drawRoundRect(toggleMenuBounds, 12f, 12f, toggleMenuBackgroundPaint)
         canvas.drawRoundRect(toggleMenuBounds, 12f, 12f, toggleMenuBorderPaint)
 
-        LocationElement.values().forEachIndexed { index, element ->
+        LocationElement.entries.forEachIndexed { index, element ->
             val bounds = toggleRowBounds[index]
             val rowPaint = if (hoveredToggleElement == element) toggleRowHoverPaint else toggleRowPaint
             canvas.drawRoundRect(bounds, 8f, 8f, rowPaint)

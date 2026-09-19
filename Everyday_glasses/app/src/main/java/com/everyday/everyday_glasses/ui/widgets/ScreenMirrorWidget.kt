@@ -20,6 +20,8 @@ import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.get
 
 /**
  * A widget that displays mirrored screen content from the phone.
@@ -27,6 +29,9 @@ import java.util.concurrent.atomic.AtomicReference
  * 
  * Refactored to extend BaseWidget for common functionality.
  */
+// RenderScript is intentionally retained until the mirror conversion
+// is migrated and performance-tested on the glasses.
+@Suppress("DEPRECATION")
 class ScreenMirrorWidget(
     private val context: Context,
     x: Float,
@@ -41,6 +46,7 @@ class ScreenMirrorWidget(
         private const val MIN_HEIGHT = MIN_WIDGET_SIZE
         private const val STREAM_PORT = 5050
         private const val RECONNECT_DELAY_MS = 1000L
+        private const val BLACK_THRESHOLD = 20
         
         private const val TARGET_DISPLAY_FPS = 15
         private const val MIN_FRAME_INTERVAL_MS = 1000L / TARGET_DISPLAY_FPS
@@ -72,7 +78,7 @@ class ScreenMirrorWidget(
     
     private var decoder: MediaCodec? = null
     private var frameBitmap: Bitmap? = null
-    private val frameLock = Object()
+    private val frameLock = Any()
     
     private var sourceWidth = 480
     private var sourceHeight = 854
@@ -86,7 +92,6 @@ class ScreenMirrorWidget(
     private var useRenderScript = true
     
     private var detectedContentRect: Rect? = null
-    private val BLACK_THRESHOLD = 20
     private var lastContentBoundsDetectionMs = 0L
     
     private var nv21Buffer: ByteArray? = null
@@ -179,7 +184,7 @@ class ScreenMirrorWidget(
         // Detect top black bar
         outer@ for (y in 0 until height / 2 step sampleStep) {
             for (x in 0 until width step sampleStep) {
-                val pixel = bitmap.getPixel(x, y)
+                val pixel = bitmap[x, y]
                 if (!isBlackPixel(pixel)) {
                     top = maxOf(0, y - sampleStep)
                     break@outer
@@ -190,7 +195,7 @@ class ScreenMirrorWidget(
         // Detect bottom black bar
         outer@ for (y in height - 1 downTo height / 2 step sampleStep) {
             for (x in 0 until width step sampleStep) {
-                val pixel = bitmap.getPixel(x, y)
+                val pixel = bitmap[x, y]
                 if (!isBlackPixel(pixel)) {
                     bottom = minOf(height, y + sampleStep)
                     break@outer
@@ -201,7 +206,7 @@ class ScreenMirrorWidget(
         // Detect left black bar
         outer@ for (x in 0 until width / 2 step sampleStep) {
             for (y in top until bottom step sampleStep) {
-                val pixel = bitmap.getPixel(x, y)
+                val pixel = bitmap[x, y]
                 if (!isBlackPixel(pixel)) {
                     left = maxOf(0, x - sampleStep)
                     break@outer
@@ -212,7 +217,7 @@ class ScreenMirrorWidget(
         // Detect right black bar
         outer@ for (x in width - 1 downTo width / 2 step sampleStep) {
             for (y in top until bottom step sampleStep) {
-                val pixel = bitmap.getPixel(x, y)
+                val pixel = bitmap[x, y]
                 if (!isBlackPixel(pixel)) {
                     right = minOf(width, x + sampleStep)
                     break@outer
@@ -282,7 +287,7 @@ class ScreenMirrorWidget(
         for (sampleY in sampleYs) {
             for (sampleX in sampleXs) {
                 totalSamples++
-                if (isBlackPixel(bitmap.getPixel(sampleX, sampleY))) {
+                if (isBlackPixel(bitmap[sampleX, sampleY])) {
                     blackSamples++
                 }
             }
@@ -313,7 +318,7 @@ class ScreenMirrorWidget(
 
         for (sampleY in sampleYs) {
             for (sampleX in sampleXs) {
-                if (!isBlackPixel(bitmap.getPixel(sampleX, sampleY))) {
+                if (!isBlackPixel(bitmap[sampleX, sampleY])) {
                     return true
                 }
             }
@@ -359,7 +364,7 @@ class ScreenMirrorWidget(
             lastContentBoundsDetectionMs = now
             Log.d(
                 TAG,
-                "Detected content: ${detectedContentRect}" +
+                "Detected content: $detectedContentRect" +
                     if (needsRecoveryRefresh) " (recovered stale crop)" else ""
             )
         }
@@ -563,7 +568,7 @@ class ScreenMirrorWidget(
                     initDecoder()
                     receiveFrames()
                     
-                } catch (e: InterruptedException) {
+                } catch (_: InterruptedException) {
                     Log.d(TAG, "Stream thread interrupted")
                     break
                 } catch (e: Exception) {
@@ -575,14 +580,14 @@ class ScreenMirrorWidget(
                 }
                 
                 releaseDecoder()
-                try { streamSocket?.close() } catch (e: Exception) {}
+                try { streamSocket?.close() } catch (_: Exception) {}
                 streamSocket = null
                 inputStream = null
                 
                 if (isStreaming.get()) {
                     clearError()
                     updateStreamState(StreamState.CONNECTING)
-                    try { Thread.sleep(RECONNECT_DELAY_MS) } catch (e: InterruptedException) { break }
+                    try { Thread.sleep(RECONNECT_DELAY_MS) } catch (_: InterruptedException) { break }
                 }
             }
             
@@ -596,7 +601,7 @@ class ScreenMirrorWidget(
     
     private fun stopStreaming() {
         isStreaming.set(false)
-        try { streamSocket?.close() } catch (e: Exception) {}
+        try { streamSocket?.close() } catch (_: Exception) {}
         streamSocket = null
         inputStream = null
         streamThread?.interrupt()
@@ -694,7 +699,7 @@ class ScreenMirrorWidget(
                 //     Log.d(TAG, "Stats: recv=$frameCount conv=$convertedFrames skip=$skippedFrames")
                 // }
                 
-            } catch (e: SocketTimeoutException) {
+            } catch (_: SocketTimeoutException) {
                 // Log.d(TAG, "Socket timeout, continuing...")
             } catch (e: Exception) {
                 if (isStreaming.get()) {
@@ -851,7 +856,7 @@ class ScreenMirrorWidget(
             rsOutputBitmap!!.width != width || rsOutputBitmap!!.height != height) {
             outputAllocation?.destroy()
             rsOutputBitmap?.recycle()
-            rsOutputBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            rsOutputBitmap = createBitmap(width, height)
             outputAllocation = Allocation.createFromBitmap(rs, rsOutputBitmap)
         }
         
@@ -863,7 +868,7 @@ class ScreenMirrorWidget(
         synchronized(frameLock) {
             if (frameBitmap == null || frameBitmap!!.width != width || frameBitmap!!.height != height) {
                 frameBitmap?.recycle()
-                frameBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                frameBitmap = createBitmap(width, height)
             }
             val canvas = Canvas(frameBitmap!!)
             canvas.drawBitmap(rsOutputBitmap!!, 0f, 0f, null)
@@ -925,7 +930,7 @@ class ScreenMirrorWidget(
             }
         }
         
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val bitmap = createBitmap(width, height)
         bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
         
         synchronized(frameLock) {
@@ -1126,8 +1131,4 @@ class ScreenMirrorWidget(
         isDisplayVisible = visible
         dispatchMediaStateIfChanged()
     }
-
-    fun onHostPause() = onPause()
-
-    fun onHostResume() = onResume()
 }

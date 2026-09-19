@@ -19,6 +19,8 @@ import com.everyday.everyday_glasses.runtime.FileBrowserWidgetListener
 import com.everyday.everyday_glasses.ui.widgets.common.WidgetInteractionState
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import java.io.File
+import androidx.core.graphics.toColorInt
+import androidx.core.graphics.withClip
 
 /**
  * A file browser widget for navigating and selecting files on the device.
@@ -53,12 +55,12 @@ class FileBrowserWidget(
     /**
      * File type filter for the browser
      */
-    enum class FileFilter(val extensions: Set<String>, val mimePrefix: String) {
-        IMAGES(setOf("jpg", "jpeg", "png", "gif", "webp", "bmp"), "image/"),
-        MEDIA(setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "mp4", "mkv", "webm", "mov", "avi", "m4v", "ts", "pdf"), "*/*"),
-        VIDEOS(setOf("mp4", "mkv", "webm", "mov", "avi", "m4v", "ts"), "video/"),
-        PDF(setOf("pdf"), "application/pdf"),
-        ALL(emptySet(), "*/*")
+    enum class FileFilter(val extensions: Set<String>) {
+        IMAGES(setOf("jpg", "jpeg", "png", "gif", "webp", "bmp")),
+        MEDIA(setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "mp4", "mkv", "webm", "mov", "avi", "m4v", "ts", "pdf")),
+        VIDEOS(setOf("mp4", "mkv", "webm", "mov", "avi", "m4v", "ts")),
+        PDF(setOf("pdf")),
+        ALL(emptySet())
     }
 
     /**
@@ -87,7 +89,6 @@ class FileBrowserWidget(
     // State
     private var state = State.IDLE
     var listener: FileBrowserWidgetListener? = null
-    private val onStateChanged: ((State) -> Unit)? get() = listener?.let { value -> { value.onStateChanged(it) } }
 
     // Current directory and file list
     private var currentDirectory: File = getDefaultDirectory()
@@ -115,22 +116,22 @@ class FileBrowserWidget(
 
     // Paints
     private val headerPaint = Paint().apply {
-        color = Color.parseColor("#1a1a2e")
+        color = "#1a1a2e".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val listBackgroundPaint = Paint().apply {
-        color = Color.parseColor("#0d0d1a")
+        color = "#0d0d1a".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val itemPaint = Paint().apply {
-        color = Color.parseColor("#1a1a2e")
+        color = "#1a1a2e".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val hoverItemPaint = Paint().apply {
-        color = Color.parseColor("#3a3a5e")
+        color = "#3a3a5e".toColorInt()
         style = Paint.Style.FILL
     }
 
@@ -142,7 +143,7 @@ class FileBrowserWidget(
     }
 
     private val pathTextPaint = Paint().apply {
-        color = Color.parseColor("#AAAAAA")
+        color = "#AAAAAA".toColorInt()
         textSize = 14f
         isAntiAlias = true
     }
@@ -157,40 +158,40 @@ class FileBrowserWidget(
     }
 
     private val folderIconPaint = Paint().apply {
-        color = Color.parseColor("#FFD54F")  // Yellow for folders
+        color = "#FFD54F".toColorInt()  // Yellow for folders
         style = Paint.Style.FILL
         isAntiAlias = true
     }
 
     private val imageIconPaint = Paint().apply {
-        color = Color.parseColor("#4FC3F7")  // Light blue for images
+        color = "#4FC3F7".toColorInt()  // Light blue for images
         style = Paint.Style.FILL
         isAntiAlias = true
     }
 
     private val fileIconPaint = Paint().apply {
-        color = Color.parseColor("#90A4AE")  // Gray for generic files
+        color = "#90A4AE".toColorInt()  // Gray for generic files
         style = Paint.Style.FILL
         isAntiAlias = true
     }
 
     private val scrollbarTrackPaint = Paint().apply {
-        color = Color.parseColor("#333344")
+        color = "#333344".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val scrollbarThumbPaint = Paint().apply {
-        color = Color.parseColor("#6666AA")
+        color = "#6666AA".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val navButtonPaint = Paint().apply {
-        color = Color.parseColor("#3a3a5e")
+        color = "#3a3a5e".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val navButtonHoverPaint = Paint().apply {
-        color = Color.parseColor("#5050AA")
+        color = "#5050AA".toColorInt()
         style = Paint.Style.FILL
     }
 
@@ -227,7 +228,7 @@ class FileBrowserWidget(
         if (extStorage.exists() && extStorage.canRead()) return extStorage
 
         // Last resort: app's files directory (always accessible)
-        return File("/sdcard")
+        return context.filesDir
     }
 
     /**
@@ -284,7 +285,7 @@ class FileBrowserWidget(
                             absolutePath = file.absolutePath,
                         )
                     }
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && fileFilter in setOf(FileFilter.IMAGES, FileFilter.VIDEOS, FileFilter.PDF, FileFilter.MEDIA)) {
+            } else if (fileFilter in setOf(FileFilter.IMAGES, FileFilter.VIDEOS, FileFilter.PDF, FileFilter.MEDIA)) {
                 // Scoped-storage fallback when broad filesystem access is unavailable.
                 val mediaFiles = buildList {
                     if (fileFilter == FileFilter.IMAGES || fileFilter == FileFilter.MEDIA) addAll(queryMediaStoreForImages(directory.absolutePath))
@@ -624,65 +625,64 @@ class FileBrowserWidget(
         canvas.drawRect(listBounds, listBackgroundPaint)
 
         // Save canvas state for clipping
-        canvas.save()
-        canvas.clipRect(listBounds)
+        canvas.withClip(listBounds) {
+            // Draw file items or empty message
+            itemBounds.clear()
 
-        // Draw file items or empty message
-        itemBounds.clear()
-
-        if (entries.isEmpty()) {
-            // Show empty message with appropriate reason
-            val emptyText = when {
-                !hasStoragePermission() -> "Storage permission required"
-                !currentDirectory.canRead() -> "Cannot read directory"
-                else -> "No files found"
-            }
-            val textWidth = textPaint.measureText(emptyText)
-            canvas.drawText(
-                emptyText,
-                listBounds.centerX() - textWidth / 2,
-                listBounds.centerY(),
-                pathTextPaint
-            )
-        }
-
-        var y = listBounds.top - scrollOffset
-
-        for ((index, entry) in entries.withIndex()) {
-            val itemTop = y
-            val itemBottom = y + ITEM_HEIGHT
-
-            if (itemBottom > listBounds.top && itemTop < listBounds.bottom) {
-                val itemRect = RectF(listBounds.left, itemTop, listBounds.right, itemBottom)
-                itemBounds.add(itemRect)
-
-                // Item background
-                val paint = when {
-                    index == hoveredItemIndex -> hoverItemPaint
-                    else -> itemPaint
+            if (entries.isEmpty()) {
+                // Show empty message with appropriate reason
+                val emptyText = when {
+                    !hasStoragePermission() -> "Storage permission required"
+                    !currentDirectory.canRead() -> "Cannot read directory"
+                    else -> "No files found"
                 }
-                canvas.drawRect(itemRect, paint)
-
-                // Icon
-                val iconLeft = listBounds.left + PADDING
-                val iconTop = itemTop + (ITEM_HEIGHT - ICON_SIZE) / 2
-                val iconRect = RectF(iconLeft, iconTop, iconLeft + ICON_SIZE, iconTop + ICON_SIZE)
-                drawFileIcon(canvas, iconRect, entry)
-
-                // File name
-                val textX = iconRect.right + PADDING
-                val textY = itemTop + ITEM_HEIGHT / 2 + 6f
-                val maxTextWidth = listBounds.right - textX - PADDING
-                val displayName = truncateText(entry.name, maxTextWidth, textPaint)
-                canvas.drawText(displayName, textX, textY, textPaint)
-            } else {
-                itemBounds.add(RectF())  // Placeholder for off-screen items
+                val textWidth = textPaint.measureText(emptyText)
+                drawText(
+                    emptyText,
+                    listBounds.centerX() - textWidth / 2,
+                    listBounds.centerY(),
+                    pathTextPaint
+                )
             }
 
-            y += ITEM_HEIGHT
-        }
+            var y = listBounds.top - scrollOffset
 
-        canvas.restore()
+            for ((index, entry) in entries.withIndex()) {
+                val itemTop = y
+                val itemBottom = y + ITEM_HEIGHT
+
+                if (itemBottom > listBounds.top && itemTop < listBounds.bottom) {
+                    val itemRect = RectF(listBounds.left, itemTop, listBounds.right, itemBottom)
+                    itemBounds.add(itemRect)
+
+                    // Item background
+                    val paint = when {
+                        index == hoveredItemIndex -> hoverItemPaint
+                        else -> itemPaint
+                    }
+                    drawRect(itemRect, paint)
+
+                    // Icon
+                    val iconLeft = listBounds.left + PADDING
+                    val iconTop = itemTop + (ITEM_HEIGHT - ICON_SIZE) / 2
+                    val iconRect =
+                        RectF(iconLeft, iconTop, iconLeft + ICON_SIZE, iconTop + ICON_SIZE)
+                    drawFileIcon(this, iconRect, entry)
+
+                    // File name
+                    val textX = iconRect.right + PADDING
+                    val textY = itemTop + ITEM_HEIGHT / 2 + 6f
+                    val maxTextWidth = listBounds.right - textX - PADDING
+                    val displayName = truncateText(entry.name, maxTextWidth, textPaint)
+                    drawText(displayName, textX, textY, textPaint)
+                } else {
+                    itemBounds.add(RectF())  // Placeholder for off-screen items
+                }
+
+                y += ITEM_HEIGHT
+            }
+
+        }
 
         // Scrollbar
         if (!scrollbarThumbBounds.isEmpty) {
@@ -769,11 +769,11 @@ class FileBrowserWidget(
 
             // Sun (small circle)
             iconPaint.style = Paint.Style.FILL
-            iconPaint.color = Color.parseColor("#FFF176")
+            iconPaint.color = "#FFF176".toColorInt()
             canvas.drawCircle(cx + size * 0.4f, cy - size * 0.3f, size * 0.25f, iconPaint)
 
             // Mountain
-            iconPaint.color = Color.parseColor("#81C784")
+            iconPaint.color = "#81C784".toColorInt()
             val mountainPath = Path().apply {
                 moveTo(cx - size * 0.8f, cy + size * 0.6f)
                 lineTo(cx - size * 0.2f, cy - size * 0.1f)

@@ -464,7 +464,6 @@ class WidgetCaptureRestore(private val context: Context) {
             val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, screenHeight.toFloat())
 
             TextBoxWidget(
-                context,
                 adjustedX,
                 adjustedY,
                 adjustedWidth,

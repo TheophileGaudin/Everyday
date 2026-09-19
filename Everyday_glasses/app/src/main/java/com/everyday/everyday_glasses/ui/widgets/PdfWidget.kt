@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
+import androidx.core.graphics.createBitmap
 
 /** Canvas-backed PDF reader. Only the visible page bitmap is retained. */
 class PdfWidget(
@@ -136,7 +137,7 @@ class PdfWidget(
                     targetWidth = (targetWidth * reduction).roundToInt().coerceAtLeast(1)
                     targetHeight = (targetHeight * reduction).roundToInt().coerceAtLeast(1)
                 }
-                val rendered = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+                val rendered = createBitmap(targetWidth, targetHeight)
                 rendered.eraseColor(Color.WHITE)
                 page.render(rendered, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                 mainHandler.post {
@@ -163,18 +164,18 @@ class PdfWidget(
         }
     }
 
-    fun handleContentTap(px: Float, py: Float): Boolean {
+    fun handleContentTap(px: Float, py: Float) {
         if (!isFullscreen) {
             toggleFullscreen()
-            return true
+            return
         }
+
         when {
             previousBounds.contains(px, py) -> changePage(-1)
             nextBounds.contains(px, py) -> changePage(1)
             zoomOutBounds.contains(px, py) -> changeZoom(-1)
             zoomInBounds.contains(px, py) -> changeZoom(1)
         }
-        return true
     }
 
     private fun changePage(delta: Int) {

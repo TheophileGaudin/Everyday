@@ -18,6 +18,8 @@ import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
+import androidx.core.graphics.toColorInt
+import androidx.core.graphics.withClip
 
 class CalendarWidget(
     x: Float,
@@ -111,7 +113,7 @@ class CalendarWidget(
         textSize = BASE_TITLE_WINDOW_SIZE
     }
     private val detailPaintWindow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#D6E3F8")
+        color = "#D6E3F8".toColorInt()
         textSize = BASE_DETAIL_WINDOW_SIZE
     }
     private val titlePaintFullscreen = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -119,45 +121,45 @@ class CalendarWidget(
         textSize = BASE_TITLE_FULLSCREEN_SIZE
     }
     private val detailPaintFullscreen = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#D6E3F8")
+        color = "#D6E3F8".toColorInt()
         textSize = BASE_DETAIL_FULLSCREEN_SIZE
     }
     private val metaPaintFullscreen = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#8FA1B7")
+        color = "#8FA1B7".toColorInt()
         textSize = BASE_DETAIL_FULLSCREEN_SIZE * 0.92f
     }
     private val centerInfoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#96A7BD")
+        color = "#96A7BD".toColorInt()
         textSize = BASE_CENTER_INFO_SIZE
         textAlign = Paint.Align.CENTER
     }
     private val separatorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#22415A74")
+        color = "#22415A74".toColorInt()
         strokeWidth = 2f
     }
     private val scrollbarTrackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#33445566")
+        color = "#33445566".toColorInt()
         style = Paint.Style.FILL
     }
     private val scrollbarThumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#88AECBFF")
+        color = "#88AECBFF".toColorInt()
         style = Paint.Style.FILL
     }
     private val fontMenuBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#DD111827")
+        color = "#DD111827".toColorInt()
         style = Paint.Style.FILL
     }
     private val fontMenuBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#667FA1C4")
+        color = "#667FA1C4".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 2f
     }
     private val fontMenuButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#334A6178")
+        color = "#334A6178".toColorInt()
         style = Paint.Style.FILL
     }
     private val fontMenuButtonHoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#5578A7D5")
+        color = "#5578A7D5".toColorInt()
         style = Paint.Style.FILL
     }
     private val fontMenuLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -166,7 +168,7 @@ class CalendarWidget(
         textAlign = Paint.Align.CENTER
     }
     private val fontMenuStatusPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#9FB2C9")
+        color = "#9FB2C9".toColorInt()
         textSize = 13f
         textAlign = Paint.Align.CENTER
     }
@@ -175,16 +177,19 @@ class CalendarWidget(
         textSize = 22f
         textAlign = Paint.Align.CENTER
     }
-    private val iconBluePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#4285F4") }
-    private val iconBlueDarkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#2B6BCB") }
+    private val iconBluePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#4285F4".toColorInt() }
+    private val iconBlueDarkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color =
+        "#2B6BCB".toColorInt() }
     private val iconWhitePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
-    private val iconYellowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#FBBC04") }
-    private val iconGreenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#34A853") }
-    private val iconGreenDarkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#1E8E3E") }
-    private val iconRedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#EA4335") }
+    private val iconYellowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color =
+        "#FBBC04".toColorInt() }
+    private val iconGreenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#34A853".toColorInt() }
+    private val iconGreenDarkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color =
+        "#1E8E3E".toColorInt() }
+    private val iconRedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#EA4335".toColorInt() }
     private val iconFoldPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
     private val iconNumberPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#2A73E8")
+        color = "#2A73E8".toColorInt()
         textAlign = Paint.Align.CENTER
     }
 
@@ -388,32 +393,36 @@ class CalendarWidget(
         val clampedScroll = contentScrollOffset.coerceIn(0f, layout.maxScroll)
         if (clampedScroll != contentScrollOffset) contentScrollOffset = clampedScroll
 
-        canvas.save()
-        canvas.clipRect(layout.viewport)
+        canvas.withClip(layout.viewport) {
+            val titleLineHeight = lineHeight(titlePaintFullscreen)
+            val detailLineHeight = lineHeight(detailPaintFullscreen)
+            for (item in layout.events) {
+                val event = displayState.events.getOrNull(item.eventIndex) ?: continue
+                val itemTop = item.top - clampedScroll
+                val itemBottom = item.bottom - clampedScroll
+                if (itemBottom < layout.viewport.top || itemTop > layout.viewport.bottom) continue
 
-        val titleLineHeight = lineHeight(titlePaintFullscreen)
-        val detailLineHeight = lineHeight(detailPaintFullscreen)
-        for (item in layout.events) {
-            val event = displayState.events.getOrNull(item.eventIndex) ?: continue
-            val itemTop = item.top - clampedScroll
-            val itemBottom = item.bottom - clampedScroll
-            if (itemBottom < layout.viewport.top || itemTop > layout.viewport.bottom) continue
+                var y = itemTop + titleLineHeight
+                for (line in item.titleLines) {
+                    drawText(line, layout.viewport.left, y, titlePaintFullscreen)
+                    y += titleLineHeight
+                }
 
-            var y = itemTop + titleLineHeight
-            for (line in item.titleLines) {
-                canvas.drawText(line, layout.viewport.left, y, titlePaintFullscreen)
-                y += titleLineHeight
+                drawText(event.relativeLabel, layout.viewport.left, y + 2f, detailPaintFullscreen)
+                y += detailLineHeight
+                drawText(event.scheduleLabel, layout.viewport.left, y + 2f, metaPaintFullscreen)
+
+                val separatorY = itemBottom + EVENT_GAP * 0.5f
+                drawLine(
+                    layout.viewport.left,
+                    separatorY,
+                    layout.viewport.right - 14f,
+                    separatorY,
+                    separatorPaint
+                )
             }
 
-            canvas.drawText(event.relativeLabel, layout.viewport.left, y + 2f, detailPaintFullscreen)
-            y += detailLineHeight
-            canvas.drawText(event.scheduleLabel, layout.viewport.left, y + 2f, metaPaintFullscreen)
-
-            val separatorY = itemBottom + EVENT_GAP * 0.5f
-            canvas.drawLine(layout.viewport.left, separatorY, layout.viewport.right - 14f, separatorY, separatorPaint)
         }
-
-        canvas.restore()
         drawScrollbar(canvas, layout)
     }
 

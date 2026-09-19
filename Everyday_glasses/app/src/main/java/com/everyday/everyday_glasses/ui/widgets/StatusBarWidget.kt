@@ -1,6 +1,5 @@
 package com.everyday.everyday_glasses.ui.widgets
 
-import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -9,6 +8,7 @@ import android.text.TextPaint
 import android.util.Log
 import com.everyday.everyday_glasses.ui.widgets.common.WidgetInteractionState
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import androidx.core.graphics.toColorInt
 
 /**
  * A movable status bar widget that displays:
@@ -22,7 +22,6 @@ import com.everyday.everyday_glasses.runtime.WidgetTypeId
  * Refactored to extend BaseWidget for common functionality.
  */
 class StatusBarWidget(
-    private val context: Context,
     x: Float,
     y: Float,
     widgetWidth: Float,
@@ -70,14 +69,14 @@ class StatusBarWidget(
     private var showToggleMenu = false
     private var hoveredToggleElement: StatusElement? = null
     private val toggleMenuBounds = RectF()
-    private val toggleRowBounds = Array(StatusElement.values().size) { RectF() }
+    private val toggleRowBounds = Array(StatusElement.entries.size) { RectF() }
     
     var onStateChanged: ((State) -> Unit)? = null
     // onFullscreenToggled provided by BaseWidget
     
     // Paints
     private val transparentBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#22000000")
+        color = "#22000000".toColorInt()
     }
     
     // hoverBorderPaint is provided by BaseWidget (#6666AA)
@@ -95,25 +94,25 @@ class StatusBarWidget(
     }
     
     private val disconnectedPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#666666")
+        color = "#666666".toColorInt()
         textSize = currentTextSize
         textAlign = Paint.Align.LEFT
     }
     
     private val batteryGoodPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#4CAF50")
+        color = "#4CAF50".toColorInt()
         textSize = currentTextSize
         textAlign = Paint.Align.LEFT
     }
     
     private val batteryLowPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#FF9800")
+        color = "#FF9800".toColorInt()
         textSize = currentTextSize
         textAlign = Paint.Align.LEFT
     }
     
     private val batteryCriticalPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#F44336")
+        color = "#F44336".toColorInt()
         textSize = currentTextSize
         textAlign = Paint.Align.LEFT
     }
@@ -125,29 +124,29 @@ class StatusBarWidget(
     
     // Strikethrough paint for disconnected phone
     private val strikethroughPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#888888")
+        color = "#888888".toColorInt()
         strokeWidth = 2f
         style = Paint.Style.STROKE
     }
 
     private val toggleMenuBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#DD111827")
+        color = "#DD111827".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val toggleMenuBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#667FA1C4")
+        color = "#667FA1C4".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 2f
     }
 
     private val toggleRowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#334A6178")
+        color = "#334A6178".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val toggleRowHoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#5578A7D5")
+        color = "#5578A7D5".toColorInt()
         style = Paint.Style.FILL
     }
 
@@ -158,13 +157,13 @@ class StatusBarWidget(
     }
 
     private val toggleValueOnPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#8BC34A")
+        color = "#8BC34A".toColorInt()
         textSize = 16f
         textAlign = Paint.Align.RIGHT
     }
 
     private val toggleValueOffPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#B0BEC5")
+        color = "#B0BEC5".toColorInt()
         textSize = 16f
         textAlign = Paint.Align.RIGHT
     }
@@ -243,7 +242,7 @@ class StatusBarWidget(
     fun handleToggleMenuTapOrDismiss(px: Float, py: Float): Boolean {
         if (!showToggleMenu) return false
 
-        val tappedElement = StatusElement.values().firstOrNull { toggleRowBounds[it.ordinal].contains(px, py) }
+        val tappedElement = StatusElement.entries.firstOrNull { toggleRowBounds[it.ordinal].contains(px, py) }
         if (tappedElement != null) {
             toggleElement(tappedElement)
         } else {
@@ -378,7 +377,7 @@ class StatusBarWidget(
         }
 
         hoveredToggleElement = if (showToggleMenu) {
-            StatusElement.values().firstOrNull { toggleRowBounds[it.ordinal].contains(px, py) }
+            StatusElement.entries.firstOrNull { toggleRowBounds[it.ordinal].contains(px, py) }
         } else {
             null
         }
@@ -572,12 +571,12 @@ class StatusBarWidget(
 
     private fun updateToggleMenuBounds() {
         val menuWidth = TOGGLE_MENU_WIDTH.coerceAtMost((widgetWidth - PADDING * 2).coerceAtLeast(120f))
-        val menuHeight = TOGGLE_MENU_PADDING * 2 + TOGGLE_MENU_ROW_HEIGHT * StatusElement.values().size
+        val menuHeight = TOGGLE_MENU_PADDING * 2 + TOGGLE_MENU_ROW_HEIGHT * StatusElement.entries.size
         val left = widgetBounds.centerX() - menuWidth / 2f
         val top = contentBounds.top + 8f
         toggleMenuBounds.set(left, top, left + menuWidth, top + menuHeight)
 
-        StatusElement.values().forEachIndexed { index, _ ->
+        StatusElement.entries.forEachIndexed { index, _ ->
             val rowTop = toggleMenuBounds.top + TOGGLE_MENU_PADDING + index * TOGGLE_MENU_ROW_HEIGHT
             toggleRowBounds[index].set(
                 toggleMenuBounds.left + TOGGLE_MENU_PADDING,
@@ -601,7 +600,7 @@ class StatusBarWidget(
         canvas.drawRoundRect(toggleMenuBounds, 12f, 12f, toggleMenuBackgroundPaint)
         canvas.drawRoundRect(toggleMenuBounds, 12f, 12f, toggleMenuBorderPaint)
 
-        StatusElement.values().forEachIndexed { index, element ->
+        StatusElement.entries.forEachIndexed { index, element ->
             val bounds = toggleRowBounds[index]
             val rowPaint = if (hoveredToggleElement == element) toggleRowHoverPaint else toggleRowPaint
             canvas.drawRoundRect(bounds, 8f, 8f, rowPaint)

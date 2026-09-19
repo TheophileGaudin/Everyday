@@ -1,6 +1,5 @@
 package com.everyday.everyday_glasses.ui.widgets
 
-import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -23,6 +22,9 @@ import com.everyday.everyday_glasses.ui.widgets.common.WidgetInteractionState
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.widgets.common.WidgetTheme
 import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
+import androidx.core.text.toHtml
+import androidx.core.graphics.withClip
+import androidx.core.graphics.withSave
 
 /**
  * A dynamic text box widget that can be moved, resized, deleted, and toggled fullscreen.
@@ -39,7 +41,6 @@ import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
  * Updated to work with reactive BaseWidget.
  */
 class TextBoxWidget(
-    private val context: Context,
     x: Float,
     y: Float,
     widgetWidth: Float,
@@ -49,16 +50,15 @@ class TextBoxWidget(
     companion object {
         private const val TAG = "TextBoxWidget"
 
-        // Minimum sizes
-        private const val MIN_WIDTH = MIN_WIDGET_SIZE
-        private const val MIN_HEIGHT = MIN_WIDGET_SIZE
-
         // Scrolling
         private const val SCROLL_SENSITIVITY = 0.5f
         private const val SCROLLBAR_WIDTH_RATIO = 0.10f
 
         // List formatting
         private const val BULLET_GAP_WIDTH = 20
+
+        // Column formatting
+        private const val COLUMN_GAP = 24f
     }
     
     // ==================== Extended State ====================
@@ -114,7 +114,6 @@ class TextBoxWidget(
 
     // Multi-column settings
     private var columnCount: Int = 1
-    private val COLUMN_GAP = 24f
 
     fun setColumns(count: Int) {
         columnCount = count.coerceIn(1, 3)
@@ -273,16 +272,6 @@ class TextBoxWidget(
         onStateChanged?.invoke(state)
     }
 
-    /**
-     * Show keyboard.
-     */
-    fun showKeyboard() {
-        if (keyboardOverlay.show()) {
-            updateKeyboardLayout()
-            updateTextLayout()
-            onStateChanged?.invoke(state)
-        }
-    }
 
     /**
      * Hide keyboard.
@@ -354,10 +343,7 @@ class TextBoxWidget(
         if (contentBounds.contains(px, py)) {
             // If keyboard is visible, check if point is above keyboard
             if (isKeyboardVisible) {
-                val keyboardBounds = keyboardOverlay.getBounds()
-                if (keyboardBounds == null) {
-                    return HitArea.CONTENT
-                }
+                val keyboardBounds = keyboardOverlay.getBounds() ?: return HitArea.CONTENT
                 if (py < keyboardBounds.top) {
                     return HitArea.CONTENT
                 }
@@ -381,8 +367,8 @@ class TextBoxWidget(
         return HitArea.NONE
     }
     
-    override fun isOverScrollbar(px: Float, py: Float): Boolean {
-        return maxScrollOffset > 0 && scrollbarBounds.contains(px, py)
+    override fun isOverScrollbar(x: Float, y: Float): Boolean {
+        return maxScrollOffset > 0 && scrollbarBounds.contains(x, y)
     }
     
     override fun containsPoint(px: Float, py: Float): Boolean {
@@ -577,7 +563,7 @@ class TextBoxWidget(
     }
     
     fun getHtmlContent(): String {
-        return HtmlCompat.toHtml(richText, HtmlCompat.TO_HTML_PARAGRAPH_LINES_CONSECUTIVE)
+        return richText.toHtml()
     }
     
     fun setFontSize(size: Float) {
@@ -646,7 +632,7 @@ class TextBoxWidget(
         var currentY = scrollOffset
         offsets[0] = currentY
 
-        for (i in 1 until columnCount) {
+        for (i in 1..columnCount) {
             // The "ideal" cut point is exactly one screen height below the previous column's start
             val idealCutY = currentY + visibleHeight
 
@@ -959,8 +945,6 @@ class TextBoxWidget(
     // ==================== Key Input ====================
     
     fun onKeyPress(key: String) {
-        if (!isFocused) return
-
         Log.d(TAG, "onKeyPress: key='$key', keyLength=${key.length}, isFocused=$isFocused")
 
         when (key) {
@@ -1144,94 +1128,98 @@ class TextBoxWidget(
         }
 
         // Content - clip to area above keyboard if visible
-        canvas.save()
-        val clipBounds = if (isKeyboardVisible) {
-            textClipBounds.set(
-                contentBounds.left,
-                contentBounds.top,
-                contentBounds.right,
-                contentBounds.bottom - keyboardOverlay.getHeight()
-            )
-            textClipBounds
-        } else {
-            contentBounds
-        }
-        canvas.clipRect(clipBounds)
-
-        val showHint = isBorderHovered && !isFocused && richText.isEmpty()
-        val displayText: CharSequence = when {
-            richText.isNotEmpty() -> richText
-            showHint -> "Click to type..."
-            isFocused -> ""
-            else -> ""
-        }
-        val paint = if (richText.isEmpty() && showHint) hintPaint else textPaint
-
-        if (displayText.isNotEmpty()) {
-            // Recalculate column width for drawing
-            val totalAvailableWidth = contentBounds.width()
-            val gapTotal = (columnCount - 1) * COLUMN_GAP
-            val singleColumnWidth = ((totalAvailableWidth - gapTotal) / columnCount).toInt().coerceAtLeast(1)
-
-            val layout = if (displayText === richText) {
-                getRichTextLayout(singleColumnWidth)
+        canvas.withSave {
+            val clipBounds = if (isKeyboardVisible) {
+                textClipBounds.set(
+                    contentBounds.left,
+                    contentBounds.top,
+                    contentBounds.right,
+                    contentBounds.bottom - keyboardOverlay.getHeight()
+                )
+                textClipBounds
             } else {
-                buildTextLayout(displayText, paint, singleColumnWidth)
+                contentBounds
             }
+            clipRect(clipBounds)
 
-            val visibleHeight = getEffectiveContentHeight()
+            val showHint = isBorderHovered && !isFocused && richText.isEmpty()
+            val displayText: CharSequence = when {
+                richText.isNotEmpty() -> richText
+                showHint -> "Click to type..."
+                isFocused -> ""
+                else -> ""
+            }
+            val paint = if (richText.isEmpty() && showHint) hintPaint else textPaint
 
-            // NEW: Calculate dynamic offsets that align with text lines
-            val columnOffsets = calculateColumnOffsets(layout, visibleHeight)
+            if (displayText.isNotEmpty()) {
+                // Recalculate column width for drawing
+                val totalAvailableWidth = contentBounds.width()
+                val gapTotal = (columnCount - 1) * COLUMN_GAP
+                val singleColumnWidth =
+                    ((totalAvailableWidth - gapTotal) / columnCount).toInt().coerceAtLeast(1)
 
-            // Draw each column
-            for (col in 0 until columnCount) {
-                // Determine where this column sits horizontally on screen
-                val colX = contentBounds.left + col * (singleColumnWidth + COLUMN_GAP)
-
-                // NEW: Use the calculated snapped offset instead of simple math
-                val virtualYStart = columnOffsets[col]
-
-                canvas.save()
-                // Clip output to just this column
-                canvas.clipRect(colX, contentBounds.top, colX + singleColumnWidth, contentBounds.bottom)
-
-                // Move canvas to the column slot, then shift text UP by virtualYStart
-                canvas.translate(colX, contentBounds.top - virtualYStart)
-
-                if (hasSelection() && richText.isNotEmpty() && displayText === richText) {
-                    drawSelectionHighlight(canvas, layout)
+                val layout = if (displayText === richText) {
+                    getRichTextLayout(singleColumnWidth)
+                } else {
+                    buildTextLayout(displayText, paint, singleColumnWidth)
                 }
 
-                layout.draw(canvas)
+                val visibleHeight = getEffectiveContentHeight()
 
-                // Draw Cursor
-                if (isFocused && cursorVisible && richText.isNotEmpty()) {
-                    val cursorOffset = cursorPosition.coerceIn(0, richText.length)
+                // NEW: Calculate dynamic offsets that align with text lines
+                val columnOffsets = calculateColumnOffsets(layout, visibleHeight)
 
-                    // Only draw cursor if it falls within this column's vertical range
-                    val line = layout.getLineForOffset(cursorOffset)
-                    val lineTop = layout.getLineTop(line)
-                    val lineBottom = layout.getLineBottom(line)
+                // Draw each column
+                for (col in 0 until columnCount) {
+                    // Determine where this column sits horizontally on screen
+                    val colX = contentBounds.left + col * (singleColumnWidth + COLUMN_GAP)
 
-                    // NEW: Accurate visibility check using snapped offsets
-                    if (lineBottom > virtualYStart && lineTop < virtualYStart + visibleHeight) {
-                        val cursorX = layout.getPrimaryHorizontal(cursorOffset)
-                        val cursorTop = layout.getLineTop(line).toFloat()
-                        val cursorBottom = layout.getLineBottom(line).toFloat()
-                        canvas.drawLine(cursorX, cursorTop, cursorX, cursorBottom, cursorPaint)
+                    // NEW: Use the calculated snapped offset instead of simple math
+                    val virtualYStart = columnOffsets[col]
+
+                    withClip(
+                        colX,
+                        contentBounds.top,
+                        colX + singleColumnWidth,
+                        contentBounds.bottom
+                    ) {
+                        // Clip output to just this column
+                        // Move canvas to the column slot, then shift text UP by virtualYStart
+                        translate(colX, contentBounds.top - virtualYStart)
+
+                        if (hasSelection() && richText.isNotEmpty() && displayText === richText) {
+                            drawSelectionHighlight(this, layout)
+                        }
+
+                        layout.draw(this)
+
+                        // Draw Cursor
+                        if (isFocused && cursorVisible && richText.isNotEmpty()) {
+                            val cursorOffset = cursorPosition.coerceIn(0, richText.length)
+
+                            // Only draw cursor if it falls within this column's vertical range
+                            val line = layout.getLineForOffset(cursorOffset)
+                            val lineTop = layout.getLineTop(line)
+                            val lineBottom = layout.getLineBottom(line)
+
+                            // NEW: Accurate visibility check using snapped offsets
+                            if (lineBottom > virtualYStart && lineTop < virtualYStart + visibleHeight) {
+                                val cursorX = layout.getPrimaryHorizontal(cursorOffset)
+                                val cursorTop = layout.getLineTop(line).toFloat()
+                                val cursorBottom = layout.getLineBottom(line).toFloat()
+                                drawLine(cursorX, cursorTop, cursorX, cursorBottom, cursorPaint)
+                            }
+                        }
+
                     }
                 }
-
-                canvas.restore()
+            } else if (isFocused && cursorVisible) {
+                // Empty state cursor
+                translate(contentBounds.left, contentBounds.top)
+                drawLine(0f, 0f, 0f, paint.textSize, cursorPaint)
             }
-        } else if (isFocused && cursorVisible) {
-            // Empty state cursor
-            canvas.translate(contentBounds.left, contentBounds.top)
-            canvas.drawLine(0f, 0f, 0f, paint.textSize, cursorPaint)
-        }
 
-        canvas.restore()
+        }
 
         // Draw keyboard if visible (inside content bounds but at bottom)
         keyboardOverlay.draw(canvas)

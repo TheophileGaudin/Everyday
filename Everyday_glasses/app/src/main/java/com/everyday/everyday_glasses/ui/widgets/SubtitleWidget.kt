@@ -18,6 +18,9 @@ import com.everyday.shared.sync.SubtitleSource
 import com.everyday.shared.sync.SubtitleStatus
 import com.everyday.shared.sync.SubtitleStatusState
 import com.everyday.shared.sync.SubtitleTranscript
+import androidx.core.graphics.toColorInt
+import androidx.core.graphics.withClip
+import androidx.core.graphics.withTranslation
 
 class SubtitleWidget(
     x: Float,
@@ -67,12 +70,12 @@ class SubtitleWidget(
     private val onStateChanged: (() -> Unit)? get() = listener?.let { value -> { value.onStateChanged() } }
 
     private val panelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#D0000000")
+        color = "#D0000000".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val statusPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#B0BEC5")
+        color = "#B0BEC5".toColorInt()
         textSize = 17f
     }
 
@@ -83,7 +86,7 @@ class SubtitleWidget(
     }
 
     private val partialPaint = TextPaint(subtitlePaint).apply {
-        color = Color.parseColor("#CCDCE9")
+        color = "#CCDCE9".toColorInt()
         isSubpixelText = true
     }
 
@@ -97,30 +100,30 @@ class SubtitleWidget(
     }
 
     private val disabledOptionTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#777777")
+        color = "#777777".toColorInt()
         textSize = 20f
     }
 
     private val checkboxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#DDE7F2")
+        color = "#DDE7F2".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 2f
     }
 
     private val checkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#6EE7A8")
+        color = "#6EE7A8".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 3f
         strokeCap = Paint.Cap.ROUND
     }
 
     private val toggleOffPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#3A3A44")
+        color = "#3A3A44".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val toggleOnPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#2D9CDB")
+        color = "#2D9CDB".toColorInt()
         style = Paint.Style.FILL
     }
 
@@ -394,11 +397,10 @@ class SubtitleWidget(
             interiorBottom - totalH
         }
 
-        canvas.save()
-        canvas.clipRect(interiorLeft, interiorTop, interiorRight, interiorBottom)
-        canvas.translate(interiorLeft, translateY)
-        layout.draw(canvas)
-        canvas.restore()
+        canvas.withClip(interiorLeft, interiorTop, interiorRight, interiorBottom) {
+            translate(interiorLeft, translateY)
+            layout.draw(this)
+        }
 
         if (totalH > interiorHeight) {
             drawTopFade(canvas, interiorLeft, interiorTop, interiorRight, sizedFont)
@@ -433,10 +435,9 @@ class SubtitleWidget(
             .setLineSpacing(0f, 1f)
             .setMaxLines(2)
             .build()
-        canvas.save()
-        canvas.translate(x + CONTENT_PADDING, y + CONTENT_PADDING)
-        layout.draw(canvas)
-        canvas.restore()
+        canvas.withTranslation(x + CONTENT_PADDING, y + CONTENT_PADDING) {
+            layout.draw(this)
+        }
     }
 
     private fun drawOptionsPanel(canvas: Canvas) {
@@ -450,7 +451,7 @@ class SubtitleWidget(
         val row = optionRows[index]
         val boxSize = 20f
         val box = RectF(row.left, row.centerY() - boxSize / 2f, row.left + boxSize, row.centerY() + boxSize / 2f)
-        checkboxPaint.color = if (enabled) Color.parseColor("#DDE7F2") else Color.parseColor("#777777")
+        checkboxPaint.color = if (enabled) "#DDE7F2".toColorInt() else "#777777".toColorInt()
         canvas.drawRect(box, checkboxPaint)
         if (checked) {
             canvas.drawLine(box.left + 4f, box.centerY(), box.left + 9f, box.bottom - 4f, checkPaint)
