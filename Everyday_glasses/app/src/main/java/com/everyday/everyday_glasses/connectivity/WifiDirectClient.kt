@@ -13,7 +13,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.everyday.everyday_glasses.interaction.WifiDirectConnectionListener
+import com.everyday.everyday_glasses.contracts.WifiDirectConnectionListener
 
 /**
  * Handles WiFi Direct connection on the glasses side.

@@ -8,7 +8,7 @@ import android.hardware.SensorManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.everyday.everyday_glasses.interaction.ThreeDofObserver
+import com.everyday.everyday_glasses.contracts.ThreeDofObserver
 import kotlin.math.abs
 
 /**

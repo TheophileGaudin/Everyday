@@ -8,7 +8,7 @@ import com.everyday.everyday_glasses.map.PoiDisplayConfig
 import com.everyday.everyday_glasses.map.PoiDisplayConfigState
 import com.everyday.everyday_glasses.map.PoiDisplayMode
 import com.everyday.everyday_glasses.persistence.WidgetDocument
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.map.toAssistantSemanticFacts
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import org.junit.Assert.assertEquals

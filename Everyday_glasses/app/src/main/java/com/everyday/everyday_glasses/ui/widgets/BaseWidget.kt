@@ -9,7 +9,7 @@ import android.util.Log
 import com.everyday.everyday_glasses.runtime.WidgetLifecycle
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleListener
 import com.everyday.everyday_glasses.ui.widgets.common.WidgetInteractionState
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.widgets.common.SnapProvider
 import com.everyday.everyday_glasses.ui.widgets.common.WidgetTheme
 

@@ -12,7 +12,7 @@ import android.text.TextUtils
 import android.util.Log
 import com.everyday.everyday_glasses.runtime.NewsWidgetListener
 import com.everyday.everyday_glasses.ui.widgets.common.WidgetDataState
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.widgets.helpers.NewsDoubleTapAction
 import com.everyday.everyday_glasses.ui.widgets.helpers.NewsInteractionPolicy
 import com.everyday.shared.sync.NewsArticle

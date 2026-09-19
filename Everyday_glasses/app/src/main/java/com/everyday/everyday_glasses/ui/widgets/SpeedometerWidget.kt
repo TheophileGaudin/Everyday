@@ -5,8 +5,8 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.text.TextPaint
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
-import com.everyday.everyday_glasses.misc.UnitDisplayFormatter
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import com.everyday.everyday_glasses.settings.UnitDisplayFormatter
 import java.util.Locale
 import kotlin.math.abs
 

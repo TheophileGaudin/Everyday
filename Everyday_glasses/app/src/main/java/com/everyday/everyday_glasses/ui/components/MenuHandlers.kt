@@ -1,6 +1,4 @@
-package com.everyday.everyday_glasses.contracts
-
-import com.everyday.everyday_glasses.ui.components.ContextMenu
+package com.everyday.everyday_glasses.ui.components
 
 interface ContextMenuHandler {
     fun submenuItemsFor(item: ContextMenu.MenuItem): List<ContextMenu.SubMenuItem>

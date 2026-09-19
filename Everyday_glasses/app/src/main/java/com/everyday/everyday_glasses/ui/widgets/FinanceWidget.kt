@@ -11,7 +11,7 @@ import com.everyday.everyday_glasses.interaction.assistant.FinanceTileSemanticSt
 import com.everyday.everyday_glasses.interaction.assistant.FinanceTileTarget
 import com.everyday.everyday_glasses.interaction.assistant.FinanceTileTargetResolver
 import com.everyday.everyday_glasses.interaction.assistant.FinanceWidgetSemanticState
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.shared.sync.FinanceAssetType
 import com.everyday.shared.sync.FinanceCandle
 import com.everyday.shared.sync.FinanceChartType

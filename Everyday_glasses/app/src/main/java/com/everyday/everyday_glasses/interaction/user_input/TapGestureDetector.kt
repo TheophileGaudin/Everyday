@@ -3,7 +3,7 @@ package com.everyday.everyday_glasses.interaction.user_input
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.everyday.everyday_glasses.interaction.TapGestureListener
+import com.everyday.everyday_glasses.contracts.TapGestureListener
 
 /**
  * TapGestureDetector - Handles single, double, and triple tap detection with proper timing.

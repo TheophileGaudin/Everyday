@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.misc
+package com.everyday.everyday_glasses.permissions
 
 import android.Manifest
 import android.app.Activity

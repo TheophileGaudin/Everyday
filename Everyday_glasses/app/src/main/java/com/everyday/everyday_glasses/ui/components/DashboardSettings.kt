@@ -12,7 +12,7 @@ import android.graphics.drawable.Drawable
 import com.everyday.everyday_glasses.R
 import com.everyday.everyday_glasses.google.GoogleAuthState
 import com.everyday.everyday_glasses.headup_wake.HeadUpWakeManager
-import com.everyday.everyday_glasses.misc.UnitSystemMode
+import com.everyday.everyday_glasses.settings.UnitSystemMode
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.sin

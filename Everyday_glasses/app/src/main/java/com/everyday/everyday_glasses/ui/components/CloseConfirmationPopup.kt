@@ -5,7 +5,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.util.Log
-import com.everyday.everyday_glasses.contracts.CloseConfirmationHandler
+import com.everyday.everyday_glasses.ui.components.CloseConfirmationHandler
 
 /**
  * A simple popup dialog for confirming app close.

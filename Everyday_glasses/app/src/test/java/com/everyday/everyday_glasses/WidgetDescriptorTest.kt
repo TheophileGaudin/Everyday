@@ -1,8 +1,8 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.contracts.WidgetDescriptors
-import com.everyday.everyday_glasses.contracts.WidgetInstancePolicy
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetDescriptors
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.shared.command.CommandWidgetId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

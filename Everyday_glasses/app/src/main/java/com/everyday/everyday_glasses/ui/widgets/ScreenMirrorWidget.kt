@@ -12,7 +12,7 @@ import android.renderscript.*
 import android.util.Log
 import com.everyday.everyday_glasses.contracts.MirrorWidgetListener
 import com.everyday.everyday_glasses.ui.widgets.common.WidgetInteractionState
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.widgets.common.WidgetTheme
 import java.io.InputStream
 import java.net.Socket

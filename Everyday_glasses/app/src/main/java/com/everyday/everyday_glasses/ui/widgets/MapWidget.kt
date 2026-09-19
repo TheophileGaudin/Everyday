@@ -43,7 +43,7 @@ import com.everyday.everyday_glasses.map.PoiDisplayConfig
 import com.everyday.everyday_glasses.map.PoiDisplayConfigState
 import com.everyday.everyday_glasses.map.PoiDisplayMode
 import com.everyday.everyday_glasses.map.RankedGeocodingCandidate
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.map.destinationIndicatorIsOffscreen
 import com.everyday.everyday_glasses.map.formatGuidanceDistance
 import com.everyday.everyday_glasses.map.mapPoiTier

@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.interaction
+package com.everyday.everyday_glasses.contracts
 
 import android.net.wifi.p2p.WifiP2pDevice
 

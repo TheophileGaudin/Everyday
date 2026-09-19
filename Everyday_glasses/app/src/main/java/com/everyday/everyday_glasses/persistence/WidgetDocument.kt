@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses.persistence
 
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.reflect.KClass

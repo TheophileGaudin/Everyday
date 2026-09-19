@@ -1,7 +1,7 @@
 package com.everyday.everyday_glasses
 
 import com.everyday.everyday_glasses.persistence.WidgetDocument
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 
 /**
  * Shared helpers for persistence tests.

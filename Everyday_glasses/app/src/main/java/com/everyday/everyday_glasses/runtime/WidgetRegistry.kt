@@ -3,10 +3,10 @@ package com.everyday.everyday_glasses.runtime
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
-import com.everyday.everyday_glasses.contracts.WidgetDescriptor
-import com.everyday.everyday_glasses.contracts.WidgetDescriptors
-import com.everyday.everyday_glasses.contracts.WidgetInstancePolicy
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetDescriptors
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.widgets.BaseWidget
 import com.everyday.everyday_glasses.ui.widgets.BrowserWidget
 import com.everyday.everyday_glasses.ui.widgets.CalendarWidget
@@ -30,7 +30,7 @@ import java.util.IdentityHashMap
 /**
  * The authoritative inventory of live widgets.
  *
- * Membership is grouped by [com.everyday.everyday_glasses.contracts.WidgetTypeId], while callers receive stable descriptor
+ * Membership is grouped by [WidgetTypeId], while callers receive stable descriptor
  * ordering and never mutate the backing collections directly. The typed properties and
  * lists remain temporarily for WidgetContainer compatibility; they delegate to the same
  * registry operations and do not hold duplicate state.

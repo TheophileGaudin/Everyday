@@ -8,7 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.AttributeSet
 import android.view.View
-import com.everyday.everyday_glasses.interaction.CursorActivityObserver
+import com.everyday.everyday_glasses.contracts.CursorActivityObserver
 import com.everyday.everyday_glasses._binocular.DisplayConfig
 import com.everyday.everyday_glasses.headup_wake.InteractionTimeouts
 

@@ -13,7 +13,7 @@ import com.everyday.everyday_glasses.connectivity.RouteMessageListener
 import com.everyday.everyday_glasses.connectivity.SubtitleMessageListener
 import com.everyday.everyday_glasses.connectivity.SyncMessageListener
 import com.everyday.everyday_glasses.connectivity.TransportConnectionListener
-import com.everyday.everyday_glasses.interaction.WifiDirectConnectionListener
+import com.everyday.everyday_glasses.contracts.WifiDirectConnectionListener
 import com.everyday.everyday_glasses.google.GoogleAccountSummary
 import com.everyday.everyday_glasses.google.GooglePhoneAuthStatus
 import com.everyday.everyday_glasses.map.GlassesDestinationSearchTransport

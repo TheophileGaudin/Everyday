@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses.ui.components
 
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.map.MapViewMode
 import com.everyday.everyday_glasses.map.MapZoom
 import com.everyday.everyday_glasses.persistence.DashboardPersistence

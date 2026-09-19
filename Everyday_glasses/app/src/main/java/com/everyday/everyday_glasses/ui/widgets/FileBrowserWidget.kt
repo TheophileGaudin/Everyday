@@ -17,7 +17,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import com.everyday.everyday_glasses.runtime.FileBrowserWidgetListener
 import com.everyday.everyday_glasses.ui.widgets.common.WidgetInteractionState
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import java.io.File
 
 /**

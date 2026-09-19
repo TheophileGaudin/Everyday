@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.misc
+package com.everyday.everyday_glasses.runtime
 
 import android.app.Activity
 import android.content.Context

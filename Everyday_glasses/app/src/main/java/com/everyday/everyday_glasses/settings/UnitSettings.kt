@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.misc
+package com.everyday.everyday_glasses.settings
 
 import android.content.Context
 import android.icu.util.LocaleData

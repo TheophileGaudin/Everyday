@@ -10,7 +10,7 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import com.everyday.everyday_glasses.runtime.SubtitleWidgetListener
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.shared.sync.SubtitleControl
 import com.everyday.shared.sync.SubtitleControlAction
 import com.everyday.shared.sync.SubtitleOptions

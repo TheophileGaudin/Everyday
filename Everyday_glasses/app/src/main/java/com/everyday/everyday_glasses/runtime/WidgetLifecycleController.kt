@@ -1,10 +1,10 @@
 package com.everyday.everyday_glasses.runtime
 
 import android.os.Looper
-import com.everyday.everyday_glasses.contracts.WidgetDescriptor
-import com.everyday.everyday_glasses.contracts.WidgetDescriptors
-import com.everyday.everyday_glasses.contracts.WidgetInstancePolicy
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetDescriptors
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.WidgetDocument
@@ -16,7 +16,7 @@ import kotlin.reflect.KClass
 /**
  * The complete runtime contract for one widget type.
  *
- * A registration deliberately joins runtime behaviour to the static [com.everyday.everyday_glasses.contracts.WidgetDescriptor]
+ * A registration deliberately joins runtime behaviour to the static [WidgetDescriptor]
  * without putting Android objects, factories, or mutable state into the descriptor itself.
  * The registry/container migration supplies the concrete membership callbacks; this class is
  * intentionally independent of either implementation while that work is in flight.

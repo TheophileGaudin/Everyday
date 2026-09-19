@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses.interaction.commands
 
-import com.everyday.everyday_glasses.contracts.WidgetDescriptors
+import com.everyday.everyday_glasses.runtime.WidgetDescriptors
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
 import com.everyday.shared.command.AppCommandArguments
 import com.everyday.shared.command.AppCommandInvocation

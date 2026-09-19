@@ -1,7 +1,7 @@
 package com.everyday.everyday_glasses.headup_wake
 
 import android.Manifest
-import android.R
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -17,8 +17,7 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.everyday.everyday_glasses.MainActivity
-import com.everyday.everyday_glasses.interaction.WakeRequestListener
-import com.everyday.everyday_glasses.headup_wake.HeadUpWakeManager
+import com.everyday.everyday_glasses.contracts.WakeRequestListener
 
 class GlassesService : Service() {
 
@@ -78,9 +77,9 @@ class GlassesService : Service() {
         headUpWakeManager = HeadUpWakeManager(this).apply {
             // Load settings from SharedPreferences
             val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-            headUpHoldTimeMs = prefs.getLong(KEY_HEAD_UP_TIME, HeadUpWakeManager.Companion.DEFAULT_HEAD_UP_HOLD_TIME_MS)
-            wakeDurationMs = prefs.getLong(KEY_WAKE_DURATION, HeadUpWakeManager.Companion.DEFAULT_WAKE_DURATION_MS)
-            pitchChangeThreshold = prefs.getFloat(KEY_ANGLE_THRESHOLD, HeadUpWakeManager.Companion.DEFAULT_PITCH_CHANGE_THRESHOLD)
+            headUpHoldTimeMs = prefs.getLong(KEY_HEAD_UP_TIME, HeadUpWakeManager.DEFAULT_HEAD_UP_HOLD_TIME_MS)
+            wakeDurationMs = prefs.getLong(KEY_WAKE_DURATION, HeadUpWakeManager.DEFAULT_WAKE_DURATION_MS)
+            pitchChangeThreshold = prefs.getFloat(KEY_ANGLE_THRESHOLD, HeadUpWakeManager.DEFAULT_PITCH_CHANGE_THRESHOLD)
             isHeadsUpGestureEnabled = prefs.getBoolean(KEY_HEADSUP_ENABLED, true)
 
             Log.d(TAG, "HeadUpWakeManager settings: headUpTime=${headUpHoldTimeMs}ms, wakeDuration=${wakeDurationMs}ms, angle=${pitchChangeThreshold}°, enabled=$isHeadsUpGestureEnabled")
@@ -104,14 +103,15 @@ class GlassesService : Service() {
     private fun reloadSettings() {
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         headUpWakeManager?.apply {
-            headUpHoldTimeMs = prefs.getLong(KEY_HEAD_UP_TIME, HeadUpWakeManager.Companion.DEFAULT_HEAD_UP_HOLD_TIME_MS)
-            wakeDurationMs = prefs.getLong(KEY_WAKE_DURATION, HeadUpWakeManager.Companion.DEFAULT_WAKE_DURATION_MS)
-            pitchChangeThreshold = prefs.getFloat(KEY_ANGLE_THRESHOLD, HeadUpWakeManager.Companion.DEFAULT_PITCH_CHANGE_THRESHOLD)
+            headUpHoldTimeMs = prefs.getLong(KEY_HEAD_UP_TIME, HeadUpWakeManager.DEFAULT_HEAD_UP_HOLD_TIME_MS)
+            wakeDurationMs = prefs.getLong(KEY_WAKE_DURATION, HeadUpWakeManager.DEFAULT_WAKE_DURATION_MS)
+            pitchChangeThreshold = prefs.getFloat(KEY_ANGLE_THRESHOLD, HeadUpWakeManager.DEFAULT_PITCH_CHANGE_THRESHOLD)
             isHeadsUpGestureEnabled = prefs.getBoolean(KEY_HEADSUP_ENABLED, true)
             Log.d(TAG, "Reloaded settings: headUpTime=${headUpHoldTimeMs}ms, wakeDuration=${wakeDurationMs}ms, angle=${pitchChangeThreshold}°, enabled=$isHeadsUpGestureEnabled")
         }
     }
 
+    @SuppressLint("FullScreenIntentPolicy")
     private fun launchMainActivity() {
         Log.d(TAG, "Attempting to launch MainActivity via full-screen intent...")
 
@@ -131,7 +131,7 @@ class GlassesService : Service() {
             Log.e(TAG, "Failed to acquire wake lock: ${e.message}")
         }
 
-        val wakeDuration = headUpWakeManager?.wakeDurationMs ?: HeadUpWakeManager.Companion.DEFAULT_WAKE_DURATION_MS
+        val wakeDuration = headUpWakeManager?.wakeDurationMs ?: HeadUpWakeManager.DEFAULT_WAKE_DURATION_MS
 
         // Set static flags BEFORE launching - intent extras don't work reliably with full-screen intents
         pendingHeadUpWake = true
@@ -176,7 +176,7 @@ class GlassesService : Service() {
             Notification.Builder(this, "head_up_wake_channel")
                 .setContentTitle("Everyday")
                 .setContentText("Head-up wake")
-                .setSmallIcon(R.drawable.ic_menu_view)
+                .setSmallIcon(android.R.drawable.ic_menu_view)
                 .setContentIntent(pendingIntent)
                 .setFullScreenIntent(pendingIntent, true) // This is the key!
                 .setAutoCancel(true)
@@ -188,7 +188,7 @@ class GlassesService : Service() {
             Notification.Builder(this)
                 .setContentTitle("Everyday")
                 .setContentText("Head-up wake")
-                .setSmallIcon(R.drawable.ic_menu_view)
+                .setSmallIcon(android.R.drawable.ic_menu_view)
                 .setContentIntent(pendingIntent)
                 .setFullScreenIntent(pendingIntent, true)
                 .setAutoCancel(true)
@@ -235,7 +235,7 @@ class GlassesService : Service() {
         @Volatile
         var pendingHeadUpWake: Boolean = false
         @Volatile
-        var pendingHeadUpWakeDuration: Long = HeadUpWakeManager.Companion.DEFAULT_WAKE_DURATION_MS
+        var pendingHeadUpWakeDuration: Long = HeadUpWakeManager.DEFAULT_WAKE_DURATION_MS
 
         fun start(context: Context) {
             val intent = Intent(context, GlassesService::class.java)
@@ -286,14 +286,14 @@ class GlassesService : Service() {
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("Everyday")
                 .setContentText("Running")
-                .setSmallIcon(R.drawable.ic_menu_view)
+                .setSmallIcon(android.R.drawable.ic_menu_view)
                 .build()
         } else {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
                 .setContentTitle("Everyday")
                 .setContentText("Running")
-                .setSmallIcon(R.drawable.ic_menu_view)
+                .setSmallIcon(android.R.drawable.ic_menu_view)
                 .build()
         }
     }

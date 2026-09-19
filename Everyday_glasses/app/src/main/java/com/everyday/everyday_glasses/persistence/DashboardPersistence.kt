@@ -10,7 +10,7 @@ import com.everyday.everyday_glasses.map.MapZoom
 import com.everyday.everyday_glasses.map.PoiDisplayConfig
 import com.everyday.everyday_glasses.map.PoiDisplayConfigState
 import com.everyday.everyday_glasses.map.PoiDisplayMode
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
 import com.everyday.shared.sync.FinanceAssetType
 import com.everyday.shared.sync.FinanceChartType

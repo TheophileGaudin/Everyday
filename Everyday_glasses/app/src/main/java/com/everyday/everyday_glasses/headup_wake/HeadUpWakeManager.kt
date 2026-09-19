@@ -8,7 +8,7 @@ import android.hardware.SensorManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.everyday.everyday_glasses.interaction.WakeRequestListener
+import com.everyday.everyday_glasses.contracts.WakeRequestListener
 import com.everyday.everyday_glasses.ui.components.DashboardSettings
 import kotlin.math.atan2
 
@@ -48,7 +48,7 @@ class HeadUpWakeManager(context: Context) : SensorEventListener {
         const val DEFAULT_PITCH_CHANGE_THRESHOLD = 25f // degrees
 
         // Conversion factor
-        private const val RAD_TO_DEG = 57.2957795f
+        private const val RAD_TO_DEG = 57.29578f
     }
 
     // Sensor management
@@ -76,7 +76,7 @@ class HeadUpWakeManager(context: Context) : SensorEventListener {
     // Configurable pitch threshold in degrees
     var pitchChangeThreshold: Float = DEFAULT_PITCH_CHANGE_THRESHOLD
         set(value) {
-            field = value.coerceIn(DashboardSettings.Companion.MIN_ANGLE_THRESHOLD, DashboardSettings.Companion.MAX_ANGLE_THRESHOLD)
+            field = value.coerceIn(DashboardSettings.MIN_ANGLE_THRESHOLD, DashboardSettings.MAX_ANGLE_THRESHOLD)
             Log.d(TAG, "Pitch threshold set to ${field}°")
         }
 
@@ -104,7 +104,7 @@ class HeadUpWakeManager(context: Context) : SensorEventListener {
     private var headUpStartTime: Long = 0L
     private var isHeadUp = false
 
-    // Runnables
+    // Runnable
     private var wakeTimeoutRunnable: Runnable? = null
 
     // Callbacks
@@ -176,11 +176,6 @@ class HeadUpWakeManager(context: Context) : SensorEventListener {
 
         Log.d(TAG, "Screen state changed: isOff=$isOff, wasOff=$wasOff, isWakeActive=$isWakeActive")
     }
-
-    /**
-     * Check if head-up wake is currently active (screen was woken by head-up and timer is running).
-     */
-    fun isWakeActive(): Boolean = isWakeActive
 
     /**
      * Release resources.
@@ -256,7 +251,7 @@ class HeadUpWakeManager(context: Context) : SensorEventListener {
 
         // The element at index 7 (row 2, col 1) represents the Y-component of the Z-axis.
         // The element at index 8 (row 2, col 2) represents the Z-component of the Z-axis.
-        // We use atan2 to get the full 360 degree angle.
+        // We use atan2 to get the full 360-degree angle.
 
         // This calculates the angle of the Z-vector projected on the Y-Z plane
         val pitchRad = atan2(rotationMatrix[7].toDouble(), rotationMatrix[8].toDouble())

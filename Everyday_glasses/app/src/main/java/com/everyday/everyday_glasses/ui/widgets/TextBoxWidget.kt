@@ -20,7 +20,7 @@ import androidx.core.text.HtmlCompat
 import com.everyday.everyday_glasses.runtime.TextBoxWidgetListener
 import com.everyday.everyday_glasses.ui.components.KeyboardOverlayController
 import com.everyday.everyday_glasses.ui.widgets.common.WidgetInteractionState
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.widgets.common.WidgetTheme
 import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 

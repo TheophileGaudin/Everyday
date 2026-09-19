@@ -59,6 +59,7 @@ class BinocularRenderCoordinator(
         publishIfChanged()
     }
 
+    @Suppress("DEPRECATION")
     fun onTrimMemory(level: Int) {
         val pressure = level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW
         if (hasMemoryPressure != pressure) {

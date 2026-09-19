@@ -12,7 +12,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import com.everyday.everyday_glasses.runtime.VideoWidgetListener
-import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.video.VideoItem
 import com.everyday.everyday_glasses.video.VideoPlayerController
 import com.everyday.everyday_glasses.video.VideoPlayerUi

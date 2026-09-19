@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.contracts
+package com.everyday.everyday_glasses.runtime
 
 import com.everyday.shared.command.CommandWidgetId
 

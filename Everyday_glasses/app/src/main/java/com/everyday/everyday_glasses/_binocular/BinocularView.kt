@@ -111,7 +111,7 @@ class BinocularView @JvmOverloads constructor(
         
         rightEyeSurface = SurfaceView(context).apply {
             layoutParams = LayoutParams(DisplayConfig.EYE_WIDTH, DisplayConfig.EYE_HEIGHT)
-            visibility = View.GONE
+            visibility = GONE
         }
         
         // Add content container and right eye surface
