@@ -20,7 +20,6 @@ import com.everyday.everyday_glasses.interaction.commands.AwaitingCommandUiDispa
 import com.everyday.everyday_glasses.interaction.assistant.AssistantConfiguration
 import com.everyday.everyday_glasses.interaction.assistant.AssistantModel
 import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticFact
-import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticToolHandler
 import com.everyday.everyday_glasses.interaction.assistant.AssistantTextContentFormatter
 import com.everyday.everyday_glasses.interaction.assistant.AssistantTextPresentationRequest
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolCatalog
@@ -166,6 +165,7 @@ import com.everyday.shared.transport.AssistantStatus
 import java.util.concurrent.CompletableFuture
 import kotlin.reflect.KClass
 import kotlin.math.roundToInt
+import androidx.core.net.toUri
 
 /**
  * Container view that manages dynamic widgets (text boxes, status bar, etc.).
@@ -173,7 +173,7 @@ import kotlin.math.roundToInt
  * Responsibilities are delegated to helper classes:
  * - CursorStabilizer: Cursor physics and smoothing for glasses temple input
  * - WidgetRegistry: Widget collection and z-ordering
- * - WidgetwidgetCaptureRestore: Save/restore widget states
+ * - WidgetCaptureRestore: Save/restore widget states
  * - ThreeDofOverlay: Visual overlay for 3DOF mode (dashed boundary)
  *
  * This class handles:
@@ -2123,7 +2123,7 @@ class WidgetContainer @JvmOverloads constructor(
      * space, honoring two rules:
      *
      *  1. A widget currently being moved or resized keeps the cursor for the whole gesture.
-     *  2. Otherwise hover is "sticky": while the previously hovered widget still contains the
+     *  2. Otherwise, hover is "sticky": while the previously hovered widget still contains the
      *     cursor it stays hovered, so a widget can only *become* hovered when no other widget
      *     is already hovered under the cursor. When hover is free, the top-most (highest
      *     z-order) widget under the cursor wins.
@@ -2302,7 +2302,12 @@ class WidgetContainer @JvmOverloads constructor(
             if (!cursorPressed) return@Runnable
             userInputActivity?.onUserInput(UserInputKind.LONG_PRESS)
             registry.forEachWidget { it.snapProvider = smartAlignment }
-            if (pendingFormattingMenuDrag) { formattingMenu?.let { if (it.onLongPressTriggered()) { } }; pendingFormattingMenuDrag = false; notifyTransientContentChanged(); return@Runnable }
+            if (pendingFormattingMenuDrag) {
+                formattingMenu?.onLongPressTriggered()
+                pendingFormattingMenuDrag = false
+                notifyTransientContentChanged()
+                return@Runnable
+            }
             if (pendingTextSelection) { val widget = focusedWidget ?: fullscreenTextWidget; widget?.let { if (it.isFocused()) { val (cx, cy) = screenToContentCoordinates(longPressStartX, longPressStartY); it.setCursorFromScreenPosition(cx, cy); it.resetPixelAccumulator(); it.startSelection(); isLongPressSelectionMode = true; isTextSelectionActive = false } }; pendingTextSelection = false; notifyTransientContentChanged(); return@Runnable }
             if (isWidgetLayoutLocked && hasPendingWidgetDrag()) {
                 clearPendingWidgetDrag()
@@ -2362,12 +2367,12 @@ class WidgetContainer @JvmOverloads constructor(
         widget.dispatchTouchEvent(cx, cy, MotionEvent.ACTION_UP)
         activeBrowserTouchWidget = null
         suppressBrowserContentTapWidget = widget
-        suppressBrowserContentTapUntilMs = android.os.SystemClock.uptimeMillis() + BROWSER_TOUCH_TAP_SUPPRESSION_MS
+        suppressBrowserContentTapUntilMs = SystemClock.uptimeMillis() + BROWSER_TOUCH_TAP_SUPPRESSION_MS
     }
 
     private fun shouldSuppressBrowserContentTap(widget: BrowserWidget): Boolean {
         if (suppressBrowserContentTapWidget != widget) return false
-        if (android.os.SystemClock.uptimeMillis() <= suppressBrowserContentTapUntilMs) return true
+        if (SystemClock.uptimeMillis() <= suppressBrowserContentTapUntilMs) return true
         suppressBrowserContentTapWidget = null
         suppressBrowserContentTapUntilMs = 0L
         return false
@@ -2688,7 +2693,19 @@ class WidgetContainer @JvmOverloads constructor(
             } 
         }
         // Menus use screen-space (head-locked)
-        formattingMenu?.let { menu -> if (menu.isDragging()) { menu.onDrag(x, y); notifyTransientContentChanged(); return }; if (menu.checkLongPressCancellation(x, y, LONG_PRESS_MAX_MOVEMENT)) { } }
+        formattingMenu?.let { menu ->
+            if (menu.isDragging()) {
+                menu.onDrag(x, y)
+                notifyTransientContentChanged()
+                return
+            }
+
+            menu.checkLongPressCancellation(
+                x,
+                y,
+                LONG_PRESS_MAX_MOVEMENT
+            )
+        }
         // Long-press cancellation uses screen-space (cursor movement)
         if (longPressRunnable != null) { val totalMovement = kotlin.math.sqrt((x - longPressStartX) * (x - longPressStartX) + (y - longPressStartY) * (y - longPressStartY)); if (totalMovement > LONG_PRESS_MAX_MOVEMENT) cancelLongPress() }
         // Widget dragging uses delta values (works in both spaces)
@@ -3102,7 +3119,7 @@ class WidgetContainer @JvmOverloads constructor(
      *
      * Calls [BaseWidget.baseHitTest] once and dispatches accordingly. [onElse] receives the raw
      * [BaseWidget.BaseHitArea] result when the hit falls outside the four base buttons, letting
-     * per-widget handlers add extra behaviour; defaults to swallowing the tap (returns `true`).
+     * per-widget handlers add extra behavior; defaults to swallowing the tap (returns `true`).
      */
     private fun handleBaseTap(
         widget: BaseWidget,
@@ -3682,7 +3699,7 @@ class WidgetContainer @JvmOverloads constructor(
     fun setHeadsUpEnabled(enabled: Boolean) {settingsController.setHeadsUpEnabled(enabled)} /** Set the heads-up enabled state programmatically (used for restoring persisted state). */
     fun getHeadsUpEnabled(): Boolean = settingsController.getHeadsUpEnabled() /** Get the current heads-up enabled state (used for persistence). */
 
-    /** setter for google authentication*/
+    /** setter for Google authentication*/
     fun setGoogleAuthState(state: GoogleAuthState) {settingsController.setGoogleAuthState(state)}
 
     /**
@@ -4137,7 +4154,6 @@ class WidgetContainer @JvmOverloads constructor(
         val createY = if (y >= 0) y.coerceIn(0f, (height - browserHeight).coerceAtLeast(0f))
                       else ((height - browserHeight) / 2f).coerceAtLeast(0f)
 
-        val selectionHandler = onFileSelected
         val widget = FileBrowserWidget(
             context,
             createX,
@@ -4149,7 +4165,7 @@ class WidgetContainer @JvmOverloads constructor(
             listener = object : FileBrowserWidgetListener {
                 override fun onStateChanged(state: FileBrowserWidget.State) = notifyTransientContentChanged()
                 override fun onFileSelected(entry: FileBrowserWidget.FileEntry) {
-                    selectionHandler?.invoke(entry)
+                    onFileSelected?.invoke(entry)
                     removeFileBrowserWidget(this@apply)
                 }
             }
@@ -4448,7 +4464,7 @@ class WidgetContainer @JvmOverloads constructor(
     /** Convert the fixed screen cursor to the coordinate space in which widgets are drawn. */
     fun screenToContentCoordinates(screenX: Float, screenY: Float): Pair<Float, Float> {
         if (!shouldApplyThreeDofTransform()) return Pair(screenX, screenY)
-        return ThreeDofCoordinateMath.screenToContent(screenX = screenX, screenY = screenY, viewportWidth = width.toFloat(), viewportHeight = height.toFloat(), offsetX = threeDofOffsetX, offsetY = threeDofOffsetY, rollDeg = threeDofRollDeg,)
+        return ThreeDofCoordinateMath.screenToContent(screenX = screenX, screenY = screenY, viewportWidth = width.toFloat(), viewportHeight = height.toFloat(), offsetX = threeDofOffsetX, offsetY = threeDofOffsetY, rollDeg = threeDofRollDeg)
     }
     // ==================== Drawing ====================
 
@@ -4850,7 +4866,7 @@ class WidgetContainer @JvmOverloads constructor(
         registry = commandRegistry,
         isAvailable = commandCapabilities::isAvailable,
         executeCommand = this::executeCommand,
-        extraHandlers = listOfNotNull<AssistantSemanticToolHandler>(
+        extraHandlers = listOfNotNull(
             PresentTextSemanticToolHandler(),
             webSearchHandler,
             InspectUiSemanticToolHandler(),
@@ -5326,7 +5342,7 @@ class WidgetContainer @JvmOverloads constructor(
     private fun restoreTextWidget(state: DashboardPersistence.TextWidgetState): TextBoxWidget? =
         widgetCaptureRestore.restoreTextWidgets(listOf(state), width, height).firstOrNull()
 
-    private fun restoreBrowserWidget(state: DashboardPersistence.BrowserWidgetState,): BrowserWidget? {
+    private fun restoreBrowserWidget(state: DashboardPersistence.BrowserWidgetState): BrowserWidget? {
         val rootView = parent as? ViewGroup ?: return null
         val adjustedX = state.x.coerceIn(0f, (width - state.width).coerceAtLeast(0f))
         val adjustedY = state.y.coerceIn(0f, (height - state.height).coerceAtLeast(0f))
@@ -5342,7 +5358,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun restoreVideoWidget(state: DashboardPersistence.VideoWidgetState): VideoWidget? {
         val rootView = parent as? ViewGroup ?: return null
-        val uri = runCatching { android.net.Uri.parse(state.uri) }.getOrNull() ?: return null
+        val uri = runCatching { state.uri.toUri() }.getOrNull() ?: return null
         val readable = runCatching {
             context.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
         }.getOrDefault(false)
@@ -5362,7 +5378,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun restorePdfWidget(state: DashboardPersistence.PdfWidgetState): PdfWidget? {
-        val uri = runCatching { android.net.Uri.parse(state.uri) }.getOrNull() ?: return null
+        val uri = runCatching { state.uri.toUri() }.getOrNull() ?: return null
         val readable = runCatching {
             context.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
         }.getOrDefault(false)
