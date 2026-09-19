@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import com.everyday.everyday_glasses.settings.UnitDisplayFormatter
 import com.everyday.everyday_glasses.ui.widgets.SpeedometerWidget
+import androidx.core.graphics.toColorInt
 
 /**
  * Modal settings menu for the speedometer widget.
@@ -47,12 +48,12 @@ class SpeedometerSettingsMenu(
     private val sliderTrackRect = RectF()
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#EE1F1F1F")
+        color = "#EE1F1F1F".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#555555")
+        color = "#555555".toColorInt()
         strokeWidth = 2f
         style = Paint.Style.STROKE
     }
@@ -65,7 +66,7 @@ class SpeedometerSettingsMenu(
     }
 
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#CCCCCC")
+        color = "#CCCCCC".toColorInt()
         textSize = 18f
         textAlign = Paint.Align.LEFT
     }
@@ -77,13 +78,13 @@ class SpeedometerSettingsMenu(
     }
 
     private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#666666")
+        color = "#666666".toColorInt()
         strokeWidth = TRACK_STROKE
         strokeCap = Paint.Cap.ROUND
     }
 
     private val activeTrackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#4A90D9")
+        color = "#4A90D9".toColorInt()
         strokeWidth = TRACK_STROKE
         strokeCap = Paint.Cap.ROUND
     }
@@ -94,7 +95,7 @@ class SpeedometerSettingsMenu(
     }
 
     private val closeButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#E53935")
+        color = "#E53935".toColorInt()
         style = Paint.Style.FILL
     }
 

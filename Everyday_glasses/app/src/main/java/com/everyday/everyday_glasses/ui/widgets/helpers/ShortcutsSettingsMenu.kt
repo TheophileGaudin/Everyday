@@ -9,6 +9,8 @@ import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
 import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
 import kotlin.math.max
 import com.everyday.shared.command.AppCommandInvocation
+import androidx.core.graphics.toColorInt
+import androidx.core.graphics.withClip
 
 /**
  * Modal full-screen overlay for configuring the lemon hover control's shortcut list.
@@ -61,10 +63,10 @@ class ShortcutsSettingsMenu(
 
     // ==================== Paints ====================
 
-    private val backdropPaint = Paint().apply { color = Color.parseColor("#D8000000") }
-    private val panelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#F0222232") }
+    private val backdropPaint = Paint().apply { color = "#D8000000".toColorInt() }
+    private val panelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#F0222232".toColorInt() }
     private val panelBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#666666")
+        color = "#666666".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 1.5f
     }
@@ -75,28 +77,29 @@ class ShortcutsSettingsMenu(
         isFakeBoldText = true
     }
     private val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#FFD51F")
+        color = "#FFD51F".toColorInt()
         textSize = 16f
         textAlign = Paint.Align.LEFT
         isFakeBoldText = true
     }
-    private val columnBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#1A1A28") }
-    private val rowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#33384F") }
-    private val rowPaintAlt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#2A2F44") }
-    private val rowFullPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#6B5A1B") }
+    private val columnBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#1A1A28".toColorInt() }
+    private val rowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#33384F".toColorInt() }
+    private val rowPaintAlt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#2A2F44".toColorInt() }
+    private val rowFullPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#6B5A1B".toColorInt() }
     private val rowLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textSize = 16f
         textAlign = Paint.Align.LEFT
     }
-    private val closeButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#E53935") }
+    private val closeButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color =
+        "#E53935".toColorInt() }
     private val closeIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         strokeWidth = 3f
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
     }
-    private val arrowBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#444A6B") }
+    private val arrowBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = "#444A6B".toColorInt() }
     private val arrowIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         strokeWidth = 2.5f
@@ -105,7 +108,7 @@ class ShortcutsSettingsMenu(
         strokeJoin = Paint.Join.ROUND
     }
     private val capacityPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#CCCCCC")
+        color = "#CCCCCC".toColorInt()
         textSize = 13f
         textAlign = Paint.Align.RIGHT
     }
@@ -129,7 +132,6 @@ class ShortcutsSettingsMenu(
         listener?.onDismissed()
     }
 
-    fun containsPoint(x: Float, y: Float): Boolean = isVisible
 
     // ==================== Layout ====================
 
@@ -169,13 +171,13 @@ class ShortcutsSettingsMenu(
         val topReserved = panelRect.top + 80f
         val bottomReserved = panelRect.bottom - 12f
         val columnGap = 16f
-        val columnsTop = topReserved
         val columnsLeft = panelRect.left + 16f
         val columnsRight = panelRect.right - 16f
         val columnWidth = (columnsRight - columnsLeft - columnGap) / 2f
 
-        leftRect.set(columnsLeft, columnsTop, columnsLeft + columnWidth, bottomReserved)
-        rightRect.set(leftRect.right + columnGap, columnsTop, leftRect.right + columnGap + columnWidth, bottomReserved)
+        leftRect.set(columnsLeft, topReserved, columnsLeft + columnWidth, bottomReserved)
+        rightRect.set(leftRect.right + columnGap,
+            topReserved, leftRect.right + columnGap + columnWidth, bottomReserved)
 
         leftHeaderRect.set(leftRect.left, leftRect.top, leftRect.right, leftRect.top + 28f)
         rightHeaderRect.set(rightRect.left, rightRect.top, rightRect.right, rightRect.top + 28f)
@@ -236,23 +238,41 @@ class ShortcutsSettingsMenu(
         canvas.drawText("Available", leftHeaderRect.left + 10f, leftHeaderRect.bottom - 6f, headerPaint)
         canvas.drawText("On the lemon", rightHeaderRect.left + 10f, rightHeaderRect.bottom - 6f, headerPaint)
         val capacity = "${onLemon.size} / ${AppCommandRegistry.MAX_LEMON_COMMANDS}"
+        val isFull = onLemon.size >= AppCommandRegistry.MAX_LEMON_COMMANDS
         canvas.drawText(capacity, rightHeaderRect.right - 10f, rightHeaderRect.bottom - 6f, capacityPaint)
-
-        canvas.save()
-        canvas.clipRect(leftRect.left, leftHeaderRect.bottom, leftRect.right, leftRect.bottom)
-        for ((i, row) in leftRows.withIndex()) drawRow(canvas, row, alt = i % 2 == 1, full = false)
-        canvas.restore()
-
-        canvas.save()
-        canvas.clipRect(rightRect.left, rightHeaderRect.bottom, rightRect.right, rightRect.bottom)
-        val full = onLemon.size >= AppCommandRegistry.MAX_LEMON_COMMANDS
-        for ((i, row) in rightRows.withIndex()) drawRow(canvas, row, alt = i % 2 == 1, full = false)
-        for (arrow in rightArrows) drawArrowButton(canvas, arrow.rect, up = arrow.delta < 0)
-        if (full) {
-            canvas.drawText("Lemon is full", rightRect.centerX(), rightRect.bottom - 14f, capacityPaint.apply { textAlign = Paint.Align.CENTER })
-            capacityPaint.textAlign = Paint.Align.RIGHT
+        canvas.withClip(
+            leftRect.left,
+            leftHeaderRect.bottom,
+            leftRect.right,
+            leftRect.bottom
+        ) {
+            for ((i, row) in leftRows.withIndex()) {
+                drawRow(
+                    this,
+                    row,
+                    alt = i % 2 == 1,
+                    full = isFull
+                )
+            }
         }
-        canvas.restore()
+        canvas.withClip(rightRect.left, rightHeaderRect.bottom, rightRect.right, rightRect.bottom) {
+
+            for ((i, row) in rightRows.withIndex()) drawRow(
+                this,
+                row,
+                alt = i % 2 == 1,
+                full = false
+            )
+            for (arrow in rightArrows) drawArrowButton(this, arrow.rect, up = arrow.delta < 0)
+            if (isFull) {
+                drawText(
+                    "Lemon is full",
+                    rightRect.centerX(),
+                    rightRect.bottom - 14f,
+                    capacityPaint.apply { textAlign = Paint.Align.CENTER })
+                capacityPaint.textAlign = Paint.Align.RIGHT
+            }
+        }
     }
 
     private fun drawRow(canvas: Canvas, row: Row, alt: Boolean, full: Boolean) {
@@ -283,16 +303,11 @@ class ShortcutsSettingsMenu(
     // ==================== Input ====================
 
     @Suppress("UNUSED_PARAMETER")
-    fun onDown(x: Float, y: Float): Boolean {
-        if (!isVisible) return false
-        return true  // modal: swallow everything
-    }
+    fun onDown(x: Float, y: Float): Boolean {return isVisible}  // modal: swallow everything
 
     @Suppress("UNUSED_PARAMETER")
     fun onMove(x: Float, y: Float): Boolean = isVisible
-
     fun onUp(): Boolean = isVisible
-
     fun onTap(x: Float, y: Float): Boolean {
         if (!isVisible) return false
         if (closeButtonRect.contains(x, y)) { dismiss(); return true }

@@ -55,18 +55,6 @@ object WeatherIconMapper {
         "unsettled_snowy.png" to "unsettled_snowy_night.png"
     )
 
-    /**
-     * Returns the asset filename for the weather icon.
-     * Since the phone now sends filenames directly, this validates and returns as-is,
-     * or falls back to unsettled.png for invalid values.
-     *
-     * @param description The weather icon filename from the phone (e.g., "sunny.png")
-     * @return The validated asset filename
-     */
-    fun getIconForDescription(description: String): String {
-        return getIconForDescription(description, isNight = false)
-    }
-
     fun getIconForDescription(description: String, isNight: Boolean): String {
         val filename = description.trim()
         val resolved = if (filename in validAssets) {

@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.util.Log
 import com.everyday.everyday_glasses.ui.components.TextEditCommandHandler
+import androidx.core.graphics.toColorInt
 
 /**
  * A popup context menu for text editing operations (paste, etc.).
@@ -56,25 +57,25 @@ class TextEditContextMenu(
     
     // Paints
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#2a2a3e")
+        color = "#2a2a3e".toColorInt()
     }
     
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 2f
-        color = Color.parseColor("#4a4a6e")
+        color = "#4a4a6e".toColorInt()
     }
     
     private val itemPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#3a3a5e")
+        color = "#3a3a5e".toColorInt()
     }
     
     private val hoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#5050AA")
+        color = "#5050AA".toColorInt()
     }
     
     private val disabledPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#2a2a3e")
+        color = "#2a2a3e".toColorInt()
     }
     
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -83,7 +84,7 @@ class TextEditContextMenu(
     }
     
     private val disabledTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#666666")
+        color = "#666666".toColorInt()
         textSize = 24f
     }
     
@@ -93,7 +94,7 @@ class TextEditContextMenu(
     }
     
     private val disabledIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#666666")
+        color = "#666666".toColorInt()
         textSize = 28f
     }
     
@@ -168,7 +169,7 @@ class TextEditContextMenu(
         // Calculate item rects
         itemRects.clear()
         var itemY = menuY + PADDING
-        for (item in items) {
+        repeat(items.size) {
             val rect = RectF(
                 menuX + PADDING,
                 itemY,
@@ -311,7 +312,7 @@ class TextEditContextMenu(
         
         // Shadow effect
         val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#40000000")
+            color = "#40000000".toColorInt()
         }
         canvas.drawRoundRect(
             menuBounds.left + 4f,

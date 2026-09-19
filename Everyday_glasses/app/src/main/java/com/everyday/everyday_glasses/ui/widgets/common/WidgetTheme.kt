@@ -1,6 +1,4 @@
 package com.everyday.everyday_glasses.ui.widgets.common
-
-import android.graphics.Color
 import androidx.core.graphics.toColorInt
 
 /**

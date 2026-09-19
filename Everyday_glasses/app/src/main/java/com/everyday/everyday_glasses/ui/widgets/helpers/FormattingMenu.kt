@@ -8,6 +8,7 @@ import android.graphics.Typeface
 import android.util.Log
 import com.everyday.everyday_glasses.ui.components.TextFormattingHandler
 import kotlin.math.sqrt
+import androidx.core.graphics.toColorInt
 
 /**
  * A floating formatting toolbar for text editing.
@@ -100,37 +101,37 @@ class FormattingMenu(
 
     // Paints
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#2a2a3e")
+        color = "#2a2a3e".toColorInt()
     }
     
     private val titleBarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#3a3a5e")
+        color = "#3a3a5e".toColorInt()
     }
     
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 2f
-        color = Color.parseColor("#5a5a7e")
+        color = "#5a5a7e".toColorInt()
     }
     
     private val buttonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#3a3a5e")
+        color = "#3a3a5e".toColorInt()
     }
     
     private val buttonActivePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#5050AA")
+        color = "#5050AA".toColorInt()
     }
     
     private val buttonHoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#4a4a7e")
+        color = "#4a4a7e".toColorInt()
     }
     
     private val closeButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#AA4444")
+        color = "#AA4444".toColorInt()
     }
     
     private val closeButtonHoverPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#CC5555")
+        color = "#CC5555".toColorInt()
     }
     
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -161,12 +162,12 @@ class FormattingMenu(
     }
     
     private val titleTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#AAAACC")
+        color = "#AAAACC".toColorInt()
         textSize = 16f
     }
     
     private val inputBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#222233")
+        color = "#222233".toColorInt()
     }
     
     private val xPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -227,7 +228,6 @@ class FormattingMenu(
      * Update button rectangles based on current menu position.
      */
     private fun updateButtonRects() {
-        val menuBounds = RectF(menuX, menuY, menuX + MENU_WIDTH, menuY + menuHeight)
         
         // Title bar (entire top area for dragging)
         titleBarRect.set(
@@ -382,12 +382,7 @@ class FormattingMenu(
         }
         return false
     }
-    
-    /**
-     * Check if long-press is pending.
-     */
-    fun isLongPressPending(): Boolean = isLongPressPending
-    
+
     /**
      * Handle drag movement.
      */
@@ -559,7 +554,7 @@ class FormattingMenu(
         
         // Shadow
         val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#60000000")
+            color = "#60000000".toColorInt()
         }
         canvas.drawRoundRect(
             menuBounds.left + 4f, menuBounds.top + 4f,
@@ -680,7 +675,6 @@ class FormattingMenu(
             canvas.drawLine(cx - lineWidth, cy + lineSpacing, cx + lineWidth * 0.5f, cy + lineSpacing, iconPaint)
             
             // Curved arrow indicating wrap
-            val arrowPaint = Paint(iconPaint).apply { style = Paint.Style.FILL }
             canvas.drawLine(cx + lineWidth, cy - lineSpacing + 3f, cx + lineWidth, cy + lineSpacing - 3f, iconPaint)
             // Arrow head
             canvas.drawLine(cx + lineWidth - 3f, cy + lineSpacing - 6f, cx + lineWidth, cy + lineSpacing - 3f, iconPaint)
