@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicReference
  * 
  * This class is thread-safe and designed for minimal overhead on the hot path.
  */
+@Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
 class RefreshController(
     private val onRefresh: (dirtyRect: Rect?) -> Unit
 ) {
@@ -112,12 +113,7 @@ class RefreshController(
             }
         }
     }
-    
-    /**
-     * Get the current refresh mode.
-     */
-    fun getMode(): RefreshMode = currentMode.get()
-    
+
     /**
      * Start the refresh controller.
      */
@@ -236,29 +232,8 @@ class RefreshController(
             lastRefreshTime = currentTime
         }
     }
-    
-    /**
-     * Check if there are pending dirty regions.
-     */
-    fun hasDirtyRegions(): Boolean = isDirty.get()
-    
-    /**
-     * Get time since last refresh in milliseconds.
-     */
-    fun getTimeSinceLastRefresh(): Long = System.currentTimeMillis() - lastRefreshTime
-    
+
     companion object {
         private const val TAG = "RefreshController"
     }
-}
-
-/**
- * Extension to easily mark a View as dirty in the binocular system.
- * 
- * Usage:
- *   myTextView.text = "Updated"
- *   myTextView.markBinocularDirty(refreshController)
- */
-fun View.markBinocularDirty(controller: RefreshController) {
-    controller.markDirty(this)
 }

@@ -104,14 +104,14 @@ class GlassesDataSyncCoordinator(
             // latest location now that the phone proxy is actually reachable.
             widgetContainer.requestPhoneMapRefresh()
             syncOrchestrator.refresh(
-                channels = SyncChannel.Companion.ALL,
+                channels = SyncChannel.ALL,
                 force = false,
                 reason = "phone_connected"
             )
         } else {
             completePendingNewsSourceRequest(Result.failure(IllegalStateException("Phone disconnected")))
             syncOrchestrator.refresh(
-                channels = SyncChannel.Companion.ALL,
+                channels = SyncChannel.ALL,
                 force = false,
                 reason = "phone_disconnected"
             )
@@ -120,7 +120,7 @@ class GlassesDataSyncCoordinator(
 
     fun onAppResumed() {
         syncOrchestrator.refresh(
-            channels = SyncChannel.Companion.ALL,
+            channels = SyncChannel.ALL,
             force = false,
             reason = "app_resumed"
         )
@@ -128,7 +128,7 @@ class GlassesDataSyncCoordinator(
 
     fun onDisplayWake(reason: String = "display_wake") {
         syncOrchestrator.refresh(
-            channels = SyncChannel.Companion.ALL,
+            channels = SyncChannel.ALL,
             force = false,
             reason = reason
         )
@@ -254,7 +254,7 @@ class GlassesDataSyncCoordinator(
         )
     }
 
-    fun onMapDataRequested(point: MapGeoPoint, poiConfig: PoiDisplayConfig = PoiDisplayConfig.Companion.DEFAULT) {
+    fun onMapDataRequested(point: MapGeoPoint, poiConfig: PoiDisplayConfig = PoiDisplayConfig.DEFAULT) {
         if (!phoneConnected) {
             Log.d(TAG, "Map proxy skipped: phone is not connected")
             return
@@ -441,7 +441,7 @@ class GlassesDataSyncCoordinator(
         val resolvedSource = sourceSpec
             ?: widgetContainer.currentNewsSourceSpec()
             ?: cached?.sourceSpec
-            ?: NewsSourceSpec.Companion.DEFAULT_LOCATION
+            ?: NewsSourceSpec.DEFAULT_LOCATION
         if (!force && cached != null && !cached.isStale() &&
             cached.countryCode == resolvedCountry && cached.sourceSpec == resolvedSource
         ) {
@@ -505,7 +505,7 @@ class GlassesDataSyncCoordinator(
                 val tiles = (visibleConfigs.mapNotNull { config ->
                     fetchedTiles.firstOrNull { it.id == config.id } ?: cachedTilesById[config.id]
                 }).ifEmpty { fetchedTiles }
-                val snapshot = requireNotNull(FinanceSnapshot.Companion.fromTiles(tiles))
+                val snapshot = requireNotNull(FinanceSnapshot.fromTiles(tiles))
                 snapshotStore.saveFinance(snapshot)
                 applyFinance(snapshot)
                 Log.d(TAG, "Local finance refresh success: reason=${request.reason} tiles=${fetchedTiles.size}")
@@ -524,7 +524,7 @@ class GlassesDataSyncCoordinator(
         widgetContainer.currentFinanceVisibleConfigs().takeIf { it.isNotEmpty() }?.let { return it }
         val symbol = request.financeSymbol
         if (symbol != null) {
-            val range = FinanceTimeRange.Companion.fromRange(request.financeRange)
+            val range = FinanceTimeRange.fromRange(request.financeRange)
             return listOf(
                 FinanceDashboardTileConfig(
                     id = request.financeTileId ?: "finance_${symbol}_${range.range}",

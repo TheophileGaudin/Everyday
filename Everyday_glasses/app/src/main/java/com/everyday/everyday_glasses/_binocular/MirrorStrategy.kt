@@ -14,6 +14,7 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
 import android.widget.FrameLayout
+import androidx.core.graphics.createBitmap
 
 /**
  * Strategy interface for binocular mirroring.
@@ -172,8 +173,8 @@ class PixelCopyStrategy : MirrorStrategy {
         synchronized(this) {
             releaseBuffers()
             try {
-                bufferA = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                bufferB = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                bufferA = createBitmap(width, height)
+                bufferB = createBitmap(width, height)
                 frontBuffer = bufferA
                 backBuffer = bufferB
                 Log.d(TAG, "Buffers created: ${width}x${height}")

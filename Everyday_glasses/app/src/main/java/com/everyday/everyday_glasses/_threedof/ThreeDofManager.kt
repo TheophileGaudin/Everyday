@@ -44,7 +44,7 @@ class ThreeDofManager(context: Context) : SensorEventListener {
         private const val MAX_ROTATION_SPEED = 300f
 
         // Conversion factor: radians to degrees
-        private const val RAD_TO_DEG = 57.2957795f
+        private const val RAD_TO_DEG = 57.29578f
 
         // --- Per-axis smoothing (alpha in smooth += (target - smooth) * alpha)
 // Higher alpha = more responsive (less lag), lower alpha = smoother (more lag).
@@ -85,8 +85,6 @@ class ThreeDofManager(context: Context) : SensorEventListener {
     }
 
     // ==================== State ====================
-    private var lastRollLogMs = 0L
-
     private val sensorManager: SensorManager =
         context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
 
@@ -144,10 +142,6 @@ class ThreeDofManager(context: Context) : SensorEventListener {
     }
 
     // ==================== Public API ====================
-
-    fun is3DofEnabled(): Boolean = is3DofEnabled
-    fun isTransitioning(): Boolean = isTransitioning
-
     private fun applyDeadZoneDeg(value: Float, zone: Float): Float {
         return if (abs(value) < zone) 0f else value
     }

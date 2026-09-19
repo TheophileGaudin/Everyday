@@ -15,7 +15,7 @@ internal object ThreeDofCoordinateMath {
         rollDeg: Float,
     ): Pair<Float, Float> {
         // WidgetContainer translates first, then asks Canvas to rotate. The rotation pivot is
-        // expressed before that translation, so subtract the offset from the screen centre.
+        // expressed before that translation, so subtract the offset from the screen center.
         val pivotX = viewportWidth / 2f - offsetX
         val pivotY = viewportHeight / 2f - offsetY
 

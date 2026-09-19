@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.RectF
+import androidx.core.graphics.toColorInt
 
 /**
  * ThreeDofOverlay - Visual overlay for 3DOF mode.
@@ -21,6 +22,7 @@ import android.graphics.RectF
 class ThreeDofOverlay {
 
     companion object {
+        @Suppress("unused")
         private const val TAG = "ThreeDofOverlay"
 
         // Dashed line styling
@@ -57,18 +59,18 @@ class ThreeDofOverlay {
     private val indicatorRect = RectF()
 
     // ==================== Paints ====================
-
+    @Suppress("SpellCheckingInspection")
     private val dashedBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = STROKE_WIDTH
-        color = Color.parseColor("#66AAAAFF")  // Light blue, semi-transparent
+        color = "#66AAAAFF".toColorInt()  // Light blue, semi-transparent
         pathEffect = DashPathEffect(floatArrayOf(DASH_LENGTH, GAP_LENGTH), 0f)
     }
 
     private val activeBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = STROKE_WIDTH + 1f
-        color = Color.parseColor("#AAAAFF")  // Brighter blue when active
+        color = "#AAAAFF".toColorInt()  // Brighter blue when active
         pathEffect = DashPathEffect(floatArrayOf(DASH_LENGTH, GAP_LENGTH), 0f)
     }
 
@@ -78,18 +80,6 @@ class ThreeDofOverlay {
         color = Color.WHITE
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
-    }
-
-    private val arrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        color = Color.parseColor("#88AAAAFF")
-    }
-
-    private val arrowStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 2f
-        color = Color.parseColor("#AAAAFF")
-        strokeCap = Paint.Cap.ROUND
     }
 
     // ==================== Public API ====================
