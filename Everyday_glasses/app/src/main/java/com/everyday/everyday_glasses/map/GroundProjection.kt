@@ -115,27 +115,17 @@ class GroundProjection {
             forwardM = forwardM
         )
 
-    fun projectHorizonPoint(rightM: Float, forwardM: Float): ProjectedGroundPoint? =
-        projectNeutralCameraSpace(
-            rightM = rightM,
-            upM = 0f,
-            forwardM = forwardM
-        )
-
     private fun projectNeutralCameraSpace(
         rightM: Float,
-        upM: Float,
+        @Suppress("SameParameterValue") upM: Float,
         forwardM: Float
     ): ProjectedGroundPoint? {
         if (forwardM > MapProjectionTuning.FAR_CLIP_M || forwardM < -MapProjectionTuning.FAR_CLIP_M) {
             return null
         }
 
-        if (forwardM < MapProjectionTuning.NEAR_CLIP_M ||
-            forwardM > MapProjectionTuning.FAR_CLIP_M
-        ) {
-            return null
-        }
+        @Suppress("KotlinConstantConditions")
+        if (forwardM < MapProjectionTuning.NEAR_CLIP_M || forwardM > MapProjectionTuning.FAR_CLIP_M) {return null}
 
         val neutralX = centerX + rightM / forwardM * focalX
         val neutralY = centerY - upM / forwardM * focalY

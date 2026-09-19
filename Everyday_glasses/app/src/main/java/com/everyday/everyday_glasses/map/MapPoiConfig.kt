@@ -280,9 +280,9 @@ object MapPoiCategoryCatalog {
             val tagValue = value.substring(separator + 1)
             return when (tag) {
                 "railway" -> if (tagValue == "station") setOf(STATION) else emptySet()
-                "amenity" -> when {
-                    tagValue in setOf("kindergarten", "school", "college", "university") -> setOf(SCHOOL)
-                    tagValue in supportedIds -> setOf(tagValue)
+                "amenity" -> when (tagValue) {
+                    in setOf("kindergarten", "school", "college", "university") -> setOf(SCHOOL)
+                    in supportedIds -> setOf(tagValue)
                     else -> emptySet()
                 }
                 "shop" -> if (tagValue == SUPERMARKET) setOf(SUPERMARKET) else setOf(SHOP)

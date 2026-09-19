@@ -28,8 +28,8 @@ class MapRoadRepository(
     private var fetchedAt = 0L
     private var roads = emptyList<MapRoad>()
     private var pois = emptyList<MapPoi>()
-    @Volatile private var requestedConfig = PoiDisplayConfig.Companion.DEFAULT
-    private var fetchedConfig = PoiDisplayConfig.Companion.DEFAULT
+    @Volatile private var requestedConfig = PoiDisplayConfig.DEFAULT
+    private var fetchedConfig = PoiDisplayConfig.DEFAULT
     private var preferPhoneProxyUntilMs = 0L
     private var lastPhoneProxyRequestMs = 0L
     @Volatile private var pendingRefresh: PendingRefresh? = null
@@ -137,11 +137,11 @@ class MapRoadRepository(
             """
               nw(around:8000,${c.lat},${c.lon})["railway"="station"];
               nw(around:1700,${c.lat},${c.lon})["shop"="supermarket"];
-              nw(around:1700,${c.lat},${c.lon})["amenity"~"^(kindergarten|school|college|university)${'$'}"];
-              nw(around:400,${c.lat},${c.lon})["amenity"~"^(hospital|police|bus_station|ferry_terminal|place_of_worship|cafe|restaurant|pharmacy|fuel|library|marketplace)${'$'}"];
-              nw(around:400,${c.lat},${c.lon})["historic"~"^(cathedral|church|monument|castle)${'$'}"];
+              nw(around:1700,${c.lat},${c.lon})["amenity"~"^(kindergarten|school|college|university)$"];
+              nw(around:400,${c.lat},${c.lon})["amenity"~"^(hospital|police|bus_station|ferry_terminal|place_of_worship|cafe|restaurant|pharmacy|fuel|library|marketplace)$"];
+              nw(around:400,${c.lat},${c.lon})["historic"~"^(cathedral|church|monument|castle)$"];
               nw(around:400,${c.lat},${c.lon})["shop"];
-              nw(around:400,${c.lat},${c.lon})["tourism"~"^(museum|attraction|viewpoint)${'$'}"];
+              nw(around:400,${c.lat},${c.lon})["tourism"~"^(museum|attraction|viewpoint)$"];
             """.trimIndent()
         } else if (config.isDefaultMode) {
             buildDefaultModePoiQuery(c, config)
@@ -154,7 +154,7 @@ class MapRoadRepository(
                         definition.exactValue != null ->
                             "[\"${definition.overpassTag}\"=\"${definition.exactValue}\"]"
                         definition.valuesRegex != null ->
-                            "[\"${definition.overpassTag}\"~\"^(${definition.valuesRegex})${'$'}\"]"
+                            "[\"${definition.overpassTag}\"~\"^(${definition.valuesRegex})$\"]"
                         else -> "[\"${definition.overpassTag}\"]"
                     }
                     "nw(around:${config.radiusM},${c.lat},${c.lon})$selector;"
@@ -185,7 +185,7 @@ class MapRoadRepository(
                 add(overpassPoiQuery(c, category, radius))
             }
             config.normalCategories.sorted().forEach { category ->
-                add(overpassPoiQuery(c, category, PoiDisplayConfig.Companion.DEFAULT_RADIUS_M))
+                add(overpassPoiQuery(c, category, PoiDisplayConfig.DEFAULT_RADIUS_M))
             }
         }
         return queries.takeIf { it.isNotEmpty() }?.joinToString("\n")
@@ -198,7 +198,7 @@ class MapRoadRepository(
             definition.exactValue != null ->
                 "[\"${definition.overpassTag}\"=\"${definition.exactValue}\"]"
             definition.valuesRegex != null ->
-                "[\"${definition.overpassTag}\"~\"^(${definition.valuesRegex})${'$'}\"]"
+                "[\"${definition.overpassTag}\"~\"^(${definition.valuesRegex})$\"]"
             else -> "[\"${definition.overpassTag}\"]"
         }
         return "nw(around:$radiusM,${c.lat},${c.lon})$selector;"

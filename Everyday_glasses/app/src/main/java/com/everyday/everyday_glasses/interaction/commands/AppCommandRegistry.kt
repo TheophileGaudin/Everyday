@@ -95,7 +95,7 @@ class AppCommandRegistry(private val savedLayoutNames: () -> List<String> = { em
 
     /** Idempotent visibility commands reserved for the assistant tool catalog. */
     private val assistantVisibilityCommands: List<AssistantVisibilityCommand> =
-        CommandWidgetId.values().flatMap { widgetId ->
+        CommandWidgetId.entries.flatMap { widgetId ->
             val label = WidgetDescriptors.forCommand(widgetId).label
             listOf(
                 AssistantVisibilityCommand(

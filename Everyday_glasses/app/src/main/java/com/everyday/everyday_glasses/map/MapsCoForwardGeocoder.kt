@@ -147,6 +147,6 @@ class MapsCoForwardGeocoder(
             keys.forEach { key -> address.optString(key).trim().takeIf { it.isNotBlank() }?.let(::add) }
         }.joinToString(", ")
 
-        private fun formatCoordinate(value: Double): String = String.Companion.format(Locale.US, "%.6f", value)
+        private fun formatCoordinate(value: Double): String = String.format(Locale.US, "%.6f", value)
     }
 }

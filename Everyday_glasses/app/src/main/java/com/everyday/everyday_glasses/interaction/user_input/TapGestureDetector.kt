@@ -86,7 +86,7 @@ class TapGestureDetector {
 
         // Check if this tap is close enough in time and space to count as consecutive
         val isConsecutive = timeSinceLastTap < TAP_WINDOW_MS &&
-                isWithinDistance(x, y, lastTapX, lastTapY, MAX_TAP_DISTANCE)
+                isWithinDistance(x, y, lastTapX, lastTapY)
 
         if (isConsecutive) {
             tapCount++
@@ -149,7 +149,7 @@ class TapGestureDetector {
 
     /**
      * Schedule a tap dispatch after the TAP_WINDOW.
-     * If another tap arrives before dispatch, this is cancelled.
+     * If another tap arrives before dispatch, this is canceled.
      */
     private fun scheduleTapDispatch(count: Int, x: Float, y: Float) {
         pendingTapDispatch = Runnable {
@@ -182,9 +182,9 @@ class TapGestureDetector {
     /**
      * Check if two points are within a given distance.
      */
-    private fun isWithinDistance(x1: Float, y1: Float, x2: Float, y2: Float, maxDistance: Float): Boolean {
+    private fun isWithinDistance(x1: Float, y1: Float, x2: Float, y2: Float): Boolean {
         val dx = x1 - x2
         val dy = y1 - y2
-        return (dx * dx + dy * dy) <= (maxDistance * maxDistance)
+        return (dx * dx + dy * dy) <= (MAX_TAP_DISTANCE * MAX_TAP_DISTANCE)
     }
 }

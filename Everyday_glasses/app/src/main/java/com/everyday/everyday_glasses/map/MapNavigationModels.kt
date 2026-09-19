@@ -8,8 +8,6 @@ import com.everyday.shared.routing.RouteFailure
 import com.everyday.shared.routing.GuidanceFixStatus
 import com.everyday.shared.routing.LiveGuidanceSnapshot
 import com.everyday.shared.routing.RouteResult
-import org.json.JSONArray
-import org.json.JSONObject
 import com.everyday.shared.transport.DestinationTextMatcher
 import java.text.Normalizer
 import java.util.Locale
@@ -270,7 +268,7 @@ private fun formatKilometres(metres: Double): String =
 internal fun formatWalkingEta(seconds: Long?): String {
     if (seconds == null) return "ETA unavailable"
     val minutes = ((seconds + 59L) / 60L).coerceAtLeast(1L)
-    return if (minutes < 60L) "${minutes} min walk" else "${minutes / 60L} h ${minutes % 60L} min walk"
+    return if (minutes < 60L) "$minutes min walk" else "${minutes / 60L} h ${minutes % 60L} min walk"
 }
 
 internal fun formatGuidanceDistance(metres: Double?): String {
@@ -328,12 +326,3 @@ internal fun NavigationState.toCompactBannerText(): NavigationBannerText {
     }
     return NavigationBannerText(title, statusLine, progress)
 }
-
-internal fun NavigationState.toCompactJson(): JSONObject = JSONObject()
-    .put("status", status.name)
-    .put("destination", destination?.label ?: JSONObject.NULL)
-    .put("eta_seconds", walkingEtaSeconds ?: JSONObject.NULL)
-    .put("first_maneuver", firstManeuver ?: JSONObject.NULL)
-    .put("remaining_distance_meters", remainingDistanceMeters ?: JSONObject.NULL)
-    .put("distance_to_maneuver_meters", distanceToNextManeuverMeters ?: JSONObject.NULL)
-    .put("choices", JSONArray().apply { choices.forEach { put(it.label) } })

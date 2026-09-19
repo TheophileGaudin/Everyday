@@ -17,9 +17,7 @@ data class MapPoiSelection(
     val displayed: List<MapPoi> = emptyList()
 ) {
     val visibleInMap: List<MapPoi>
-        get() = if (displayed.isNotEmpty()) {
-            displayed
-        } else {
+        get() = displayed.ifEmpty {
             buildList {
                 addAll(important)
                 immediate?.let(::add)
@@ -101,9 +99,9 @@ class MapPoiSelector(private val random: Random = Random.Default) {
                 val effectiveRadiusM = when {
                     // Preserve the legacy station behavior when a user changes another Default
                     // variable: the legacy data request already bounds stations at 8 km.
-                    category == MapPoiCategoryCatalog.STATION && radiusM == PoiDisplayConfig.Companion.DEFAULT_STATION_RADIUS_M -> Double.POSITIVE_INFINITY
+                    category == MapPoiCategoryCatalog.STATION && radiusM == PoiDisplayConfig.DEFAULT_STATION_RADIUS_M -> Double.POSITIVE_INFINITY
                     category in setOf(MapPoiCategoryCatalog.SUPERMARKET, MapPoiCategoryCatalog.SCHOOL) &&
-                        radiusM == PoiDisplayConfig.Companion.DEFAULT_LOCAL_IMPORTANT_RADIUS_M -> ONE_MILE_M
+                        radiusM == PoiDisplayConfig.DEFAULT_LOCAL_IMPORTANT_RADIUS_M -> ONE_MILE_M
                     else -> radiusM.toDouble()
                 }
                 nearest(
@@ -181,9 +179,7 @@ class MapPoiSelector(private val random: Random = Random.Default) {
             // Preserve the previous voice configuration's category representation behavior.
             // The settings menu uses [nearest], which leaves this compatibility path disabled.
             if (config.maxResults >= byCategory.size) {
-                byCategory.values
-                    .map { it.minWithOrNull(candidateComparator()) }
-                    .filterNotNull()
+                byCategory.values.mapNotNull { it.minWithOrNull(candidateComparator()) }
                     .sortedWith(candidateComparator())
                     .forEach { selectedKeys += it.poi.stableKey }
             }

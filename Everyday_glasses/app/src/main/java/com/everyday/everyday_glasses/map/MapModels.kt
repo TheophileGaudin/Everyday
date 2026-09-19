@@ -5,10 +5,10 @@ data class MapRoad(val id: Long, val highway: String, val name: String?, val poi
 enum class MapPoiTier { STATION, SUPERMARKET, SCHOOL, NORMAL }
 data class MapPoi(val id: Long, val name: String?, val category: String, val tier: MapPoiTier, val point: MapGeoPoint)
 
-fun mapPoiTier(category: String): MapPoiTier = when {
-    category == "railway=station" -> MapPoiTier.STATION
-    category == "shop=supermarket" -> MapPoiTier.SUPERMARKET
-    category in setOf("amenity=kindergarten", "amenity=school", "amenity=college", "amenity=university") -> MapPoiTier.SCHOOL
+fun mapPoiTier(category: String): MapPoiTier = when (category) {
+    "railway=station" -> MapPoiTier.STATION
+    "shop=supermarket" -> MapPoiTier.SUPERMARKET
+    in setOf("amenity=kindergarten", "amenity=school", "amenity=college", "amenity=university") -> MapPoiTier.SCHOOL
     else -> MapPoiTier.NORMAL
 }
 data class DevicePose(

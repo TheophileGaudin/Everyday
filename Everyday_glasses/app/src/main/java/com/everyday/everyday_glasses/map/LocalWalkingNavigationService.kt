@@ -47,7 +47,7 @@ class LocalWalkingNavigationService(
             origin = GeoPoint(origin.lat, origin.lon),
             destination = GeoPoint(destination.lat, destination.lon),
             mode = RouteMode.WALKING,
-            walkingSpeedMps = NavigationState.Companion.WALKING_SPEED_MPS
+            walkingSpeedMps = NavigationState.WALKING_SPEED_MPS
         )
         routeEngine.validateRequest(request)?.let { failure ->
             return RouteCalculationResult.Failure(failure, attempts = 0)

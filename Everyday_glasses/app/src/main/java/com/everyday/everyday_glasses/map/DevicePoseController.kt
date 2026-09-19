@@ -8,7 +8,6 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.location.Location
 import android.os.SystemClock
-import kotlin.math.PI
 import kotlin.math.asin
 import kotlin.math.atan2
 import kotlin.math.max
@@ -304,7 +303,7 @@ class DevicePoseController(
         }
     }
 
-    private fun smoothScalar(previous: Float, next: Float, alpha: Float): Float =
+    private fun smoothScalar(previous: Float, next: Float, @Suppress("SameParameterValue") alpha: Float): Float =
         if (previous.isNaN()) next else previous + (next - previous) * alpha
 
     private fun smoothAngle(previous: Float, next: Float, alpha: Float): Float {
@@ -384,11 +383,10 @@ class DevicePoseController(
         out[2] = atan2(matrix[3], matrix[4])
     }
 
-    private fun clamp(value: Float, minValue: Float, maxValue: Float): Float =
+    private fun clamp(value: Float, @Suppress("SameParameterValue") minValue: Float, @Suppress("SameParameterValue") maxValue: Float): Float =
         max(minValue, min(maxValue, value))
 
     companion object {
-        const val DEG_TO_RAD = PI.toFloat() / 180f
         private const val DISPLAY_YAW_FROM_RAW_Y_SIGN = -1f
         private const val DISPLAY_PITCH_FROM_RAW_X_SIGN = 1f
         private const val DISPLAY_ROLL_FROM_RAW_Z_SIGN = 1f
