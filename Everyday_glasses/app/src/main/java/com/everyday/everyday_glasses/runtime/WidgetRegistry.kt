@@ -3,10 +3,6 @@ package com.everyday.everyday_glasses.runtime
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
-import com.everyday.everyday_glasses.runtime.WidgetDescriptor
-import com.everyday.everyday_glasses.runtime.WidgetDescriptors
-import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.widgets.BaseWidget
 import com.everyday.everyday_glasses.ui.widgets.BrowserWidget
 import com.everyday.everyday_glasses.ui.widgets.CalendarWidget
@@ -42,11 +38,11 @@ class WidgetRegistry {
     }
 
     private val widgetsByType: Map<WidgetTypeId, MutableList<BaseWidget>> =
-        WidgetTypeId.entries.associateWith { ArrayList<BaseWidget>() }
+        WidgetTypeId.entries.associateWith { ArrayList() }
     private val stableIds = IdentityHashMap<BaseWidget, String>()
     private val widgetsByStableId = mutableMapOf<String, BaseWidget>()
     private val nextInstanceSequence = mutableMapOf<WidgetTypeId, Int>()
-    private val hitTestCache = WidgetHitTestCache<BaseWidget>(::allWidgets) { it.zOrder }
+    private val hitTestCache = WidgetHitTestCache(::allWidgets) { it.zOrder }
 
     private var sortedWidgetsCache: List<BaseWidget>? = null
     private var nextZOrder = 0
@@ -137,8 +133,6 @@ class WidgetRegistry {
     fun allWidgets(): List<BaseWidget> = buildList {
         WidgetDescriptors.all.forEach { descriptor -> addAll(widgetsFor(descriptor.type)) }
     }
-
-    fun pinnedWidgets(): List<BaseWidget> = allWidgets().filter(BaseWidget::isPinned)
 
     fun forEachWidget(action: (BaseWidget) -> Unit) = allWidgets().forEach(action)
 

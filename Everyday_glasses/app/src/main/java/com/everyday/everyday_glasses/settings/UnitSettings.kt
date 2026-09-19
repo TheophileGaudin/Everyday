@@ -6,6 +6,7 @@ import android.icu.util.ULocale
 import android.os.Build
 import com.everyday.everyday_glasses.ui.widgets.SpeedometerWidget
 import java.util.Locale
+import androidx.core.content.edit
 
 enum class UnitSystemMode(val code: String) {
     METRIC("metric"),
@@ -14,7 +15,7 @@ enum class UnitSystemMode(val code: String) {
 
     companion object {
         fun fromCode(code: String?): UnitSystemMode =
-            values().firstOrNull { it.code.equals(code, ignoreCase = true) } ?: AUTO
+            UnitSystemMode.entries.firstOrNull { it.code.equals(code, ignoreCase = true) } ?: AUTO
     }
 }
 
@@ -24,7 +25,7 @@ enum class TemperatureUnit(val code: String, val label: String) {
 
     companion object {
         fun fromCode(code: String?): TemperatureUnit? =
-            values().firstOrNull { it.code.equals(code, ignoreCase = true) }
+            TemperatureUnit.entries.firstOrNull { it.code.equals(code, ignoreCase = true) }
     }
 }
 
@@ -111,11 +112,11 @@ class UnitSettings(context: Context) {
         globalMode = mode
         speedOverride = null
         temperatureOverride = null
-        prefs.edit()
-            .putString(KEY_UNIT_SYSTEM_MODE, mode.code)
-            .remove(KEY_SPEED_OVERRIDE)
-            .remove(KEY_TEMPERATURE_OVERRIDE)
-            .apply()
+        prefs.edit {
+            putString(KEY_UNIT_SYSTEM_MODE, mode.code)
+                .remove(KEY_SPEED_OVERRIDE)
+                .remove(KEY_TEMPERATURE_OVERRIDE)
+        }
         onChanged?.invoke()
     }
 
@@ -125,7 +126,7 @@ class UnitSettings(context: Context) {
         } else {
             SpeedometerWidget.SpeedUnit.KMH
         }
-        prefs.edit().putString(KEY_SPEED_OVERRIDE, speedOverride!!.code).apply()
+        prefs.edit { putString(KEY_SPEED_OVERRIDE, speedOverride!!.code) }
         onChanged?.invoke()
     }
 
@@ -135,7 +136,7 @@ class UnitSettings(context: Context) {
         } else {
             TemperatureUnit.CELSIUS
         }
-        prefs.edit().putString(KEY_TEMPERATURE_OVERRIDE, temperatureOverride!!.code).apply()
+        prefs.edit { putString(KEY_TEMPERATURE_OVERRIDE, temperatureOverride!!.code) }
         onChanged?.invoke()
     }
 

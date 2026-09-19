@@ -11,6 +11,7 @@ import android.os.Looper
 import android.util.Log
 import kotlin.math.abs
 import kotlin.math.ln
+import androidx.core.content.edit
 
 data class BrightnessState(
     val requestedBrightness: Float,
@@ -138,10 +139,10 @@ class BrightnessController(
      */
     private fun saveBrightnessSettings() {
         activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putFloat(KEY_BRIGHTNESS, requestedBrightness)
-            .putBoolean(KEY_ADAPTIVE_BRIGHTNESS, adaptiveBrightnessEnabled)
-            .apply()
+            .edit {
+                putFloat(KEY_BRIGHTNESS, requestedBrightness)
+                    .putBoolean(KEY_ADAPTIVE_BRIGHTNESS, adaptiveBrightnessEnabled)
+            }
     }
 
     // Ambient light sensor

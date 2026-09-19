@@ -19,6 +19,7 @@ import androidx.core.location.LocationManagerCompat
 import com.everyday.shared.sync.LocationFix
 import com.everyday.shared.sync.usableSpeedMps
 import java.util.Locale
+import androidx.core.content.edit
 
 
 data class SpeedState(
@@ -119,6 +120,7 @@ class LocationSpeedController(
             smoothSpeedReading(0f, qualityOk = false, source = "phone-unavailable")
             lastSpeedQualityOk = false
             isSpeedMoving = false
+            @Suppress("KotlinConstantConditions")
             onSpeedChanged(SpeedState(speedKmh = smoothedSpeedKmh, qualityOk = lastSpeedQualityOk, isMoving = isSpeedMoving))
             return
         }
@@ -135,8 +137,7 @@ class LocationSpeedController(
 
         speedLog {
             "Applied phone speed: " +
-                    "${String.format(Locale.ENGLISH, "%.2f", smoothedSpeedKmh)} km/h " +
-                    "(localFresh=$localFresh)"
+                    "${String.format(Locale.ENGLISH, "%.2f", smoothedSpeedKmh)} km/h "
         }
     }
 
@@ -200,15 +201,9 @@ class LocationSpeedController(
 
     private fun saveSpeedVisibilityThreshold(thresholdKmh: Float) {
         activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putFloat(KEY_SPEED_VISIBILITY_THRESHOLD, thresholdKmh.coerceIn(0f, 1f))
-            .apply()
-    }
-
-    private fun loadSpeedVisibilityThreshold(): Float {
-        return activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getFloat(KEY_SPEED_VISIBILITY_THRESHOLD, SPEED_THRESHOLD_KMH)
-            .coerceIn(0f, 1f)
+            .edit {
+                putFloat(KEY_SPEED_VISIBILITY_THRESHOLD, thresholdKmh.coerceIn(0f, 1f))
+            }
     }
 
     private fun smoothSpeedReading(rawKmh: Float, qualityOk: Boolean, source: String): Float {
@@ -252,13 +247,6 @@ class LocationSpeedController(
         return smoothedSpeedKmh
     }
 
-    fun currentState(): SpeedState {
-        return SpeedState(
-            speedKmh = smoothedSpeedKmh,
-            qualityOk = lastSpeedQualityOk,
-            isMoving = isSpeedMoving
-        )
-    }
 
     /**
      * Called when local location updates are received.
@@ -405,7 +393,6 @@ class LocationSpeedController(
             speedLocationListener = locationListener
 
             val requestedProviders = linkedSetOf<String>()
-            val candidateProviders = enabledProviders
 
             fun requestProvider(provider: String) {
                 try {
@@ -422,8 +409,8 @@ class LocationSpeedController(
                 }
             }
 
-            if (candidateProviders.isNotEmpty()) {
-                for (provider in candidateProviders) {
+            if (enabledProviders.isNotEmpty()) {
+                for (provider in enabledProviders) {
                     requestProvider(provider)
                 }
             } else {
@@ -438,12 +425,12 @@ class LocationSpeedController(
             }
             val fallbackProviders = locationCandidates
                 .ifEmpty { listOf("fused", LocationManager.PASSIVE_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER) }
-            startSpeedFallbackPolling(locationManager, fallbackProviders.toList())
+            startSpeedFallbackPolling( fallbackProviders.toList())
 
             var bestLocation: Location? = null
             for (provider in locationCandidates) {
                 val candidate = runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull() ?: continue
-                if (bestLocation == null || candidate.time > (bestLocation?.time ?: Long.MIN_VALUE)) {
+                if (bestLocation == null || candidate.time > (bestLocation.time)) {
                     bestLocation = candidate
                 }
             }
@@ -506,7 +493,7 @@ class LocationSpeedController(
         handler.removeCallbacksAndMessages(null)
     }
 
-    private fun startSpeedFallbackPolling(locationManager: LocationManager, providers: List<String>) {
+    private fun startSpeedFallbackPolling(providers: List<String>) {
         stopSpeedFallbackPolling()
         speedFallbackProviders = providers.distinct()
 
@@ -547,7 +534,7 @@ class LocationSpeedController(
 
         for (provider in providers.distinct()) {
             val candidate = runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull() ?: continue
-            if (bestLocation == null || candidate.time > (bestLocation?.time ?: Long.MIN_VALUE)) {
+            if (bestLocation == null || candidate.time > (bestLocation.time)) {
                 bestLocation = candidate
                 bestProvider = provider
             }

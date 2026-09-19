@@ -499,14 +499,8 @@ class WidgetContainer @JvmOverloads constructor(
     private var layoutDeleteInProgress = false
     private val layoutLibrary = LayoutLibrary(context)
     private val layoutManager = WidgetLayoutManager(
-        context = context,
         layouts = layoutLibrary,
-        canApplyLayout = ::isReady,
         captureDashboard = ::captureWidgetDashboardWithoutLayoutName,
-        applyDashboard = ::applyPersistedDashboardReplacingCurrent,
-        buildDeliveredLayout = { name ->
-            BuiltInLayouts.buildDashboard(name, width.toFloat(), height.toFloat())
-        },
         showNamePrompt = { suggestedName ->
             dismissMenu()
             layoutNamePrompt?.show(suggestedName)
@@ -515,7 +509,6 @@ class WidgetContainer @JvmOverloads constructor(
         showNameError = { error -> layoutNamePrompt?.showError(error) },
         dismissNamePrompt = { layoutNamePrompt?.dismiss() },
         showDeleteConfirmation = { name -> layoutDeleteConfirmationPopup?.show(name) },
-        beforeApplyLayout = ::requestLayoutSwitchBrightness,
         notifyTransientContentChanged = {
             layoutOverlayNotificationEmitted = true
             notifyTransientContentChanged()

@@ -17,7 +17,7 @@ internal fun resolveDisplayState(
 /**
  * Manages the wake/sleep display states for AR glasses.
  *
- * This is the app's internal state machine, completely independent from the
+ * This is the app's internal state machine, completely independent of the
  * glasses' hardware action button which controls display on/off at the OS level.
  *
  * State Machine:
@@ -99,33 +99,6 @@ class WakeSleepManager(
         }
     }
 
-    /**
-     * Called when head lift is detected (from accelerometer).
-     * Wakes from SLEEP mode if there are pinned widgets.
-     *
-     * @return true if state changed
-     */
-    fun onHeadLift(): Boolean {
-        Log.d(TAG, "Head lift detected in state: $_state")
-
-        when (_state) {
-            DisplayState.SLEEP -> {
-                // SLEEP → WAKE
-                transitionTo(DisplayState.WAKE)
-                return true
-            }
-            DisplayState.OFF -> {
-                // OFF → WAKE (head lift can also wake from off)
-                transitionTo(DisplayState.WAKE)
-                return true
-            }
-            DisplayState.WAKE -> {
-                // Already awake, just reset the timer
-                resetSleepTimer()
-                return false
-            }
-        }
-    }
 
     /**
      * Force transition to a specific state.
@@ -208,27 +181,6 @@ class WakeSleepManager(
             handler.removeCallbacks(it)
             sleepRunnable = null
         }
-    }
-
-    /**
-     * Check if content should be visible based on current state.
-     *
-     * @param isPinned Whether the widget asking is pinned
-     * @return true if the widget should be drawn
-     */
-    fun shouldShowWidget(isPinned: Boolean): Boolean {
-        return when (_state) {
-            DisplayState.OFF -> false  // Nothing visible when OFF
-            DisplayState.WAKE -> true  // Everything visible when WAKE
-            DisplayState.SLEEP -> isPinned  // Only pinned widgets in SLEEP
-        }
-    }
-
-    /**
-     * Check if we're in a state where the cursor should be visible.
-     */
-    fun shouldShowCursor(): Boolean {
-        return _state == DisplayState.WAKE
     }
 
     /**

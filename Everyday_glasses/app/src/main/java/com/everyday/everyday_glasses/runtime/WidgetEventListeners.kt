@@ -21,7 +21,6 @@ import com.everyday.shared.sync.SubtitleControl
  * migrate to the more precise signal.
  */
 interface WidgetChangeListener {
-    fun onRepaintRequested() = Unit
     fun onTransientStateChanged() = Unit
     fun onPersistentStateChanged() = Unit
 }

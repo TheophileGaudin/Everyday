@@ -1,11 +1,6 @@
 package com.everyday.everyday_glasses.runtime
 
 import android.os.Looper
-import com.everyday.everyday_glasses.runtime.WidgetDescriptor
-import com.everyday.everyday_glasses.runtime.WidgetDescriptors
-import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
-import com.everyday.everyday_glasses.runtime.WidgetRegistry
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.ui.widgets.BaseWidget
@@ -16,7 +11,7 @@ import kotlin.reflect.KClass
 /**
  * The complete runtime contract for one widget type.
  *
- * A registration deliberately joins runtime behaviour to the static [WidgetDescriptor]
+ * A registration deliberately joins runtime behavior to the static [WidgetDescriptor]
  * without putting Android objects, factories, or mutable state into the descriptor itself.
  * The registry/container migration supplies the concrete membership callbacks; this class is
  * intentionally independent of either implementation while that work is in flight.
@@ -133,10 +128,6 @@ class WidgetLifecycleController(
     private var mutationDepth = 0
     private var changedDuringMutation = false
 
-    /** The sole fullscreen widget tracked by the lifecycle layer. */
-    val fullscreenWidget: BaseWidget?
-        get() = registry.fullscreenWidget
-
     fun <W : BaseWidget, S : Any> register(registration: WidgetLifecycleRegistration<W, S>) {
         check(registration.descriptor.type !in registrations) {
             "Duplicate widget lifecycle for ${registration.descriptor.type}"
@@ -242,21 +233,6 @@ class WidgetLifecycleController(
     /** Requests fullscreen for [widget], enforcing the one-fullscreen-widget invariant. */
     fun enterFullscreen(widget: BaseWidget) = mutate {
         if (!widget.isFullscreen) widget.toggleFullscreen()
-    }
-
-    /** Exits whichever widget is fullscreen, if any. */
-    fun exitFullscreen() = mutate {
-        currentFullscreenWidget()?.let { widget ->
-            if (widget.isFullscreen) widget.toggleFullscreen() else clearFullscreen(widget)
-        }
-    }
-
-    /** Applies new fullscreen bounds to the active widget and emits one content change. */
-    fun resizeFullscreen(updateBounds: (BaseWidget) -> Unit) = mutate {
-        currentFullscreenWidget()?.let {
-            updateBounds(it)
-            markChanged()
-        }
     }
 
     override fun onCloseRequested(widget: BaseWidget) {

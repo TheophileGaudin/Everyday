@@ -22,7 +22,7 @@ import com.everyday.shared.command.AppCommandInvocation
 
 class SettingsController(
     private val resources: Resources,
-    private val defaultSpeedVisibilityThresholdKmh: Float,
+    defaultSpeedVisibilityThresholdKmh: Float,
     private val notifyTransientContentChanged: () -> Unit,
     private val notifyPersistentContentChanged: () -> Unit,
     private val setSpeedometerForceVisibleWhenIdle: (Boolean) -> Boolean,
@@ -63,11 +63,11 @@ class SettingsController(
 
     private var brightnessValue = 1.0f
     private var adaptiveBrightnessEnabled = true
-    private var headUpTimeMs = HeadUpWakeManager.Companion.DEFAULT_HEAD_UP_HOLD_TIME_MS
-    private var wakeDurationMs = HeadUpWakeManager.Companion.DEFAULT_WAKE_DURATION_MS
-    private var angleThresholdDegrees = HeadUpWakeManager.Companion.DEFAULT_PITCH_CHANGE_THRESHOLD
+    private var headUpTimeMs = HeadUpWakeManager.DEFAULT_HEAD_UP_HOLD_TIME_MS
+    private var wakeDurationMs = HeadUpWakeManager.DEFAULT_WAKE_DURATION_MS
+    private var angleThresholdDegrees = HeadUpWakeManager.DEFAULT_PITCH_CHANGE_THRESHOLD
     private var headsUpEnabled = true
-    private var googleAuthState = GoogleAuthState.Companion.signedOut()
+    private var googleAuthState = GoogleAuthState.signedOut()
     private var assistantConfiguration: AssistantConfiguration? = null
     private var assistantModels: List<AssistantModel> = emptyList()
     private var assistantDetail: String = "Paste an API key to enable voice"
@@ -116,8 +116,8 @@ class SettingsController(
 
     fun applyHoverControlPlacements(placements: List<DashboardPersistence.HoverControlPlacementState>?) {
         val migrated = placements?.map { placement ->
-            if (placement.controlId == AssistantVoiceHoverControl.Companion.LEGACY_ID) {
-                placement.copy(controlId = AssistantVoiceHoverControl.Companion.ID)
+            if (placement.controlId == AssistantVoiceHoverControl.LEGACY_ID) {
+                placement.copy(controlId = AssistantVoiceHoverControl.ID)
             } else placement
         }
         hoverControlPlacements = migrated
@@ -402,19 +402,15 @@ class SettingsController(
         notifyBrightnessChanged(brightnessValue)
     }
 
-    fun getBrightness(): Float = brightnessValue
-
     fun setAdaptiveBrightnessEnabled(enabled: Boolean) {
         adaptiveBrightnessEnabled = enabled
         notifyAdaptiveBrightnessChanged(adaptiveBrightnessEnabled)
     }
 
-    fun getAdaptiveBrightnessEnabled(): Boolean = adaptiveBrightnessEnabled
-
     fun setHeadUpTime(ms: Long) {
         headUpTimeMs = ms.coerceIn(
-            HeadUpWakeManager.Companion.MIN_HEAD_UP_HOLD_TIME_MS,
-            HeadUpWakeManager.Companion.MAX_HEAD_UP_HOLD_TIME_MS
+            HeadUpWakeManager.MIN_HEAD_UP_HOLD_TIME_MS,
+            HeadUpWakeManager.MAX_HEAD_UP_HOLD_TIME_MS
         )
         notifyHeadUpTimeChanged(headUpTimeMs)
     }
@@ -423,8 +419,8 @@ class SettingsController(
 
     fun setWakeDuration(ms: Long) {
         wakeDurationMs = ms.coerceIn(
-            HeadUpWakeManager.Companion.MIN_WAKE_DURATION_MS,
-            HeadUpWakeManager.Companion.MAX_WAKE_DURATION_MS
+            HeadUpWakeManager.MIN_WAKE_DURATION_MS,
+            HeadUpWakeManager.MAX_WAKE_DURATION_MS
         )
         notifyWakeDurationChanged(wakeDurationMs)
     }
@@ -433,8 +429,8 @@ class SettingsController(
 
     fun setAngleThreshold(degrees: Float) {
         angleThresholdDegrees = degrees.coerceIn(
-            DashboardSettings.Companion.MIN_ANGLE_THRESHOLD,
-            DashboardSettings.Companion.MAX_ANGLE_THRESHOLD
+            DashboardSettings.MIN_ANGLE_THRESHOLD,
+            DashboardSettings.MAX_ANGLE_THRESHOLD
         )
         notifyAngleThresholdChanged(angleThresholdDegrees)
     }
