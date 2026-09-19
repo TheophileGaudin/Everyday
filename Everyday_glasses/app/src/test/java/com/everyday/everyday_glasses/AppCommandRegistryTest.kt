@@ -1,13 +1,13 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.controllers.AppCommandCapabilities
-import com.everyday.everyday_glasses.controllers.AppCommandExecutor
-import com.everyday.everyday_glasses.controllers.AppCommandResult
-import com.everyday.everyday_glasses.controllers.CommandUiDispatcher
-import com.everyday.everyday_glasses.managers.AppCommandRegistry
-import com.everyday.everyday_glasses.managers.CommandAvailability
-import com.everyday.everyday_glasses.managers.CommandValidationResult
-import com.everyday.everyday_glasses.stores.ShortcutsStore
+import com.everyday.everyday_glasses.interaction.commands.AppCommandCapabilities
+import com.everyday.everyday_glasses.interaction.commands.AppCommandExecutor
+import com.everyday.everyday_glasses.interaction.commands.AppCommandResult
+import com.everyday.everyday_glasses.interaction.commands.CommandUiDispatcher
+import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
+import com.everyday.everyday_glasses.interaction.commands.CommandAvailability
+import com.everyday.everyday_glasses.interaction.commands.CommandValidationResult
+import com.everyday.everyday_glasses.persistence.ShortcutsStore
 import com.everyday.shared.command.AppCommandArguments
 import com.everyday.shared.command.AppCommandInvocation
 import com.everyday.shared.command.AppCommandProtocol

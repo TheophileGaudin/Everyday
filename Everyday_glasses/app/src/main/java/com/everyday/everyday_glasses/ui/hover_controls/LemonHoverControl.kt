@@ -4,8 +4,8 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
-import com.everyday.everyday_glasses.helpers.LemonDrawing
-import com.everyday.everyday_glasses.managers.AppCommandRegistry
+import com.everyday.everyday_glasses.ui.components.LemonDrawing
+import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
 import kotlin.math.abs
 import com.everyday.shared.command.AppCommandInvocation
 

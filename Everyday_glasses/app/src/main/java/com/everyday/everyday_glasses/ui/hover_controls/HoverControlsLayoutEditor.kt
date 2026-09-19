@@ -6,7 +6,7 @@ import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
-import com.everyday.everyday_glasses.stores.DashboardPersistence
+import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import kotlin.math.abs
 
 /**

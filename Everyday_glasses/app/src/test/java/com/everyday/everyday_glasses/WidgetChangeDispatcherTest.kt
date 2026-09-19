@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.bindings.WidgetChangeDispatcher
+import com.everyday.everyday_glasses.runtime.WidgetChangeDispatcher
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

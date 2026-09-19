@@ -3,10 +3,10 @@ package com.everyday.everyday_glasses
 import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.stateOf
 import com.everyday.everyday_glasses.map.MapViewMode
 import com.everyday.everyday_glasses.map.MapZoom
-import com.everyday.everyday_glasses.data_models.WidgetDocument
-import com.everyday.everyday_glasses.data_models.WidgetTypeId
-import com.everyday.everyday_glasses.stores.BuiltInLayouts
-import com.everyday.everyday_glasses.stores.DashboardPersistence
+import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
+import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.ui.hover_controls.CloseAppHoverControl
 import com.everyday.everyday_glasses.ui.hover_controls.YouTubeHistoryHoverControl
 import org.junit.Assert.assertEquals

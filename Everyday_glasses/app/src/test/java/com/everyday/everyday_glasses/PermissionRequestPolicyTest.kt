@@ -2,7 +2,7 @@ package com.everyday.everyday_glasses
 
 import android.Manifest
 import android.os.Build
-import com.everyday.everyday_glasses.helpers.PermissionRequestPolicy
+import com.everyday.everyday_glasses.misc.PermissionRequestPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

@@ -2,7 +2,7 @@ package com.everyday.everyday_glasses.google
 
 import android.app.Activity
 import android.util.Log
-import com.everyday.everyday_glasses.stores.GoogleAuthStateStore
+import com.everyday.everyday_glasses.google.GoogleAuthStateStore
 import com.everyday.shared.sync.CalendarSnapshot
 import java.io.IOException
 import java.util.concurrent.Executor

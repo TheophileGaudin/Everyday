@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.stores.sortedVideoFiles
+import com.everyday.everyday_glasses.video.sortedVideoFiles
 import java.io.File
 import org.junit.After
 import org.junit.Assert.assertEquals

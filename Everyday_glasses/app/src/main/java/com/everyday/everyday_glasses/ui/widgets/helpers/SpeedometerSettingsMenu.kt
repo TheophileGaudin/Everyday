@@ -4,7 +4,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
-import com.everyday.everyday_glasses.managers.UnitDisplayFormatter
+import com.everyday.everyday_glasses.misc.UnitDisplayFormatter
 import com.everyday.everyday_glasses.ui.widgets.SpeedometerWidget
 
 /**

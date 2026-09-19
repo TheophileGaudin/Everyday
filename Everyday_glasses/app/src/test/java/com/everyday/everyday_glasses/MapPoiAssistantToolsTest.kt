@@ -1,15 +1,15 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.assistant.AssistantToolCall
-import com.everyday.everyday_glasses.assistant.AssistantToolExecution
-import com.everyday.everyday_glasses.assistant.AssistantToolExecutionCodes
-import com.everyday.everyday_glasses.assistant.AssistantToolExecutionContext
-import com.everyday.everyday_glasses.assistant.AssistantUiContext
-import com.everyday.everyday_glasses.assistant.ConfigureMapPoisRequest
-import com.everyday.everyday_glasses.assistant.ConfigureMapPoisSemanticToolHandler
-import com.everyday.everyday_glasses.assistant.assistantCompletedFuture
-import com.everyday.everyday_glasses.controllers.PresentationExpiryPolicy
-import com.everyday.everyday_glasses.controllers.PresentationMode
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolCall
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecution
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContext
+import com.everyday.everyday_glasses.interaction.assistant.ConfigureMapPoisRequest
+import com.everyday.everyday_glasses.interaction.assistant.ConfigureMapPoisSemanticToolHandler
+import com.everyday.everyday_glasses.interaction.assistant.assistantCompletedFuture
+import com.everyday.everyday_glasses.ui.widgets.common.PresentationExpiryPolicy
+import com.everyday.everyday_glasses.ui.widgets.common.PresentationMode
 import com.everyday.everyday_glasses.map.MapPoiCategoryCatalog
 import com.everyday.everyday_glasses.map.PoiDisplayConfig
 import org.json.JSONArray

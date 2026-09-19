@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.helpers.ThreeDofCoordinateMath
+import com.everyday.everyday_glasses._threedof.ThreeDofCoordinateMath
 import org.junit.Assert
 import org.junit.Test
 import kotlin.math.cos

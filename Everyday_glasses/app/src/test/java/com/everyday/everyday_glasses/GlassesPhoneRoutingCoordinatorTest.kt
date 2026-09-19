@@ -1,9 +1,9 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.controllers.GlassesPhoneRoutingCoordinator
-import com.everyday.everyday_glasses.controllers.GlassesRouteFallbackReason
-import com.everyday.everyday_glasses.controllers.GlassesRouteTransport
-import com.everyday.everyday_glasses.controllers.RouteResolutionListener
+import com.everyday.everyday_glasses.map.GlassesPhoneRoutingCoordinator
+import com.everyday.everyday_glasses.map.GlassesRouteFallbackReason
+import com.everyday.everyday_glasses.map.GlassesRouteTransport
+import com.everyday.everyday_glasses.map.RouteResolutionListener
 import com.everyday.shared.routing.GeoPoint
 import com.everyday.shared.routing.RoutePolyline
 import com.everyday.shared.routing.RouteResult

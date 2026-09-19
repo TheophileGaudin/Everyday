@@ -7,7 +7,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.text.TextPaint
 import android.text.TextUtils
-import com.everyday.everyday_glasses.data_models.WidgetTypeId
+import com.everyday.everyday_glasses.contracts.WidgetTypeId
 import com.everyday.shared.sync.PhoneNotificationItem
 import com.everyday.shared.sync.PhoneNotificationsSnapshot
 import java.text.SimpleDateFormat

@@ -17,8 +17,8 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.everyday.everyday_glasses.MainActivity
-import com.everyday.everyday_glasses.bindings.WakeRequestListener
-import com.everyday.everyday_glasses.managers.HeadUpWakeManager
+import com.everyday.everyday_glasses.interaction.WakeRequestListener
+import com.everyday.everyday_glasses.headup_wake.HeadUpWakeManager
 
 class GlassesService : Service() {
 

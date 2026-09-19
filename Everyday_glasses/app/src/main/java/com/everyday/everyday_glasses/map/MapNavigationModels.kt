@@ -1,9 +1,9 @@
 package com.everyday.everyday_glasses.map
 
-import com.everyday.everyday_glasses.assistant.AssistantSemanticFact
-import com.everyday.everyday_glasses.controllers.PresentationExpiryPolicy
-import com.everyday.everyday_glasses.controllers.PresentationMode
-import com.everyday.everyday_glasses.controllers.PresentationSpec
+import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticFact
+import com.everyday.everyday_glasses.ui.widgets.common.PresentationExpiryPolicy
+import com.everyday.everyday_glasses.ui.widgets.common.PresentationMode
+import com.everyday.everyday_glasses.ui.widgets.common.PresentationSpec
 import com.everyday.shared.routing.RouteFailure
 import com.everyday.shared.routing.GuidanceFixStatus
 import com.everyday.shared.routing.LiveGuidanceSnapshot

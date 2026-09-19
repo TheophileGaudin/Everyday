@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses.map
 
-import com.everyday.everyday_glasses.assistant.AssistantSemanticFact
+import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticFact
 
 /** Identifies whether a POI configuration is the legacy, compatibility configuration. */
 enum class PoiDisplayConfigState {

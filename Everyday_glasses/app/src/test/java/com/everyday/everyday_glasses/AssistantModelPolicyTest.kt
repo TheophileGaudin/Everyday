@@ -1,7 +1,7 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.assistant.AssistantModel
-import com.everyday.everyday_glasses.assistant.AssistantModelPolicy
+import com.everyday.everyday_glasses.interaction.assistant.AssistantModel
+import com.everyday.everyday_glasses.interaction.assistant.AssistantModelPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

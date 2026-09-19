@@ -1,12 +1,12 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.managers.LocationMeasurementSystem
-import com.everyday.everyday_glasses.managers.SessionLocationCountry
-import com.everyday.everyday_glasses.managers.TemperatureUnit
-import com.everyday.everyday_glasses.managers.UnitDisplayFormatter
-import com.everyday.everyday_glasses.managers.UnitResolver
-import com.everyday.everyday_glasses.managers.UnitSettings
-import com.everyday.everyday_glasses.managers.UnitSystemMode
+import com.everyday.everyday_glasses.misc.LocationMeasurementSystem
+import com.everyday.everyday_glasses.misc.SessionLocationCountry
+import com.everyday.everyday_glasses.misc.TemperatureUnit
+import com.everyday.everyday_glasses.misc.UnitDisplayFormatter
+import com.everyday.everyday_glasses.misc.UnitResolver
+import com.everyday.everyday_glasses.misc.UnitSettings
+import com.everyday.everyday_glasses.misc.UnitSystemMode
 import com.everyday.everyday_glasses.ui.widgets.SpeedometerWidget
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

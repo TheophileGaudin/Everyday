@@ -1,13 +1,13 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.assistant.AssistantSemanticFact
-import com.everyday.everyday_glasses.assistant.AssistantToolCall
-import com.everyday.everyday_glasses.assistant.AssistantToolExecutionCodes
-import com.everyday.everyday_glasses.assistant.AssistantToolExecutionContext
-import com.everyday.everyday_glasses.assistant.AssistantUiContext
-import com.everyday.everyday_glasses.assistant.AssistantWidgetContext
-import com.everyday.everyday_glasses.assistant.NewsSourceUpdateResult
-import com.everyday.everyday_glasses.assistant.SetNewsSourceSemanticToolHandler
+import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticFact
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolCall
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContext
+import com.everyday.everyday_glasses.interaction.assistant.AssistantWidgetContext
+import com.everyday.everyday_glasses.interaction.assistant.NewsSourceUpdateResult
+import com.everyday.everyday_glasses.interaction.assistant.SetNewsSourceSemanticToolHandler
 import com.everyday.shared.sync.NewsSourceSpec
 import org.json.JSONObject
 import org.junit.Assert.assertEquals

@@ -1,7 +1,7 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.data_models.WidgetDocument
-import com.everyday.everyday_glasses.data_models.WidgetTypeId
+import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.contracts.WidgetTypeId
 
 /**
  * Shared helpers for persistence tests.

@@ -7,7 +7,7 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.text.TextPaint
 import android.text.TextUtils
-import com.everyday.everyday_glasses.data_models.WidgetTypeId
+import com.everyday.everyday_glasses.contracts.WidgetTypeId
 import com.everyday.shared.sync.CalendarEventSnapshot
 import com.everyday.shared.sync.CalendarSnapshot
 import java.text.SimpleDateFormat

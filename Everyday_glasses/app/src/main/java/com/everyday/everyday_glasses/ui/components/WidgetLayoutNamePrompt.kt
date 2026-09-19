@@ -4,8 +4,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
-import com.everyday.everyday_glasses.controllers.KeyboardOverlayController
-import com.everyday.everyday_glasses.helpers.LayoutNameHandler
+import com.everyday.everyday_glasses.contracts.LayoutNameHandler
 
 /**
  * Small modal prompt used for naming saved widget layouts.

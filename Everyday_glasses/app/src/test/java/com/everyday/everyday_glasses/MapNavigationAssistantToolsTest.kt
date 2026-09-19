@@ -1,14 +1,14 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.assistant.AssistantToolExecution
-import com.everyday.everyday_glasses.assistant.AssistantToolExecutionCodes
-import com.everyday.everyday_glasses.assistant.AssistantToolExecutionContext
-import com.everyday.everyday_glasses.assistant.AssistantUiContext
-import com.everyday.everyday_glasses.assistant.StartNavigationSemanticToolHandler
-import com.everyday.everyday_glasses.assistant.StopNavigationSemanticToolHandler
-import com.everyday.everyday_glasses.assistant.assistantCompletedFuture
-import com.everyday.everyday_glasses.controllers.PresentationExpiryPolicy
-import com.everyday.everyday_glasses.controllers.PresentationMode
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecution
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContext
+import com.everyday.everyday_glasses.interaction.assistant.StartNavigationSemanticToolHandler
+import com.everyday.everyday_glasses.interaction.assistant.StopNavigationSemanticToolHandler
+import com.everyday.everyday_glasses.interaction.assistant.assistantCompletedFuture
+import com.everyday.everyday_glasses.ui.widgets.common.PresentationExpiryPolicy
+import com.everyday.everyday_glasses.ui.widgets.common.PresentationMode
 import com.everyday.everyday_glasses.map.MapGeoPoint
 import com.everyday.everyday_glasses.map.NavigationDestination
 import com.everyday.everyday_glasses.map.NavigationPresentationDefaults

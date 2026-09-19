@@ -10,11 +10,11 @@ import android.os.Handler
 import android.os.Looper
 import android.text.TextUtils
 import android.util.Log
-import com.everyday.everyday_glasses.bindings.NewsWidgetListener
+import com.everyday.everyday_glasses.runtime.NewsWidgetListener
 import com.everyday.everyday_glasses.ui.widgets.common.WidgetDataState
-import com.everyday.everyday_glasses.data_models.WidgetTypeId
-import com.everyday.everyday_glasses.helpers.NewsDoubleTapAction
-import com.everyday.everyday_glasses.helpers.NewsInteractionPolicy
+import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.ui.widgets.helpers.NewsDoubleTapAction
+import com.everyday.everyday_glasses.ui.widgets.helpers.NewsInteractionPolicy
 import com.everyday.shared.sync.NewsArticle
 import com.everyday.shared.sync.NewsDataProvider
 import com.everyday.shared.sync.NewsSnapshot

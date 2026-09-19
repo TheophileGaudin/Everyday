@@ -6,7 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Rect
 import android.graphics.RectF
 import android.util.Log
-import com.everyday.everyday_glasses.data_models.WidgetTypeId
+import com.everyday.everyday_glasses.contracts.WidgetTypeId
 
 class ImageWidget(
     x: Float,

@@ -1,8 +1,8 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.assistant.AssistantToolCall
-import com.everyday.everyday_glasses.assistant.AssistantToolCatalog
-import com.everyday.everyday_glasses.managers.AppCommandRegistry
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolCall
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolCatalog
+import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

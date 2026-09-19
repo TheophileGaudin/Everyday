@@ -1,11 +1,11 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.data_models.WidgetDescriptors
-import com.everyday.everyday_glasses.data_models.WidgetInstancePolicy
-import com.everyday.everyday_glasses.data_models.WidgetTypeId
-import com.everyday.everyday_glasses.managers.WidgetLifecycleController
-import com.everyday.everyday_glasses.managers.WidgetLifecycleRegistration
-import com.everyday.everyday_glasses.managers.WidgetRegistry
+import com.everyday.everyday_glasses.contracts.WidgetDescriptors
+import com.everyday.everyday_glasses.contracts.WidgetInstancePolicy
+import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetRegistry
 import com.everyday.everyday_glasses.ui.widgets.BaseWidget
 import org.junit.Assert.assertThrows
 import org.junit.Test

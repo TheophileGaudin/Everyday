@@ -6,7 +6,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.util.Log
-import com.everyday.everyday_glasses.helpers.TextFormattingHandler
+import com.everyday.everyday_glasses.contracts.TextFormattingHandler
 import kotlin.math.sqrt
 
 /**

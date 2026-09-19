@@ -6,11 +6,11 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.util.Log
-import com.everyday.everyday_glasses.bindings.WidgetLifecycle
-import com.everyday.everyday_glasses.bindings.WidgetLifecycleListener
+import com.everyday.everyday_glasses.runtime.WidgetLifecycle
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleListener
 import com.everyday.everyday_glasses.ui.widgets.common.WidgetInteractionState
-import com.everyday.everyday_glasses.data_models.WidgetTypeId
-import com.everyday.everyday_glasses.helpers.SnapProvider
+import com.everyday.everyday_glasses.contracts.WidgetTypeId
+import com.everyday.everyday_glasses.ui.widgets.common.SnapProvider
 import com.everyday.everyday_glasses.ui.widgets.common.WidgetTheme
 
 /**

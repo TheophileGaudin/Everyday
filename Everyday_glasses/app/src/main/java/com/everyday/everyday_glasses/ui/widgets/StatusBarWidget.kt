@@ -8,7 +8,7 @@ import android.graphics.RectF
 import android.text.TextPaint
 import android.util.Log
 import com.everyday.everyday_glasses.ui.widgets.common.WidgetInteractionState
-import com.everyday.everyday_glasses.data_models.WidgetTypeId
+import com.everyday.everyday_glasses.contracts.WidgetTypeId
 
 /**
  * A movable status bar widget that displays:

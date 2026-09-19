@@ -5,7 +5,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.util.Log
-import com.everyday.everyday_glasses.helpers.TextEditCommandHandler
+import com.everyday.everyday_glasses.contracts.TextEditCommandHandler
 
 /**
  * A popup context menu for text editing operations (paste, etc.).

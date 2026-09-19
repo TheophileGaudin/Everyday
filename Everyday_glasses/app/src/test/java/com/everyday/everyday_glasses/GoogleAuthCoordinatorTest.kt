@@ -11,7 +11,7 @@ import com.everyday.everyday_glasses.google.GooglePhoneAuthStatus
 import com.everyday.everyday_glasses.google.GooglePhoneFallbackBridge
 import com.everyday.everyday_glasses.google.GoogleAccountSummary
 import com.everyday.everyday_glasses.google.GoogleAuthState
-import com.everyday.everyday_glasses.stores.GoogleAuthStateStore
+import com.everyday.everyday_glasses.google.GoogleAuthStateStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
