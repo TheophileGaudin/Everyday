@@ -5,7 +5,7 @@ import android.net.wifi.p2p.WifiP2pDevice
 import android.util.Log
 import com.everyday.everyday_glasses.bindings.AssistantControlListener
 import com.everyday.everyday_glasses.bindings.DestinationSearchMessageListener
-import com.everyday.everyday_glasses.data_models.GoogleAccountSummary
+import com.everyday.everyday_glasses.google.GoogleAccountSummary
 import com.everyday.everyday_glasses.bindings.MirrorSessionListener
 import com.everyday.everyday_glasses.bindings.RemoteAuthListener
 import com.everyday.everyday_glasses.bindings.RemoteContentListener

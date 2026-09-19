@@ -1,7 +1,7 @@
 package com.everyday.everyday_glasses.bindings
 
 import com.everyday.everyday_glasses.controllers.GooglePhoneAuthStatus
-import com.everyday.everyday_glasses.data_models.GoogleAccountSummary
+import com.everyday.everyday_glasses.google.GoogleAccountSummary
 import com.everyday.shared.sync.SyncError
 import com.everyday.shared.sync.SyncSnapshot
 import com.everyday.shared.sync.SubtitleStatus

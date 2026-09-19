@@ -7,10 +7,10 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.util.Log
 import com.everyday.everyday_glasses.bindings.FinanceWidgetListener
-import com.everyday.everyday_glasses.agent_tools.FinanceTileSemanticState
-import com.everyday.everyday_glasses.agent_tools.FinanceTileTarget
-import com.everyday.everyday_glasses.agent_tools.FinanceTileTargetResolver
-import com.everyday.everyday_glasses.agent_tools.FinanceWidgetSemanticState
+import com.everyday.everyday_glasses.assistant.FinanceTileSemanticState
+import com.everyday.everyday_glasses.assistant.FinanceTileTarget
+import com.everyday.everyday_glasses.assistant.FinanceTileTargetResolver
+import com.everyday.everyday_glasses.assistant.FinanceWidgetSemanticState
 import com.everyday.everyday_glasses.data_models.WidgetTypeId
 import com.everyday.shared.sync.FinanceAssetType
 import com.everyday.shared.sync.FinanceCandle

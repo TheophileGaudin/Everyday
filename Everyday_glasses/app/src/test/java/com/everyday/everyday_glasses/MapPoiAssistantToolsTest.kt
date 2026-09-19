@@ -1,17 +1,17 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.agent_tools.AssistantToolCall
-import com.everyday.everyday_glasses.agent_tools.AssistantToolExecution
-import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionCodes
-import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionContext
-import com.everyday.everyday_glasses.agent_tools.AssistantUiContext
-import com.everyday.everyday_glasses.agent_tools.ConfigureMapPoisRequest
-import com.everyday.everyday_glasses.agent_tools.ConfigureMapPoisSemanticToolHandler
-import com.everyday.everyday_glasses.agent_tools.assistantCompletedFuture
+import com.everyday.everyday_glasses.assistant.AssistantToolCall
+import com.everyday.everyday_glasses.assistant.AssistantToolExecution
+import com.everyday.everyday_glasses.assistant.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.assistant.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.assistant.AssistantUiContext
+import com.everyday.everyday_glasses.assistant.ConfigureMapPoisRequest
+import com.everyday.everyday_glasses.assistant.ConfigureMapPoisSemanticToolHandler
+import com.everyday.everyday_glasses.assistant.assistantCompletedFuture
 import com.everyday.everyday_glasses.controllers.PresentationExpiryPolicy
 import com.everyday.everyday_glasses.controllers.PresentationMode
-import com.everyday.everyday_glasses.data_models.MapPoiCategoryCatalog
-import com.everyday.everyday_glasses.data_models.PoiDisplayConfig
+import com.everyday.everyday_glasses.map.MapPoiCategoryCatalog
+import com.everyday.everyday_glasses.map.PoiDisplayConfig
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals

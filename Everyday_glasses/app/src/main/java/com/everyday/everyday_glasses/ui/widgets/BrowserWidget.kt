@@ -31,9 +31,9 @@ import android.graphics.Bitmap
 import android.os.SystemClock
 import android.view.InputDevice
 import com.everyday.everyday_glasses.bindings.BrowserWidgetListener
-import com.everyday.everyday_glasses.agent_tools.PageAgentFullscreenMode
-import com.everyday.everyday_glasses.agent_tools.PageAgentPageSnapshot
-import com.everyday.everyday_glasses.agent_tools.PageAgentScreenshot
+import com.everyday.everyday_glasses.assistant.page_agent.PageAgentFullscreenMode
+import com.everyday.everyday_glasses.assistant.page_agent.PageAgentPageSnapshot
+import com.everyday.everyday_glasses.assistant.page_agent.PageAgentScreenshot
 import com.everyday.everyday_glasses.controllers.KeyboardOverlayController
 import com.everyday.everyday_glasses.data_models.WidgetInteractionState
 import com.everyday.everyday_glasses.data_models.WidgetTypeId

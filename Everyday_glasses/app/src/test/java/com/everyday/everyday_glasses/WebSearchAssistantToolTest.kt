@@ -1,11 +1,11 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.agent_tools.AssistantToolExecutionContext
-import com.everyday.everyday_glasses.agent_tools.AssistantUiContext
-import com.everyday.everyday_glasses.agent_tools.WebSearchProvider
-import com.everyday.everyday_glasses.agent_tools.WebSearchResult
-import com.everyday.everyday_glasses.agent_tools.WebSearchSemanticToolHandler
-import com.everyday.everyday_glasses.agent_tools.parseDuckDuckGoResults
+import com.everyday.everyday_glasses.assistant.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.assistant.AssistantUiContext
+import com.everyday.everyday_glasses.assistant.WebSearchProvider
+import com.everyday.everyday_glasses.assistant.WebSearchResult
+import com.everyday.everyday_glasses.assistant.WebSearchSemanticToolHandler
+import com.everyday.everyday_glasses.assistant.parseDuckDuckGoResults
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

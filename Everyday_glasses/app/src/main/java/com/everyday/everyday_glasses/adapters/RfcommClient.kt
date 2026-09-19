@@ -32,7 +32,7 @@ import com.everyday.everyday_glasses.bindings.TransportConnectionListener
 import com.everyday.everyday_glasses.controllers.GlassesDestinationSearchTransport
 import com.everyday.everyday_glasses.controllers.GlassesRouteTransport
 import com.everyday.everyday_glasses.controllers.GooglePhoneAuthStatus
-import com.everyday.everyday_glasses.data_models.GoogleAccountSummary
+import com.everyday.everyday_glasses.google.GoogleAccountSummary
 import com.everyday.shared.sync.SyncError
 import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot

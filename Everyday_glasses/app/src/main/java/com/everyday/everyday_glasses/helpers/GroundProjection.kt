@@ -1,8 +1,8 @@
 package com.everyday.everyday_glasses.helpers
 
 import android.graphics.PointF
-import com.everyday.everyday_glasses.data_models.DevicePose
-import com.everyday.everyday_glasses.data_models.MapGeoPoint
+import com.everyday.everyday_glasses.map.DevicePose
+import com.everyday.everyday_glasses.map.MapGeoPoint
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin

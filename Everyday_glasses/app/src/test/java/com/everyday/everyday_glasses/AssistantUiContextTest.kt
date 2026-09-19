@@ -1,8 +1,8 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.agent_tools.AssistantSemanticFact
-import com.everyday.everyday_glasses.agent_tools.AssistantUiContext
-import com.everyday.everyday_glasses.agent_tools.AssistantWidgetContext
+import com.everyday.everyday_glasses.assistant.AssistantSemanticFact
+import com.everyday.everyday_glasses.assistant.AssistantUiContext
+import com.everyday.everyday_glasses.assistant.AssistantWidgetContext
 import org.junit.Assert.assertTrue
 import org.junit.Test
 

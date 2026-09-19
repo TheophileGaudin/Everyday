@@ -5,11 +5,11 @@ import android.os.Environment
 import android.util.AtomicFile
 import android.util.Log
 import com.everyday.everyday_glasses.ui.widgets.FinanceWidget
-import com.everyday.everyday_glasses.data_models.MapViewMode
-import com.everyday.everyday_glasses.data_models.MapZoom
-import com.everyday.everyday_glasses.data_models.PoiDisplayConfig
-import com.everyday.everyday_glasses.data_models.PoiDisplayConfigState
-import com.everyday.everyday_glasses.data_models.PoiDisplayMode
+import com.everyday.everyday_glasses.map.MapViewMode
+import com.everyday.everyday_glasses.map.MapZoom
+import com.everyday.everyday_glasses.map.PoiDisplayConfig
+import com.everyday.everyday_glasses.map.PoiDisplayConfigState
+import com.everyday.everyday_glasses.map.PoiDisplayMode
 import com.everyday.everyday_glasses.data_models.WidgetDocument
 import com.everyday.everyday_glasses.data_models.WidgetTypeId
 import com.everyday.shared.sync.FinanceAssetType

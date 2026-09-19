@@ -5,11 +5,11 @@ import android.location.Location
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.everyday.everyday_glasses.data_models.GoogleAuthState
-import com.everyday.everyday_glasses.adapters.GoogleCalendarClient
-import com.everyday.everyday_glasses.data_models.MapGeoPoint
-import com.everyday.everyday_glasses.adapters.NetworkStatusProvider
-import com.everyday.everyday_glasses.data_models.PoiDisplayConfig
+import com.everyday.everyday_glasses.google.GoogleAuthState
+import com.everyday.everyday_glasses.google.GoogleCalendarClient
+import com.everyday.everyday_glasses.map.MapGeoPoint
+import com.everyday.everyday_glasses.google.NetworkStatusProvider
+import com.everyday.everyday_glasses.map.PoiDisplayConfig
 import com.everyday.everyday_glasses.WidgetContainer
 import com.everyday.shared.sync.CalendarAccount
 import com.everyday.shared.sync.CalendarEventSnapshot

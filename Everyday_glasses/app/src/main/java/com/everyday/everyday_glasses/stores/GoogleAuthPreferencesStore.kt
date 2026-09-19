@@ -4,8 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
-import com.everyday.everyday_glasses.data_models.GoogleAuthState
-import com.everyday.everyday_glasses.data_models.PersistedGoogleAuthState
+import com.everyday.everyday_glasses.google.GoogleAuthState
+import com.everyday.everyday_glasses.google.PersistedGoogleAuthState
 
 interface GoogleAuthStateStore {
     fun loadState(): GoogleAuthState

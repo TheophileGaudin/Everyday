@@ -10,7 +10,7 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
 import com.everyday.everyday_glasses.R
-import com.everyday.everyday_glasses.data_models.GoogleAuthState
+import com.everyday.everyday_glasses.google.GoogleAuthState
 import com.everyday.everyday_glasses.helpers.LemonDrawing
 import com.everyday.everyday_glasses.managers.HeadUpWakeManager
 import com.everyday.everyday_glasses.managers.UnitSystemMode

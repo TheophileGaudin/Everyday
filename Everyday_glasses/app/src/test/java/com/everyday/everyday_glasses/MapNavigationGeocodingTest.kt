@@ -1,12 +1,12 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.data_models.GeocodingCandidate
-import com.everyday.everyday_glasses.data_models.GeocodingException
-import com.everyday.everyday_glasses.data_models.GeocodingFailureKind
-import com.everyday.everyday_glasses.data_models.GeocodingRanker
-import com.everyday.everyday_glasses.data_models.GeocodingResolution
-import com.everyday.everyday_glasses.data_models.MapGeoPoint
-import com.everyday.everyday_glasses.adapters.MapsCoForwardGeocoder
+import com.everyday.everyday_glasses.map.GeocodingCandidate
+import com.everyday.everyday_glasses.map.GeocodingException
+import com.everyday.everyday_glasses.map.GeocodingFailureKind
+import com.everyday.everyday_glasses.map.GeocodingRanker
+import com.everyday.everyday_glasses.map.GeocodingResolution
+import com.everyday.everyday_glasses.map.MapGeoPoint
+import com.everyday.everyday_glasses.map.MapsCoForwardGeocoder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

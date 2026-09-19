@@ -1,11 +1,11 @@
 package com.everyday.everyday_glasses.helpers
 
-import com.everyday.everyday_glasses.data_models.MapGeoPoint
-import com.everyday.everyday_glasses.data_models.MapPoi
-import com.everyday.everyday_glasses.data_models.MapPoiCategoryCatalog
-import com.everyday.everyday_glasses.data_models.MapPoiTier
-import com.everyday.everyday_glasses.data_models.MapZoom
-import com.everyday.everyday_glasses.data_models.PoiDisplayConfig
+import com.everyday.everyday_glasses.map.MapGeoPoint
+import com.everyday.everyday_glasses.map.MapPoi
+import com.everyday.everyday_glasses.map.MapPoiCategoryCatalog
+import com.everyday.everyday_glasses.map.MapPoiTier
+import com.everyday.everyday_glasses.map.MapZoom
+import com.everyday.everyday_glasses.map.PoiDisplayConfig
 import kotlin.math.*
 import kotlin.random.Random
 

@@ -1,8 +1,8 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.data_models.GoogleAccountSummary
-import com.everyday.everyday_glasses.data_models.GoogleAuthState
-import com.everyday.everyday_glasses.data_models.PersistedGoogleAuthState
+import com.everyday.everyday_glasses.google.GoogleAccountSummary
+import com.everyday.everyday_glasses.google.GoogleAuthState
+import com.everyday.everyday_glasses.google.PersistedGoogleAuthState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

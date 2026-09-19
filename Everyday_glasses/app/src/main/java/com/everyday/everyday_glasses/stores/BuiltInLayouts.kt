@@ -1,7 +1,7 @@
 package com.everyday.everyday_glasses.stores
 
-import com.everyday.everyday_glasses.data_models.MapViewMode
-import com.everyday.everyday_glasses.data_models.MapZoom
+import com.everyday.everyday_glasses.map.MapViewMode
+import com.everyday.everyday_glasses.map.MapZoom
 import com.everyday.everyday_glasses.ui.widgets.SubtitleWidget
 import com.everyday.everyday_glasses.data_models.WidgetDocument
 import com.everyday.everyday_glasses.data_models.WidgetDocument.PersistedDashboard

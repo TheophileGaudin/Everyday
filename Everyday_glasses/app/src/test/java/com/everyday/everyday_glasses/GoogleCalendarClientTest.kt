@@ -1,10 +1,10 @@
 package com.everyday.everyday_glasses
 
 import android.app.Activity
-import com.everyday.everyday_glasses.adapters.GoogleCalendarClient
-import com.everyday.everyday_glasses.adapters.GoogleCalendarEvent
-import com.everyday.everyday_glasses.adapters.GoogleCalendarTransport
-import com.everyday.everyday_glasses.adapters.GoogleCalendarUnauthorizedException
+import com.everyday.everyday_glasses.google.GoogleCalendarClient
+import com.everyday.everyday_glasses.google.GoogleCalendarEvent
+import com.everyday.everyday_glasses.google.GoogleCalendarTransport
+import com.everyday.everyday_glasses.google.GoogleCalendarUnauthorizedException
 import com.everyday.everyday_glasses.controllers.GoogleCalendarTokenProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

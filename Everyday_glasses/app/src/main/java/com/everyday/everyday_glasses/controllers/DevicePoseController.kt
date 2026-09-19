@@ -8,7 +8,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.location.Location
 import android.os.SystemClock
-import com.everyday.everyday_glasses.data_models.DevicePose
+import com.everyday.everyday_glasses.map.DevicePose
 import kotlin.math.PI
 import kotlin.math.asin
 import kotlin.math.atan2

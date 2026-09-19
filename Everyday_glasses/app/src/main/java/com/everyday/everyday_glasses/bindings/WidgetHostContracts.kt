@@ -1,8 +1,8 @@
 package com.everyday.everyday_glasses.bindings
 
 import com.everyday.everyday_glasses.binocular.BinocularContentClass
-import com.everyday.everyday_glasses.data_models.MapGeoPoint
-import com.everyday.everyday_glasses.data_models.PoiDisplayConfig
+import com.everyday.everyday_glasses.map.MapGeoPoint
+import com.everyday.everyday_glasses.map.PoiDisplayConfig
 import com.everyday.everyday_glasses.ui.widgets.ScreenMirrorWidget
 import com.everyday.shared.sync.NewsSnapshot
 import com.everyday.shared.sync.NewsSourceSpec

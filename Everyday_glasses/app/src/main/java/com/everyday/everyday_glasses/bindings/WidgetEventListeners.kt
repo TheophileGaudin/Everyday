@@ -1,8 +1,8 @@
 package com.everyday.everyday_glasses.bindings
 
-import com.everyday.everyday_glasses.data_models.MapGeoPoint
-import com.everyday.everyday_glasses.data_models.NavigationOperationResult
-import com.everyday.everyday_glasses.data_models.PoiDisplayConfig
+import com.everyday.everyday_glasses.map.MapGeoPoint
+import com.everyday.everyday_glasses.map.NavigationOperationResult
+import com.everyday.everyday_glasses.map.PoiDisplayConfig
 import com.everyday.everyday_glasses.ui.widgets.BaseWidget
 import com.everyday.everyday_glasses.ui.widgets.BrowserWidget
 import com.everyday.everyday_glasses.ui.widgets.FileBrowserWidget
