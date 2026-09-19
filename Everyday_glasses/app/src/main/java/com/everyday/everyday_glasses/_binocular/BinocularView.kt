@@ -15,11 +15,14 @@ import android.view.PixelCopy
 import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewGroup.LayoutParams as ViewGroupLayoutParams
 import android.widget.FrameLayout
 import com.everyday.everyday_glasses.interaction.assistant.AssistantScreenshot
 import com.everyday.everyday_glasses.ui.components.CursorView
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CompletableFuture
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.withClip
 
 /**
  * BinocularView - A ViewGroup that handles binocular display for AR glasses.
@@ -167,11 +170,9 @@ class BinocularView @JvmOverloads constructor(
         mirrorStrategy = CompositeStrategy().also {
             it.initialize(contentContainer, rightEyeSurface, activity)
             it.setPixelCopyMinIntervalProvider { renderCoordinator.getPixelCopyIntervalMs() }
-            it.setPixelCopyPerformanceListener(
-                PixelCopyPerformanceListener { durationMs, success ->
-                    renderCoordinator.reportPixelCopyResult(durationMs, success)
-                }
-            )
+            it.setPixelCopyPerformanceListener { durationMs, success ->
+                renderCoordinator.reportPixelCopyResult(durationMs, success)
+            }
         }
         applyRenderProfile(renderCoordinator.getCurrentProfile())
         
@@ -179,22 +180,6 @@ class BinocularView @JvmOverloads constructor(
     }
 
     private fun isOverlayChild(child: View): Boolean = child is CursorView
-    
-    /**
-     * Set the refresh mode.
-     */
-    fun setRefreshMode(mode: RefreshMode) {
-        refreshController?.setMode(mode)
-        
-        if (mode == RefreshMode.IDLE) {
-            post { invalidate() }
-        }
-    }
-    
-    /**
-     * Get the current refresh mode.
-     */
-    fun getRefreshMode(): RefreshMode = refreshController?.getMode() ?: RefreshMode.IDLE
 
     fun isUsingPixelCopyMode(): Boolean = !useDispatchDrawMode
 
@@ -278,31 +263,7 @@ class BinocularView @JvmOverloads constructor(
             }
         }
     }
-    
-    /**
-     * Force using PixelCopy strategy.
-     */
-    fun forcePixelCopyMode() {
-        useDispatchDrawMode = false
-        rightEyeSurface.visibility = View.VISIBLE
-        
-        (mirrorStrategy as? CompositeStrategy)?.setHasComplexContent(true)
-        
-        Log.d(TAG, "Forced PixelCopy mode")
-    }
-    
-    /**
-     * Force using DispatchDraw strategy (default).
-     */
-    fun forceDispatchDrawMode() {
-        useDispatchDrawMode = true
-        rightEyeSurface.visibility = View.GONE
-        
-        (mirrorStrategy as? CompositeStrategy)?.setHasComplexContent(false)
-        
-        Log.d(TAG, "Forced DispatchDraw mode")
-    }
-    
+
     /**
      * Auto-detect the best mirroring strategy based on content.
      */
@@ -311,7 +272,7 @@ class BinocularView @JvmOverloads constructor(
         
         val hasComplex = containsComplexViews(contentContainer)
         useDispatchDrawMode = !hasComplex
-        rightEyeSurface.visibility = if (hasComplex) View.VISIBLE else View.GONE
+        rightEyeSurface.visibility = if (hasComplex) VISIBLE else GONE
     }
     
     private fun containsComplexViews(view: View): Boolean {
@@ -386,7 +347,7 @@ class BinocularView @JvmOverloads constructor(
     /**
      * Redirect programmatic addView calls to contentContainer.
      */
-    override fun addView(child: View?, index: Int, params: ViewGroup.LayoutParams?) {
+    override fun addView(child: View?, index: Int, params: ViewGroupLayoutParams?) {
         if (child == null) return
         
         // Before internal setup, let normal addView work (for XML inflation)
@@ -404,11 +365,7 @@ class BinocularView @JvmOverloads constructor(
             super.addView(child, index, params)
         }
     }
-    
-    /**
-     * Get the content container for direct access if needed.
-     */
-    fun getContentContainer(): FrameLayout = contentContainer
+
 
     /**
      * Capture the composited glasses view only for an explicit caller request.
@@ -422,7 +379,7 @@ class BinocularView @JvmOverloads constructor(
             val captureWidth = width.takeIf { it > 0 } ?: DisplayConfig.SCREEN_WIDTH
             val captureHeight = height.takeIf { it > 0 } ?: DisplayConfig.EYE_HEIGHT
             val bitmap = runCatching {
-                Bitmap.createBitmap(captureWidth, captureHeight, Bitmap.Config.ARGB_8888)
+                createBitmap(captureWidth, captureHeight)
             }.getOrElse { failure ->
                 result.completeExceptionally(failure)
                 return@Runnable
@@ -554,17 +511,20 @@ class BinocularView @JvmOverloads constructor(
         
         if (useDispatchDrawMode) {
             // Draw to left eye (0-640)
-            canvas.save()
-            canvas.clipRect(0, 0, DisplayConfig.EYE_WIDTH, DisplayConfig.EYE_HEIGHT)
-            contentContainer.draw(canvas)
-            canvas.restore()
+            canvas.withClip(0, 0, DisplayConfig.EYE_WIDTH, DisplayConfig.EYE_HEIGHT) {
+                contentContainer.draw(this)
+            }
             
             // Draw to right eye (640-1280) - same content, translated
-            canvas.save()
-            canvas.clipRect(DisplayConfig.EYE_WIDTH, 0, DisplayConfig.SCREEN_WIDTH, DisplayConfig.EYE_HEIGHT)
-            canvas.translate(DisplayConfig.EYE_WIDTH.toFloat(), 0f)
-            contentContainer.draw(canvas)
-            canvas.restore()
+            canvas.withClip(
+                DisplayConfig.EYE_WIDTH,
+                0,
+                DisplayConfig.SCREEN_WIDTH,
+                DisplayConfig.EYE_HEIGHT
+            ) {
+                translate(DisplayConfig.EYE_WIDTH.toFloat(), 0f)
+                contentContainer.draw(this)
+            }
 
             val drawingTime = drawingTime
             for (i in 0 until childCount) {
