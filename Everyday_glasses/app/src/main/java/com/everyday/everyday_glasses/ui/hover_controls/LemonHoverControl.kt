@@ -1,13 +1,15 @@
 package com.everyday.everyday_glasses.ui.hover_controls
 
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import com.everyday.everyday_glasses.ui.components.LemonDrawing
 import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
 import kotlin.math.abs
 import com.everyday.shared.command.AppCommandInvocation
+import androidx.core.graphics.toColorInt
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
  * A hover control shaped like a lemon slice that exposes user-configurable shortcuts.
@@ -64,35 +66,35 @@ class LemonHoverControl(
     private var screenHeight: Float = Float.MAX_VALUE
 
     private val labelBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#EFFFF6BF")
+        color = "#EFFFF6BF".toColorInt()
         style = Paint.Style.FILL
     }
     private val labelBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#B07B6800")
+        color = "#B07B6800".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 1.2f
     }
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#2B2300")
+        color = "#2B2300".toColorInt()
         textAlign = Paint.Align.CENTER
         isFakeBoldText = true
     }
     private val confirmationBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#F4FFFBE6")
+        color = "#F4FFFBE6".toColorInt()
         style = Paint.Style.FILL
     }
     private val confirmationBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#FFD400")
+        color = "#FFD400".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 2f
     }
     private val confirmationTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#2B2300")
+        color = "#2B2300".toColorInt()
         textAlign = Paint.Align.CENTER
         isFakeBoldText = true
     }
     private val confirmationHintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#5F5200")
+        color = "#5F5200".toColorInt()
         textAlign = Paint.Align.CENTER
     }
 
@@ -202,8 +204,8 @@ class LemonHoverControl(
         for (i in 0 until n) {
             val angleDeg = -90.0 + i * anglePer
             val a = Math.toRadians(angleDeg)
-            val tx = cx + (Math.cos(a) * labelR).toFloat()
-            val ty = cy + (Math.sin(a) * labelR).toFloat() + textSize * 0.35f
+            val tx = cx + (cos(a) * labelR).toFloat()
+            val ty = cy + (sin(a) * labelR).toFloat() + textSize * 0.35f
             val text = shortLabel(actions[i])
             val truncated = fitText(text, labelPaint, maxWidth)
             val textWidth = labelPaint.measureText(truncated)

@@ -8,6 +8,7 @@ import android.graphics.Path
 import android.graphics.RectF
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import kotlin.math.abs
+import androidx.core.graphics.toColorInt
 
 /**
  * Full-screen modal overlay that lets the user edit the placement of dashboard hover controls
@@ -86,29 +87,29 @@ class HoverControlsLayoutEditor(
     // ==================== Paints ====================
 
     private val backdropPaint = Paint().apply {
-        color = Color.parseColor("#D8000000")
+        color = "#D8000000".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#55FFFFFF")
+        color = "#55FFFFFF".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 1f
         pathEffect = DashPathEffect(floatArrayOf(DASH_LENGTH, DASH_GAP), 0f)
     }
 
     private val dragHighlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#552196F3")
+        color = "#552196F3".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val menuBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#F02A2A3E")
+        color = "#F02A2A3E".toColorInt()
         style = Paint.Style.FILL
     }
 
     private val menuBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#666666")
+        color = "#666666".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 1.5f
     }
@@ -120,7 +121,7 @@ class HoverControlsLayoutEditor(
     }
 
     private val menuArrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#AAAAAA")
+        color = "#AAAAAA".toColorInt()
         textSize = 16f
         textAlign = Paint.Align.RIGHT
     }
@@ -182,7 +183,7 @@ class HoverControlsLayoutEditor(
         }
         // For any controls the persisted set doesn't mention (e.g. new controls added in
         // a later version), drop them into their default cell when that cell is free.
-        // Otherwise leave them unplaced so the user can position them from the editor.
+        // Otherwise, leave them unplaced so the user can position them from the editor.
         val occupied = placements.values.toMutableSet()
         for (control in controls) {
             if (placements.containsKey(control.id)) continue
@@ -241,8 +242,6 @@ class HoverControlsLayoutEditor(
 
     private fun controlIdAt(cell: GridCell): String? =
         placements.entries.firstOrNull { it.value == cell }?.key
-
-    fun containsPoint(x: Float, y: Float): Boolean = isVisible
 
     // ==================== Drawing ====================
 

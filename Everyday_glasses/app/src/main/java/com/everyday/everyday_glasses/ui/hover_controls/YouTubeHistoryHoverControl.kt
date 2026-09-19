@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import androidx.core.graphics.toColorInt
 
 class YouTubeHistoryHoverControl(
     private val onOpenHistory: () -> Unit
@@ -16,11 +17,11 @@ class YouTubeHistoryHoverControl(
     }
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#CC000000")
+        color = "#CC000000".toColorInt()
     }
 
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#FF0000")
+        color = "#FF0000".toColorInt()
         style = Paint.Style.FILL
     }
 

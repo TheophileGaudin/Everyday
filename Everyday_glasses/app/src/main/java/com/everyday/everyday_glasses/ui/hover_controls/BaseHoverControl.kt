@@ -75,7 +75,7 @@ abstract class BaseHoverControl(
 
     /**
      * Subclasses with stateful interactions (long press, slide-to-select) override these
-     * three hooks to consume the cursor pipeline. Default behaviour: ignore.
+     * three hooks to consume the cursor pipeline. Default behavior: ignore.
      */
     open fun onCursorDown(px: Float, py: Float): Boolean = false
     open fun onCursorMove(px: Float, py: Float, dx: Float, dy: Float): Boolean = false
