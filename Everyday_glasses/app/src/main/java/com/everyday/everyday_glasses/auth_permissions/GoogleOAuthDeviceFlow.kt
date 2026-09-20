@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.google_auth
+package com.everyday.everyday_glasses.auth_permissions
 
 import android.content.Context
 import android.net.ConnectivityManager

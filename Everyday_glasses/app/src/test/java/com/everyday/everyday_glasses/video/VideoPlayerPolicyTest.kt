@@ -1,5 +1,10 @@
 package com.everyday.everyday_glasses.video
 
+import com.everyday.everyday_glasses.widgets.file_browser.video_backend.PlaybackProgress
+import com.everyday.everyday_glasses.widgets.file_browser.video_backend.resolveResumePosition
+import com.everyday.everyday_glasses.widgets.file_browser.video_backend.resolveSeekTarget
+import com.everyday.everyday_glasses.widgets.file_browser.video_backend.shouldAutoHidePlayerControls
+import com.everyday.everyday_glasses.widgets.file_browser.video_backend.shouldAutoSelectEmbeddedSubtitle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

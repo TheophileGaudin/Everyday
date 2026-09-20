@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.video
+package com.everyday.everyday_glasses.widgets.file_browser.video_backend
 
 private const val MIN_RESUME_POSITION_MS = 30_000L
 private const val MAX_COMPLETION_THRESHOLD = 0.95f

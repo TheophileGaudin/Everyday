@@ -81,7 +81,7 @@ import com.everyday.everyday_glasses.widgets._common.PresentationSpec
 import com.everyday.everyday_glasses.settings.SettingsController
 import com.everyday.everyday_glasses.interaction.user_input.UserInputActivity
 import com.everyday.everyday_glasses.interaction.user_input.UserInputKind
-import com.everyday.everyday_glasses.google_auth.GoogleAuthState
+import com.everyday.everyday_glasses.auth_permissions.GoogleAuthState
 import com.everyday.everyday_glasses.widgets.map.backend.MapGeoPoint
 import com.everyday.everyday_glasses.widgets.map.backend.NavigationOperationResult
 import com.everyday.everyday_glasses.widgets.map.backend.NavigationPresentationDefaults
@@ -120,7 +120,7 @@ import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.ImageWidgetStorage
 import com.everyday.everyday_glasses.persistence.LayoutLibrary
 import com.everyday.everyday_glasses.persistence.ShortcutsStore
-import com.everyday.everyday_glasses.video.VideoQueueRepository
+import com.everyday.everyday_glasses.widgets.file_browser.video_backend.VideoQueueRepository
 import com.everyday.everyday_glasses.ui.hover_controls.BaseHoverControl
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets.browser.BrowserWidget

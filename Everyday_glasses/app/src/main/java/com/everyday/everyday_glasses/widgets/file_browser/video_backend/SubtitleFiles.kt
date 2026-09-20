@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.video
+package com.everyday.everyday_glasses.widgets.file_browser.video_backend
 
 import androidx.media3.common.MimeTypes
 import java.util.Locale

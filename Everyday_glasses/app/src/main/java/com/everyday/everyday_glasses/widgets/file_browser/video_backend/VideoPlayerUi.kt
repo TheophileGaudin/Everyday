@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.video
+package com.everyday.everyday_glasses.widgets.file_browser.video_backend
 
 import android.content.Context
 import android.media.AudioManager
@@ -20,6 +20,7 @@ import com.everyday.everyday_glasses.R
 import com.google.android.material.button.MaterialButton
 import java.util.Locale
 import androidx.core.view.isVisible
+import com.google.android.material.progressindicator.LinearProgressIndicator
 
 class VideoPlayerUi(
     context: Context,
@@ -39,7 +40,7 @@ class VideoPlayerUi(
     private val errorText: TextView = root.findViewById(R.id.errorText)
     private val playbackMessageText: TextView = root.findViewById(R.id.playbackMessageText)
     private val positionText: TextView = root.findViewById(R.id.positionText)
-    private val playbackProgress: com.google.android.material.progressindicator.LinearProgressIndicator =
+    private val playbackProgress: LinearProgressIndicator =
         root.findViewById(R.id.playbackProgress)
     private val progressContainer: View = root.findViewById(R.id.progressContainer)
     private val backButton: MaterialButton = root.findViewById(R.id.backButton)

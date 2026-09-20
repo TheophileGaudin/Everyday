@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.google_auth
+package com.everyday.everyday_glasses.auth_permissions
 
 data class GoogleAccountSummary(
     val email: String,

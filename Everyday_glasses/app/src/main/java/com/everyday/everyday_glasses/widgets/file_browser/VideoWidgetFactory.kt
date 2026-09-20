@@ -5,7 +5,7 @@ import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
 import com.everyday.everyday_glasses.runtime.VideoWidgetListener
-import com.everyday.everyday_glasses.video.VideoQueueRepository
+import com.everyday.everyday_glasses.widgets.file_browser.video_backend.VideoQueueRepository
 
 /** Constructs VideoWidget instances with their shared queue and callbacks. */
 internal class VideoWidgetFactory(

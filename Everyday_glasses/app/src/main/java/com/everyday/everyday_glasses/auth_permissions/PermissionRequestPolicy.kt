@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.permissions
+package com.everyday.everyday_glasses.auth_permissions
 
 import android.Manifest
 import android.os.Build

@@ -12,7 +12,7 @@ import com.everyday.everyday_glasses.ui.hover_controls.BaseHoverControl
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.ui.components.DashboardSettings
 import com.everyday.everyday_glasses.runtime.GeminiSettingsListener
-import com.everyday.everyday_glasses.google_auth.GoogleAuthState
+import com.everyday.everyday_glasses.auth_permissions.GoogleAuthState
 import com.everyday.everyday_glasses.headup_wake.HeadUpWakeManager
 import com.everyday.everyday_glasses.ui.hover_controls.HoverControlsLayoutEditor
 import com.everyday.everyday_glasses.ui.components.ShortcutsSettingsMenu

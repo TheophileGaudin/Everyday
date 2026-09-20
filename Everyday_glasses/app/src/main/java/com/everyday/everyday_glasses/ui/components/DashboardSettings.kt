@@ -11,7 +11,7 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
 import com.everyday.everyday_glasses.R
-import com.everyday.everyday_glasses.google_auth.GoogleAuthState
+import com.everyday.everyday_glasses.auth_permissions.GoogleAuthState
 import com.everyday.everyday_glasses.headup_wake.HeadUpWakeManager
 import com.everyday.everyday_glasses.settings.UnitSystemMode
 import kotlin.math.ceil

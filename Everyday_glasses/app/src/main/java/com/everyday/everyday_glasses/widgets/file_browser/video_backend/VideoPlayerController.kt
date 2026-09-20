@@ -1,11 +1,13 @@
-package com.everyday.everyday_glasses.video
+package com.everyday.everyday_glasses.widgets.file_browser.video_backend
 
 import android.content.Context
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
+import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Format
@@ -33,7 +35,7 @@ interface VideoPlaybackObserver {
     fun onSubtitleCandidatesChanged(candidates: List<LocalSubtitleCandidate>) = Unit
 }
 
-@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
+@OptIn(markerClass = [UnstableApi::class])
 class VideoPlayerController(
     context: Context,
     initialUri: Uri,
@@ -243,7 +245,7 @@ class VideoPlayerController(
     }
 
     fun handleProgressTap() {
-        val now = android.os.SystemClock.elapsedRealtime()
+        val now = SystemClock.elapsedRealtime()
         if (lastProgressTapAt > 0L && now - lastProgressTapAt <= PROGRESS_DOUBLE_TAP_WINDOW_MS) {
             handler.removeCallbacks(progressForwardRunnable)
             seekBy(-PROGRESS_SEEK_MS)

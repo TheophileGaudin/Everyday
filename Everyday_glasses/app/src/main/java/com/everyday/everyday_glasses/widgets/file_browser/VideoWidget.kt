@@ -14,9 +14,9 @@ import android.widget.FrameLayout
 import com.everyday.everyday_glasses.runtime.VideoWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
-import com.everyday.everyday_glasses.video.VideoItem
-import com.everyday.everyday_glasses.video.VideoPlayerController
-import com.everyday.everyday_glasses.video.VideoPlayerUi
+import com.everyday.everyday_glasses.widgets.file_browser.video_backend.VideoItem
+import com.everyday.everyday_glasses.widgets.file_browser.video_backend.VideoPlayerController
+import com.everyday.everyday_glasses.widgets.file_browser.video_backend.VideoPlayerUi
 import kotlin.math.roundToInt
 
 /**

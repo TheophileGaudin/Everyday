@@ -1,10 +1,9 @@
-package com.everyday.everyday_glasses.permissions
+package com.everyday.everyday_glasses.auth_permissions
 
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings

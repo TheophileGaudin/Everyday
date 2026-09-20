@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.video.sortedVideoFiles
+import com.everyday.everyday_glasses.widgets.file_browser.video_backend.sortedVideoFiles
 import java.io.File
 import org.junit.After
 import org.junit.Assert.assertEquals

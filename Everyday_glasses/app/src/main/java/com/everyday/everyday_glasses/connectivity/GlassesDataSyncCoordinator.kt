@@ -6,10 +6,10 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.everyday.everyday_glasses.WidgetContainer
-import com.everyday.everyday_glasses.google_auth.GoogleAuthCoordinator
-import com.everyday.everyday_glasses.google_auth.GoogleAuthState
+import com.everyday.everyday_glasses.auth_permissions.GoogleAuthCoordinator
+import com.everyday.everyday_glasses.auth_permissions.GoogleAuthState
 import com.everyday.everyday_glasses.widgets.calendar.GoogleCalendarClient
-import com.everyday.everyday_glasses.google_auth.NetworkStatusProvider
+import com.everyday.everyday_glasses.auth_permissions.NetworkStatusProvider
 import com.everyday.everyday_glasses.widgets.map.backend.MapGeoPoint
 import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
 import com.everyday.shared.sync.CalendarAccount

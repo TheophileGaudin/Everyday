@@ -5,7 +5,6 @@ import com.everyday.everyday_glasses.widgets.map.backend.GeocodingCandidate
 import com.everyday.everyday_glasses.widgets.map.backend.GeocodingResolution
 import com.everyday.everyday_glasses.widgets.map.backend.MapGeoPoint
 import com.everyday.everyday_glasses.widgets.map.backend.navigationFailureMessage
-import com.everyday.everyday_glasses.widgets.map.backend.ForwardGeocoder
 import com.everyday.shared.routing.GeoPoint
 import com.everyday.shared.routing.OverpassNode
 import com.everyday.shared.routing.OverpassRouteData
@@ -13,7 +12,6 @@ import com.everyday.shared.routing.OverpassWay
 import com.everyday.shared.routing.RouteCalculationResult
 import com.everyday.shared.routing.RouteFailure
 import com.everyday.shared.routing.RouteGraphFetchResult
-import com.everyday.shared.routing.RouteGraphProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

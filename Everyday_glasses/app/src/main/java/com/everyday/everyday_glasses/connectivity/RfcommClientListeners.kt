@@ -1,7 +1,7 @@
 package com.everyday.everyday_glasses.connectivity
 
-import com.everyday.everyday_glasses.google_auth.GoogleAccountSummary
-import com.everyday.everyday_glasses.google_auth.GooglePhoneAuthStatus
+import com.everyday.everyday_glasses.auth_permissions.GoogleAccountSummary
+import com.everyday.everyday_glasses.auth_permissions.GooglePhoneAuthStatus
 import com.everyday.shared.sync.SubtitleStatus
 import com.everyday.shared.sync.SubtitleTranscript
 import com.everyday.shared.sync.SyncError

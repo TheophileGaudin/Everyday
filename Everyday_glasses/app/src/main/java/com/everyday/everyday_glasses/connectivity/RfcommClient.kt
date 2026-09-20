@@ -21,8 +21,8 @@ import android.util.Log
 import androidx.core.app.ActivityCompat
 import com.everyday.everyday_glasses.widgets.map.backend.GlassesDestinationSearchTransport
 import com.everyday.everyday_glasses.widgets.map.backend.GlassesRouteTransport
-import com.everyday.everyday_glasses.google_auth.GooglePhoneAuthStatus
-import com.everyday.everyday_glasses.google_auth.GoogleAccountSummary
+import com.everyday.everyday_glasses.auth_permissions.GooglePhoneAuthStatus
+import com.everyday.everyday_glasses.auth_permissions.GoogleAccountSummary
 import com.everyday.shared.sync.SyncError
 import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot
