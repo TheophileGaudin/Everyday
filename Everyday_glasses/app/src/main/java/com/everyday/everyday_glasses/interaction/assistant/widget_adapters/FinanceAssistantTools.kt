@@ -229,7 +229,7 @@ class UpdateFinanceTileSemanticToolHandler(
                         "slot", JSONObject()
                             .put("type", "integer")
                             .put("minimum", 0)
-                            .put("maximum", FinanceWidget.Companion.MAX_TILES - 1)
+                            .put("maximum", FinanceWidget.MAX_TILES - 1)
                             .put("description", "Optional dashboard placement slot")
                     )
                     .put(
@@ -346,8 +346,8 @@ class UpdateFinanceTileSemanticToolHandler(
             arguments.has("placement") && !arguments.isNull("placement") -> arguments.getInt("placement")
             else -> return null
         }
-        require(raw in 0 until FinanceWidget.Companion.MAX_TILES) {
-            "Finance tile slot must be between 0 and ${FinanceWidget.Companion.MAX_TILES - 1}"
+        require(raw in 0 until FinanceWidget.MAX_TILES) {
+            "Finance tile slot must be between 0 and ${FinanceWidget.MAX_TILES - 1}"
         }
         return raw
     }

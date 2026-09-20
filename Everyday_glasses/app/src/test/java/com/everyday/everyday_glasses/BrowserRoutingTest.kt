@@ -56,7 +56,7 @@ class BrowserRoutingTest {
         val host = FakeRoutingHost(fullscreen = browser)
         val pageAgent = PageAgentCoordinator({ "page-key" }, provider)
         val routing = BrowserRoutingCoordinator(pageAgent, host, ImmediatePageAgentUiDispatcher())
-        var mainAssistantCalls = 0
+        val mainAssistantCalls = 0
 
         try {
             val start = routing.routeRecordedAudio(audioFile, onComplete = { result ->

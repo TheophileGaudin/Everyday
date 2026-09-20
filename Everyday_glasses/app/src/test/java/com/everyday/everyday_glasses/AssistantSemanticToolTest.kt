@@ -229,7 +229,7 @@ class AssistantSemanticToolTest {
 
     @Test
     fun `successful custom web search grounds a later presentation and injects sources`() {
-        val search = WebSearchSemanticToolHandler(WebSearchProvider { _, _, _ ->
+        val search = WebSearchSemanticToolHandler { _, _, _ ->
             Result.success(
                 listOf(
                     WebSearchResult(
@@ -239,7 +239,7 @@ class AssistantSemanticToolTest {
                     )
                 )
             )
-        })
+        }
         val catalog = AssistantToolCatalog(listOf(search, PresentTextSemanticToolHandler()))
         val searchCall =
             AssistantToolCall("search-1", "search_web", JSONObject().put("query", "current fact"))
