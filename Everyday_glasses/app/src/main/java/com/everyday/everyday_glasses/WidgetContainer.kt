@@ -168,22 +168,32 @@ import kotlin.math.roundToInt
 import androidx.core.net.toUri
 
 /**
- * Container view that manages dynamic widgets (text boxes, status bar, etc.).
+ * Central UI host and coordinator for the dashboard's widgets.
  *
- * Responsibilities are delegated to helper classes:
- * - CursorStabilizer: Cursor physics and smoothing for glasses temple input
- * - WidgetRegistry: Widget collection and z-ordering
- * - WidgetCaptureRestore: Save/restore widget states
- * - ThreeDofOverlay: Visual overlay for 3DOF mode (dashed boundary)
+ * WidgetContainer owns the currently displayed collection of widgets and coordinates
+ * how they are created, presented, interacted with, updated, persisted, and removed.
+ * Individual widget classes remain responsible for rendering and behavior specific
+ * to their own content.
  *
- * This class handles:
- * - Widget creation/deletion
- * - Cursor interaction routing
- * - Context menu display
- * - Widget drawing coordination
- * - Long-press to drag
- * - Fullscreen mode for widgets
- * - 3DOF mode content transformation
+ * Its main responsibilities are:
+ * - Creating, registering, restoring, closing, and arranging widgets
+ * - Routing taps, pointer movement, dragging, keyboard input, and hover interactions
+ * - Coordinating focus, context menus, formatting controls, and other UI overlays
+ * - Drawing widgets and applying fullscreen, minimized, presentation, and 3DOF states
+ * - Delivering app data and external updates to the appropriate visible widgets
+ * - Capturing and restoring dashboard state in cooperation with persistence classes
+ * - Exposing widget operations to app commands and assistant tools
+ *
+ * Supporting components own narrower parts of this work, including:
+ * - WidgetRegistry for the active widget collection, lookup, and display ordering
+ * - WidgetLifecycleController for widget registration, closing, and cleanup
+ * - WidgetCaptureRestore for translating between live widgets and persisted state
+ * - PresentationController for temporary widget presentation modes and transitions
+ * - CursorStabilizer for smoothing cursor movement
+ * - ThreeDofOverlay and related helpers for 3DOF display behavior
+ *
+ * This class coordinates these systems; it should not contain the internal
+ * content-specific logic of individual widget types.
  */
 class WidgetContainer @JvmOverloads constructor(
     context: Context,

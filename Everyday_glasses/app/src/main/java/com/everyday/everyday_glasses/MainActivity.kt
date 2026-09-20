@@ -101,15 +101,28 @@ import com.everyday.shared.transport.TransportMessage
 import java.util.concurrent.CompletableFuture
 
 /**
- * Glasses app with cursor controlled by phone trackpad or local temple trackpad.
+ * Main Android activity and top-level runtime coordinator for the glasses app.
  *
- * Features:
- * - Cursor control from phone or temple trackpad
- * - Double-tap to open context menu and create widgets
- * - Triple-tap to toggle 3DOF (world-locked) mode
- * - Dynamic text boxes with move/resize/delete
- * - Text input via phone keyboard when text field is focused
- * - Movable status bar showing phone/glasses battery and time
+ * MainActivity creates the app's primary views and connects the major systems that
+ * need access to the Android activity lifecycle. It is the composition point where
+ * coordinators, controllers, stores, and UI components are constructed and wired
+ * together.
+ *
+ * Its main responsibilities are:
+ * - Initializing the glasses display, cursor, and WidgetContainer
+ * - Forwarding Android lifecycle, input, permission, and memory events
+ * - Coordinating phone connectivity and synchronized phone data
+ * - Connecting authentication, calendar, location, file import, and assistant services
+ * - Managing display power, brightness, head-up wake behavior, and 3DOF tracking
+ * - Starting dashboard restoration and persistence
+ * - Routing changes between app services and the visible UI
+ *
+ * Detailed behavior is delegated to focused components. InputCoordinator handles
+ * user input, WidgetContainer manages the widget dashboard, and the other
+ * coordinators and controllers own their respective app systems.
+ *
+ * MainActivity should primarily contain application startup, lifecycle handling,
+ * dependency wiring, and coordination between otherwise separate systems.
  */
 class MainActivity : AppCompatActivity() {
 
