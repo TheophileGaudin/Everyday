@@ -19,15 +19,10 @@ import android.view.inputmethod.InputMethodManager
 import com.everyday.everyday_glasses.interaction.commands.AwaitingCommandUiDispatcher
 import com.everyday.everyday_glasses.interaction.assistant.AssistantConfiguration
 import com.everyday.everyday_glasses.interaction.assistant.AssistantModel
-import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticFact
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.AssistantTextContentFormatter
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.AssistantTextPresentationRequest
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolCatalog
-import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecution
-import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionCodes
 import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContext
 import com.everyday.everyday_glasses.interaction.assistant.AssistantVoiceHoverControl
-import com.everyday.everyday_glasses.interaction.assistant.AssistantWidgetContext
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserRoutingCoordinator
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserWidgetPageAgentAdapter
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.ConfigureMapPoisRequest
@@ -48,16 +43,13 @@ import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.Start
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.StopNavigationSemanticToolHandler
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.UpdateFinanceTileSemanticToolHandler
 import com.everyday.everyday_glasses.interaction.assistant.WebSearchSemanticToolHandler
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.toAssistantSemanticFacts
 import com.everyday.everyday_glasses.runtime.BrowserWidgetListener
 import com.everyday.everyday_glasses.contracts.DisplaySettingsHandler
 import com.everyday.everyday_glasses.runtime.FileBrowserWidgetListener
-import com.everyday.everyday_glasses.runtime.FinanceWidgetListener
 import com.everyday.everyday_glasses.runtime.GeminiSettingsListener
 import com.everyday.everyday_glasses.contracts.GoogleAccountHandler
 import com.everyday.everyday_glasses.runtime.MapWidgetListener
 import com.everyday.everyday_glasses.contracts.MirrorWidgetListener
-import com.everyday.everyday_glasses.runtime.NewsWidgetListener
 import com.everyday.everyday_glasses.runtime.SubtitleWidgetListener
 import com.everyday.everyday_glasses.runtime.TextBoxWidgetListener
 import com.everyday.everyday_glasses.contracts.WidgetContentObserver
@@ -84,15 +76,11 @@ import com.everyday.everyday_glasses.interaction.user_input.UserInputKind
 import com.everyday.everyday_glasses.auth_permissions.GoogleAuthState
 import com.everyday.everyday_glasses.widgets.map.backend.MapGeoPoint
 import com.everyday.everyday_glasses.widgets.map.backend.NavigationOperationResult
-import com.everyday.everyday_glasses.widgets.map.backend.NavigationPresentationDefaults
 import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
 import com.everyday.everyday_glasses.widgets.map.backend.StartNavigationRequest
-import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetDescriptors
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
-import com.everyday.everyday_glasses.widgets.map.backend.formatWalkingEta
-import com.everyday.everyday_glasses.widgets.map.backend.toAssistantSemanticFacts
 import com.everyday.everyday_glasses.widgets.browser.BrowserWidgetFactory
 import com.everyday.everyday_glasses.widgets.file_browser.VideoWidgetFactory
 import com.everyday.everyday_glasses.ui.components.CloseConfirmationHandler
@@ -108,7 +96,6 @@ import com.everyday.everyday_glasses._threedof.ThreeDofCoordinateMath
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
 import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
 import com.everyday.everyday_glasses.interaction.commands.CommandAvailability
-import com.everyday.everyday_glasses.settings.UnitDisplayFormatter
 import com.everyday.everyday_glasses.settings.UnitSettings
 import com.everyday.everyday_glasses.runtime.WakeSleepManager
 import com.everyday.everyday_glasses.persistence.WidgetLayoutManager
@@ -148,6 +135,13 @@ import com.everyday.everyday_glasses._threedof.ThreeDofOverlay
 import com.everyday.everyday_glasses.widgets.file_browser.VideoWidget
 import com.everyday.everyday_glasses.ui.components.WidgetLayoutDeleteConfirmationPopup
 import com.everyday.everyday_glasses.ui.components.WidgetLayoutNamePrompt
+import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContextCapture
+import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.MapAssistantActions
+import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.TextAssistantActions
+import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
+import com.everyday.everyday_glasses.widgets.finance.FinanceFeatureController
+import com.everyday.everyday_glasses.widgets.news.NewsFeatureController
+import com.everyday.everyday_glasses.widgets.weather_location.LocationWeatherBinding
 import com.everyday.shared.sync.FinanceSnapshot
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.NewsSnapshot
@@ -164,7 +158,6 @@ import com.everyday.shared.command.CommandWidgetId
 import com.everyday.shared.transport.AssistantStatus
 import java.util.concurrent.CompletableFuture
 import kotlin.reflect.KClass
-import kotlin.math.roundToInt
 import androidx.core.net.toUri
 
 /**
@@ -235,6 +228,8 @@ class WidgetContainer @JvmOverloads constructor(
         onMutationStarted = { lifecycleMutationInProgress = true },
         onMutationFinished = { lifecycleMutationInProgress = false }
     )
+    private val assistantUiDispatcher = UiThreadDispatcher { action -> if (Looper.myLooper() == Looper.getMainLooper()) {action(); true}
+    else {post(Runnable(action))}}
     private fun browserWidgetFactory(rootView: ViewGroup) = BrowserWidgetFactory(
         context = context,
         rootLayout = rootView,
@@ -251,6 +246,37 @@ class WidgetContainer @JvmOverloads constructor(
             notifyMediaBrightnessCapChanged()
         },
     )
+    private val locationWeatherBinding by lazy {
+        LocationWeatherBinding(
+            currentWidget = { locationWidget },
+            temperatureUnit = { unitSettings.effectiveTemperatureUnit() },
+            toggleTemperatureUnit = { unitSettings.toggleTemperatureOverride() },
+            notifyTransientChange = ::notifyTransientContentChanged,
+        )
+    }
+    private val newsFeatures by lazy {
+        NewsFeatureController(
+            ui = assistantUiDispatcher,
+            currentWidget = { newsWidget },
+            currentProvider = { dataProvider },
+            withTransientChanges = { action -> withTransientChangeBatch(action) },
+            notifyTransientChange = ::notifyTransientContentChanged,
+            notifyPersistentChange = ::notifyPersistentContentChanged,
+            notifyFocusChange = { focused -> notifyFocusChanged(focused) },
+        )
+    }
+    private val financeFeatures by lazy {
+        FinanceFeatureController(
+            ui = assistantUiDispatcher,
+            currentWidget = { financeWidget },
+            currentProvider = { dataProvider },
+            runPersistentUpdate = { action -> runPersistentMutation( action = action, changed = { result -> result.isSuccess } ) },
+            notifyTransientChange = ::notifyTransientContentChanged,
+            notifyPersistentChange = ::notifyPersistentContentChanged,
+            stableWidgetId = ::widgetStableId,
+        )
+    }
+
     private val threeDofOverlay = ThreeDofOverlay()
     private val smartAlignment = SmartAlignmentHelper(registry)
     private val smartAlignmentRenderer = SmartAlignmentRenderer()
@@ -384,6 +410,41 @@ class WidgetContainer @JvmOverloads constructor(
     private var capturedHoverControl: BaseHoverControl? = null
     private var hoverConfirmTapGuardUntilMs: Long = 0L
 
+    // ==================== Assistant Actions ====================
+    private val assistantUiContextCapture by lazy {AssistantUiContextCapture(registry = registry, screenSize = {width to height}, activeLayoutName = {layoutManager.activeLayoutName}, focusedWidget = {focusedWidget ?: focusedBrowserWidget})}
+
+    private val textAssistantActions by lazy {
+        TextAssistantActions(
+            ui = assistantUiDispatcher,
+            findTextWidget = { id -> findWidgetByStableId(id) as? TextBoxWidget },
+            createTextWidget = ::createAssistantTextWidget,
+            clearEditing = { widget ->
+                widget.hideKeyboard()
+                widget.setFocused(false)
+                setFocusedWidget(null)
+                hideAssistantIme()
+            },
+            presentWidget = { widget, spec, created -> presentWidget(widget, spec, created) },
+            removePresentationTarget = ::removePresentationTarget,
+        )
+    }
+
+    private val mapAssistantActions by lazy {
+        MapAssistantActions(
+            ui = assistantUiDispatcher,
+            showMap = {
+                lifecycleController.show(WidgetTypeId.MAP)
+                mapWidget
+            },
+            currentMap = { mapWidget },
+            present = { widget, spec -> presentWidget(widget, spec) },
+            dismissPresentation = ::dismissMapPresentation,
+            withTransientChanges = { action -> withTransientChangeBatch(action) },
+            notifyTransientChange = ::notifyTransientContentChanged,
+            notifyPersistentChange = ::notifyPersistentContentChanged,
+        )
+    }
+
     // ==================== Widget References ====================
     
     // Status bar widget - delegated to registry
@@ -401,13 +462,6 @@ class WidgetContainer @JvmOverloads constructor(
         get() = registry.calendarWidget
 
     // Pending data for location widget
-    private var pendingLocationTown: String? = null
-    private var pendingLocationCountryCode: String? = null
-    private var pendingWeatherData: WeatherData? = null
-    private var pendingLocationAddress: String? = null
-    private var pendingLocationWeather: String? = null
-    private var pendingLocationSunriseEpochMs: Long? = null
-    private var pendingLocationSunsetEpochMs: Long? = null
     private var pendingMapLocation: android.location.Location? = null
     private var pendingMapLocationLabel: String = ""
     private var pendingMapCountryCode: String = ""
@@ -417,15 +471,9 @@ class WidgetContainer @JvmOverloads constructor(
     val financeWidget: FinanceWidget?
         get() = registry.financeWidget
 
-    // Pending country code for finance widget
-    private var pendingFinanceCountryCode: String? = null
-
     // News widget - delegated to registry
     val newsWidget: NewsWidget?
         get() = registry.newsWidget
-
-    // Pending country code for news widget
-    private var pendingNewsCountryCode: String? = null
 
     val notificationsWidget: NotificationsWidget?
         get() = registry.notificationsWidget
@@ -968,8 +1016,7 @@ class WidgetContainer @JvmOverloads constructor(
             { storeClosedTemplate(WidgetTypeId.FINANCE, it) },
             onMinimize = { widget, minimized ->
                 handleSingletonRegisteredMinimize(widget, minimized)
-                dataProvider?.onFinanceVisibilityChanged(!minimized)
-                if (!minimized) widget.requestData(force = false, reason = "finance_unminimized")
+                financeFeatures.onMinimizeChanged(widget, minimized)
             })
         bindSingleton(
             WidgetTypeId.NEWS, NewsWidget::class, DashboardPersistence.NewsWidgetState::class,
@@ -1726,39 +1773,30 @@ class WidgetContainer @JvmOverloads constructor(
         notifyMediaBrightnessCapChanged()
     }
 
-    fun updateLocationData(
-        address: String,
-        weather: String,
-        sunriseEpochMs: Long? = null,
-        sunsetEpochMs: Long? = null
-    ) {
-        pendingLocationAddress = address
-        pendingLocationWeather = weather
-        pendingLocationSunriseEpochMs = sunriseEpochMs
-        pendingLocationSunsetEpochMs = sunsetEpochMs
-        locationWidget?.setLocationData(address, weather)
-        locationWidget?.setSunTimes(sunriseEpochMs, sunsetEpochMs)
-        notifyTransientContentChanged()
+    // distribute location updates to widgets that are location dependent
+    fun applyLocationMetadata(town: String, countryCode: String) {
+        updateMapMetadata(town, countryCode)
+        financeFeatures.updateCountryCode(countryCode)
+        newsFeatures.updateCountryCode(countryCode)
+        locationWeatherBinding.applyLocationMetadata(town, countryCode)
     }
 
-    fun updateFinanceCountryCode(countryCode: String) {
-        pendingFinanceCountryCode = countryCode
-        financeWidget?.setCountryCode(countryCode)
-    }
+    //update features of the Weather and location widget
+    fun setLocationPermissionDenied() = locationWeatherBinding.setLocationPermissionDenied()
+    fun applyWeatherData(weather: WeatherData?) = locationWeatherBinding.applyWeatherData(weather)
 
-    fun updateNewsCountryCode(countryCode: String) {
-        pendingNewsCountryCode = countryCode
-        newsWidget?.setCountryCode(countryCode)
-    }
+    //update features of the Finance widget
+    fun applyFinanceSnapshot(snapshot: FinanceSnapshot, notify: Boolean = true) = financeFeatures.applySnapshot(snapshot, notify)
+    fun applyFinanceError(message: String) = financeFeatures.applyError(message)
+    fun currentFinanceVisibleConfigs(): List<FinanceDashboardTileConfig> = financeFeatures.currentVisibleConfigs()
+    fun updateFinanceTile(request: FinanceTileUpdateRequest): CompletableFuture<FinanceTileUpdateResult> = financeFeatures.updateTile(request)
 
-    fun setLocationPermissionDenied() {
-        pendingLocationAddress = "-----"
-        pendingLocationWeather = "-"
-        pendingLocationSunriseEpochMs = null
-        pendingLocationSunsetEpochMs = null
-        locationWidget?.setPermissionDenied()
-        notifyTransientContentChanged()
-    }
+    //update features of the News widget
+    fun applyNewsSnapshot(snapshot: NewsSnapshot) = newsFeatures.applySnapshot(snapshot)
+    fun applyNewsError(message: String) = newsFeatures.applyError(message)
+    fun currentNewsCountryCode(): String? = newsFeatures.currentCountryCode()
+    fun currentNewsSourceSpec(): NewsSourceSpec? = newsFeatures.currentSourceSpec()
+    fun setNewsSource(sourceSpec: NewsSourceSpec): CompletableFuture<NewsSourceUpdateResult> = newsFeatures.setSource(sourceSpec)
 
     fun updateSpeedData(speedKmh: Float, qualityOk: Boolean, isMoving: Boolean) {
         pendingSpeedKmh = speedKmh
@@ -1891,80 +1929,12 @@ class WidgetContainer @JvmOverloads constructor(
             true
         } ?: false
 
-    fun applyLocationMetadata(town: String, countryCode: String) {
-        pendingLocationTown = town
-        pendingLocationCountryCode = countryCode
-        updateMapMetadata(town, countryCode)
-        updateFinanceCountryCode(countryCode)
-        updateNewsCountryCode(countryCode)
-        renderLocationWeather()
-    }
-
-    fun applyWeatherData(weather: WeatherData?) {
-        pendingWeatherData = weather
-        renderLocationWeather()
-    }
-
-    private fun renderLocationWeather() {
-        val town = pendingLocationTown ?: return
-        val countryCode = pendingLocationCountryCode.orEmpty()
-        val weather = pendingWeatherData
-        val addressText = if (countryCode.isNotEmpty()) "$town, $countryCode" else town
-        if (weather == null) {
-            updateLocationData(addressText, "Checking weather...")
-            return
-        }
-        val tempText = UnitDisplayFormatter.formatTemperature(
-            weather.tempCurrent,
-            unitSettings.effectiveTemperatureUnit()
-        )
-        val weatherText = if (weather.weatherDescCurrent.isNotEmpty()) {
-            "${weather.weatherDescCurrent} $tempText"
-        } else {
-            tempText
-        }
-        updateLocationData(
-            addressText,
-            weatherText,
-            weather.sunriseEpochMs,
-            weather.sunsetEpochMs
-        )
-    }
-
     private fun applyEffectiveUnitSettings() {
         val speedUnit = unitSettings.effectiveSpeedUnit()
         speedometerWidget?.setUnit(speedUnit)
         settingsController.setSpeedUnit(speedUnit)
         settingsController.setUnitSystemMode(unitSettings.globalMode)
-        locationWidget?.setTemperatureUnit(unitSettings.effectiveTemperatureUnit())
-        renderLocationWeather()
-    }
-
-    fun applyFinanceSnapshot(snapshot: FinanceSnapshot, notify: Boolean = true) {
-        financeWidget?.let {
-            it.applySnapshot(snapshot)
-            if (notify) notifyTransientContentChanged()
-        }
-    }
-
-    fun applyFinanceError(message: String) {
-        financeWidget?.let {
-            it.applyError(message)
-            notifyTransientContentChanged()
-        }
-    }
-
-    fun applyNewsSnapshot(snapshot: NewsSnapshot) {
-        val widget = newsWidget ?: return
-        // A pending source switch owns the matching snapshot's persistent callback; until the
-        // source is committed, applying it would only produce a redundant transient refresh.
-        if (widget.getSourceSpec() != snapshot.sourceSpec || widget.getCountryCode() != snapshot.countryCode) {
-            return
-        }
-        withTransientChangeBatch {
-            widget.applySnapshot(snapshot)
-            notifyTransientContentChanged()
-        }
+        locationWeatherBinding.applyUnitSettings()
     }
 
     fun applyNotificationsSnapshot(snapshot: PhoneNotificationsSnapshot) {
@@ -1973,151 +1943,6 @@ class WidgetContainer @JvmOverloads constructor(
             notificationsWidget?.setNotificationsSnapshot(snapshot)
             notifyTransientContentChanged()
         }
-    }
-
-    fun applyNewsError(message: String) {
-        withTransientChangeBatch {
-            newsWidget?.applyError(message)
-            notifyTransientContentChanged()
-        }
-    }
-
-    fun currentNewsCountryCode(): String? = newsWidget?.getCountryCode() ?: pendingNewsCountryCode
-
-    fun currentNewsSourceSpec(): NewsSourceSpec? = newsWidget?.getSourceSpec()
-
-    /** Update the existing singleton News widget from an assistant request. */
-    fun setNewsSource(sourceSpec: NewsSourceSpec): CompletableFuture<NewsSourceUpdateResult> {
-        val result = CompletableFuture<NewsSourceUpdateResult>()
-        val action = Runnable {
-            val widget = newsWidget
-            if (widget == null) {
-                result.complete(
-                    NewsSourceUpdateResult(
-                        applied = false,
-                        message = "News widget is not visible"
-                    )
-                )
-                return@Runnable
-            }
-            widget.requestSource(sourceSpec) { fetchResult ->
-                fetchResult.fold(
-                    onSuccess = {
-                        result.complete(
-                            NewsSourceUpdateResult(
-                                applied = true,
-                                message = "News source updated",
-                                sourceSpec = sourceSpec
-                            )
-                        )
-                    },
-                    onFailure = { failure ->
-                        result.complete(
-                            NewsSourceUpdateResult(
-                                applied = false,
-                                message = failure.message ?: "News source could not be loaded"
-                            )
-                        )
-                    }
-                )
-            }
-        }
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            action.run()
-        } else if (!post(action)) {
-            result.complete(
-                NewsSourceUpdateResult(
-                    applied = false,
-                    message = "Glasses display is unavailable"
-                )
-            )
-        }
-        return result
-    }
-
-    fun currentFinanceVisibleConfigs(): List<FinanceDashboardTileConfig> =
-        financeWidget?.getVisibleTileConfigs().orEmpty()
-
-
-    /** Update an existing finance tile on the UI thread and keep the widget instance intact. */
-    fun updateFinanceTile(request: FinanceTileUpdateRequest): CompletableFuture<FinanceTileUpdateResult> {
-        val result = CompletableFuture<FinanceTileUpdateResult>()
-        val action = Runnable {
-            val widget = financeWidget
-            if (widget == null) {
-                result.complete(
-                    FinanceTileUpdateResult(
-                        applied = false,
-                        message = "Finance widget is not visible"
-                    )
-                )
-                return@Runnable
-            }
-
-            if (request.fullscreen == true && widget.isMinimized) {
-                result.complete(
-                    FinanceTileUpdateResult(
-                        applied = false,
-                        message = "Finance widget is minimized"
-                    )
-                )
-                return@Runnable
-            }
-
-            val update = runPersistentMutation(
-                action = {
-                    runCatching {
-                        widget.updateTileInstrument(
-                            target = request.target,
-                            instrument = request.instrument,
-                            range = request.range,
-                            chartType = request.chartType,
-                            slot = request.slot
-                        )
-                    }.getOrElse { failure ->
-                        Result.failure(failure)
-                    }.also { result ->
-                        if (result.isSuccess && request.fullscreen != null && request.fullscreen != widget.isFullscreen) {
-                            widget.toggleFullscreen()
-                        }
-                    }
-                },
-                changed = { it.isSuccess }
-            )
-            update.fold(
-                onSuccess = { config ->
-                    val state = widget.semanticState(widgetStableId(widget))
-                    result.complete(
-                        FinanceTileUpdateResult(
-                            applied = true,
-                            message = "Updated ${request.instrument.displayName} on finance tile ${config.id}",
-                            tileId = config.id,
-                            instrument = request.instrument,
-                            state = state
-                        )
-                    )
-                },
-                onFailure = { failure ->
-                    result.complete(
-                        FinanceTileUpdateResult(
-                            applied = false,
-                            message = failure.message ?: "Requested finance tile is not present"
-                        )
-                    )
-                }
-            )
-        }
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            action.run()
-        } else if (!post(action)) {
-            result.complete(
-                FinanceTileUpdateResult(
-                    applied = false,
-                    message = "Glasses display is unavailable"
-                )
-            )
-        }
-        return result
     }
 
     // ==================== Z-Order Management ====================
@@ -3780,19 +3605,12 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createLocationPresence(): LocationWidget {
-        closedTemplateState<DashboardPersistence.LocationWidgetState>(WidgetTypeId.LOCATION)?.let {
-            return applyLocationState(it)
-        }
-        val locWidth = 300f
-        val locHeight = 120f
-        return LocationWidget(context, 20f, height - locHeight - 20f, locWidth, locHeight).apply {
-            onTemperatureUnitChanged = { unitSettings.toggleTemperatureOverride() }
-            setTemperatureUnit(unitSettings.effectiveTemperatureUnit())
-            if (pendingLocationAddress != null || pendingLocationWeather != null) {
-                setLocationData(pendingLocationAddress ?: "Loading...", pendingLocationWeather ?: "Checking weather...")
-            }
-            setSunTimes(pendingLocationSunriseEpochMs, pendingLocationSunsetEpochMs)
-        }
+        closedTemplateState<DashboardPersistence.LocationWidgetState>(WidgetTypeId.LOCATION)?.let {return applyLocationState(it)}
+        val locationWidth = 300f
+        val locationHeight = 120f
+        val widget = LocationWidget(context, 20f, height - locationHeight - 20f, locationWidth, locationHeight)
+        locationWeatherBinding.configure(widget)
+        return widget
     }
 
     private fun createMapPresence(): MapWidget {
@@ -3858,47 +3676,20 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createFinancePresence(): FinanceWidget {
-        closedTemplateState<DashboardPersistence.FinanceWidgetState>(WidgetTypeId.FINANCE)?.let {
-            return applyFinanceState(it)
-        }
-        return FinanceWidget(20f, 20f, FinanceWidget.DEFAULT_WIDTH, FinanceWidget.DEFAULT_HEIGHT).apply {
-            listener = object : FinanceWidgetListener {
-                override fun onStateChanged() = notifyTransientContentChanged()
-                override fun onPersistentStateChanged() = notifyPersistentContentChanged()
-                override fun onDataRequested(
-                    visibleConfigs: List<FinanceDashboardTileConfig>,
-                    refreshTileIds: List<String>, force: Boolean, reason: String
-                ) {
-                    dataProvider?.requestFinanceData(visibleConfigs, refreshTileIds, force, reason)
-                }
-            }
-            pendingFinanceCountryCode?.let { setCountryCode(it) }
-            requestData(force = true, reason = "widget_toggled_on")
-            dataProvider?.onFinanceVisibilityChanged(true)
-        }
+        closedTemplateState<DashboardPersistence.FinanceWidgetState>(WidgetTypeId.FINANCE)?.let {return applyFinanceState(it)}
+        val widget = FinanceWidget(20f, 20f, FinanceWidget.DEFAULT_WIDTH, FinanceWidget.DEFAULT_HEIGHT)
+        financeFeatures.configure(widget)
+        financeFeatures.onOpened(widget, reason = "widget_toggled_on")
+        return widget
     }
 
     private fun createNewsPresence(): NewsWidget {
-        closedTemplateState<DashboardPersistence.NewsWidgetState>(WidgetTypeId.NEWS)?.let {
-            return applyNewsState(it)
-        }
+        closedTemplateState<DashboardPersistence.NewsWidgetState>(WidgetTypeId.NEWS)?.let {return applyNewsState(it)}
         val startX = (width - NewsWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
-        return NewsWidget(startX, 20f, NewsWidget.DEFAULT_WIDTH, NewsWidget.DEFAULT_HEIGHT).apply {
-            listener = object : NewsWidgetListener {
-                override fun onStateChanged() = notifyTransientContentChanged()
-                override fun onPersistentStateChanged() = notifyPersistentContentChanged()
-                override fun onDataRequested(countryCode: String, force: Boolean, reason: String) {
-                    dataProvider?.requestNewsData(countryCode, force, reason)
-                }
-                override fun onSourceDataRequested(sourceSpec: NewsSourceSpec, countryCode: String, force: Boolean, reason: String, completion: (Result<NewsSnapshot>) -> Unit) {
-                    dataProvider?.requestNewsSourceData(sourceSpec, countryCode, force, reason, completion)
-                        ?: completion(Result.failure(IllegalStateException("News data service is unavailable")))
-                }
-                override fun onSourceInputFocusChanged(focused: Boolean) { notifyFocusChanged(focused) }
-            }
-            pendingNewsCountryCode?.let { setCountryCode(it) }
-            requestData(force = true, reason = "widget_toggled_on")
-        }
+        val widget = NewsWidget(startX, 20f, NewsWidget.DEFAULT_WIDTH, NewsWidget.DEFAULT_HEIGHT)
+        newsFeatures.configure(widget)
+        newsFeatures.onOpened(widget, reason = "widget_toggled_on")
+        return widget
     }
 
     private fun createNotificationsPresence(): NotificationsWidget {
@@ -4902,236 +4693,16 @@ class WidgetContainer @JvmOverloads constructor(
         )
     )
 
-    /** Starts glasses-local walking navigation and presents the map for voice requests. */
-    fun startNavigation(request: StartNavigationRequest): CompletableFuture<AssistantToolExecution> {
-        val result = CompletableFuture<AssistantToolExecution>()
-        val action = Runnable {
-            try {
-                lifecycleController.show(WidgetTypeId.MAP)
-                val map = mapWidget ?: error("Map widget could not be created")
-                val presentation = request.presentation ?: NavigationPresentationDefaults.VOICE_ROUTE
-                if (!presentWidget(map, presentation)) {
-                    result.complete(
-                        AssistantToolExecution(
-                            false,
-                            AssistantToolExecutionCodes.EXECUTION_FAILED,
-                            "Map presentation could not be started"
-                        )
-                    )
-                    return@Runnable
-                }
-                withTransientChangeBatch {
-                    map.startNavigation(
-                        address = request.address,
-                        modeName = request.mode,
-                        presentationSpec = presentation
-                    ) { outcome ->
-                        result.complete(outcome.toAssistantExecution())
-                    }
-                    notifyTransientContentChanged()
-                }
-            } catch (failure: Throwable) {
-                result.complete(
-                    AssistantToolExecution(
-                        false,
-                        AssistantToolExecutionCodes.EXECUTION_FAILED,
-                        failure.message ?: "Navigation could not be started"
-                    )
-                )
-            }
-        }
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            action.run()
-        } else if (!post(action)) {
-            result.complete(
-                AssistantToolExecution(
-                    false,
-                    AssistantToolExecutionCodes.EXECUTION_FAILED,
-                    "Glasses display is unavailable"
-                )
-            )
-        }
-        return result
-    }
-
-    /** Idempotently stops navigation without changing the map widget's prior presentation state. */
-    fun stopNavigation(): CompletableFuture<AssistantToolExecution> {
-        val result = CompletableFuture<AssistantToolExecution>()
-        val action = Runnable {
-            withTransientChangeBatch {
-                dismissMapPresentation()
-                mapWidget?.stopNavigation()
-                notifyTransientContentChanged()
-            }
-            result.complete(
-                AssistantToolExecution(
-                    true,
-                    AssistantToolExecutionCodes.SUCCESS,
-                    "Navigation stopped"
-                )
-            )
-        }
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            action.run()
-        } else if (!post(action)) {
-            result.complete(
-                AssistantToolExecution(
-                    false,
-                    AssistantToolExecutionCodes.EXECUTION_FAILED,
-                    "Glasses display is unavailable"
-                )
-            )
-        }
-        return result
-    }
-
-    private fun NavigationOperationResult.toAssistantExecution(): AssistantToolExecution = when (this) {
-        is NavigationOperationResult.Active -> AssistantToolExecution(
-            true,
-            AssistantToolExecutionCodes.SUCCESS,
-            "Walking route active: destination=${state.destination?.label.orEmpty()}, " +
-                    "eta=${formatWalkingEta(state.walkingEtaSeconds)}"
-        )
-        is NavigationOperationResult.Ambiguous -> AssistantToolExecution(
-            false,
-            AssistantToolExecutionCodes.EXECUTION_FAILED,
-            "Destination is ambiguous; choose one: ${state.choices.joinToString(" | ") { it.label }}"
-        )
-        is NavigationOperationResult.Failure -> AssistantToolExecution(
-            false,
-            AssistantToolExecutionCodes.EXECUTION_FAILED,
-            message
-        )
-    }
-
-    /** Applies a semantic POI request on the UI thread and optionally presents the map. */
-    fun configureMapPois(request: ConfigureMapPoisRequest): CompletableFuture<AssistantToolExecution> {
-        val result = CompletableFuture<AssistantToolExecution>()
-        val action = Runnable {
-            runCatching {
-                val mapWasAlreadyVisible = mapWidget != null
-                lifecycleController.show(WidgetTypeId.MAP)
-                val map = mapWidget ?: error("Map widget could not be created")
-                val beforeConfig = map.poiDisplayConfig
-                map.applyPoiDisplayConfig(request.config)
-                val configChanged = map.poiDisplayConfig != beforeConfig
-                val presented = request.presentation?.let { presentWidget(map, it) } ?: true
-                if (!presented) {
-                    AssistantToolExecution(
-                        false,
-                        AssistantToolExecutionCodes.EXECUTION_FAILED,
-                        "Map presentation could not be started"
-                    )
-                } else {
-                    // Creation already notified through the lifecycle controller.  Existing-map
-                    // configuration changes need the explicit persistent signal here.
-                    if (configChanged && mapWasAlreadyVisible) notifyPersistentContentChanged()
-                    AssistantToolExecution(
-                        true,
-                        AssistantToolExecutionCodes.SUCCESS,
-                        "Map POIs configured: state=${request.config.state.name}, " +
-                                "categories=${
-                                    request.config.categories.sorted().joinToString(",")
-                                }, " +
-                                "radius_m=${request.config.radiusM}, max_results=${request.config.maxResults}"
-                    )
-                }
-            }.onSuccess(result::complete)
-                .onFailure { failure ->
-                    result.complete(
-                        AssistantToolExecution(
-                            false,
-                            AssistantToolExecutionCodes.EXECUTION_FAILED,
-                            failure.message ?: "Map POI configuration failed"
-                        )
-                    )
-                }
-        }
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            action.run()
-        } else if (!post(action)) {
-            result.complete(
-                AssistantToolExecution(
-                    false,
-                    AssistantToolExecutionCodes.EXECUTION_FAILED,
-                    "Glasses display is unavailable"
-                )
-            )
-        }
-        return result
-    }
+    /** Assistant navigation */
+    fun startNavigation(request: StartNavigationRequest) = mapAssistantActions.startNavigation(request)
+    fun stopNavigation() = mapAssistantActions.stopNavigation()
+    fun configureMapPois(request: ConfigureMapPoisRequest) = mapAssistantActions.configurePois(request)
 
     /**
      * Present assistant-authored text on the UI thread. The callback is asynchronous because
      * semantic handlers run inside the provider worker and widget mutations are main-thread-only.
      */
-    fun presentAssistantText(request: AssistantTextPresentationRequest): CompletableFuture<AssistantToolExecution> {
-        val result = CompletableFuture<AssistantToolExecution>()
-        val action = Runnable {
-            val execution = runCatching { presentAssistantTextOnUi(request) }
-                .getOrElse { failure ->
-                    AssistantToolExecution(
-                        false,
-                        AssistantToolExecutionCodes.EXECUTION_FAILED,
-                        failure.message ?: "Text presentation failed"
-                    )
-                }
-            result.complete(execution)
-        }
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            action.run()
-        } else if (!post(action)) {
-            result.complete(
-                AssistantToolExecution(
-                    false,
-                    AssistantToolExecutionCodes.EXECUTION_FAILED,
-                    "Glasses display is unavailable"
-                )
-            )
-        }
-        return result
-    }
-
-    private fun presentAssistantTextOnUi(request: AssistantTextPresentationRequest): AssistantToolExecution {
-        val targetedWidget = request.targetWidgetId
-            ?.let(::findWidgetByStableId)
-            as? TextBoxWidget
-        val widget = targetedWidget ?: createAssistantTextWidget()
-            ?: return AssistantToolExecution(
-            false,
-            AssistantToolExecutionCodes.EXECUTION_FAILED,
-            "Text widget could not be created"
-        )
-
-        val renderedContent = AssistantTextContentFormatter.render(request.content, request.sources)
-        widget.setAssistantContent(renderedContent)
-
-        // Assistant output is not a typing task: clear both the canvas keyboard and any Android
-        // IME/focus state before applying the requested temporary presentation.
-        widget.hideKeyboard()
-        widget.setFocused(false)
-        setFocusedWidget(null)
-        hideAssistantIme()
-
-        val presented = presentWidget(
-            widget = widget,
-            spec = request.spec,
-            createdByPresentation = targetedWidget == null
-        )
-        if (!presented) {
-            if (targetedWidget == null) removePresentationTarget(widget)
-            return AssistantToolExecution(
-                false,
-                AssistantToolExecutionCodes.EXECUTION_FAILED,
-                "Text presentation could not be started"
-            )
-        }
-        return AssistantToolExecution(
-            true,
-            AssistantToolExecutionCodes.SUCCESS,
-            "Text presented"
-        )
-    }
+    fun presentAssistantText(request: AssistantTextPresentationRequest) =  textAssistantActions.present(request)
 
     private fun createAssistantTextWidget(): TextBoxWidget? {
         if (!isReady()) return null
@@ -5151,60 +4722,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     /** Capture only runtime layout metadata for the next assistant request. */
-    fun assistantUiContext(): AssistantUiContext {
-        val entries = mutableListOf<Triple<String, WidgetDescriptor, BaseWidget>>()
-        WidgetDescriptors.all.forEach { descriptor ->
-            registry.widgets(descriptor.type).forEach { widget ->
-                val id = stableWidgetId(widget)
-                entries += Triple(id, descriptor, widget)
-            }
-        }
-
-        val focused = when {
-            focusedWidget != null -> focusedWidget
-            focusedBrowserWidget != null -> focusedBrowserWidget
-            else -> null
-        }
-        val focusedId = entries.firstOrNull { it.third === focused }?.first
-        val widgets = entries.map { (id, descriptor, widget) ->
-            val bounds = widget.getBounds()
-            val facts = mutableListOf(
-                AssistantSemanticFact("widget_type", descriptor.type.persistedId),
-                AssistantSemanticFact("widget_label", descriptor.label)
-            )
-            if (widget is NewsWidget) {
-                facts += AssistantSemanticFact("source_kind", widget.getSourceSpec().kind.name)
-                facts += AssistantSemanticFact("source_description", widget.getSourceDescription())
-            }
-            if (widget is FinanceWidget) {
-                facts += widget.semanticState(id).toAssistantSemanticFacts()
-            }
-            if (widget is MapWidget) {
-                facts += widget.poiDisplayConfig.toAssistantSemanticFacts()
-                facts += widget.navigationState.toAssistantSemanticFacts()
-            }
-            AssistantWidgetContext(
-                id = id,
-                left = bounds.left.roundToInt(),
-                top = bounds.top.roundToInt(),
-                right = bounds.right.roundToInt(),
-                bottom = bounds.bottom.roundToInt(),
-                zOrder = widget.zOrder,
-                minimized = widget.isMinimized,
-                fullscreen = widget.isFullscreen,
-                pinned = widget.isPinned,
-                stableId = id,
-                facts = facts
-            )
-        }
-        return AssistantUiContext(
-            screenWidth = width,
-            screenHeight = height,
-            layoutName = layoutManager.activeLayoutName,
-            focusedWidgetId = focusedId,
-            widgets = widgets
-        )
-    }
+    fun assistantUiContext(): AssistantUiContext = assistantUiContextCapture.capture()
 
     fun setAssistantStatus(status: AssistantStatus) {
         assistantVoiceHoverControl.configured = status.configured
@@ -5339,7 +4857,7 @@ class WidgetContainer @JvmOverloads constructor(
             setBinocularMediaSourceActive(widget.binocularSourceId, false)
         }
         if (widget is FinanceWidget) {
-            dataProvider?.onFinanceVisibilityChanged(false)
+            financeFeatures.onDestroyed()
         }
         widget.onDestroy()
     }
@@ -5501,15 +5019,8 @@ class WidgetContainer @JvmOverloads constructor(
         return widget
     }
 
-    private fun applyLocationState(state: DashboardPersistence.LocationWidgetState): LocationWidget {
-        val widget = LocationWidget(context, state.x, state.y, state.width, state.height).apply {
-            onTemperatureUnitChanged = { unitSettings.toggleTemperatureOverride() }
-            setTemperatureUnit(unitSettings.effectiveTemperatureUnit())
-            if (pendingLocationAddress != null || pendingLocationWeather != null) {
-                setLocationData(pendingLocationAddress ?: "Loading...", pendingLocationWeather ?: "Checking weather...")
-            }
-            setSunTimes(pendingLocationSunriseEpochMs, pendingLocationSunsetEpochMs)
-        }
+    private fun applyLocationState(state: DashboardPersistence.LocationWidgetState): LocationWidget {val widget = LocationWidget(context, state.x, state.y, state.width, state.height)
+        locationWeatherBinding.configure(widget)
         widgetCaptureRestore.restoreLocationWidgetPosition(widget, state, width, height)
         applyFullscreenState(widget, state.isFullscreen)
         return widget
@@ -5532,25 +5043,14 @@ class WidgetContainer @JvmOverloads constructor(
     /**
      * Restore or create finance widget with the given state.
      */
-    private fun applyFinanceState(state: DashboardPersistence.FinanceWidgetState): FinanceWidget {
-        val widget = FinanceWidget(state.x, state.y, state.width, state.height).apply {
-            listener = object : FinanceWidgetListener {
-                override fun onStateChanged() = notifyTransientContentChanged()
-                override fun onPersistentStateChanged() = notifyPersistentContentChanged()
-                override fun onDataRequested(visibleConfigs: List<FinanceDashboardTileConfig>, refreshTileIds: List<String>, force: Boolean, reason: String) {
-                    dataProvider?.requestFinanceData(visibleConfigs, refreshTileIds, force, reason)
-                }
-            }
-            pendingFinanceCountryCode?.let { setCountryCode(it) }
-        }
+    private fun applyFinanceState(
+        state: DashboardPersistence.FinanceWidgetState
+    ): FinanceWidget {
+        val widget = FinanceWidget(state.x, state.y, state.width, state.height)
+        financeFeatures.configure(widget)
         widgetCaptureRestore.restoreFinanceWidgetPosition(widget, state, width, height)
         applyFullscreenState(widget, state.isFullscreen)
-        if (widget.isMinimized) {
-            dataProvider?.onFinanceVisibilityChanged(false)
-        } else {
-            widget.requestData(force = true, reason = "widget_restored")
-            dataProvider?.onFinanceVisibilityChanged(true)
-        }
+        financeFeatures.onOpened(widget, reason = "widget_restored")
         return widget
     }
 
@@ -5558,37 +5058,16 @@ class WidgetContainer @JvmOverloads constructor(
      * Restore or create news widget with the given state.
      */
     private fun applyNewsState(state: DashboardPersistence.NewsWidgetState): NewsWidget {
-        val widget = NewsWidget(state.x, state.y, state.width, state.height).apply {
-            listener = object : NewsWidgetListener {
-                override fun onStateChanged() = notifyTransientContentChanged()
-                override fun onPersistentStateChanged() = notifyPersistentContentChanged()
-                override fun onDataRequested(countryCode: String, force: Boolean, reason: String) {
-                    dataProvider?.requestNewsData(countryCode, force, reason)
-                }
-                override fun onSourceDataRequested(sourceSpec: NewsSourceSpec, countryCode: String, force: Boolean, reason: String, completion: (Result<NewsSnapshot>) -> Unit) {
-                    dataProvider?.requestNewsSourceData(sourceSpec, countryCode, force, reason, completion)
-                        ?: completion(Result.failure(IllegalStateException("News data service is unavailable")))
-                }
-                override fun onSourceInputFocusChanged(focused: Boolean) { notifyFocusChanged(focused) }
-            }
-            pendingNewsCountryCode?.let { setCountryCode(it) }
-        }
+        val widget = NewsWidget(state.x, state.y, state.width, state.height)
+        newsFeatures.configure(widget)
         widgetCaptureRestore.restoreNewsWidgetPosition(widget, state, width, height)
         applyFullscreenState(widget, state.isFullscreen)
-        widget.requestData(force = true, reason = "widget_restored")
+        newsFeatures.onOpened(widget, reason = "widget_restored")
         return widget
     }
 
     private fun applyNotificationsState(state: DashboardPersistence.NotificationsWidgetState): NotificationsWidget {
-        val widget = NotificationsWidget(
-            state.x,
-            state.y,
-            state.width,
-            state.height,
-            height.toFloat()
-        ).apply {
-            onStateChanged = { notifyTransientContentChanged() }
-        }
+        val widget = NotificationsWidget(state.x, state.y, state.width, state.height, height.toFloat()).apply {onStateChanged = { notifyTransientContentChanged() }}
         widgetCaptureRestore.restoreNotificationsWidgetPosition(widget, state, width, height)
         widget.setScreenHeight(height.toFloat())
         widget.setNotificationsSnapshot(latestNotificationsSnapshot)
