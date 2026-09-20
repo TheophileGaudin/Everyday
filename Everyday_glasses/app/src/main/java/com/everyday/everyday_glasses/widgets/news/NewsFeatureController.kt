@@ -1,6 +1,5 @@
 package com.everyday.everyday_glasses.widgets.news
 
-import android.os.Looper
 import com.everyday.everyday_glasses.contracts.WidgetDataProvider
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.NewsSourceUpdateResult
 import com.everyday.everyday_glasses.runtime.NewsWidgetListener
