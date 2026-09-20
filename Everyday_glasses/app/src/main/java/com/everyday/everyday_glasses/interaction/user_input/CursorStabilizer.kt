@@ -62,17 +62,6 @@ class CursorStabilizer {
         lastOutputSpeed = 0f
     }
 
-    /**
-     * Process raw delta input and return stabilized delta output.
-     * 
-     * @param rawDx Raw X delta from trackpad
-     * @param rawDy Raw Y delta from trackpad
-     * @return Stabilized PointF containing (processedDx, processedDy)
-     */
-    fun process(rawDx: Float, rawDy: Float): PointF {
-        val out = PointF()
-        return processInto(rawDx, rawDy, out)
-    }
 
     /**
      * Process raw delta input into a caller-owned point to avoid per-frame

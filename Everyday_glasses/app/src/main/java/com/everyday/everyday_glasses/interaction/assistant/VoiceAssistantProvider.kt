@@ -1,5 +1,7 @@
 package com.everyday.everyday_glasses.interaction.assistant
 
+import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.AssistantOutputPolicy
+import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.AssistantSource
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File

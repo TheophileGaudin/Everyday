@@ -1,5 +1,12 @@
-package com.everyday.everyday_glasses.interaction.assistant
+package com.everyday.everyday_glasses.interaction.assistant.widget_adapters
 
+import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticFact
+import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticToolHandler
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolDefinition
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecution
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.interaction.assistant.assistantCompletedFuture
 import com.everyday.everyday_glasses.widgets.finance.FinanceWidget
 import com.everyday.shared.sync.FinanceAssetType
 import com.everyday.shared.sync.FinanceChartType
@@ -181,7 +188,7 @@ class UpdateFinanceTileSemanticToolHandler(
         name = "update_finance_tile",
         description =
             "Update the instrument on an existing Finance dashboard tile and refresh its data; " +
-                "target defaults to TOP_LEFT_VISIBLE when no target is specified",
+                    "target defaults to TOP_LEFT_VISIBLE when no target is specified",
         parameters = JSONObject()
             .put("type", "object")
             .put(
@@ -190,7 +197,10 @@ class UpdateFinanceTileSemanticToolHandler(
                         "instrument", JSONObject()
                             .put("type", "string")
                             .put("maxLength", 128)
-                            .put("description", "A catalogue name, alias, or symbol such as FTSE100")
+                            .put(
+                                "description",
+                                "A catalogue name, alias, or symbol such as FTSE100"
+                            )
                     )
                     .put(
                         "target", JSONObject()
@@ -219,7 +229,7 @@ class UpdateFinanceTileSemanticToolHandler(
                         "slot", JSONObject()
                             .put("type", "integer")
                             .put("minimum", 0)
-                            .put("maximum", FinanceWidget.MAX_TILES - 1)
+                            .put("maximum", FinanceWidget.Companion.MAX_TILES - 1)
                             .put("description", "Optional dashboard placement slot")
                     )
                     .put(
@@ -336,8 +346,8 @@ class UpdateFinanceTileSemanticToolHandler(
             arguments.has("placement") && !arguments.isNull("placement") -> arguments.getInt("placement")
             else -> return null
         }
-        require(raw in 0 until FinanceWidget.MAX_TILES) {
-            "Finance tile slot must be between 0 and ${FinanceWidget.MAX_TILES - 1}"
+        require(raw in 0 until FinanceWidget.Companion.MAX_TILES) {
+            "Finance tile slot must be between 0 and ${FinanceWidget.Companion.MAX_TILES - 1}"
         }
         return raw
     }

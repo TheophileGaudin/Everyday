@@ -2,7 +2,7 @@ package com.everyday.everyday_glasses.interaction.assistant.page_agent
 
 import com.everyday.everyday_glasses.interaction.assistant.AssistantDiagnostics
 import com.everyday.everyday_glasses.interaction.assistant.AssistantPreferencesStore
-import com.everyday.everyday_glasses.interaction.assistant.BrowserTaskPolicy
+import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserTaskPolicy
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutorService

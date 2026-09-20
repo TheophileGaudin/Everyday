@@ -1,17 +1,8 @@
-package com.everyday.everyday_glasses.interaction.assistant
+package com.everyday.everyday_glasses.interaction.assistant.page_agent
 
 import android.os.Handler
 import android.os.Looper
 import android.webkit.WebView
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentActionCode
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentActionResult
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentActionType
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentBrowserAdapter
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentFullscreenMode
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentPageSnapshot
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentPolicy
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentTargetBinding
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentTargetUnavailableException
 import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit

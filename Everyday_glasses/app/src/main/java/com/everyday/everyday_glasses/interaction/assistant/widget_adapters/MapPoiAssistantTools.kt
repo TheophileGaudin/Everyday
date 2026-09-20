@@ -1,5 +1,11 @@
-package com.everyday.everyday_glasses.interaction.assistant
+package com.everyday.everyday_glasses.interaction.assistant.widget_adapters
 
+import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticToolHandler
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolDefinition
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecution
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.interaction.assistant.assistantCompletedFuture
 import com.everyday.everyday_glasses.widgets.map.backend.MapPoiCategoryCatalog
 import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
 import com.everyday.everyday_glasses.widgets._common.PresentationExpiryPolicy
@@ -33,7 +39,10 @@ class ConfigureMapPoisSemanticToolHandler(
                         "categories", JSONObject()
                             .put("type", "array")
                             .put("minItems", 1)
-                            .put("items", JSONObject().put("type", "string").put("enum", categoryEnum()))
+                            .put(
+                                "items",
+                                JSONObject().put("type", "string").put("enum", categoryEnum())
+                            )
                     )
                     .put(
                         "radius_m", JSONObject()

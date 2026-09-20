@@ -1,9 +1,5 @@
 package com.everyday.everyday_glasses.interaction.commands
 
-import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
-import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
-import com.everyday.everyday_glasses.interaction.commands.CommandAvailability
-import com.everyday.everyday_glasses.interaction.commands.CommandValidationResult
 import com.everyday.shared.command.AppCommandArguments
 import com.everyday.shared.command.AppCommandInvocation
 import com.everyday.shared.command.CommandScrollDirection

@@ -1,5 +1,11 @@
-package com.everyday.everyday_glasses.interaction.assistant
+package com.everyday.everyday_glasses.interaction.assistant.widget_adapters
 
+import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticToolHandler
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolDefinition
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecution
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.interaction.assistant.assistantCompletedFuture
 import com.everyday.everyday_glasses.widgets.map.backend.NavigationAddressText
 import com.everyday.everyday_glasses.widgets.map.backend.StartNavigationRequest
 import com.everyday.everyday_glasses.widgets._common.PresentationExpiryPolicy

@@ -4,7 +4,7 @@ import com.everyday.everyday_glasses.interaction.assistant.AssistantModel
 import com.everyday.everyday_glasses.interaction.assistant.AssistantProviderTurn
 import com.everyday.everyday_glasses.interaction.assistant.AssistantScreenshot
 import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticToolHandler
-import com.everyday.everyday_glasses.interaction.assistant.AssistantTextPresentationRequest
+import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.AssistantTextPresentationRequest
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolCall
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolCatalog
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolDefinition

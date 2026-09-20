@@ -24,12 +24,12 @@ import com.everyday.everyday_glasses.interaction.assistant.AssistantNetworkLease
 import com.everyday.everyday_glasses.interaction.assistant.AssistantPreferencesStore
 import com.everyday.everyday_glasses.interaction.assistant.AssistantStateObserver
 import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContext
-import com.everyday.everyday_glasses.interaction.assistant.BrowserRoutingCoordinator
+import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserRoutingCoordinator
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.GeminiPageAgentProvider
 import com.everyday.everyday_glasses.interaction.assistant.GeminiVoiceAssistantProvider
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentCoordinator
 import com.everyday.everyday_glasses.interaction.assistant.VoiceAssistantCoordinator
-import com.everyday.everyday_glasses.interaction.assistant.WidgetContainerBrowserRoutingHost
+import com.everyday.everyday_glasses.interaction.assistant.page_agent.WidgetContainerBrowserRoutingHost
 import com.everyday.everyday_glasses.contracts.CursorActivityObserver
 import com.everyday.everyday_glasses.contracts.DisplaySettingsHandler
 import com.everyday.everyday_glasses.contracts.GoogleAccountHandler

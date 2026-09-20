@@ -1,6 +1,8 @@
 package com.everyday.everyday_glasses.interaction.assistant
 
 import android.util.Base64
+import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.AssistantSource
+import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.FinanceAssistantPolicy
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request

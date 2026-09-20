@@ -152,13 +152,6 @@ class InputCoordinator(
         tapGestureDetectorProvider()?.onTap(x, y) ?: handleTapAtCoordinates(x, y)
     }
 
-    fun handleDoubleTap() {
-        val x = cursorView.getCursorX()
-        val y = cursorView.getCursorY()
-
-        tapGestureDetectorProvider()?.onTap(x, y) ?: handleDoubleTapAtCoordinates(x, y)
-    }
-
     fun handleTapAtCoordinates(screenX: Float, screenY: Float) {
         flashCursor()
         widgetContainer.onTap(screenX, screenY)

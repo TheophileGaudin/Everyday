@@ -9,9 +9,9 @@ import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutio
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionContext
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolLoop
 import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContext
-import com.everyday.everyday_glasses.interaction.assistant.BrowserRoutingCoordinator
-import com.everyday.everyday_glasses.interaction.assistant.BrowserRoutingHost
-import com.everyday.everyday_glasses.interaction.assistant.BrowserTaskPolicy
+import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserRoutingCoordinator
+import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserRoutingHost
+import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserTaskPolicy
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentAction
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentActionCode
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentActionResult
@@ -27,8 +27,8 @@ import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentT
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentTargetUnavailableException
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentTerminalState
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentTurnRequest
-import com.everyday.everyday_glasses.interaction.assistant.PageAgentUiDispatcher
-import com.everyday.everyday_glasses.interaction.assistant.RunBrowserTaskSemanticToolHandler
+import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentUiDispatcher
+import com.everyday.everyday_glasses.interaction.assistant.page_agent.RunBrowserTaskSemanticToolHandler
 import com.everyday.everyday_glasses.interaction.assistant.VoiceAssistantProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

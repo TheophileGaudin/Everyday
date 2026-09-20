@@ -1,16 +1,12 @@
-package com.everyday.everyday_glasses.interaction.assistant
+package com.everyday.everyday_glasses.interaction.assistant.page_agent
 
 import com.everyday.everyday_glasses.WidgetContainer
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentApprovalRequester
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentAudio
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentBrowserAdapter
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentCoordinator
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentResult
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentRunHandle
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentRunRequest
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentTargetBinding
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentTerminalState
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentUpdate
+import com.everyday.everyday_glasses.interaction.assistant.AssistantDiagnostics
+import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticToolHandler
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolDefinition
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecution
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File

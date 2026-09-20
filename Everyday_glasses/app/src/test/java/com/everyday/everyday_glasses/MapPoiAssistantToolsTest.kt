@@ -5,8 +5,8 @@ import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutio
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionCodes
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionContext
 import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContext
-import com.everyday.everyday_glasses.interaction.assistant.ConfigureMapPoisRequest
-import com.everyday.everyday_glasses.interaction.assistant.ConfigureMapPoisSemanticToolHandler
+import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.ConfigureMapPoisRequest
+import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.ConfigureMapPoisSemanticToolHandler
 import com.everyday.everyday_glasses.interaction.assistant.assistantCompletedFuture
 import com.everyday.everyday_glasses.widgets._common.PresentationExpiryPolicy
 import com.everyday.everyday_glasses.widgets._common.PresentationMode

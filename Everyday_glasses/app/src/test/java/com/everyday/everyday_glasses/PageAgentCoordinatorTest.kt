@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.interaction.assistant.BrowserRoutingCoordinator
+import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserRoutingCoordinator
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentAction
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentActionCode
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentActionResult

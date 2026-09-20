@@ -2,7 +2,7 @@ package com.everyday.everyday_glasses.interaction.assistant.page_agent
 
 import android.util.Base64
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolDefinition
-import com.everyday.everyday_glasses.interaction.assistant.BrowserTaskPolicy
+import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserTaskPolicy
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request

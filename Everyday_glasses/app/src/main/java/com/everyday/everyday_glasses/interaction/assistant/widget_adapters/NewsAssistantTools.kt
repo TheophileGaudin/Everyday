@@ -1,5 +1,11 @@
-package com.everyday.everyday_glasses.interaction.assistant
+package com.everyday.everyday_glasses.interaction.assistant.widget_adapters
 
+import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticToolHandler
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolDefinition
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecution
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.interaction.assistant.assistantCompletedFuture
 import com.everyday.shared.sync.NewsDataProvider
 import com.everyday.shared.sync.NewsSourceSpec
 import org.json.JSONArray

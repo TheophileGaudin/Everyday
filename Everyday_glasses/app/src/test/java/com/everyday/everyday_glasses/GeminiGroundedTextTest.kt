@@ -1,9 +1,9 @@
 package com.everyday.everyday_glasses
 
 import com.everyday.everyday_glasses.interaction.assistant.AssistantProviderTurn
-import com.everyday.everyday_glasses.interaction.assistant.AssistantTextContentFormatter
-import com.everyday.everyday_glasses.interaction.assistant.AssistantTextPresentationPolicy
-import com.everyday.everyday_glasses.interaction.assistant.AssistantTextPresentationRequest
+import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.AssistantTextContentFormatter
+import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.AssistantTextPresentationPolicy
+import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.AssistantTextPresentationRequest
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolCall
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolCatalog
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolDefinition

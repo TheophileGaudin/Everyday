@@ -1,5 +1,6 @@
-package com.everyday.everyday_glasses.interaction.assistant
+package com.everyday.everyday_glasses.interaction.assistant.widget_adapters
 
+import com.everyday.everyday_glasses.interaction.assistant.AssistantProviderAnswer
 import com.everyday.everyday_glasses.widgets._common.PresentationExpiryPolicy
 import com.everyday.everyday_glasses.widgets._common.PresentationMode
 import com.everyday.everyday_glasses.widgets._common.PresentationSpec
