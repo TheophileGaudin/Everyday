@@ -40,11 +40,5 @@ data class SubtitleSelection(
 data class VideoSubtitleState(
     val subtitles: List<UploadedSubtitle> = emptyList(),
     val selection: SubtitleSelection? = null,
-) {
-    val selectedSubtitle: UploadedSubtitle?
-        get() = selection
-            ?.takeIf { it.mode == SubtitleSelectionMode.EXTERNAL }
-            ?.externalSubtitleId
-            ?.let { selectedId -> subtitles.firstOrNull { it.id == selectedId } }
-}
+)
 

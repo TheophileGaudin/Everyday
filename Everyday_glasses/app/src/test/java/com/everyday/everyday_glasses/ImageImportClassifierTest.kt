@@ -1,7 +1,7 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.files.ImageImportClassifier
-import com.everyday.everyday_glasses.files.ImageImportFormat
+import com.everyday.everyday_glasses.widgets.file_browser.ImageImportClassifier
+import com.everyday.everyday_glasses.widgets.file_browser.ImageImportFormat
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test

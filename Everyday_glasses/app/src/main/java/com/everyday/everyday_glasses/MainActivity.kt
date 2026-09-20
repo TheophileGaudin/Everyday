@@ -46,9 +46,9 @@ import com.everyday.everyday_glasses._binocular.BinocularView
 import com.everyday.everyday_glasses.runtime.BrightnessController
 import com.everyday.everyday_glasses.runtime.DisplayPowerCallbacks
 import com.everyday.everyday_glasses.runtime.DisplayPowerController
-import com.everyday.everyday_glasses.files.FileImportCallbacks
-import com.everyday.everyday_glasses.files.FileImportCoordinator
-import com.everyday.everyday_glasses.files.FileImportError
+import com.everyday.everyday_glasses.widgets.file_browser.FileImportCallbacks
+import com.everyday.everyday_glasses.widgets.file_browser.FileImportCoordinator
+import com.everyday.everyday_glasses.widgets.file_browser.FileImportError
 import com.everyday.everyday_glasses.connectivity.GlassesDataSyncCoordinator
 import com.everyday.everyday_glasses.auth_permissions.GoogleAuthCoordinator
 import com.everyday.everyday_glasses.auth_permissions.GooglePhoneAuthStatus

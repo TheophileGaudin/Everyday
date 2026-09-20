@@ -209,8 +209,7 @@ class PermissionCoordinator(
         }
 
         val missingPermissions = buildList {
-            if (true &&
-                !hasPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
+            if (!hasPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
             ) {
                 add(Manifest.permission.READ_EXTERNAL_STORAGE)
             }
