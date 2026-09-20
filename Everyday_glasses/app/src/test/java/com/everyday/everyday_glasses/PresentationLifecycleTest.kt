@@ -35,12 +35,6 @@ class PresentationLifecycleTest {
             tasks += scheduled
             return PresentationCancellable { scheduled.cancelled = true }
         }
-
-        fun runNext() {
-            val next = tasks.firstOrNull { !it.cancelled } ?: return
-            next.cancelled = true
-            next.action()
-        }
     }
 
     private val snapshot = PresentationSnapshot(
@@ -159,13 +153,27 @@ class PresentationLifecycleTest {
         controller.start("old",
             PresentationSpec(PresentationMode.FULLSCREEN, 10, PresentationExpiryPolicy.CLOSE)
         ) {
-            PresentationSnapshot(true, true, snapshot.bounds, true, false, 1)
+            PresentationSnapshot(
+                existedBeforePresentation = true,
+                visible = true,
+                bounds = snapshot.bounds,
+                fullscreen = true,
+                focused = false,
+                zOrder = 1
+            )
         }
         controller.start("new",
             PresentationSpec(PresentationMode.WINDOWED, 10, PresentationExpiryPolicy.CLOSE)
         ) {
             order += "snapshot:$state"
-            PresentationSnapshot(true, true, snapshot.bounds, false, false, 2)
+            PresentationSnapshot(
+                existedBeforePresentation = true,
+                visible = true,
+                bounds = snapshot.bounds,
+                fullscreen = false,
+                focused = false,
+                zOrder = 2
+            )
         }
 
         assertEquals(listOf("start:old", "restore:old", "snapshot:old-restored", "start:new"), order)
@@ -175,13 +183,13 @@ class PresentationLifecycleTest {
     @Test
     fun `dismissal and target removal clear progress and make stale timers harmless`() {
         val scheduler = FakeScheduler()
-        val progress = mutableListOf<PresentationProgress?>()
+        val progressUpdates = mutableListOf<PresentationProgress?>()
         val controller = PresentationController(
             scheduler = scheduler,
             nowElapsedMs = { 0L },
             delegate = object : PresentationLifecycleDelegate {
-                override fun onProgressChanged(value: PresentationProgress?) {
-                    progress += value
+                override fun onProgressChanged(progress: PresentationProgress?) {
+                    progressUpdates += progress
                 }
             }
         )
@@ -192,7 +200,7 @@ class PresentationLifecycleTest {
         }!!
         assertTrue(controller.dismiss())
         assertNull(controller.activeSession)
-        assertNull(progress.last())
+        assertNull(progressUpdates.last())
         assertFalse(controller.onTimerFired(session.token, 10_000L))
 
         controller.start("text#1",
@@ -208,15 +216,15 @@ class PresentationLifecycleTest {
     @Test
     fun `progress uses the original duration and disappears before expiry policy runs`() {
         val scheduler = FakeScheduler()
-        val progress = mutableListOf<PresentationProgress?>()
+        val progressUpdates = mutableListOf<PresentationProgress?>()
         val order = mutableListOf<String>()
         val controller = PresentationController(
             scheduler = scheduler,
             nowElapsedMs = { 0L },
             delegate = object : PresentationLifecycleDelegate {
-                override fun onProgressChanged(value: PresentationProgress?) {
-                    progress += value
-                    if (value == null) order += "progress-cleared"
+                override fun onProgressChanged(progress: PresentationProgress?) {
+                    progressUpdates += progress
+                    if (progress == null) {order += "progress-cleared"}
                 }
 
                 override fun onLeaveWindowed(session: PresentationSession) {
@@ -234,8 +242,8 @@ class PresentationLifecycleTest {
         ) { snapshot }!!
 
         controller.onTimerFired(session.token, 2_500L)
-        assertEquals(0.25f, progress.filterNotNull().last().fraction, 0.001f)
-        assertEquals(10_000L, progress.filterNotNull().last().durationMs)
+        assertEquals(0.25f, progressUpdates.filterNotNull().last().fraction, 0.001f)
+        assertEquals(10_000L, progressUpdates.filterNotNull().last().durationMs)
 
         controller.onTimerFired(session.token, 10_000L)
         assertEquals(listOf("progress-cleared", "expiry-applied"), order)
@@ -245,7 +253,7 @@ class PresentationLifecycleTest {
     @Test
     fun `user cancellation happens before normal delivery and leaves current state untouched`() {
         val scheduler = FakeScheduler()
-        var currentState = "fullscreen"
+        val currentState = "fullscreen"
         val controller = PresentationController(
             scheduler = scheduler,
             nowElapsedMs = { 0L }

@@ -39,7 +39,7 @@ class GoogleAuthCoordinatorTest {
                             accessToken = "fresh-access-token",
                             expiresInSeconds = 3600,
                             refreshToken = "refresh-token",
-                            idToken = buildIdToken("user@example.com", "Everyday User")
+                            idToken = buildIdToken()
                         )
                     )
                 )
@@ -52,10 +52,10 @@ class GoogleAuthCoordinatorTest {
             tokenService = FakeGoogleOAuthTokenService(),
             networkStatusProvider = FakeNetworkStatusProvider(true),
             phoneFallbackBridge = RecordingPhoneFallbackBridge(),
-            executor = Executor { runnable -> runnable.run() }
+            executor = { runnable -> runnable.run() }
         )
 
-        coordinator.beginConnect(null)
+        coordinator.beginConnect()
 
         assertEquals("device-client-id.apps.googleusercontent.com", deviceService.lastDeviceCodeClientId)
         assertEquals(
@@ -81,10 +81,10 @@ class GoogleAuthCoordinatorTest {
             tokenService = FakeGoogleOAuthTokenService(),
             networkStatusProvider = FakeNetworkStatusProvider(true),
             phoneFallbackBridge = phoneBridge,
-            executor = Executor { runnable -> runnable.run() }
+            executor = { runnable -> runnable.run() }
         )
 
-        coordinator.beginConnect(null)
+        coordinator.beginConnect()
 
         assertEquals(GoogleAuthState.Status.PHONE_FALLBACK_REQUIRED, coordinator.getCurrentState().status)
         assertEquals(GoogleAuthState.AuthMode.PHONE_FALLBACK, coordinator.getCurrentState().authMode)
@@ -103,7 +103,7 @@ class GoogleAuthCoordinatorTest {
                 accessToken = "refreshed-access-token",
                 expiresInSeconds = 3600,
                 refreshToken = "refresh-token",
-                idToken = buildIdToken("user@example.com", "Everyday User")
+                idToken = buildIdToken()
             )
         )
         val coordinator = GoogleAuthCoordinator(
@@ -246,7 +246,6 @@ private class FakeGoogleOAuthDeviceService(
         return when (response) {
             is FakePollResponse.Success -> response.response
             is FakePollResponse.Failure -> throw response.throwable
-            else -> error("Unexpected fake device poll response")
         }
     }
 }
@@ -256,7 +255,7 @@ private class FakeGoogleOAuthTokenService(
         accessToken = "refreshed-access-token",
         expiresInSeconds = 3600,
         refreshToken = "refresh-token",
-        idToken = buildIdToken("user@example.com", "Everyday User")
+        idToken = buildIdToken()
     )
 ) : GoogleOAuthTokenService {
     var lastRefreshToken: String? = null
@@ -301,10 +300,16 @@ private class RecordingPhoneFallbackBridge : GooglePhoneFallbackBridge {
     }
 }
 
-private fun buildIdToken(email: String, displayName: String): String {
-    val header = Base64.getUrlEncoder().withoutPadding().encodeToString("""{"alg":"none"}""".toByteArray())
-    val payload = Base64.getUrlEncoder().withoutPadding().encodeToString(
-        """{"email":"$email","name":"$displayName"}""".toByteArray()
-    )
+private fun buildIdToken(): String {
+    val header = Base64.getUrlEncoder()
+        .withoutPadding()
+        .encodeToString("""{"alg":"none"}""".toByteArray())
+
+    val payload = Base64.getUrlEncoder()
+        .withoutPadding()
+        .encodeToString(
+            """{"email":"user@example.com","name":"Everyday User"}""".toByteArray()
+        )
+
     return "$header.$payload.signature"
 }

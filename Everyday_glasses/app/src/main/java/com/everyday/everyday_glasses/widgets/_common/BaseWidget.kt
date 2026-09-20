@@ -93,9 +93,6 @@ abstract class BaseWidget(
         RESIZING        // Being resized
     }
 
-    protected fun BaseState.asWidgetChromeState(): BaseState =
-        WidgetInteractionState(this).chromeState
-
     enum class BaseHitArea {
         NONE,
         CONTENT,
@@ -398,7 +395,7 @@ abstract class BaseWidget(
      */
     open fun baseHitTest(px: Float, py: Float): BaseHitArea {
         // Check buttons first
-        // We always check buttons because they might extend outside the widget bounds
+        // We always check buttons because they might extend outside the widget bounds,
         // and we want them to "wake up" the widget.
         if (closeButtonBounds.contains(px, py)) {
             return BaseHitArea.CLOSE_BUTTON
@@ -547,12 +544,9 @@ abstract class BaseWidget(
             else -> BaseState.IDLE
         }
 
-        // UNIFIED RULE: Border is hovered if and only if we're in HOVER_BORDER state
-        // (or HOVER_RESIZE, MOVING, RESIZING)
-        _isBorderHovered = when (newState) {
-            BaseState.HOVER_BORDER, BaseState.HOVER_RESIZE, BaseState.MOVING, BaseState.RESIZING -> true
-            else -> false
-        }
+        // Moving and resizing returned near the start of this function.
+        // Resize-handle hovering is handled immediately below.
+        _isBorderHovered = newState == BaseState.HOVER_BORDER
 
         // Also check resize handle specifically
         if (!isFullscreen && !isMinimized && getResizeHitArea().contains(px, py)) {

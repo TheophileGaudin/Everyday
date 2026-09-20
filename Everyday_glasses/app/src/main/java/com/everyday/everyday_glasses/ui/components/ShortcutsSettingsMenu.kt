@@ -139,7 +139,7 @@ class ShortcutsSettingsMenu(
         for (invocation in initialShortcuts) {
             val definition = registry.find(invocation.commandId) ?: continue
             if (onLemon.none { it.id == definition.id }) onLemon.add(definition)
-            if (onLemon.size >= AppCommandRegistry.Companion.MAX_LEMON_COMMANDS) break
+            if (onLemon.size >= AppCommandRegistry.MAX_LEMON_COMMANDS) break
         }
         rebuildAvailable()
     }
@@ -242,8 +242,8 @@ class ShortcutsSettingsMenu(
         canvas.drawRoundRect(rightRect, 8f, 8f, columnBgPaint)
         canvas.drawText("Available", leftHeaderRect.left + 10f, leftHeaderRect.bottom - 6f, headerPaint)
         canvas.drawText("On the lemon", rightHeaderRect.left + 10f, rightHeaderRect.bottom - 6f, headerPaint)
-        val capacity = "${onLemon.size} / ${AppCommandRegistry.Companion.MAX_LEMON_COMMANDS}"
-        val isFull = onLemon.size >= AppCommandRegistry.Companion.MAX_LEMON_COMMANDS
+        val capacity = "${onLemon.size} / ${AppCommandRegistry.MAX_LEMON_COMMANDS}"
+        val isFull = onLemon.size >= AppCommandRegistry.MAX_LEMON_COMMANDS
         canvas.drawText(capacity, rightHeaderRect.right - 10f, rightHeaderRect.bottom - 6f, capacityPaint)
         canvas.withClip(
             leftRect.left,
@@ -357,7 +357,7 @@ class ShortcutsSettingsMenu(
     }
 
     private fun moveToLemon(action: AppCommandDefinition) {
-        if (onLemon.size >= AppCommandRegistry.Companion.MAX_LEMON_COMMANDS) return
+        if (onLemon.size >= AppCommandRegistry.MAX_LEMON_COMMANDS) return
         if (onLemon.any { it.id == action.id }) return
         onLemon.add(action)
         rebuildAvailable()

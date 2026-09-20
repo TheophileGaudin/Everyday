@@ -154,11 +154,11 @@ class FinanceAssistantToolsTest {
 
         assertTrue(execution.success)
         assertEquals(FinanceTileTargetMode.TOP_LEFT_VISIBLE, requested!!.target.mode)
-        assertEquals("^FTSE", requested!!.instrument.symbol)
-        assertEquals(null, requested!!.range)
-        assertEquals(null, requested!!.chartType)
-        assertEquals(null, requested!!.slot)
-        assertEquals(null, requested!!.fullscreen)
+        assertEquals("^FTSE", requested.instrument.symbol)
+        assertEquals(null, requested.range)
+        assertEquals(null, requested.chartType)
+        assertEquals(null, requested.slot)
+        assertEquals(null, requested.fullscreen)
     }
 
     @Test
@@ -206,12 +206,12 @@ class FinanceAssistantToolsTest {
 
         assertTrue(execution.success)
         assertEquals(FinanceTileTargetMode.EXPLICIT, requested!!.target.mode)
-        assertEquals("stable-tile", requested!!.target.tileId)
-        assertEquals(FinanceDataProvider.resolveInstrument("FTSE"), requested!!.instrument)
-        assertEquals(FinanceTimeRange.ONE_MONTH, requested!!.range)
-        assertEquals(FinanceChartType.CANDLE, requested!!.chartType)
-        assertEquals(4, requested!!.slot)
-        assertEquals(false, requested!!.fullscreen)
+        assertEquals("stable-tile", requested.target.tileId)
+        assertEquals(FinanceDataProvider.resolveInstrument("FTSE"), requested.instrument)
+        assertEquals(FinanceTimeRange.ONE_MONTH, requested.range)
+        assertEquals(FinanceChartType.CANDLE, requested.chartType)
+        assertEquals(4, requested.slot)
+        assertEquals(false, requested.fullscreen)
     }
 
     private fun tile(

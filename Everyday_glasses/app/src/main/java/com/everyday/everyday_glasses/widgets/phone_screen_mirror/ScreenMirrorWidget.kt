@@ -1,3 +1,6 @@
+@file:Suppress("DEPRECATION")
+// RenderScript is intentionally retained until the mirror conversion
+// is migrated and performance-tested on the glasses.
 package com.everyday.everyday_glasses.widgets.phone_screen_mirror
 
 import android.content.Context
@@ -40,9 +43,6 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * Refactored to extend BaseWidget for common functionality.
  */
-// RenderScript is intentionally retained until the mirror conversion
-// is migrated and performance-tested on the glasses.
-@Suppress("DEPRECATION")
 class ScreenMirrorWidget(
     private val context: Context,
     x: Float,

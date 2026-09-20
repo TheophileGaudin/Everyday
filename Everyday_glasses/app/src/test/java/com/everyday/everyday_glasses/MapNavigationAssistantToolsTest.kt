@@ -63,8 +63,8 @@ class MapNavigationAssistantToolsTest {
 
         assertTrue(execution.success)
         assertEquals("Central Station", received!!.address)
-        assertEquals("WALKING", received!!.mode)
-        assertEquals(PresentationMode.FULLSCREEN, received!!.presentation!!.mode)
+        assertEquals("WALKING", received.mode)
+        assertEquals(PresentationMode.FULLSCREEN, received.presentation!!.mode)
     }
 
     @Test

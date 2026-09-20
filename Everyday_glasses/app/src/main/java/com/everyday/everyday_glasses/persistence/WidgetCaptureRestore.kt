@@ -1,6 +1,5 @@
 package com.everyday.everyday_glasses.persistence
 
-import android.content.Context
 import android.util.Log
 import com.everyday.everyday_glasses.runtime.TextBoxWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetPersistenceListener
@@ -32,7 +31,7 @@ import java.io.File
  * Some legacy bulk-restore methods still construct widgets. Move those construction paths into
  * focused factories as their widget types are refactored; do not expand that legacy role.
  */
-class WidgetCaptureRestore(private val context: Context) {
+class WidgetCaptureRestore {
 
     companion object {
         private const val TAG = "WidgetCaptureRestore"

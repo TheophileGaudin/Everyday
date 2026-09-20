@@ -216,7 +216,7 @@ class WidgetContainer @JvmOverloads constructor(
     private val cursorStabilizer = CursorStabilizer()
     private val stabilizedCursorDelta = PointF()
     private val registry = WidgetRegistry()
-    private val widgetCaptureRestore = WidgetCaptureRestore(context)
+    private val widgetCaptureRestore = WidgetCaptureRestore()
     private val videoQueueRepository = VideoQueueRepository(context)
     private val lifecycleController = WidgetLifecycleController(
         runOnUiThread = { action -> post(action) },

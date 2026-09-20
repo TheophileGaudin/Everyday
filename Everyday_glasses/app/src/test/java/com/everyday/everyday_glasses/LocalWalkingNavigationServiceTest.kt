@@ -26,12 +26,12 @@ class LocalWalkingNavigationServiceTest {
     fun resolvesAddressThroughForwardGeocoderAndReturnsRankedResult() {
         var searched: String? = null
         val service = LocalWalkingNavigationService(
-            geocoder = ForwardGeocoder { address, near ->
+            geocoder = { address, near ->
                 searched = address
                 assertEquals(origin, near)
                 Result.success(listOf(GeocodingCandidate(destination, "Museum, London")))
             },
-            graphProvider = RouteGraphProvider { _, _ -> RouteGraphFetchResult.Success(routeData()) }
+            graphProvider = { _, _ -> RouteGraphFetchResult.Success(routeData()) }
         )
 
         val resolution = service.resolveAddress("  Museum,   London ", origin)
@@ -52,8 +52,8 @@ class LocalWalkingNavigationServiceTest {
             )
         )
         val service = LocalWalkingNavigationService(
-            geocoder = ForwardGeocoder { _, _ -> Result.success(emptyList()) },
-            graphProvider = RouteGraphProvider { _, buffer ->
+            geocoder = { _, _ -> Result.success(emptyList()) },
+            graphProvider = { _, buffer ->
                 buffers += buffer
                 RouteGraphFetchResult.Success(if (buffer == 400) disconnected else routeData())
             }
@@ -71,8 +71,8 @@ class LocalWalkingNavigationServiceTest {
     fun rejectsDestinationBeyondTheProviderSafetyCeilingBeforeNetworkFetch() {
         var calls = 0
         val service = LocalWalkingNavigationService(
-            geocoder = ForwardGeocoder { _, _ -> Result.success(emptyList()) },
-            graphProvider = RouteGraphProvider { _, _ ->
+            geocoder = { _, _ -> Result.success(emptyList()) },
+            graphProvider = { _, _ ->
                 calls++
                 RouteGraphFetchResult.Success(routeData())
             }
