@@ -1,16 +1,16 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationBounds
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationCancellable
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationController
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationExpiryPolicy
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationLifecycleDelegate
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationMode
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationProgress
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationScheduler
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationSession
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationSnapshot
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationSpec
+import com.everyday.everyday_glasses.widgets._common.PresentationBounds
+import com.everyday.everyday_glasses.widgets._common.PresentationCancellable
+import com.everyday.everyday_glasses.widgets._common.PresentationController
+import com.everyday.everyday_glasses.widgets._common.PresentationExpiryPolicy
+import com.everyday.everyday_glasses.widgets._common.PresentationLifecycleDelegate
+import com.everyday.everyday_glasses.widgets._common.PresentationMode
+import com.everyday.everyday_glasses.widgets._common.PresentationProgress
+import com.everyday.everyday_glasses.widgets._common.PresentationScheduler
+import com.everyday.everyday_glasses.widgets._common.PresentationSession
+import com.everyday.everyday_glasses.widgets._common.PresentationSnapshot
+import com.everyday.everyday_glasses.widgets._common.PresentationSpec
 import com.everyday.everyday_glasses.interaction.user_input.UserInputActivity
 import com.everyday.everyday_glasses.interaction.user_input.UserInputKind
 import org.junit.Assert.assertEquals

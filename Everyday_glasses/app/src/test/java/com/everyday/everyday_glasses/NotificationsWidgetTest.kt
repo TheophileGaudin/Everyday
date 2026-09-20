@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.ui.widgets.NotificationsWidget
+import com.everyday.everyday_glasses.widgets.notifications.NotificationsWidget
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

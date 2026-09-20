@@ -2,9 +2,9 @@ package com.everyday.everyday_glasses.contracts
 
 import com.everyday.everyday_glasses.runtime.WidgetChangeListener
 import com.everyday.everyday_glasses._binocular.BinocularContentClass
-import com.everyday.everyday_glasses.map.MapGeoPoint
-import com.everyday.everyday_glasses.map.PoiDisplayConfig
-import com.everyday.everyday_glasses.ui.widgets.ScreenMirrorWidget
+import com.everyday.everyday_glasses.widgets.map.backend.MapGeoPoint
+import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
+import com.everyday.everyday_glasses.widgets.phone_screen_mirror.ScreenMirrorWidget
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.NewsSnapshot
 import com.everyday.shared.sync.NewsSourceSpec

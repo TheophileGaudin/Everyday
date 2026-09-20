@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.ui.widgets.common.WidgetHitTestCache
+import com.everyday.everyday_glasses.widgets._common.WidgetHitTestCache
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test

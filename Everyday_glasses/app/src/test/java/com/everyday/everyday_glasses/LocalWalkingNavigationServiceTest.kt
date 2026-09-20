@@ -1,11 +1,11 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.map.LocalWalkingNavigationService
-import com.everyday.everyday_glasses.map.GeocodingCandidate
-import com.everyday.everyday_glasses.map.GeocodingResolution
-import com.everyday.everyday_glasses.map.MapGeoPoint
-import com.everyday.everyday_glasses.map.navigationFailureMessage
-import com.everyday.everyday_glasses.map.ForwardGeocoder
+import com.everyday.everyday_glasses.widgets.map.backend.LocalWalkingNavigationService
+import com.everyday.everyday_glasses.widgets.map.backend.GeocodingCandidate
+import com.everyday.everyday_glasses.widgets.map.backend.GeocodingResolution
+import com.everyday.everyday_glasses.widgets.map.backend.MapGeoPoint
+import com.everyday.everyday_glasses.widgets.map.backend.navigationFailureMessage
+import com.everyday.everyday_glasses.widgets.map.backend.ForwardGeocoder
 import com.everyday.shared.routing.GeoPoint
 import com.everyday.shared.routing.OverpassNode
 import com.everyday.shared.routing.OverpassRouteData

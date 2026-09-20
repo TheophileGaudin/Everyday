@@ -12,7 +12,7 @@ import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentP
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentPolicy
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentTargetBinding
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentTargetUnavailableException
-import com.everyday.everyday_glasses.ui.widgets.BrowserWidget
+import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 

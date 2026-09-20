@@ -1,8 +1,8 @@
 package com.everyday.everyday_glasses
 
 import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.stateOf
-import com.everyday.everyday_glasses.map.MapViewMode
-import com.everyday.everyday_glasses.map.MapZoom
+import com.everyday.everyday_glasses.widgets.map.backend.MapViewMode
+import com.everyday.everyday_glasses.widgets.map.backend.MapZoom
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts

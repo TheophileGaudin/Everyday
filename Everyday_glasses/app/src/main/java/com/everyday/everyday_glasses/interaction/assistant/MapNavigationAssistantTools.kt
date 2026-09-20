@@ -1,10 +1,10 @@
 package com.everyday.everyday_glasses.interaction.assistant
 
-import com.everyday.everyday_glasses.map.NavigationAddressText
-import com.everyday.everyday_glasses.map.StartNavigationRequest
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationExpiryPolicy
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationMode
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationSpec
+import com.everyday.everyday_glasses.widgets.map.backend.NavigationAddressText
+import com.everyday.everyday_glasses.widgets.map.backend.StartNavigationRequest
+import com.everyday.everyday_glasses.widgets._common.PresentationExpiryPolicy
+import com.everyday.everyday_glasses.widgets._common.PresentationMode
+import com.everyday.everyday_glasses.widgets._common.PresentationSpec
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale

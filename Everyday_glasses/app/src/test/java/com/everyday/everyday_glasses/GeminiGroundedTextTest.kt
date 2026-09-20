@@ -15,7 +15,7 @@ import com.everyday.everyday_glasses.interaction.assistant.GeminiInteractionResp
 import com.everyday.everyday_glasses.interaction.assistant.PresentTextSemanticToolHandler
 import com.everyday.everyday_glasses.interaction.assistant.geminiInteractionTools
 import com.everyday.everyday_glasses.interaction.commands.AppCommandResult
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationMode
+import com.everyday.everyday_glasses.widgets._common.PresentationMode
 import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
 import org.json.JSONArray
 import org.json.JSONObject

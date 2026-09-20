@@ -5,7 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
-import com.everyday.everyday_glasses.ui.widgets.FileBrowserWidget
+import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidget
 import java.io.File
 import java.util.Locale
 

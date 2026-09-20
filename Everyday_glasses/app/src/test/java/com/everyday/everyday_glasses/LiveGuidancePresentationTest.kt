@@ -1,10 +1,10 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.map.MapGeoPoint
-import com.everyday.everyday_glasses.map.NavigationDestination
-import com.everyday.everyday_glasses.map.NavigationState
-import com.everyday.everyday_glasses.map.NavigationStatus
-import com.everyday.everyday_glasses.map.toCompactBannerText
+import com.everyday.everyday_glasses.widgets.map.backend.MapGeoPoint
+import com.everyday.everyday_glasses.widgets.map.backend.NavigationDestination
+import com.everyday.everyday_glasses.widgets.map.backend.NavigationState
+import com.everyday.everyday_glasses.widgets.map.backend.NavigationStatus
+import com.everyday.everyday_glasses.widgets.map.backend.toCompactBannerText
 import com.everyday.shared.routing.GuidanceFixStatus
 import com.everyday.shared.routing.LiveGuidanceSnapshot
 import com.everyday.shared.routing.RouteManeuver

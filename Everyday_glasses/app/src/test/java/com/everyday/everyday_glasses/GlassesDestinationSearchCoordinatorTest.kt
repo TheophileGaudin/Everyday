@@ -1,9 +1,9 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.map.DestinationSearchFallbackReason
-import com.everyday.everyday_glasses.map.DestinationSearchListener
-import com.everyday.everyday_glasses.map.GlassesDestinationSearchCoordinator
-import com.everyday.everyday_glasses.map.GlassesDestinationSearchTransport
+import com.everyday.everyday_glasses.widgets.map.backend.DestinationSearchFallbackReason
+import com.everyday.everyday_glasses.widgets.map.backend.DestinationSearchListener
+import com.everyday.everyday_glasses.widgets.map.backend.GlassesDestinationSearchCoordinator
+import com.everyday.everyday_glasses.widgets.map.backend.GlassesDestinationSearchTransport
 import com.everyday.shared.routing.GeoPoint
 import com.everyday.shared.transport.*
 import org.junit.Assert.assertEquals

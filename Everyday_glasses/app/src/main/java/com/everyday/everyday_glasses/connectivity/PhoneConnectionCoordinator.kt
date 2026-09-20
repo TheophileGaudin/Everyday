@@ -4,10 +4,10 @@ import android.content.Context
 import android.net.wifi.p2p.WifiP2pDevice
 import android.util.Log
 import com.everyday.everyday_glasses.contracts.WifiDirectConnectionListener
-import com.everyday.everyday_glasses.google.GoogleAccountSummary
-import com.everyday.everyday_glasses.google.GooglePhoneAuthStatus
-import com.everyday.everyday_glasses.map.GlassesDestinationSearchTransport
-import com.everyday.everyday_glasses.map.GlassesRouteTransport
+import com.everyday.everyday_glasses.google_auth.GoogleAccountSummary
+import com.everyday.everyday_glasses.google_auth.GooglePhoneAuthStatus
+import com.everyday.everyday_glasses.widgets.map.backend.GlassesDestinationSearchTransport
+import com.everyday.everyday_glasses.widgets.map.backend.GlassesRouteTransport
 import com.everyday.shared.sync.SubtitleControl
 import com.everyday.shared.sync.SubtitleStatus
 import com.everyday.shared.sync.SubtitleTranscript

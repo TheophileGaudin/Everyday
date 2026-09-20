@@ -19,10 +19,10 @@ import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
 import androidx.core.app.ActivityCompat
-import com.everyday.everyday_glasses.map.GlassesDestinationSearchTransport
-import com.everyday.everyday_glasses.map.GlassesRouteTransport
-import com.everyday.everyday_glasses.google.GooglePhoneAuthStatus
-import com.everyday.everyday_glasses.google.GoogleAccountSummary
+import com.everyday.everyday_glasses.widgets.map.backend.GlassesDestinationSearchTransport
+import com.everyday.everyday_glasses.widgets.map.backend.GlassesRouteTransport
+import com.everyday.everyday_glasses.google_auth.GooglePhoneAuthStatus
+import com.everyday.everyday_glasses.google_auth.GoogleAccountSummary
 import com.everyday.shared.sync.SyncError
 import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot

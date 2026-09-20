@@ -1,10 +1,10 @@
 package com.everyday.everyday_glasses.interaction.assistant
 
-import com.everyday.everyday_glasses.map.MapPoiCategoryCatalog
-import com.everyday.everyday_glasses.map.PoiDisplayConfig
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationExpiryPolicy
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationMode
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationSpec
+import com.everyday.everyday_glasses.widgets.map.backend.MapPoiCategoryCatalog
+import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
+import com.everyday.everyday_glasses.widgets._common.PresentationExpiryPolicy
+import com.everyday.everyday_glasses.widgets._common.PresentationMode
+import com.everyday.everyday_glasses.widgets._common.PresentationSpec
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.CompletableFuture

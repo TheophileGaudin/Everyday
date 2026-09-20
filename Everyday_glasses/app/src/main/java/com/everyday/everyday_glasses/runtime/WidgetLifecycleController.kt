@@ -3,7 +3,7 @@ package com.everyday.everyday_glasses.runtime
 import android.os.Looper
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.WidgetDocument
-import com.everyday.everyday_glasses.ui.widgets.BaseWidget
+import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import java.util.Collections
 import java.util.IdentityHashMap
 import kotlin.reflect.KClass

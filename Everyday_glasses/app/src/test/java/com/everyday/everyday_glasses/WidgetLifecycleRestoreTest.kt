@@ -3,7 +3,7 @@ package com.everyday.everyday_glasses
 import com.everyday.everyday_glasses.runtime.WidgetDescriptors
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
-import com.everyday.everyday_glasses.ui.widgets.BaseWidget
+import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test

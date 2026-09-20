@@ -7,7 +7,7 @@ import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
-import com.everyday.everyday_glasses.ui.widgets.BaseWidget
+import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

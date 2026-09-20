@@ -8,10 +8,10 @@ import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContext
 import com.everyday.everyday_glasses.interaction.assistant.ConfigureMapPoisRequest
 import com.everyday.everyday_glasses.interaction.assistant.ConfigureMapPoisSemanticToolHandler
 import com.everyday.everyday_glasses.interaction.assistant.assistantCompletedFuture
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationExpiryPolicy
-import com.everyday.everyday_glasses.ui.widgets.common.PresentationMode
-import com.everyday.everyday_glasses.map.MapPoiCategoryCatalog
-import com.everyday.everyday_glasses.map.PoiDisplayConfig
+import com.everyday.everyday_glasses.widgets._common.PresentationExpiryPolicy
+import com.everyday.everyday_glasses.widgets._common.PresentationMode
+import com.everyday.everyday_glasses.widgets.map.backend.MapPoiCategoryCatalog
+import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals

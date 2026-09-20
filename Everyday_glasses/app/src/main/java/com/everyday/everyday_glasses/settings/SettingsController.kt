@@ -12,12 +12,12 @@ import com.everyday.everyday_glasses.ui.hover_controls.BaseHoverControl
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.ui.components.DashboardSettings
 import com.everyday.everyday_glasses.runtime.GeminiSettingsListener
-import com.everyday.everyday_glasses.google.GoogleAuthState
+import com.everyday.everyday_glasses.google_auth.GoogleAuthState
 import com.everyday.everyday_glasses.headup_wake.HeadUpWakeManager
 import com.everyday.everyday_glasses.ui.hover_controls.HoverControlsLayoutEditor
-import com.everyday.everyday_glasses.ui.widgets.helpers.ShortcutsSettingsMenu
-import com.everyday.everyday_glasses.ui.widgets.helpers.SpeedometerSettingsMenu
-import com.everyday.everyday_glasses.ui.widgets.SpeedometerWidget
+import com.everyday.everyday_glasses.ui.components.ShortcutsSettingsMenu
+import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerSettingsMenu
+import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidget
 import com.everyday.shared.command.AppCommandInvocation
 
 class SettingsController(

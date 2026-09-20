@@ -1,7 +1,7 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.ui.widgets.helpers.NewsDoubleTapAction
-import com.everyday.everyday_glasses.ui.widgets.helpers.NewsInteractionPolicy
+import com.everyday.everyday_glasses.widgets.news.NewsDoubleTapAction
+import com.everyday.everyday_glasses.widgets.news.NewsInteractionPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

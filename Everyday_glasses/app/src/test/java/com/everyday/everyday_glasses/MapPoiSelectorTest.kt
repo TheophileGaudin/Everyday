@@ -1,14 +1,14 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.map.MapGeoPoint
-import com.everyday.everyday_glasses.map.MapPoi
-import com.everyday.everyday_glasses.map.MapPoiCategoryCatalog
-import com.everyday.everyday_glasses.map.MapPoiTier
-import com.everyday.everyday_glasses.map.PoiDisplayConfig
-import com.everyday.everyday_glasses.map.PoiDisplayConfigState
-import com.everyday.everyday_glasses.map.PoiDisplayMode
-import com.everyday.everyday_glasses.map.mapPoiTier
-import com.everyday.everyday_glasses.map.MapPoiSelector
+import com.everyday.everyday_glasses.widgets.map.backend.MapGeoPoint
+import com.everyday.everyday_glasses.widgets.map.backend.MapPoi
+import com.everyday.everyday_glasses.widgets.map.backend.MapPoiCategoryCatalog
+import com.everyday.everyday_glasses.widgets.map.backend.MapPoiTier
+import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
+import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfigState
+import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayMode
+import com.everyday.everyday_glasses.widgets.map.backend.mapPoiTier
+import com.everyday.everyday_glasses.widgets.map.backend.MapPoiSelector
 import org.junit.Assert.*
 import org.junit.Test
 import kotlin.random.Random

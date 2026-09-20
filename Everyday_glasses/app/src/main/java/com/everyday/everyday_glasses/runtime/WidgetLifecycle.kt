@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses.runtime
 
-import com.everyday.everyday_glasses.ui.widgets.BaseWidget
+import com.everyday.everyday_glasses.widgets._common.BaseWidget
 
 interface WidgetLifecycle {
     fun onResume() {}

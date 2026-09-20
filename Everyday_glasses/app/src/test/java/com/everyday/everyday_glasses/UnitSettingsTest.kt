@@ -7,7 +7,7 @@ import com.everyday.everyday_glasses.settings.UnitDisplayFormatter
 import com.everyday.everyday_glasses.settings.UnitResolver
 import com.everyday.everyday_glasses.settings.UnitSettings
 import com.everyday.everyday_glasses.settings.UnitSystemMode
-import com.everyday.everyday_glasses.ui.widgets.SpeedometerWidget
+import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidget
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
