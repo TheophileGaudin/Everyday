@@ -153,12 +153,14 @@ class FinanceAssistantToolsTest {
         ).get()
 
         assertTrue(execution.success)
-        assertEquals(FinanceTileTargetMode.TOP_LEFT_VISIBLE, requested!!.target.mode)
-        assertEquals("^FTSE", requested.instrument.symbol)
-        assertEquals(null, requested.range)
-        assertEquals(null, requested.chartType)
-        assertEquals(null, requested.slot)
-        assertEquals(null, requested.fullscreen)
+
+        val actualRequest = requireNotNull(requested)
+        assertEquals(FinanceTileTargetMode.TOP_LEFT_VISIBLE, actualRequest.target.mode)
+        assertEquals("^FTSE", actualRequest.instrument.symbol)
+        assertEquals(null, actualRequest.range)
+        assertEquals(null, actualRequest.chartType)
+        assertEquals(null, actualRequest.slot)
+        assertEquals(null, actualRequest.fullscreen)
     }
 
     @Test
@@ -205,13 +207,18 @@ class FinanceAssistantToolsTest {
         ).get()
 
         assertTrue(execution.success)
-        assertEquals(FinanceTileTargetMode.EXPLICIT, requested!!.target.mode)
-        assertEquals("stable-tile", requested.target.tileId)
-        assertEquals(FinanceDataProvider.resolveInstrument("FTSE"), requested.instrument)
-        assertEquals(FinanceTimeRange.ONE_MONTH, requested.range)
-        assertEquals(FinanceChartType.CANDLE, requested.chartType)
-        assertEquals(4, requested.slot)
-        assertEquals(false, requested.fullscreen)
+
+        val actualRequest = requireNotNull(requested)
+        assertEquals(FinanceTileTargetMode.EXPLICIT, actualRequest.target.mode)
+        assertEquals("stable-tile", actualRequest.target.tileId)
+        assertEquals(
+            FinanceDataProvider.resolveInstrument("FTSE"),
+            actualRequest.instrument
+        )
+        assertEquals(FinanceTimeRange.ONE_MONTH, actualRequest.range)
+        assertEquals(FinanceChartType.CANDLE, actualRequest.chartType)
+        assertEquals(4, actualRequest.slot)
+        assertEquals(false, actualRequest.fullscreen)
     }
 
     private fun tile(

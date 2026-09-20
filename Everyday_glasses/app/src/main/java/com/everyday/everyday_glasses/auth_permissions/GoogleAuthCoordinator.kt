@@ -430,15 +430,21 @@ class GoogleAuthCoordinator(
 
     private fun handleTokenExchangeSuccess(tokenResponse: GoogleOAuthTokenResponse) {
         val profile = tokenResponse.idToken?.let(::parseGoogleIdToken)
-        val account = when {
-            !profile?.email.isNullOrBlank() -> GoogleAccountSummary(
-                email = profile.email,
-                displayName = profile.displayName
-            )
-
-            currentState.account != null -> currentState.account!!
-            else -> throw IllegalStateException("Google sign-in finished without account details")
+        val profileAccount = profile?.let { parsedProfile ->
+            val email = parsedProfile.email
+            if (email.isNullOrBlank()) {
+                null
+            } else {
+                GoogleAccountSummary(
+                    email = email,
+                    displayName = parsedProfile.displayName
+                )
+            }
         }
+
+        val account = profileAccount
+            ?: currentState.account
+            ?: throw IllegalStateException("Google sign-in finished without account details")
 
         val expiresAtMs = System.currentTimeMillis() + (tokenResponse.expiresInSeconds * 1000L) - 30_000L
         inMemoryAccessToken = InMemoryGoogleAccessToken(
@@ -518,11 +524,15 @@ class GoogleAuthCoordinator(
 
     private fun resolveAccountForTokenResponse(tokenResponse: GoogleOAuthTokenResponse): GoogleAccountSummary {
         val profile = tokenResponse.idToken?.let(::parseGoogleIdToken)
-        if (!profile?.email.isNullOrBlank()) {
-            return GoogleAccountSummary(
-                email = profile.email,
-                displayName = profile.displayName ?: currentState.account?.displayName
-            )
+        profile?.let { parsedProfile ->
+            val email = parsedProfile.email
+            if (!email.isNullOrBlank()) {
+                return GoogleAccountSummary(
+                    email = email,
+                    displayName = parsedProfile.displayName
+                        ?: currentState.account?.displayName
+                )
+            }
         }
 
         return currentState.account

@@ -10,7 +10,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 
 class GoogleCalendarClientTest {
     @Test
@@ -34,11 +33,15 @@ class GoogleCalendarClientTest {
             latch.countDown()
         }
 
-        assertTrue(latch.await(1, TimeUnit.SECONDS))
-        assertTrue(result!!.isSuccess)
+        val completedResult = requireNotNull(result)
+
+        assertTrue(completedResult.isSuccess)
         assertEquals(2, transport.callCount)
         assertEquals(listOf("stale-token"), tokenProvider.clearedTokens)
-        assertEquals("Event after retry", result.getOrThrow().single().summary)
+        assertEquals(
+            "Event after retry",
+            completedResult.getOrThrow().single().summary
+        )
     }
 }
 

@@ -1818,15 +1818,26 @@ class MapWidget(
             if (chosen == null) {
                 var candidateBaseline = (item.anchor.y - 4f).coerceIn(4f - fm.ascent, canvas.height - 4f - fm.descent)
                 val left = (item.anchor.x + 7f).coerceIn(4f, (canvas.width - width - 4f).coerceAtLeast(4f))
-                repeat(pending.size) {
+                var attempt = 0
+                while (attempt < pending.size) {
                     val rect = RectF(
                         left - 2f,
                         candidateBaseline + fm.ascent - 2f,
                         left + width + 2f,
                         candidateBaseline + fm.descent + 2f
                     )
-                    if (chosen == null && occupied.none { RectF.intersects(it, rect) }) { chosen = rect; baseline = candidateBaseline }
-                    candidateBaseline = (candidateBaseline + height + 5f).coerceAtMost(canvas.height - 4f - fm.descent)
+
+                    if (occupied.none { RectF.intersects(it, rect) }) {
+                        chosen = rect
+                        baseline = candidateBaseline
+                        break
+                    }
+
+                    candidateBaseline =
+                        (candidateBaseline + height + 5f)
+                            .coerceAtMost(canvas.height - 4f - fm.descent)
+
+                    attempt++
                 }
                 if (chosen == null) { baseline = candidateBaseline; chosen =
                     RectF(left, baseline + fm.ascent, left + width, baseline + fm.descent)

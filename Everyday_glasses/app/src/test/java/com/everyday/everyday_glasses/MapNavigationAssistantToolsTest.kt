@@ -62,9 +62,13 @@ class MapNavigationAssistantToolsTest {
         val execution = handler.execute(arguments, context()).get()
 
         assertTrue(execution.success)
-        assertEquals("Central Station", received!!.address)
-        assertEquals("WALKING", received.mode)
-        assertEquals(PresentationMode.FULLSCREEN, received.presentation!!.mode)
+
+        val actualRequest = requireNotNull(received)
+        assertEquals("Central Station", actualRequest.address)
+        assertEquals("WALKING", actualRequest.mode)
+
+        val actualPresentation = requireNotNull(actualRequest.presentation)
+        assertEquals(PresentationMode.FULLSCREEN, actualPresentation.mode)
     }
 
     @Test
