@@ -17,7 +17,6 @@ import com.everyday.everyday_glasses.interaction.assistant.InspectUiSemanticTool
 import com.everyday.everyday_glasses.interaction.assistant.PresentTextSemanticToolHandler
 import com.everyday.everyday_glasses.interaction.assistant.RequestScreenshotSemanticToolHandler
 import com.everyday.everyday_glasses.interaction.assistant.VoiceAssistantProvider
-import com.everyday.everyday_glasses.interaction.assistant.WebSearchProvider
 import com.everyday.everyday_glasses.interaction.assistant.WebSearchResult
 import com.everyday.everyday_glasses.interaction.assistant.WebSearchSemanticToolHandler
 import com.everyday.everyday_glasses.interaction.assistant.assistantCompletedFuture
