@@ -18,7 +18,6 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
-import com.everyday.everyday_glasses.BuildConfig
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
@@ -137,13 +136,19 @@ class VideoPlayerController(
                 Player.STATE_READY -> {
                     hasFatalPlaybackError = false
                     playbackErrorText = null
-                    updateAudioTrackStatus(playerValue?.currentTracks ?: Tracks.EMPTY)
+                    updateAudioTrackStatus(
+                        playerValue?.currentTracks ?: Tracks.EMPTY
+                    )
                 }
+
                 Player.STATE_ENDED -> {
                     savePlaybackProgress(forceCompleted = true)
-                    notifyChanged()
                 }
+
+                Player.STATE_BUFFERING, // loading spinner is handled in PlayerView.kt
+                Player.STATE_IDLE -> Unit
             }
+
             notifyChanged()
         }
 
@@ -170,7 +175,7 @@ class VideoPlayerController(
         shouldAutoplay = autoPlay
         ensurePlayer()
         if (!started || playerValue?.currentMediaItem == null) {
-            prepareCurrent(initialPlayback = true, autoPlay = autoPlay)
+            prepareCurrent(autoPlay = autoPlay)
         } else if (autoPlay) {
             playerValue?.play()
             startPositionUpdates()
@@ -335,7 +340,7 @@ class VideoPlayerController(
         currentItemValue = queue[queueIndex]
         shouldAutoplay = true
         observer?.onVideoItemChanged(currentItemValue)
-        prepareCurrent(initialPlayback = true, autoPlay = true)
+        prepareCurrent(autoPlay = true)
         return true
     }
 
@@ -355,26 +360,32 @@ class VideoPlayerController(
         released = false
     }
 
-    private fun prepareCurrent(initialPlayback: Boolean, autoPlay: Boolean) {
+    private fun prepareCurrent(autoPlay: Boolean) {
         val activePlayer = playerValue ?: return
         if (!preparing.compareAndSet(false, true)) return
+
         val item = currentItemValue
         scope.launch {
             try {
                 val uri = item.contentUri.toString()
                 subtitleStateValue = subtitleStore.load(uri)
-                val startPosition = if (initialPlayback) {
-                    resolveResumePosition(progressStore.load(uri), autoResumeEnabled = true)
-                } else {
-                    activePlayer.currentPosition.coerceAtLeast(0L)
-                }
-                activePlayer.setMediaItem(buildMediaItem(item, subtitleStateValue), startPosition)
+
+                val startPosition = resolveResumePosition(
+                    progressStore.load(uri),
+                    autoResumeEnabled = true
+                )
+
+                activePlayer.setMediaItem(
+                    buildMediaItem(item, subtitleStateValue),
+                    startPosition
+                )
                 activePlayer.prepare()
                 activePlayer.playWhenReady = autoPlay
                 shouldAutoplay = autoPlay
                 started = true
                 appliedSubtitleUri = uri
-                appliedExternalSubtitleIds = subtitleStateValue.subtitles.mapTo(linkedSetOf()) { it.id }
+                appliedExternalSubtitleIds =
+                    subtitleStateValue.subtitles.mapTo(linkedSetOf()) { it.id }
                 hasFatalPlaybackError = false
                 playbackErrorText = null
                 playbackMessage = null
@@ -523,11 +534,7 @@ class VideoPlayerController(
             return
         }
         val codecNames = audioTracks.map { (_, _, format) -> audioFormatLabel(format) }.distinct().joinToString(", ").ifBlank { "unknown codec" }
-        playbackMessage = if (BuildConfig.FFMPEG_AUDIO_ENABLED) {
-            "Audio unavailable: $codecNames is not supported on this device."
-        } else {
-            "Audio unavailable: $codecNames. Install the FFmpeg decoder build to add support."
-        }
+        playbackMessage = "Audio unavailable: $codecNames is not supported on this device."
     }
 
     private fun startPositionUpdates() {

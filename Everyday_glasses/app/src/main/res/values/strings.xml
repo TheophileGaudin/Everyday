@@ -31,4 +31,5 @@
     <string name="subtitle_track_unsupported">Unsupported</string>
     <string name="audio_track_unsupported">Audio unavailable: %1$s is not supported on this device.</string>
     <string name="audio_track_unsupported_without_ffmpeg">Audio unavailable: %1$s. Install the FFmpeg decoder build to add support.</string>
+    <string name="video_playback_position">%1$s / %2$s</string>
 </resources>

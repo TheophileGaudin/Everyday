@@ -19,10 +19,11 @@ import com.everyday.everyday_glasses.headup_wake.InteractionTimeouts
 import com.everyday.everyday_glasses.R
 import com.google.android.material.button.MaterialButton
 import java.util.Locale
+import androidx.core.view.isVisible
 
 class VideoPlayerUi(
-    private val context: Context,
-    private val host: FrameLayout,
+    context: Context,
+    host: FrameLayout,
     private val controller: VideoPlayerController,
     private val onExitRequested: () -> Unit,
 ) {
@@ -121,15 +122,15 @@ class VideoPlayerUi(
     }
 
     fun handleDoubleTap(localX: Float, localY: Float): Boolean {
-        if (subtitleImportOverlay.visibility == View.VISIBLE) {
+        if (subtitleImportOverlay.isVisible) {
             closeSubtitleImportOverlay()
             return true
         }
-        if (subtitleOverlay.visibility == View.VISIBLE) {
+        if (subtitleOverlay.isVisible) {
             closeSubtitleMenu()
             return true
         }
-        if (advancedOverlay.visibility == View.VISIBLE) {
+        if (advancedOverlay.isVisible) {
             closeAdvancedOptions()
             return true
         }
@@ -178,9 +179,9 @@ class VideoPlayerUi(
             }
             KeyEvent.KEYCODE_BACK -> {
                 when {
-                    subtitleImportOverlay.visibility == View.VISIBLE -> closeSubtitleImportOverlay()
-                    subtitleOverlay.visibility == View.VISIBLE -> closeSubtitleMenu()
-                    advancedOverlay.visibility == View.VISIBLE -> closeAdvancedOptions()
+                    subtitleImportOverlay.isVisible -> closeSubtitleImportOverlay()
+                    subtitleOverlay.isVisible -> closeSubtitleMenu()
+                    advancedOverlay.isVisible -> closeAdvancedOptions()
                     else -> onExitRequested()
                 }
                 true
@@ -234,9 +235,9 @@ class VideoPlayerUi(
     private fun setupClickHandlers() {
         root.setOnClickListener {
             when {
-                subtitleImportOverlay.visibility == View.VISIBLE -> closeSubtitleImportOverlay()
-                subtitleOverlay.visibility == View.VISIBLE -> closeSubtitleMenu()
-                advancedOverlay.visibility == View.VISIBLE -> closeAdvancedOptions()
+                subtitleImportOverlay.isVisible -> closeSubtitleImportOverlay()
+                subtitleOverlay.isVisible -> closeSubtitleMenu()
+                advancedOverlay.isVisible -> closeAdvancedOptions()
                 else -> setControlsVisible(!controlsVisible)
             }
         }
@@ -271,7 +272,7 @@ class VideoPlayerUi(
         errorText.visibility = if (error == null) View.GONE else View.VISIBLE
         playbackMessageText.text = controller.playbackMessage.orEmpty()
         playbackMessageText.visibility = if (controller.playbackMessage.isNullOrBlank()) View.GONE else View.VISIBLE
-        positionText.text = "${formatDuration(controller.positionMs)} / ${formatDuration(controller.durationMs)}"
+        positionText.text = playerContext.getString(R.string.video_playback_position, formatDuration(controller.positionMs), formatDuration(controller.durationMs))
         playbackProgress.progress = if (controller.durationMs > 0L) {
             ((controller.positionMs * PROGRESS_MAX) / controller.durationMs).toInt().coerceIn(0, PROGRESS_MAX.toInt())
         } else 0
@@ -285,13 +286,12 @@ class VideoPlayerUi(
 
     private fun toggleOrCloseOverlays() {
         when {
-            subtitleImportOverlay.visibility == View.VISIBLE -> closeSubtitleImportOverlay()
-            subtitleOverlay.visibility == View.VISIBLE -> closeSubtitleMenu()
-            advancedOverlay.visibility == View.VISIBLE -> closeAdvancedOptions()
+            subtitleImportOverlay.isVisible -> closeSubtitleImportOverlay()
+            subtitleOverlay.isVisible -> closeSubtitleMenu()
+            advancedOverlay.isVisible -> closeAdvancedOptions()
             else -> setControlsVisible(!controlsVisible)
         }
     }
-
     private fun setControlsVisible(visible: Boolean) {
         controlsVisible = visible
         controlsOverlay.visibility = if (visible) View.VISIBLE else View.GONE
@@ -331,9 +331,9 @@ class VideoPlayerUi(
     }
 
     private fun hasOpenOverlay(): Boolean =
-        advancedOverlay.visibility == View.VISIBLE ||
-            subtitleOverlay.visibility == View.VISIBLE ||
-            subtitleImportOverlay.visibility == View.VISIBLE
+        advancedOverlay.isVisible ||
+                subtitleOverlay.isVisible ||
+                subtitleImportOverlay.isVisible
 
     private fun openAdvancedOptions() {
         closeSubtitleImportOverlay(notify = false)

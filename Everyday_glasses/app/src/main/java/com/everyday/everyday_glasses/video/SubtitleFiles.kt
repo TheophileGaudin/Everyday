@@ -5,14 +5,13 @@ import java.util.Locale
 
 enum class SubtitleImportType(
     val playbackMimeType: String,
-    val canonicalExtension: String,
 ) {
-    SUBRIP(MimeTypes.APPLICATION_SUBRIP, "srt"),
-    WEBVTT(MimeTypes.TEXT_VTT, "vtt"),
-    SSA(MimeTypes.TEXT_SSA, "ssa"),
-    TTML(MimeTypes.APPLICATION_TTML, "ttml"),
-    SUB(MimeTypes.APPLICATION_SUBRIP, "srt"),
-    TEXT_AUTO(MimeTypes.APPLICATION_SUBRIP, "srt"),
+    SUBRIP(MimeTypes.APPLICATION_SUBRIP),
+    WEBVTT(MimeTypes.TEXT_VTT),
+    SSA(MimeTypes.TEXT_SSA),
+    TTML(MimeTypes.APPLICATION_TTML),
+    SUB(MimeTypes.APPLICATION_SUBRIP),
+    TEXT_AUTO(MimeTypes.APPLICATION_SUBRIP),
 }
 
 fun resolveSupportedSubtitleImportType(rawMimeType: String?, displayName: String?): SubtitleImportType? {

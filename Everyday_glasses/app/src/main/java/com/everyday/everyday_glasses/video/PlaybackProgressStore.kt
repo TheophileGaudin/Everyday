@@ -4,6 +4,7 @@ import android.content.Context
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import androidx.core.content.edit
 
 interface PlaybackProgressStore {
     fun load(uri: String): PlaybackProgress?
@@ -66,17 +67,17 @@ class PrefsPlaybackProgressStore(
             .put("durationMs", safeDuration)
             .put("completed", completed)
             .put("lastPlayedAt", System.currentTimeMillis())
-        preferences.edit()
-            .remove(legacyKeyFor(uri))
-            .putString(keyFor(uri), json.toString())
-            .apply()
+        preferences.edit {
+            remove(legacyKeyFor(uri))
+                .putString(keyFor(uri), json.toString())
+        }
     }
 
     override fun clear(uri: String) {
-        preferences.edit()
-            .remove(keyFor(uri))
-            .remove(legacyKeyFor(uri))
-            .apply()
+        preferences.edit {
+            remove(keyFor(uri))
+                .remove(legacyKeyFor(uri))
+        }
     }
 
     private fun keyFor(uri: String): String {

@@ -7,6 +7,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import androidx.core.content.edit
+import androidx.core.net.toUri
 
 class PrefsSubtitleStore(
     context: Context,
@@ -15,7 +17,7 @@ class PrefsSubtitleStore(
     private val preferences = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val importPreparer = SubtitleImportPreparer(appContext)
 
-    suspend fun load(videoUri: String): VideoSubtitleState {
+    fun load(videoUri: String): VideoSubtitleState {
         val json = readJson(videoUri) ?: return VideoSubtitleState()
         val subtitles = json.optJSONArray("subtitles")?.let(::parseSubtitles).orEmpty()
         val selection = json.optJSONObject("selection")?.let(::parseSelection)
@@ -54,18 +56,18 @@ class PrefsSubtitleStore(
         return subtitle
     }
 
-    suspend fun selectNone(videoUri: String) {
+    fun selectNone(videoUri: String) {
         val state = load(videoUri)
         write(videoUri, state.copy(selection = SubtitleSelection(SubtitleSelectionMode.NONE)))
     }
 
-    suspend fun selectExternal(videoUri: String, subtitleId: Long) {
+    fun selectExternal(videoUri: String, subtitleId: Long) {
         val state = load(videoUri)
         if (state.subtitles.none { it.id == subtitleId }) return
         write(videoUri, state.copy(selection = SubtitleSelection(SubtitleSelectionMode.EXTERNAL, subtitleId)))
     }
 
-    suspend fun selectEmbedded(videoUri: String, trackKey: String) {
+     fun selectEmbedded(videoUri: String, trackKey: String) {
         val state = load(videoUri)
         write(videoUri, state.copy(selection = SubtitleSelection(SubtitleSelectionMode.EMBEDDED, embeddedTrackKey = trackKey)))
     }
@@ -93,7 +95,7 @@ class PrefsSubtitleStore(
                 .put("externalId", selection.externalSubtitleId)
                 .put("embeddedKey", selection.embeddedTrackKey))
         }
-        preferences.edit().putString(keyFor(videoUri), json.toString()).apply()
+        preferences.edit { putString(keyFor(videoUri), json.toString()) }
     }
 
     private fun parseSubtitles(array: JSONArray): List<UploadedSubtitle> = buildList {
@@ -102,7 +104,7 @@ class PrefsSubtitleStore(
             val uri = json.optString("uri").takeIf { it.isNotBlank() } ?: continue
             add(UploadedSubtitle(
                 id = json.optLong("id", uri.hashCode().toLong()),
-                contentUri = Uri.parse(uri),
+                contentUri = uri.toUri(),
                 displayName = json.optString("displayName", "Subtitle"),
                 mimeType = json.optString("mimeType", "application/x-subrip"),
                 createdAtEpochMs = json.optLong("createdAt", 0L),
