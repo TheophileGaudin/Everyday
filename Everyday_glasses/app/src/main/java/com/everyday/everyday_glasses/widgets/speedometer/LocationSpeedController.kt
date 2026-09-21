@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.runtime
+package com.everyday.everyday_glasses.widgets.speedometer
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -15,19 +15,17 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import androidx.core.location.LocationManagerCompat
 import com.everyday.shared.sync.LocationFix
 import com.everyday.shared.sync.usableSpeedMps
 import java.util.Locale
-import androidx.core.content.edit
-
 
 data class SpeedState(
     val speedKmh: Float,
     val qualityOk: Boolean,
     val isMoving: Boolean
 )
-
 //This class owns speed data.
 
 class LocationSpeedController(

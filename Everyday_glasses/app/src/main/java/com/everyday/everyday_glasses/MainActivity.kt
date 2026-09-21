@@ -55,7 +55,7 @@ import com.everyday.everyday_glasses.auth_permissions.GooglePhoneAuthStatus
 import com.everyday.everyday_glasses.auth_permissions.GooglePhoneFallbackBridge
 import com.everyday.everyday_glasses.headup_wake.HeadUpSessionController
 import com.everyday.everyday_glasses.interaction.user_input.InputCoordinator
-import com.everyday.everyday_glasses.runtime.LocationSpeedController
+import com.everyday.everyday_glasses.widgets.speedometer.LocationSpeedController
 import com.everyday.everyday_glasses.auth_permissions.PermissionCoordinator
 import com.everyday.everyday_glasses.auth_permissions.PermissionCoordinatorCallbacks
 import com.everyday.everyday_glasses.connectivity.PhoneConnectionCallbacks
