@@ -3223,6 +3223,17 @@ class WidgetContainer @JvmOverloads constructor(
             }
         }
 
+        if (!hasFullscreenWidget()) {
+            val target = interactionTargetAt(cx, cy)
+            if (
+                target is SpeedometerWidget &&
+                target.baseHitTest(cx, cy) == BaseWidget.BaseHitArea.CONTENT
+            ) {
+                settingsController.showSpeedometerSettingsMenu()
+                return true
+            }
+        }
+
         if (!hasFullscreenWidget() && isAppContextMenuBorderDoubleTap(cx, cy)) {
             showAppContextMenu(x, y, cx, cy)
             return true
@@ -3429,11 +3440,6 @@ class WidgetContainer @JvmOverloads constructor(
         // inside a widget's bounds. The app context menu is the dashboard-level fallback for
         // both widget shells/content and empty dashboard space. This also makes the behavior
         // independent of the input source (temple gesture or phone pointer event).
-        val fallbackTarget = interactionTargetAt(cx, cy)
-        if (fallbackTarget is SpeedometerWidget && fallbackTarget.isContentVisible()) {
-            settingsController.showSpeedometerSettingsMenu()
-            return true
-        }
         showAppContextMenu(x, y, cx, cy)
         return true
     }

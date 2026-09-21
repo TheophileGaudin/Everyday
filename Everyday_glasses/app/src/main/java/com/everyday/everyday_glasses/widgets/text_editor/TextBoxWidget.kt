@@ -633,28 +633,17 @@ class TextBoxWidget(
         var currentY = scrollOffset
         offsets[0] = currentY
 
-        for (i in 1..columnCount) {
-            // The "ideal" cut point is exactly one screen height below the previous column's start
+        var i = 1
+        while (i < columnCount) {
             val idealCutY = currentY + visibleHeight
-
-            // Find which line is at this cut point
-            // We use idealCutY - 1 to ensure we hit the line inside the boundary, not the one starting exactly after
             val lineIndex = layout.getLineForVertical(idealCutY.toInt() - 1)
 
             val lineTop = layout.getLineTop(lineIndex)
             val lineBottom = layout.getLineBottom(lineIndex)
 
-            // Check coverage:
-            // pixelInPrevCol = idealCutY - lineTop
-            // pixelsInNextCol = lineBottom - idealCutY
             val pixelsInPrevCol = idealCutY - lineTop
             val pixelsInNextCol = lineBottom - idealCutY
 
-            // "Pick the column having the most coverage left"
-            // If most of the line is in the previous column (>= 50%), keep it there.
-            // The NEXT column starts AFTER this line (at lineBottom).
-            // Otherwise, push the whole line to the NEXT column.
-            // The NEXT column starts BEFORE this line (at lineTop).
             currentY = if (pixelsInPrevCol >= pixelsInNextCol) {
                 lineBottom.toFloat()
             } else {
@@ -662,6 +651,7 @@ class TextBoxWidget(
             }
 
             offsets[i] = currentY
+            i++
         }
 
         return offsets
