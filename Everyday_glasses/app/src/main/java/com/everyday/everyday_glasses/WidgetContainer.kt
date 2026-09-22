@@ -43,6 +43,7 @@ import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.Start
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.StopNavigationSemanticToolHandler
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.UpdateFinanceTileSemanticToolHandler
 import com.everyday.everyday_glasses.interaction.assistant.WebSearchSemanticToolHandler
+import com.everyday.everyday_glasses.runtime.DashboardChangeCoordinator
 import com.everyday.everyday_glasses.runtime.BrowserWidgetListener
 import com.everyday.everyday_glasses.contracts.DisplaySettingsHandler
 import com.everyday.everyday_glasses.runtime.FileBrowserWidgetListener
@@ -92,7 +93,7 @@ import com.everyday.everyday_glasses.widgets._common.SmartAlignmentHelper
 import com.everyday.everyday_glasses.widgets._common.SmartAlignmentRenderer
 import com.everyday.everyday_glasses.ui.components.TextEditCommandHandler
 import com.everyday.everyday_glasses.ui.components.TextFormattingHandler
-import com.everyday.everyday_glasses._threedof.ThreeDofCoordinateMath
+import com.everyday.everyday_glasses._threedof.DashboardTransform
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
 import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
 import com.everyday.everyday_glasses.interaction.commands.CommandAvailability
@@ -278,6 +279,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private val threeDofOverlay = ThreeDofOverlay()
+    private val dashboardTransform = DashboardTransform()
     private val smartAlignment = SmartAlignmentHelper(registry)
     private val smartAlignmentRenderer = SmartAlignmentRenderer()
     private val unitSettings = UnitSettings(context)
@@ -288,11 +290,6 @@ class WidgetContainer @JvmOverloads constructor(
 
     // Whether 3DOF mode is currently active
     private var is3DofEnabled = false
-
-    // Current content offset from 3DOF head tracking (in pixels)
-    private var threeDofOffsetX = 0f
-    private var threeDofOffsetY = 0f
-    private var threeDofRollDeg = 0f
 
     // ==================== Menus & Overlays ====================
     
@@ -917,21 +914,19 @@ class WidgetContainer @JvmOverloads constructor(
      * Anything that persists the container must refuse to write while this holds.
      */
     val isAwaitingDashboardRestore: Boolean get() = isAwaitingRestore
-    private var suppressContentChangedCallback = false
     private var lifecycleMutationInProgress = false
-    private var transientNotificationDepth = 0
-    private var transientNotificationPending = false
-    private var persistentNotificationDepth = 0
-    private var persistentNotificationPending = false
-    private var contentNotificationGeneration = 0L
-
+    private val contentChanges = DashboardChangeCoordinator(
+        repaint              = {if (Looper.myLooper() == Looper.getMainLooper()) invalidate() else postInvalidate()},
+        transient            = {contentObserver?.onTransientContentChanged()},
+        persistent           = {if (cursorPressed) interactionPersistentNotified = true; contentObserver?.onPersistentContentChanged()}, // This is gesture bookkeeping, so it remains in WidgetContainer.
+        restored             = {contentObserver?.onDashboardRestored()},
+        notificationsBlocked = { lifecycleMutationInProgress },
+    )
     init {
         setWillNotDraw(false)
         registerWidgetLifecycles()
         setupWidgetCaptureRestoreCallbacks()
-        // Callers own the classified notification for unit changes; applying the derived
-        // widget presentation here must not emit a second transient callback.
-        unitSettings.onChanged = { applyEffectiveUnitSettings() }
+        unitSettings.onChanged = { applyEffectiveUnitSettings() } // Callers own the classified notification for unit changes; applying the derived widget presentation here must not emit a second transient callback.
         applyEffectiveUnitSettings()
     }
 
@@ -1379,115 +1374,22 @@ class WidgetContainer @JvmOverloads constructor(
         presentationController.onTargetRemoved(runCatching { stableWidgetId(widget) }.getOrNull() ?: return)
     }
 
-    /** Requests one local redraw for pixel-only visual state. */
-    private fun requestRepaint() {
-        if (Looper.myLooper() == Looper.getMainLooper()) invalidate() else postInvalidate()
-    }
 
-    /** Suppresses intermediate widget/lifecycle callbacks for a temporary compound mutation. */
-    private inline fun <T> withContentChangeSuppressed(action: () -> T): T {
-        val previous = suppressContentChangedCallback
-        suppressContentChangedCallback = true
-        return try {
-            action()
-        } finally {
-            suppressContentChangedCallback = previous
-        }
-    }
-
+    private fun requestRepaint() = contentChanges.requestRepaint() /** Requests one local redraw for pixel-only visual state. */
+    private fun <T> withContentChangeSuppressed(action: () -> T): T = contentChanges.withNotificationsSuppressed(action) /** Discards callbacks produced by a temporary or restorative compound mutation. */
     /** Reports focus to the host and emits the one classified visual change for that mutation. */
     private fun notifyFocusChanged(focused: Boolean, persistent: Boolean = false) {
-        if (suppressContentChangedCallback) return
+        if (contentChanges.isSuppressed) return
         contentObserver?.onFocusChanged(focused)
         if (persistent) notifyPersistentContentChanged() else notifyTransientContentChanged()
     }
-
-    /** Emits a visible runtime change without scheduling persistence. */
-    private fun notifyTransientContentChanged() {
-        if (lifecycleMutationInProgress) return
-        if (suppressContentChangedCallback) return
-        if (transientNotificationDepth > 0) {
-            transientNotificationPending = true
-            return
-        }
-        requestRepaint()
-        contentNotificationGeneration++
-        contentObserver?.onTransientContentChanged()
-    }
-
-    /**
-     * Returns the mutation notification generation for input routing. Cursor-only movement
-     * still needs a binocular refresh, but widget-owned transient/persistent callbacks already
-     * provide one and must not be followed by a second caller-side refresh.
-     */
-    fun contentNotificationGeneration(): Long = contentNotificationGeneration
-
-    /** Coalesces several related runtime updates into one transient notification. */
-    fun <T> withTransientChangeBatch(action: () -> T): T {
-        transientNotificationDepth++
-        try {
-            return action()
-        } finally {
-            transientNotificationDepth--
-            if (transientNotificationDepth == 0 && transientNotificationPending) {
-                transientNotificationPending = false
-                notifyTransientContentChanged()
-            }
-        }
-    }
-
-    /** Runs a synchronous widget mutation while upgrading any callback it emits to persistent. */
-    private fun <T> runPersistentMutation(
-        action: () -> T,
-        changed: (T) -> Boolean = { true }
-    ): T {
-        transientNotificationDepth++
-        persistentNotificationDepth++
-        val result = try {
-            action()
-        } finally {
-            transientNotificationDepth--
-            transientNotificationPending = false
-            persistentNotificationDepth--
-            persistentNotificationPending = false
-        }
-        if (changed(result)) notifyPersistentContentChanged()
-        return result
-    }
-
-    private fun <T> runPersistentMutation(action: () -> T): T =
-        runPersistentMutation(action = action, changed = { true })
-
-    /** Upgrades a widget callback to persistent only when it changed a persisted field. */
-    private fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean): Boolean {
-        var persistedChange = false
-        val handled = runPersistentMutation(
-            action = { action().also { persistedChange = changed() } },
-            changed = { it && persistedChange }
-        )
-        if (handled && !persistedChange) notifyTransientContentChanged()
-        return handled
-    }
-
-    /** Emits a dashboard mutation; the host owns binocular refresh and debounced persistence. */
-    private fun notifyPersistentContentChanged() {
-        if (lifecycleMutationInProgress) return
-        if (suppressContentChangedCallback) return
-        if (cursorPressed) interactionPersistentNotified = true
-        if (persistentNotificationDepth > 0) {
-            persistentNotificationPending = true
-            return
-        }
-        requestRepaint()
-        contentNotificationGeneration++
-        contentObserver?.onPersistentContentChanged()
-    }
-
-    /** Completes a state restore without turning the loaded state into a new save request. */
-    private fun notifyDashboardRestored() {
-        requestRepaint()
-        contentObserver?.onDashboardRestored()
-    }
+    private fun notifyTransientContentChanged() = contentChanges.notifyTransient() /** Emits a visible runtime change without scheduling persistence. */
+    fun contentNotificationGeneration(): Long = contentChanges.notificationGeneration /** Used by input routing to avoid adding a second notification after a widget callback. */
+    fun <T> withTransientChangeBatch(action: () -> T): T = contentChanges.batch(action) /** Coalesces related updates; if one is persistent, that strongest classification wins. */
+    private fun <T> runPersistentMutation(changed: (T) -> Boolean = { true }, action: () -> T): T = contentChanges.runPersistentMutation(action = action, changed = changed) /** Perform an action that may change the dashboard, and tell the rest of the app if that change should be saved. */
+    private fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean): Boolean = contentChanges.runClassifiedInput(action, changed) /** Classifies handled input as either persistent or transient, never both. */
+    private fun notifyPersistentContentChanged() = contentChanges.notifyPersistent() /** Emits a dashboard mutation; the host owns structural refresh and debounced persistence. */
+    private fun notifyDashboardRestored() = contentChanges.notifyDashboardRestored() /** Completes a restore with a structural refresh but without requesting a save. */
 
     /**
      * Hover updates are purely visual state changes on model objects drawn by this view.
@@ -3450,27 +3352,27 @@ class WidgetContainer @JvmOverloads constructor(
 
     /** Lets a menu action own its classified notification while keeping navigation visual-only. */
     private fun dispatchContextMenuAction(action: () -> Boolean): Boolean {
-        val before = contentNotificationGeneration
+        val before = contentNotificationGeneration()
         contextMenuDispatchDepth++
         val handled = try {
             action()
         } finally {
             contextMenuDispatchDepth--
         }
-        if (handled && contentNotificationGeneration == before) notifyTransientContentChanged()
+        if (handled && contentNotificationGeneration() == before) notifyTransientContentChanged()
         return handled
     }
 
     /** Coalesces a text-edit command with the menu dismissal it causes. */
     private fun dispatchTextEditMenuAction(action: () -> Boolean): Boolean {
-        val before = contentNotificationGeneration
+        val before = contentNotificationGeneration()
         textEditMenuDispatchDepth++
         val handled = try {
             action()
         } finally {
             textEditMenuDispatchDepth--
         }
-        if (handled && contentNotificationGeneration == before) notifyTransientContentChanged()
+        if (handled && contentNotificationGeneration() == before) notifyTransientContentChanged()
         return handled
     }
 
@@ -4245,34 +4147,18 @@ class WidgetContainer @JvmOverloads constructor(
     /**
      * Set 3DOF mode enabled state. Called by ThreeDofManager.
      */
-    fun set3DofEnabled(enabled: Boolean) {
-        if (is3DofEnabled != enabled) {
-            is3DofEnabled = enabled
-            threeDofOverlay.set3DofEnabled(enabled)
-            Log.d(TAG, "3DOF mode ${if (enabled) "enabled" else "disabled"}")
-            notifyTransientContentChanged()
-        }
-    }
-    /**
-     * Update the 3DOF content offset. Called by ThreeDofManager.
-     * @param offsetX Horizontal offset in pixels (positive = content shifts right)
-     * @param offsetY Vertical offset in pixels (positive = content shifts down)
-     */
     fun set3DofOffset(offsetX: Float, offsetY: Float) {
-        threeDofOffsetX = offsetX
-        threeDofOffsetY = offsetY
+        dashboardTransform.setOffset(offsetX, offsetY)
         threeDofOverlay.setContentOffset(offsetX, offsetY)
         notifyTransientContentChanged()
     }
-    fun set3DofRoll(rollDeg: Float) {threeDofRollDeg = rollDeg ; notifyTransientContentChanged()}
-    fun set3DofTransitionProgress(progress: Float) {threeDofOverlay.setTransitionProgress(progress);notifyTransientContentChanged()} /** Set the 3DOF transition animation progress. @param progress Progress from 0.0 (start) to 1.0 (complete) */
+    fun set3DofRoll(rollDeg: Float) {dashboardTransform.setRoll(rollDeg); notifyTransientContentChanged()}
+    fun set3DofTransitionProgress(progress: Float) {threeDofOverlay.setTransitionProgress(progress); notifyTransientContentChanged()}
     private fun shouldApplyThreeDofTransform(): Boolean = displayState == WakeSleepManager.DisplayState.WAKE && !hasFullscreenWidget() && (is3DofEnabled || threeDofOverlay.isVisible())
+    private fun currentDashboardTransform(): DashboardTransform.Snapshot =  dashboardTransform.snapshot(viewportWidth = width.toFloat(), viewportHeight = height.toFloat(), applies = shouldApplyThreeDofTransform())
 
     /** Convert the fixed screen cursor to the coordinate space in which widgets are drawn. */
-    fun screenToContentCoordinates(screenX: Float, screenY: Float): Pair<Float, Float> {
-        if (!shouldApplyThreeDofTransform()) return Pair(screenX, screenY)
-        return ThreeDofCoordinateMath.screenToContent(screenX = screenX, screenY = screenY, viewportWidth = width.toFloat(), viewportHeight = height.toFloat(), offsetX = threeDofOffsetX, offsetY = threeDofOffsetY, rollDeg = threeDofRollDeg)
-    }
+    fun screenToContentCoordinates(screenX: Float, screenY: Float): Pair<Float, Float> = currentDashboardTransform().screenToContent(screenX, screenY)
     // ==================== Drawing ====================
 
     override fun onDraw(canvas: Canvas) {
@@ -4318,32 +4204,16 @@ class WidgetContainer @JvmOverloads constructor(
             return
         }
 
-        val applyThreeDofTransform = shouldApplyThreeDofTransform()
-        val cx = width / 2f - threeDofOffsetX
-        val cy = height / 2f - threeDofOffsetY
-
-        // Apply 3DOF transformation to dashboard content, but not to head-locked menus.
-        if (applyThreeDofTransform) {
-            canvas.save()
-            // Translate canvas by 3DOF offset to move content with head movement
-            canvas.translate(threeDofOffsetX, threeDofOffsetY)
-            canvas.rotate(-threeDofRollDeg, cx, cy)
-        }
+        val transform = currentDashboardTransform()
+        if (transform.applies) {canvas.save() ; transform.applyTo(canvas)} // Dashboard content moves in 3DOF; head-locked menus are drawn after the Canvas is restored.
 
         // While the hover-controls layout editor is open, hide widgets and the regular
         // dashboard hover overlays — the editor renders the controls itself in their
         // dashboard positions.
         val editorActive = settingsController.isHoverControlsLayoutEditorVisible()
-
         if (!editorActive) {
-            // Draw all widgets (affected by 3DOF transformation)
-            for (widget in registry.getAllSortedByZOrder()) {
-                widget.draw(canvas)
-            }
-
-            // Hover controls are dashboard overlays and should visually win over any
-            // widget they overlap while hovered, except for visible keyboard keys.
-            drawHoverControls(canvas)
+            for (widget in registry.getAllSortedByZOrder()) {widget.draw(canvas)} // Draw all widgets (affected by 3DOF transformation)
+            drawHoverControls(canvas)                // Hover controls are dashboard overlays and should visually win over any widget they overlap while hovered, except for visible keyboard keys.
             drawVisibleKeyboardOverlays(canvas)
         }
 
@@ -4356,18 +4226,12 @@ class WidgetContainer @JvmOverloads constructor(
             height.toFloat()
         )
 
-        // Draw 3DOF overlay (boundary rectangle - moves with content to show head-locked area)
-        threeDofOverlay.draw(canvas)
-
-        // Restore canvas if 3DOF was applied
-        if (applyThreeDofTransform) {canvas.restore()}
-
+        threeDofOverlay.draw(canvas)            // Draw 3DOF overlay (boundary rectangle - moves with content to show head-locked area)
+        if (transform.applies) canvas.restore() // Restore canvas if 3DOF was applied
         drawPresentationProgress(canvas)
+        drawOverlayMenus(canvas)         // Draw menus (not affected by 3DOF - stay head-locked like cursor)
 
-        // Draw menus (not affected by 3DOF - stay head-locked like cursor)
-        drawOverlayMenus(canvas)
-
-        // Note: Brightness dimming is now handled at window level via WindowManager.LayoutParams.screenBrightness
+        // Note: Brightness dimming is handled at window level via WindowManager.LayoutParams.screenBrightness
         // This ensures the entire app (including WebViews) is dimmed uniformly.
     }
 
@@ -4779,31 +4643,29 @@ class WidgetContainer @JvmOverloads constructor(
 
     fun applyPersistedDashboardReplacingCurrent(
         dashboard: WidgetDocument.PersistedDashboard,
-        notifyRestored: Boolean = true
+        notifyRestored: Boolean = true,
     ) {
         if (!isReady()) return
 
         val previousDashboard = captureWidgetDashboardWithoutLayoutName().copy(
-            activeLayoutName = layoutManager.activeLayoutName
+            activeLayoutName = layoutManager.activeLayoutName,
         )
-        suppressContentChangedCallback = true
-        try {
-            dismissAllTransientOverlays()
-            clearWidgetsForLayoutReplace()
-            applyPersistedContents(dashboard)
-        } catch (failure: Throwable) {
-            runCatching {
+        withContentChangeSuppressed {
+            try {
+                dismissAllTransientOverlays()
                 clearWidgetsForLayoutReplace()
-                applyPersistedContents(previousDashboard)
-            }.exceptionOrNull()?.let(failure::addSuppressed)
-            throw failure
-        } finally {
-            suppressContentChangedCallback = false
+                applyPersistedContents(dashboard)
+            } catch (failure: Throwable) {
+                runCatching {
+                    clearWidgetsForLayoutReplace()
+                    applyPersistedContents(previousDashboard)
+                }.exceptionOrNull()?.let(failure::addSuppressed)
+                throw failure
+            }
         }
 
         // The container now reflects a stored dashboard, so saving is safe again.
         isAwaitingRestore = false
-
         if (notifyRestored) notifyDashboardRestored()
     }
 
