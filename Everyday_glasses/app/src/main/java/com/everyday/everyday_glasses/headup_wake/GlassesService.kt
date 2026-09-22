@@ -17,7 +17,6 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.everyday.everyday_glasses.MainActivity
-import com.everyday.everyday_glasses.contracts.WakeRequestListener
 
 class GlassesService : Service() {
 

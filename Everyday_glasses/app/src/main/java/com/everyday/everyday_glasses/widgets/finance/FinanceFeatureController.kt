@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses.widgets.finance
 
-import com.everyday.everyday_glasses.contracts.WidgetDataProvider
+import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.FinanceTileUpdateRequest
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.FinanceTileUpdateResult
 import com.everyday.everyday_glasses.runtime.FinanceWidgetListener

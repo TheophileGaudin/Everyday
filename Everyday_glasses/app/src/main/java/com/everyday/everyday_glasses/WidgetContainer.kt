@@ -17,6 +17,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import com.everyday.everyday_glasses.interaction.commands.AwaitingCommandUiDispatcher
+import com.everyday.everyday_glasses.interaction.user_input.TextEditingController
 import com.everyday.everyday_glasses.interaction.assistant.AssistantConfiguration
 import com.everyday.everyday_glasses.interaction.assistant.AssistantModel
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.AssistantTextPresentationRequest
@@ -45,17 +46,15 @@ import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.Updat
 import com.everyday.everyday_glasses.interaction.assistant.WebSearchSemanticToolHandler
 import com.everyday.everyday_glasses.runtime.DashboardChangeCoordinator
 import com.everyday.everyday_glasses.runtime.BrowserWidgetListener
-import com.everyday.everyday_glasses.contracts.DisplaySettingsHandler
+import com.everyday.everyday_glasses.settings.DisplaySettingsHandler
 import com.everyday.everyday_glasses.runtime.FileBrowserWidgetListener
 import com.everyday.everyday_glasses.runtime.GeminiSettingsListener
-import com.everyday.everyday_glasses.contracts.GoogleAccountHandler
+import com.everyday.everyday_glasses.auth_permissions.GoogleAccountHandler
 import com.everyday.everyday_glasses.runtime.MapWidgetListener
-import com.everyday.everyday_glasses.contracts.MirrorWidgetListener
+import com.everyday.everyday_glasses.widgets.phone_screen_mirror.MirrorWidgetListener
 import com.everyday.everyday_glasses.runtime.SubtitleWidgetListener
 import com.everyday.everyday_glasses.runtime.TextBoxWidgetListener
-import com.everyday.everyday_glasses.contracts.WidgetContentObserver
-import com.everyday.everyday_glasses.contracts.WidgetDataProvider
-import com.everyday.everyday_glasses.contracts.WidgetHost
+import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
 import com.everyday.everyday_glasses.runtime.WidgetPersistenceListener
 import com.everyday.everyday_glasses._binocular.BinocularContentClass
 import com.everyday.everyday_glasses.interaction.commands.AppCommandCapabilities
@@ -189,6 +188,33 @@ import androidx.core.net.toUri
  * This class coordinates these systems; it should not contain the internal
  * content-specific logic of individual widget types.
  */
+/** Observes user-visible content changes produced by [com.everyday.everyday_glasses.WidgetContainer]. */
+interface WidgetContentObserver {
+    fun onFocusChanged(focused: Boolean)
+    fun onPersistentContentChanged()
+    fun onTransientContentChanged()
+    /** Emits the one structural binocular refresh that completes a suppressed restore. */
+    fun onDashboardRestored() = Unit
+    fun onMediaFrame(sourceId: String)
+    fun onBinocularContentSourceChanged(
+        sourceId: String,
+        contentClass: BinocularContentClass,
+        active: Boolean
+    )
+}
+
+/** Capabilities the activity supplies to [com.everyday.everyday_glasses.WidgetContainer]. */
+interface WidgetHost {
+    fun requestClose()
+    fun requestMirror(start: Boolean)
+    fun requestBrowserKeyboard(show: Boolean)
+    fun requestClipboard()
+    fun requestFilePicker()
+    fun requestStoragePermission()
+    fun requestCursorCenter()
+    fun requestSubtitleControl(control: SubtitleControl)
+    fun toggleAssistantVoice()
+}
 class WidgetContainer @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -296,10 +322,22 @@ class WidgetContainer @JvmOverloads constructor(
     private var contextMenu: ContextMenu? = null
     private var contextMenuDispatchDepth = 0
     private var textEditMenu: TextEditContextMenu? = null
-    private var textEditMenuDispatchDepth = 0
-    private enum class TextEditMenuTarget { TEXT_WIDGET, BROWSER_ADDRESS }
-    private var textEditMenuTarget: TextEditMenuTarget = TextEditMenuTarget.TEXT_WIDGET
     private var formattingMenu: FormattingMenu? = null
+    private val textEditing by lazy {
+        TextEditingController(
+            fullscreenTextWidget = { fullscreenTextWidget },
+            fullscreenBrowserWidget = { fullscreenBrowserWidget },
+            textEditMenu = { textEditMenu },
+            formattingMenu = { formattingMenu },
+            requestPhoneClipboard = { host?.requestClipboard() },
+            ensureEditingOverlayVisible = ::ensureDrawnAboveNativeOverlays,
+            notifyFocusChanged = { focused -> notifyFocusChanged(focused) },
+            notifyTransientChange = ::notifyTransientContentChanged,
+            notificationGeneration = ::contentNotificationGeneration,
+            runPersistentMutation = { action -> runPersistentMutation(action = action) },
+            runClassifiedInput = { action, changed -> runClassifiedInput(action, changed) },
+        )
+    }
     private var closeConfirmationPopup: CloseConfirmationPopup? = null
     private var layoutDeleteConfirmationPopup: WidgetLayoutDeleteConfirmationPopup? = null
     private val pageAgentApprovalOverlay =
@@ -597,9 +635,9 @@ class WidgetContainer @JvmOverloads constructor(
         get() = registry.fileBrowserWidgets
 
     // Currently focused widget
-    private var focusedWidget: TextBoxWidget? = null
-    private var focusedBrowserWidget: BrowserWidget? = null
-    private var suppressNestedFocusCallbacks = false
+    private val focusedWidget: TextBoxWidget? get() = textEditing.focusedTextWidget
+
+    private val focusedBrowserWidget: BrowserWidget? get() = textEditing.focusedBrowserWidget
 
     // Widget being dragged
     private var activeWidget: BaseWidget? = null
@@ -861,10 +899,9 @@ class WidgetContainer @JvmOverloads constructor(
         )
     }
 
-    // ==================== Clipboard ====================
-    
-    private var glassesClipboard: String? = null
-    private var phoneClipboard: String? = null
+    // ==================== Phone Clipboard to forward to relevant editors ====================
+
+    private val phoneClipboard: String? get() = textEditing.phoneClipboard
 
     // ==================== Selection Tracking ====================
     
@@ -1516,29 +1553,25 @@ class WidgetContainer @JvmOverloads constructor(
 
         textEditMenu = TextEditContextMenu(w.toFloat(), h.toFloat()).apply {
             commandHandler = object : TextEditCommandHandler {
-                override fun cut() = handleCut()
-                override fun copy() = handleCopy()
-                override fun paste(content: String) = handlePaste(content)
-                override fun selectAll() = handleSelectAll()
-                override fun showFormatting() = showFormattingMenu()
-                override fun onMenuDismissed() {
-                    if (textEditMenuDispatchDepth == 0) notifyTransientContentChanged()
-                }
+                override fun cut() = textEditing.cut()
+                override fun copy() = textEditing.copy()
+                override fun paste(content: String) = textEditing.paste(content)
+                override fun selectAll() = textEditing.selectAll()
+                override fun showFormatting() = textEditing.showFormattingMenu()
+                override fun onMenuDismissed() = textEditing.onMenuDismissed()
             }
         }
 
         formattingMenu = FormattingMenu(w.toFloat(), h.toFloat()).apply {
             formattingHandler = object : TextFormattingHandler {
-                override fun setFontSize(size: Float) = handleFontSizeChanged(size)
-                override fun setTextWrap(enabled: Boolean) = handleTextWrapToggled(enabled)
-                override fun setBold(enabled: Boolean) = handleBoldToggled()
-                override fun setItalic(enabled: Boolean) = handleItalicToggled()
-                override fun setUnderline(enabled: Boolean) = handleUnderlineToggled()
-                override fun setBulletList(enabled: Boolean) = handleBulletListToggled()
-                override fun setNumberedList(enabled: Boolean) = handleNumberedListToggled()
-                override fun setColumns(columns: Int) {
-                    runPersistentMutation { focusedWidget?.setColumns(columns) }
-                }
+                override fun setFontSize(size: Float) = textEditing.setFontSize(size)
+                override fun setTextWrap(enabled: Boolean) = textEditing.setTextWrap(enabled)
+                override fun setBold(enabled: Boolean) = textEditing.toggleBold()
+                override fun setItalic(enabled: Boolean) = textEditing.toggleItalic()
+                override fun setUnderline(enabled: Boolean) = textEditing.toggleUnderline()
+                override fun setBulletList(enabled: Boolean) = textEditing.toggleBulletList()
+                override fun setNumberedList(enabled: Boolean) = textEditing.toggleNumberedList()
+                override fun setColumns(columns: Int) = textEditing.setColumns(columns)
                 override fun onMenuDismissed() = notifyTransientContentChanged()
             }
         }
@@ -3363,18 +3396,7 @@ class WidgetContainer @JvmOverloads constructor(
         return handled
     }
 
-    /** Coalesces a text-edit command with the menu dismissal it causes. */
-    private fun dispatchTextEditMenuAction(action: () -> Boolean): Boolean {
-        val before = contentNotificationGeneration()
-        textEditMenuDispatchDepth++
-        val handled = try {
-            action()
-        } finally {
-            textEditMenuDispatchDepth--
-        }
-        if (handled && contentNotificationGeneration() == before) notifyTransientContentChanged()
-        return handled
-    }
+    private fun dispatchTextEditMenuAction(action: () -> Boolean): Boolean =  textEditing.dispatchMenuAction(action) /** Coalesces a text-edit command with the menu dismissal it causes. */
 
     private fun showAppContextMenu(screenX: Float, screenY: Float, contentX: Float, contentY: Float) {
         pendingCreateX = contentX
@@ -3913,24 +3935,7 @@ class WidgetContainer @JvmOverloads constructor(
         }
     }
 
-    private fun setFocusedWidget(widget: BaseWidget?) {
-        if (suppressNestedFocusCallbacks) return
-        if ((widget is TextBoxWidget && focusedWidget === widget) ||
-            (widget is BrowserWidget && focusedBrowserWidget === widget)
-        ) return
-        suppressNestedFocusCallbacks = true
-        try {
-            when (widget) {
-                is TextBoxWidget -> { focusedBrowserWidget?.setFocused(false); focusedBrowserWidget = null; focusedWidget?.clearSelection(); focusedWidget?.setFocused(false); focusedWidget = widget }
-                is BrowserWidget -> { focusedWidget?.clearSelection(); focusedWidget?.setFocused(false); focusedWidget = null; focusedBrowserWidget?.setFocused(false); focusedBrowserWidget = widget }
-                null -> { focusedWidget?.clearSelection(); focusedWidget?.setFocused(false); focusedWidget = null; focusedBrowserWidget?.setFocused(false); focusedBrowserWidget = null }
-            }
-            formattingMenu?.dismiss()
-        } finally {
-            suppressNestedFocusCallbacks = false
-        }
-        notifyFocusChanged(widget != null)
-    }
+    private fun setFocusedWidget(widget: BaseWidget?) = textEditing.focus(widget) // set focus for edition
 
     fun unfocusAll() {mapWidget?.takeIf { it.isAddressEntryFocused() }?.closeAddressEntry(); setFocusedWidget(null)}
 
@@ -3969,126 +3974,7 @@ class WidgetContainer @JvmOverloads constructor(
             notifyTransientContentChanged()
             return
         }
-        focusedWidget?.let { widget ->
-            val before = textPersistentSignature(widget)
-            runClassifiedInput(
-                action = { widget.onKeyPress(key); true },
-                changed = { textPersistentSignature(widget) != before }
-            )
-            return
-        }
-        focusedBrowserWidget?.let { browser ->
-            if (browser.isEditingAddress() && (key == "ENTER" || key == "\n")) {
-                runPersistentMutation { browser.onKeyPress(key) }
-            } else {
-                val before = browserPersistentSignature(browser)
-                runClassifiedInput(
-                    action = { browser.onKeyPress(key); true },
-                    changed = { browserPersistentSignature(browser) != before }
-                )
-            }
-        }
-    }
-
-    // ==================== Text Edit Menu ====================
-
-    fun showTextEditMenu(clipboardContent: String?) {
-        val widget = focusedWidget ?: fullscreenTextWidget ?: return; if (!widget.isFocused()) return
-        textEditMenuTarget = TextEditMenuTarget.TEXT_WIDGET
-        if (clipboardContent != null) phoneClipboard = clipboardContent
-        // Request fresh clipboard from phone (will arrive async and update the menu)
-        host?.requestClipboard()
-        textEditMenu?.show(widget.x + widget.widgetWidth / 2 - 90f, widget.y - 60f, glassesClipboard ?: phoneClipboard, widget.hasSelection())
-        notifyTransientContentChanged()
-    }
-
-    private fun showBrowserAddressEditMenu(widget: BrowserWidget, clipboardContent: String?) {
-        textEditMenuTarget = TextEditMenuTarget.BROWSER_ADDRESS
-        if (clipboardContent != null) phoneClipboard = clipboardContent
-        if (!widget.isEditingAddress()) widget.beginAddressEditing(selectAll = true)
-        setFocusedWidget(widget)
-        ensureDrawnAboveNativeOverlays()
-        host?.requestClipboard()
-        val menuX = widget.x + widget.widgetWidth / 2 - 90f
-        val menuY = (widget.y + 8f).coerceAtLeast(0f)
-        textEditMenu?.show(
-            menuX,
-            menuY,
-            glassesClipboard ?: phoneClipboard,
-            widget.addressHasSelection(),
-            includeFormatting = false
-        )
-        notifyTransientContentChanged()
-    }
-    
-    /**
-     * Update the visible text edit menu with new clipboard content.
-     * Called when clipboard is received from phone while menu is visible.
-     */
-    fun updateTextEditMenuClipboard() {
-        val widget = focusedWidget ?: fullscreenTextWidget
-        val browser = focusedBrowserWidget ?: fullscreenBrowserWidget
-        if (textEditMenu?.isVisible == true && (widget?.isFocused() == true || browser?.isEditingAddress() == true)) {
-            textEditMenu?.updateClipboard(glassesClipboard ?: phoneClipboard)
-            notifyTransientContentChanged()
-        }
-    }
-
-    private fun handleCut() {
-        if (textEditMenuTarget == TextEditMenuTarget.BROWSER_ADDRESS) {
-            val browser = focusedBrowserWidget ?: fullscreenBrowserWidget ?: return
-            glassesClipboard = browser.cutSelectedAddressText()
-            notifyTransientContentChanged()
-            return
-        }
-        val widget = focusedWidget ?: fullscreenTextWidget ?: return
-        if (!widget.hasSelection()) return
-        runPersistentMutation {
-            glassesClipboard = widget.getSelectedText()
-            widget.deleteSelection()
-        }
-    }
-
-    private fun handleCopy() {
-        if (textEditMenuTarget == TextEditMenuTarget.BROWSER_ADDRESS) {
-            val browser = focusedBrowserWidget ?: fullscreenBrowserWidget ?: return
-            glassesClipboard = browser.copySelectedAddressText()
-            notifyTransientContentChanged()
-            return
-        }
-        val widget = focusedWidget ?: fullscreenTextWidget ?: return
-        if (!widget.hasSelection()) return
-        glassesClipboard = widget.getSelectedText()
-        notifyTransientContentChanged()
-    }
-
-    private fun handlePaste(content: String) {
-        if (textEditMenuTarget == TextEditMenuTarget.BROWSER_ADDRESS) {
-            (focusedBrowserWidget ?: fullscreenBrowserWidget)?.pasteIntoAddress(content)
-            notifyTransientContentChanged()
-            return
-        }
-        runPersistentMutation { (focusedWidget ?: fullscreenTextWidget)?.pasteText(content) }
-    }
-
-    private fun handleSelectAll() {
-        if (textEditMenuTarget == TextEditMenuTarget.BROWSER_ADDRESS) {
-            (focusedBrowserWidget ?: fullscreenBrowserWidget)?.selectAllAddressText()
-            notifyTransientContentChanged()
-            return
-        }
-        (focusedWidget ?: fullscreenTextWidget)?.let {
-            it.selectAll()
-            notifyTransientContentChanged()
-        }
-    }
-
-    private fun showFormattingMenu() {
-        val widget = focusedWidget ?: fullscreenTextWidget ?: return; if (!widget.isFocused()) return
-        textEditMenu?.dismiss()
-        formattingMenu?.show(widget.x + widget.widgetWidth / 2, widget.y - 20f, widget.textFontSize, widget.isTextWrap, widget.getColumnCount())
-        formattingMenu?.apply { isBold = widget.isBoldActive(); isItalic = widget.isItalicActive(); isUnderline = widget.isUnderlineActive() }
-        notifyTransientContentChanged()
+        if (textEditing.handleFocusedKeyPress(key)) return
     }
 
     private fun ensureDrawnAboveNativeOverlays() {
@@ -4099,41 +3985,12 @@ class WidgetContainer @JvmOverloads constructor(
         if (elevation < 10f) elevation = 10f
     }
 
-    private fun handleFontSizeChanged(size: Float) {
-        runPersistentMutation {
-        (focusedWidget ?: fullscreenTextWidget)?.setFontSize(size)
-        }
-    }
-
-    private fun handleTextWrapToggled(wrap: Boolean) {
-        runPersistentMutation {
-        (focusedWidget ?: fullscreenTextWidget)?.setTextWrap(wrap)
-        }
-    }
-
-    private fun handleBoldToggled() = runPersistentMutation {
-        val widget = focusedWidget ?: fullscreenTextWidget ?: return@runPersistentMutation
-        widget.toggleBold()
-        formattingMenu?.isBold = widget.isBoldActive()
-    }
-
-    private fun handleItalicToggled() = runPersistentMutation {
-        val widget = focusedWidget ?: fullscreenTextWidget ?: return@runPersistentMutation
-        widget.toggleItalic()
-        formattingMenu?.isItalic = widget.isItalicActive()
-    }
-
-    private fun handleUnderlineToggled() = runPersistentMutation {
-        val widget = focusedWidget ?: fullscreenTextWidget ?: return@runPersistentMutation
-        widget.toggleUnderline()
-        formattingMenu?.isUnderline = widget.isUnderlineActive()
-    }
-
-    private fun handleBulletListToggled() {runPersistentMutation {(focusedWidget ?: fullscreenTextWidget)?.toggleBulletList()}}
-    private fun handleNumberedListToggled() {runPersistentMutation {(focusedWidget ?: fullscreenTextWidget)?.toggleNumberedList()}}
+    // ==================== Text Edit Menu ====================
+    fun showTextEditMenu(clipboardContent: String?) = textEditing.showTextEditMenu(clipboardContent)
+    private fun showBrowserAddressEditMenu(widget: BrowserWidget, clipboardContent: String?) = textEditing.showBrowserAddressEditMenu(widget, clipboardContent)
 
     // ==================== Public Accessors ====================
-    fun setPhoneClipboard(content: String?)                                                                     {phoneClipboard = content ; updateTextEditMenuClipboard()} // Update visible text edit menu with new clipboard content
+    fun setPhoneClipboard(content: String?)                                                                             = textEditing.setPhoneClipboard(content)
     fun hasFocusedWidget():                                                                                     Boolean = focusedWidget != null || focusedBrowserWidget != null || mapWidget?.isAddressEntryFocused() == true
     fun isMenuVisible():                                                                                        Boolean = contextMenu?.isVisible == true || textEditMenu?.isVisible == true || formattingMenu?.isVisible == true || layoutNamePrompt?.isVisible == true
     fun isClosePopupVisible():                                                                                  Boolean = closeConfirmationPopup?.isVisible == true || layoutDeleteConfirmationPopup?.isVisible == true
@@ -4147,6 +4004,14 @@ class WidgetContainer @JvmOverloads constructor(
     /**
      * Set 3DOF mode enabled state. Called by ThreeDofManager.
      */
+    fun set3DofEnabled(enabled: Boolean) {
+        if (is3DofEnabled != enabled) {
+            is3DofEnabled = enabled
+            threeDofOverlay.set3DofEnabled(enabled)
+            Log.d(TAG,"3DOF mode ${if (enabled) "enabled" else "disabled"}")
+            notifyTransientContentChanged()
+        }
+    }
     fun set3DofOffset(offsetX: Float, offsetY: Float) {
         dashboardTransform.setOffset(offsetX, offsetY)
         threeDofOverlay.setContentOffset(offsetX, offsetY)

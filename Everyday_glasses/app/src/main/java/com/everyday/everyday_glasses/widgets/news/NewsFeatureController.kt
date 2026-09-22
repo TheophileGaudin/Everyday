@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses.widgets.news
 
-import com.everyday.everyday_glasses.contracts.WidgetDataProvider
+import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.NewsSourceUpdateResult
 import com.everyday.everyday_glasses.runtime.NewsWidgetListener
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher

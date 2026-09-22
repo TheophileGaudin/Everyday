@@ -3,7 +3,6 @@ package com.everyday.everyday_glasses.interaction.user_input
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.everyday.everyday_glasses.contracts.TapGestureListener
 
 /**
  * TapGestureDetector - Handles single, double, and triple tap detection with proper timing.
@@ -187,4 +186,10 @@ class TapGestureDetector {
         val dy = y1 - y2
         return (dx * dx + dy * dy) <= (MAX_TAP_DISTANCE * MAX_TAP_DISTANCE)
     }
+}
+
+interface TapGestureListener {
+    fun onSingleTap(x: Float, y: Float) = Unit
+    fun onDoubleTap(x: Float, y: Float) = Unit
+    fun onTripleTap(x: Float, y: Float) = Unit
 }

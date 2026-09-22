@@ -12,7 +12,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.everyday.everyday_glasses.contracts.WifiDirectConnectionListener
+import com.everyday.everyday_glasses.connectivity.WifiDirectConnectionListener
 
 /**
  * Handles Wi-Fi Direct connection on the glasses side.
@@ -262,4 +262,11 @@ class WifiDirectClient(private val context: Context) {
         }
         return granted
     }
+}
+
+interface WifiDirectConnectionListener {
+    fun onConnected(groupOwnerIp: String) = Unit
+    fun onDisconnected() = Unit
+    fun onPeersAvailable(peers: List<WifiP2pDevice>) = Unit
+    fun onError(message: String) = Unit
 }

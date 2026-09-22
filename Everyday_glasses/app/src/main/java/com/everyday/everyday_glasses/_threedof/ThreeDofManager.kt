@@ -8,7 +8,6 @@ import android.hardware.SensorManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.everyday.everyday_glasses.contracts.ThreeDofObserver
 import kotlin.math.abs
 
 /**
@@ -500,4 +499,11 @@ class ThreeDofManager(context: Context) : SensorEventListener {
         // Note: We may need to flip this depending on the glasses' coordinate system
         return -degrees * SENSITIVITY_Y
     }
+}
+
+interface ThreeDofObserver {
+    fun onModeChanged(enabled: Boolean) = Unit
+    fun onOrientationChanged(offsetX: Float, offsetY: Float) = Unit
+    fun onRollChanged(rollDegrees: Float) = Unit
+    fun onTransitionProgress(progress: Float) = Unit
 }

@@ -655,3 +655,12 @@ class GoogleAuthCoordinator(
         }
     }
 }
+
+/** Handles Google-account actions initiated by settings hosted in [com.everyday.everyday_glasses.WidgetContainer]. */
+interface GoogleAccountHandler {
+    fun connectGoogleAccount()
+    fun grantCalendarAccess()
+    fun disconnectGoogleAccount()
+    fun retryGoogleAuthentication()
+    fun onGoogleAuthBrowserClosed()
+}

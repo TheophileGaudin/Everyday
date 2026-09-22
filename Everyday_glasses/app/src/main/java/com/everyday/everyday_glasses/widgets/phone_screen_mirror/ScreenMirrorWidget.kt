@@ -25,7 +25,7 @@ import android.renderscript.Type
 import android.util.Log
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.get
-import com.everyday.everyday_glasses.contracts.MirrorWidgetListener
+import com.everyday.everyday_glasses.runtime.WidgetChangeListener
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets._common.WidgetInteractionState
@@ -1142,4 +1142,12 @@ class ScreenMirrorWidget(
         isDisplayVisible = visible
         dispatchMediaStateIfChanged()
     }
+}
+
+interface MirrorWidgetListener : WidgetChangeListener {
+    fun onStateChanged(state: ScreenMirrorWidget.State)
+    fun onStreamStateChanged(state: ScreenMirrorWidget.StreamState)
+    fun onFrameReady()
+    fun requestMirror(start: Boolean)
+    fun onMediaStateChanged(active: Boolean)
 }

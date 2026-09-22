@@ -8,7 +8,6 @@ import android.os.Handler
 import android.os.Looper
 import android.util.AttributeSet
 import android.view.View
-import com.everyday.everyday_glasses.contracts.CursorActivityObserver
 import com.everyday.everyday_glasses._binocular.DisplayConfig
 import com.everyday.everyday_glasses.headup_wake.InteractionTimeouts
 
@@ -189,4 +188,9 @@ class CursorView @JvmOverloads constructor(
         // Clean up handler callbacks
         hideRunnable?.let { handler.removeCallbacks(it) }
     }
+}
+
+interface CursorActivityObserver {
+    fun onVisibilityChanged(visible: Boolean) = Unit
+    fun onUserActivity() = Unit
 }

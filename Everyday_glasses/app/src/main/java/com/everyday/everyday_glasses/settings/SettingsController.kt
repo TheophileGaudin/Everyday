@@ -593,3 +593,18 @@ class SettingsController(
         }
     }
 }
+
+/** Applies display and wake-related settings selected inside the widget UI. */
+interface DisplaySettingsHandler {
+    fun applyBrightness(brightness: Float)
+    fun applyAdaptiveBrightness(enabled: Boolean)
+    fun applyMediaBrightnessCap(active: Boolean)
+    fun applyBrowserMinimumBrightness(active: Boolean)
+    fun applyLayoutSwitchBrightness()
+    fun applyHeadUpTime(durationMs: Long)
+    fun applyWakeDuration(durationMs: Long)
+    fun applyHeadUpAngleThreshold(degrees: Float)
+    fun applyHeadsUpEnabled(enabled: Boolean)
+    fun applySmartAlignment(enabled: Boolean)
+    fun applySpeedVisibilityThreshold(threshold: Float)
+}

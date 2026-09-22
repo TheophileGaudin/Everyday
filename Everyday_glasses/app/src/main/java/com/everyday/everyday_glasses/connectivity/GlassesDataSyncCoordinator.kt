@@ -680,3 +680,25 @@ class GlassesDataSyncCoordinator(
     }
 
 }
+
+/** Supplies remotely synchronized data requested by widgets. */
+interface WidgetDataProvider {
+    fun requestFinanceData(
+        visibleConfigs: List<FinanceDashboardTileConfig>,
+        refreshTileIds: List<String>,
+        force: Boolean,
+        reason: String
+    )
+
+    fun onFinanceVisibilityChanged(visible: Boolean)
+    fun requestNewsData(countryCode: String, force: Boolean, reason: String)
+    fun requestNewsSourceData(
+        sourceSpec: NewsSourceSpec,
+        countryCode: String,
+        force: Boolean,
+        reason: String,
+        completion: (Result<NewsSnapshot>) -> Unit
+    )
+
+    fun requestMapData(point: MapGeoPoint, config: PoiDisplayConfig)
+}

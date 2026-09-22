@@ -8,7 +8,6 @@ import android.hardware.SensorManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.everyday.everyday_glasses.contracts.WakeRequestListener
 import com.everyday.everyday_glasses.ui.components.DashboardSettings
 import kotlin.math.atan2
 
@@ -359,4 +358,9 @@ class HeadUpWakeManager(context: Context) : SensorEventListener {
         isWakeActive = false
         wokeScreenByHeadUp = false
     }
+}
+
+interface WakeRequestListener {
+    fun onWakeRequested() = Unit
+    fun onSleepRequested() = Unit
 }
