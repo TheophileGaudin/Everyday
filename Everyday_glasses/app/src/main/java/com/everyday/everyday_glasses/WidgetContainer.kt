@@ -90,8 +90,6 @@ import com.everyday.everyday_glasses.ui.components.LayoutDeletionHandler
 import com.everyday.everyday_glasses.ui.components.LayoutNameHandler
 import com.everyday.everyday_glasses.widgets._common.SmartAlignmentHelper
 import com.everyday.everyday_glasses.widgets._common.SmartAlignmentRenderer
-import com.everyday.everyday_glasses.ui.components.TextEditCommandHandler
-import com.everyday.everyday_glasses.ui.components.TextFormattingHandler
 import com.everyday.everyday_glasses._threedof.DashboardTransform
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
 import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
@@ -117,7 +115,6 @@ import com.everyday.everyday_glasses.ui.components.CloseConfirmationPopup
 import com.everyday.everyday_glasses.ui.components.ContextMenu
 import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidget
 import com.everyday.everyday_glasses.widgets.finance.FinanceWidget
-import com.everyday.everyday_glasses.widgets.text_editor.FormattingMenu
 import com.everyday.everyday_glasses.widgets.file_browser.ImageWidget
 import com.everyday.everyday_glasses.ui.hover_controls.LemonHoverControl
 import com.everyday.everyday_glasses.widgets.weather_location.LocationWidget
@@ -130,10 +127,10 @@ import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidget
 import com.everyday.everyday_glasses.widgets.system_status.StatusBarWidget
 import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleWidget
 import com.everyday.everyday_glasses.widgets.text_editor.TextBoxWidget
-import com.everyday.everyday_glasses.widgets.text_editor.TextEditContextMenu
 import com.everyday.everyday_glasses._threedof.ThreeDofOverlay
 import com.everyday.everyday_glasses.widgets.file_browser.VideoWidget
 import com.everyday.everyday_glasses.ui.components.WidgetLayoutDeleteConfirmationPopup
+import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 import com.everyday.everyday_glasses.ui.components.WidgetLayoutNamePrompt
 import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContextCapture
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.MapAssistantActions
@@ -248,12 +245,22 @@ class WidgetContainer @JvmOverloads constructor(
     private val registry = WidgetRegistry()
     private val widgetCaptureRestore = WidgetCaptureRestore()
     private val videoQueueRepository = VideoQueueRepository(context)
+    /** Every text field and text area of the app is edited through this controller. */
+    private val textEditing = TextEditingController(
+        toContentSpace = ::screenToContentCoordinates,
+        requestPhoneClipboard = { host?.requestClipboard() },
+        notifyFocusChanged = { onTextZoneFocusChanged() },
+        notifyTransientChange = ::notifyTransientContentChanged,
+        notificationGeneration = ::contentNotificationGeneration,
+        runClassifiedInput = { action, changed -> runClassifiedInput(action, changed) },
+    )
     private val lifecycleController = WidgetLifecycleController(
         runOnUiThread = { action -> post(action) },
         onChanged = ::notifyPersistentContentChanged,
         registry = registry,
         onMutationStarted = { lifecycleMutationInProgress = true },
-        onMutationFinished = { lifecycleMutationInProgress = false }
+        onMutationFinished = { lifecycleMutationInProgress = false },
+        textZoneHost = textEditing
     )
     private val assistantUiDispatcher = UiThreadDispatcher { action -> if (Looper.myLooper() == Looper.getMainLooper()) {action(); true}
     else {post(Runnable(action))}}
@@ -289,7 +296,6 @@ class WidgetContainer @JvmOverloads constructor(
             withTransientChanges = { action -> withTransientChangeBatch(action) },
             notifyTransientChange = ::notifyTransientContentChanged,
             notifyPersistentChange = ::notifyPersistentContentChanged,
-            notifyFocusChange = { focused -> notifyFocusChanged(focused) },
         )
     }
     private val financeFeatures by lazy {
@@ -321,23 +327,6 @@ class WidgetContainer @JvmOverloads constructor(
     
     private var contextMenu: ContextMenu? = null
     private var contextMenuDispatchDepth = 0
-    private var textEditMenu: TextEditContextMenu? = null
-    private var formattingMenu: FormattingMenu? = null
-    private val textEditing by lazy {
-        TextEditingController(
-            fullscreenTextWidget = { fullscreenTextWidget },
-            fullscreenBrowserWidget = { fullscreenBrowserWidget },
-            textEditMenu = { textEditMenu },
-            formattingMenu = { formattingMenu },
-            requestPhoneClipboard = { host?.requestClipboard() },
-            ensureEditingOverlayVisible = ::ensureDrawnAboveNativeOverlays,
-            notifyFocusChanged = { focused -> notifyFocusChanged(focused) },
-            notifyTransientChange = ::notifyTransientContentChanged,
-            notificationGeneration = ::contentNotificationGeneration,
-            runPersistentMutation = { action -> runPersistentMutation(action = action) },
-            runClassifiedInput = { action, changed -> runClassifiedInput(action, changed) },
-        )
-    }
     private var closeConfirmationPopup: CloseConfirmationPopup? = null
     private var layoutDeleteConfirmationPopup: WidgetLayoutDeleteConfirmationPopup? = null
     private val pageAgentApprovalOverlay =
@@ -361,7 +350,7 @@ class WidgetContainer @JvmOverloads constructor(
         override fun isAvailable(requirement: CommandAvailability): Boolean = when (requirement) {
             CommandAvailability.ALWAYS -> true
             CommandAvailability.APP_READY -> isReady()
-            CommandAvailability.TEXT_FOCUSED -> focusedWidget?.isFocused() == true || focusedBrowserWidget != null
+            CommandAvailability.TEXT_FOCUSED -> textEditing.hasFocus || focusedBrowserWidget != null
             CommandAvailability.BROWSER_AVAILABLE -> focusedBrowserWidget != null || fullscreenBrowserWidget != null || isReady()
         }
 
@@ -455,7 +444,7 @@ class WidgetContainer @JvmOverloads constructor(
             createTextWidget = ::createAssistantTextWidget,
             clearEditing = { widget ->
                 widget.hideKeyboard()
-                widget.setFocused(false)
+                textEditing.release(widget.textZone)
                 setFocusedWidget(null)
                 hideAssistantIme()
             },
@@ -597,7 +586,6 @@ class WidgetContainer @JvmOverloads constructor(
         showNamePrompt = { suggestedName ->
             dismissMenu()
             layoutNamePrompt?.show(suggestedName)
-            notifyFocusChanged(true)
         },
         showNameError = { error -> layoutNamePrompt?.showError(error) },
         dismissNamePrompt = { layoutNamePrompt?.dismiss() },
@@ -634,10 +622,12 @@ class WidgetContainer @JvmOverloads constructor(
     private val fileBrowserWidgets: List<FileBrowserWidget>
         get() = registry.fileBrowserWidgets
 
-    // Currently focused widget
-    private val focusedWidget: TextBoxWidget? get() = textEditing.focusedTextWidget
+    // Text widget whose text area is being edited
+    private val focusedWidget: TextBoxWidget?
+        get() = textEditing.focusedZone?.let { zone -> widgets.firstOrNull { it.textZone === zone } }
 
-    private val focusedBrowserWidget: BrowserWidget? get() = textEditing.focusedBrowserWidget
+    // Browser receiving keys for its web page (address bar keys go through the text editing controller)
+    private var focusedBrowserWidget: BrowserWidget? = null
 
     // Widget being dragged
     private var activeWidget: BaseWidget? = null
@@ -781,6 +771,7 @@ class WidgetContainer @JvmOverloads constructor(
                 widgetCaptureRestore.getBrowserWidgetState(widget)?.let {
                     storeClosedTemplate(WidgetTypeId.BROWSER, it)
                 }
+                textEditing.release(widget.addressZone)
                 if (focusedBrowserWidget === widget) setFocusedWidget(null)
                 if (activeWidget === widget) activeWidget = null
                 if (googleAuthBrowserWidget === widget) googleAuthBrowserWidget = null
@@ -1103,9 +1094,7 @@ class WidgetContainer @JvmOverloads constructor(
                 if (focused && widget != null) {
                     setFocusedWidget(widget)
                 } else if (!focused) {
-                    if (widget is TextBoxWidget && focusedWidget == widget) {
-                        setFocusedWidget(null)
-                    } else if (widget is BrowserWidget && focusedBrowserWidget == widget) {
+                    if (widget is BrowserWidget && focusedBrowserWidget == widget) {
                         setFocusedWidget(null)
                     }
                 }
@@ -1415,9 +1404,11 @@ class WidgetContainer @JvmOverloads constructor(
     private fun requestRepaint() = contentChanges.requestRepaint() /** Requests one local redraw for pixel-only visual state. */
     private fun <T> withContentChangeSuppressed(action: () -> T): T = contentChanges.withNotificationsSuppressed(action) /** Discards callbacks produced by a temporary or restorative compound mutation. */
     /** Reports focus to the host and emits the one classified visual change for that mutation. */
-    private fun notifyFocusChanged(focused: Boolean, persistent: Boolean = false) {
+    private fun notifyFocusChanged(persistent: Boolean = false) {
+        // The phone keyboard follows text focus, which is not a suppressible dashboard change:
+        // focus often changes inside a mutation whose visual callbacks are discarded.
+        contentObserver?.onFocusChanged(hasFocusedWidget())
         if (contentChanges.isSuppressed) return
-        contentObserver?.onFocusChanged(focused)
         if (persistent) notifyPersistentContentChanged() else notifyTransientContentChanged()
     }
     private fun notifyTransientContentChanged() = contentChanges.notifyTransient() /** Emits a visible runtime change without scheduling persistence. */
@@ -1551,30 +1542,7 @@ class WidgetContainer @JvmOverloads constructor(
             }
         }
 
-        textEditMenu = TextEditContextMenu(w.toFloat(), h.toFloat()).apply {
-            commandHandler = object : TextEditCommandHandler {
-                override fun cut() = textEditing.cut()
-                override fun copy() = textEditing.copy()
-                override fun paste(content: String) = textEditing.paste(content)
-                override fun selectAll() = textEditing.selectAll()
-                override fun showFormatting() = textEditing.showFormattingMenu()
-                override fun onMenuDismissed() = textEditing.onMenuDismissed()
-            }
-        }
-
-        formattingMenu = FormattingMenu(w.toFloat(), h.toFloat()).apply {
-            formattingHandler = object : TextFormattingHandler {
-                override fun setFontSize(size: Float) = textEditing.setFontSize(size)
-                override fun setTextWrap(enabled: Boolean) = textEditing.setTextWrap(enabled)
-                override fun setBold(enabled: Boolean) = textEditing.toggleBold()
-                override fun setItalic(enabled: Boolean) = textEditing.toggleItalic()
-                override fun setUnderline(enabled: Boolean) = textEditing.toggleUnderline()
-                override fun setBulletList(enabled: Boolean) = textEditing.toggleBulletList()
-                override fun setNumberedList(enabled: Boolean) = textEditing.toggleNumberedList()
-                override fun setColumns(columns: Int) = textEditing.setColumns(columns)
-                override fun onMenuDismissed() = notifyTransientContentChanged()
-            }
-        }
+        textEditing.createMenus(w.toFloat(), h.toFloat())
 
         closeConfirmationPopup = CloseConfirmationPopup(w.toFloat(), h.toFloat()).apply {
             handler = object : CloseConfirmationHandler {
@@ -1616,6 +1584,7 @@ class WidgetContainer @JvmOverloads constructor(
         )
 
         layoutNamePrompt = WidgetLayoutNamePrompt(w.toFloat(), h.toFloat()).apply {
+            textZoneHost = textEditing
             handler = object : LayoutNameHandler {
                 override fun submitLayoutName(name: String) {
                     layoutNameSaveInProgress = true
@@ -1632,7 +1601,7 @@ class WidgetContainer @JvmOverloads constructor(
                         contentObserver?.onFocusChanged(hasFocusedWidget())
                     } else {
                         layoutOverlayNotificationEmitted = true
-                        notifyFocusChanged(hasFocusedWidget())
+                        notifyFocusChanged()
                     }
                 }
             }
@@ -1931,7 +1900,7 @@ class WidgetContainer @JvmOverloads constructor(
         longPressRunnable = null
         pendingDragWidget = null; pendingDragFinanceTile = false; pendingDragIsResize = false; pendingTextSelection = false
         pendingFormattingMenuDrag = false
-        formattingMenu?.cancelLongPress()
+        textEditing.formattingMenu?.cancelLongPress()
     }
 
     fun onCursorDown(x: Float, y: Float, pointerCount: Int = 1) {
@@ -1948,6 +1917,7 @@ class WidgetContainer @JvmOverloads constructor(
 
         layoutNamePrompt?.let { prompt ->
             if (prompt.isVisible) {
+                if (textEditing.focusedZoneContains(x, y)) { pendingTextSelection = true; scheduleLongPress() }
                 notifyTransientContentChanged()
                 return
             }
@@ -1982,7 +1952,7 @@ class WidgetContainer @JvmOverloads constructor(
         else { isScrollbarDragActive = false; this.scrollbarDragWidget = null }
 
         // Menus are NOT transformed (they stay head-locked like cursor)
-        formattingMenu?.let { menu -> if (menu.isVisible && menu.shouldScheduleLongPress(x, y)) { pendingFormattingMenuDrag = true; scheduleLongPress(); return } }
+        textEditing.formattingMenu?.let { menu -> if (menu.isVisible && menu.shouldScheduleLongPress(x, y)) { pendingFormattingMenuDrag = true; scheduleLongPress(); return } }
 
         if (settingsController.handleSpeedometerDown(x, y)) return
 
@@ -1990,9 +1960,13 @@ class WidgetContainer @JvmOverloads constructor(
         // map is fullscreen. Route the press before normal widget/focus handling.
         if (mapWidget?.isPoiConfigVisible() == true && mapWidget?.onDown(cx, cy) == true) return
         
-        // Widgets use content-space coordinates
-        focusedWidget?.let { widget -> if (widget.isFocused() && widget.containsPoint(cx, cy)) { bringWidgetToFrontForInteraction(widget); if (widget.hitTest(cx, cy) == TextBoxWidget.HitArea.CONTENT) { pendingTextSelection = true; scheduleLongPress(); return } } }
-        fullscreenTextWidget?.let { widget -> if (widget.isFocused() && widget.containsPoint(cx, cy)) { if (widget.hitTest(cx, cy) == TextBoxWidget.HitArea.CONTENT) { pendingTextSelection = true; scheduleLongPress(); return } } }
+        // A long press on the focused text zone starts a text selection.
+        if (textEditing.focusedZoneContains(x, y)) {
+            focusedWidget?.let(::bringWidgetToFrontForInteraction)
+            pendingTextSelection = true
+            scheduleLongPress()
+            return
+        }
         
         if (isFinanceWidgetFullscreen) {
             financeWidget?.let { fw ->
@@ -2073,12 +2047,12 @@ class WidgetContainer @JvmOverloads constructor(
             userInputActivity?.onUserInput(UserInputKind.LONG_PRESS)
             registry.forEachWidget { it.snapProvider = smartAlignment }
             if (pendingFormattingMenuDrag) {
-                formattingMenu?.onLongPressTriggered()
+                textEditing.formattingMenu?.onLongPressTriggered()
                 pendingFormattingMenuDrag = false
                 notifyTransientContentChanged()
                 return@Runnable
             }
-            if (pendingTextSelection) { val widget = focusedWidget ?: fullscreenTextWidget; widget?.let { if (it.isFocused()) { val (cx, cy) = screenToContentCoordinates(longPressStartX, longPressStartY); it.setCursorFromScreenPosition(cx, cy); it.resetPixelAccumulator(); it.startSelection(); isLongPressSelectionMode = true; isTextSelectionActive = false } }; pendingTextSelection = false; notifyTransientContentChanged(); return@Runnable }
+            if (pendingTextSelection) { if (textEditing.hasFocus) { textEditing.beginSelection(longPressStartX, longPressStartY); isLongPressSelectionMode = true; isTextSelectionActive = false }; pendingTextSelection = false; notifyTransientContentChanged(); return@Runnable }
             if (isWidgetLayoutLocked && hasPendingWidgetDrag()) {
                 clearPendingWidgetDrag()
                 notifyTransientContentChanged()
@@ -2184,8 +2158,8 @@ class WidgetContainer @JvmOverloads constructor(
 
         cursorPressed = false; cancelLongPress()
         if (isScrollbarDragActive) { isScrollbarDragActive = false; scrollbarDragWidget = null }
-        formattingMenu?.let { if (it.isDragging()) it.onDragEnd() }
-        if (isLongPressSelectionMode) { (focusedWidget ?: fullscreenTextWidget)?.endSelection(); isLongPressSelectionMode = false; isTextSelectionActive = false }
+        textEditing.formattingMenu?.let { if (it.isDragging()) it.onDragEnd() }
+        if (isLongPressSelectionMode) { textEditing.endSelection(); isLongPressSelectionMode = false; isTextSelectionActive = false }
         var dragEnded = false
         if (financeTileDragging) {
             dragEnded = true
@@ -2346,7 +2320,7 @@ class WidgetContainer @JvmOverloads constructor(
         if (!isVisible) {
             hoveredWidget = null
             hoverControls.forEach { it.clearHover() }
-            closeConfirmationPopup?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); formattingMenu?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); textEditMenu?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); contextMenu?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
+            closeConfirmationPopup?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); textEditing.updateMenuHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); contextMenu?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
             layoutDeleteConfirmationPopup?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
             layoutNamePrompt?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
             if (hasFullscreenWidget()) { fullscreenTextWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); fullscreenBrowserWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); fullscreenImageWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); fullscreenVideoWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isStatusBarFullscreen) statusBarWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isLocationWidgetFullscreen) locationWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isCalendarWidgetFullscreen) calendarWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isFinanceWidgetFullscreen) financeWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isNewsWidgetFullscreen) newsWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isNotificationsWidgetFullscreen) notificationsWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isSpeedometerWidgetFullscreen) speedometerWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isSubtitleWidgetFullscreen) subtitleWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isMirrorWidgetFullscreen) screenMirrorWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) }
@@ -2372,7 +2346,7 @@ class WidgetContainer @JvmOverloads constructor(
         hoverControls.forEach { it.updateHover(cx, cy) }
 
         // Menus stay head-locked, use screen coords
-        closeConfirmationPopup?.updateHover(x, y); formattingMenu?.updateHover(x, y); textEditMenu?.updateHover(x, y); contextMenu?.updateHover(x, y)
+        closeConfirmationPopup?.updateHover(x, y); textEditing.updateMenuHover(x, y); contextMenu?.updateHover(x, y)
         layoutDeleteConfirmationPopup?.updateHover(x, y)
         layoutNamePrompt?.updateHover(x, y)
 
@@ -2452,18 +2426,12 @@ class WidgetContainer @JvmOverloads constructor(
             userInputActivity?.onUserInput(UserInputKind.DRAG)
         }
         // For text selection, use content-space coordinates
-        if (isLongPressSelectionMode) { 
-            val widget = focusedWidget ?: fullscreenTextWidget
-            if (widget?.isFocused() == true) { 
-                val (cx, cy) = toContentSpace(x, y)
-                widget.setCursorFromScreenPosition(cx, cy)
-                widget.updateSelectionToCursor()
-                isTextSelectionActive = true
-                notifyTransientContentChanged()
-            } 
+        if (isLongPressSelectionMode && textEditing.isSelecting) {
+            textEditing.extendSelection(x, y)
+            isTextSelectionActive = true
         }
         // Menus use screen-space (head-locked)
-        formattingMenu?.let { menu ->
+        textEditing.formattingMenu?.let { menu ->
             if (menu.isDragging()) {
                 menu.onDrag(x, y)
                 notifyTransientContentChanged()
@@ -2723,10 +2691,7 @@ class WidgetContainer @JvmOverloads constructor(
         if (closeConfirmationPopup?.isVisible == true) return closeConfirmationPopup?.onTap(x, y) ?: false
         settingsController.handleHoverControlsLayoutEditorTap(x, y)?.let { return it }
         settingsController.handleShortcutsSettingsMenuTap(x, y)?.let { return it }
-        if (formattingMenu?.isVisible == true) return formattingMenu?.onTap(x, y) ?: false
-        if (textEditMenu?.isVisible == true) {
-            return dispatchTextEditMenuAction { textEditMenu?.onTap(x, y) ?: false }
-        }
+        textEditing.onMenuTap(x, y)?.let { return it }
         if (contextMenu?.isVisible == true) {
             return dispatchContextMenuAction { contextMenu?.onTap(x, y) ?: false }
         }
@@ -2923,20 +2888,13 @@ class WidgetContainer @JvmOverloads constructor(
                 true
             }
             TextBoxWidget.HitArea.KEYBOARD_KEY    -> {
-                val before = textPersistentSignature(widget)
-                runClassifiedInput(
-                    action = { widget.getKeyboard()?.onTap(x, y) == true },
-                    changed = { textPersistentSignature(widget) != before }
-                )
+                tapKeyboard(widget.getKeyboard(), x, y)
                 true
             }
             else -> handleBaseTap(widget, x, y) { hit ->
                 if (hit == BaseWidget.BaseHitArea.CONTENT) {
-                    withTransientChangeBatch {
-                        widget.setFocused(true); setFocusedWidget(widget)
-                        widget.setCursorFromScreenPosition(x, y); widget.clearSelection()
-                        notifyTransientContentChanged()
-                    }
+                    setFocusedWidget(widget)
+                    textEditing.tap(widget.textZone, x, y)
                 }
                 true
             }
@@ -2972,13 +2930,11 @@ class WidgetContainer @JvmOverloads constructor(
         widget.getUrl(), widget.isFullscreen, widget.isMinimized, widget.isPinned
     )
 
-    private fun textPersistentSignature(widget: TextBoxWidget): List<Any?> = listOf(
-        widget.text,
-        widget.getHtmlContent(),
-        widget.textFontSize,
-        widget.isTextWrap,
-        widget.getColumnCount()
-    )
+    /** Keys typed on a glasses keyboard are classified by the text editing controller. */
+    private fun tapKeyboard(keyboard: GlassesKeyboardView?, x: Float, y: Float) = withTransientChangeBatch {
+        keyboard?.onTap(x, y)
+        notifyTransientContentChanged()
+    }
 
     private fun handlePdfWidgetTap(widget: PdfWidget, x: Float, y: Float): Boolean =
         handleBaseTap(widget, x, y) { hit ->
@@ -3121,6 +3077,8 @@ class WidgetContainer @JvmOverloads constructor(
 
         if (isHoverConfirmReleaseTapGuardActive()) return true
         if (hoverControlsConsumeDoubleTap(cx, cy)) return true
+
+        if (textEditing.onDoubleTap(x, y)) return true
 
         if (mapWidget?.isAddressEntryVisible() == true || mapWidget?.navigationState?.choices?.isNotEmpty() == true) {
             mapWidget?.let { map ->
@@ -3346,24 +3304,22 @@ class WidgetContainer @JvmOverloads constructor(
             return false
         }
 
-        focusedWidget?.let { if (it.isFocused() && it.containsPoint(cx, cy)) { showTextEditMenu(phoneClipboard); return true } }
-        fullscreenTextWidget?.let { if (it.isFocused() && it.containsPoint(cx, cy)) { showTextEditMenu(phoneClipboard); return true } }
         focusedBrowserWidget?.let {
             if (it.isAddressHit(cx, cy)) {
-                showBrowserAddressEditMenu(it, phoneClipboard)
+                showBrowserAddressEditMenu(it)
                 return true
             }
         }
         fullscreenBrowserWidget?.let {
             if (it.isAddressHit(cx, cy)) {
-                showBrowserAddressEditMenu(it, phoneClipboard)
+                showBrowserAddressEditMenu(it)
                 return true
             }
         }
         if (!hasFullscreenWidget()) {
             for (widget in browserWidgets.reversed()) {
                 if (widget.isAddressHit(cx, cy)) {
-                    showBrowserAddressEditMenu(widget, phoneClipboard)
+                    showBrowserAddressEditMenu(widget)
                     return true
                 }
             }
@@ -3396,7 +3352,6 @@ class WidgetContainer @JvmOverloads constructor(
         return handled
     }
 
-    private fun dispatchTextEditMenuAction(action: () -> Boolean): Boolean =  textEditing.dispatchMenuAction(action) /** Coalesces a text-edit command with the menu dismissal it causes. */
 
     private fun showAppContextMenu(screenX: Float, screenY: Float, contentX: Float, contentY: Float) {
         pendingCreateX = contentX
@@ -3689,10 +3644,7 @@ class WidgetContainer @JvmOverloads constructor(
             override fun onAddressFocusChanged(focused: Boolean) {
                 val beforeZOrder = map.zOrder
                 if (focused) bringWidgetToFront(map)
-                notifyFocusChanged(
-                    focused = focused,
-                    persistent = focused && map.zOrder != beforeZOrder
-                )
+                notifyFocusChanged(persistent = focused && map.zOrder != beforeZOrder)
             }
             override fun onNavigationResult(result: NavigationOperationResult) = notifyTransientContentChanged()
             override fun onStopNavigationRequested() = stopNavigationFromMap()
@@ -3913,10 +3865,6 @@ class WidgetContainer @JvmOverloads constructor(
     private fun buildTextBox(x: Float, y: Float, boxWidth: Float, boxHeight: Float): TextBoxWidget =
         TextBoxWidget(x, y, boxWidth, boxHeight).apply {
             listener = object : TextBoxWidgetListener {
-                override fun onFocusChanged(focused: Boolean) {
-                    if (focused) setFocusedWidget(this@apply)
-                    else if (focusedWidget == this@apply) setFocusedWidget(null)
-                }
                 override fun onStateChanged(state: TextBoxWidget.State) = notifyTransientContentChanged()
             }
         }
@@ -3930,12 +3878,49 @@ class WidgetContainer @JvmOverloads constructor(
         val widget = buildTextBox(adjustedX, adjustedY, boxWidth, boxHeight)
         runPersistentMutation {
             lifecycleController.open(textLifecycle) { widget }
-            widget.setFocused(true)
             setFocusedWidget(widget)
         }
     }
 
-    private fun setFocusedWidget(widget: BaseWidget?) = textEditing.focus(widget) // set focus for edition
+    /**
+     * Focus for typing: a text widget's text area, or a browser page whose web content receives
+     * keys directly. Other fields request focus from the text editing controller themselves.
+     */
+    private fun setFocusedWidget(widget: BaseWidget?) {
+        when (widget) {
+            is TextBoxWidget -> {
+                setBrowserFocus(null)
+                textEditing.focus(widget.textZone)
+            }
+            is BrowserWidget -> {
+                if (textEditing.focusedZone !== widget.addressZone) textEditing.clearFocus()
+                setBrowserFocus(widget)
+            }
+            else -> {
+                textEditing.clearFocus()
+                setBrowserFocus(null)
+            }
+        }
+    }
+
+    private fun setBrowserFocus(widget: BrowserWidget?) {
+        val previous = focusedBrowserWidget
+        if (previous === widget) return
+        focusedBrowserWidget = widget
+        previous?.setFocused(false)
+        notifyFocusChanged()
+    }
+
+    /** Only one thing takes typed keys: a newly focused text zone ends web page typing. */
+    private fun onTextZoneFocusChanged() {
+        val browser = focusedBrowserWidget
+        val zone = textEditing.focusedZone
+        if (browser != null && zone != null && zone !== browser.addressZone) {
+            focusedBrowserWidget = null
+            browser.setFocused(false)
+        }
+        notifyFocusChanged()
+    }
 
     fun unfocusAll() {mapWidget?.takeIf { it.isAddressEntryFocused() }?.closeAddressEntry(); setFocusedWidget(null)}
 
@@ -3945,36 +3930,19 @@ class WidgetContainer @JvmOverloads constructor(
         minimizedWidgets.forEachIndexed { index, widget -> val row = index / maxPerRow; val col = index % maxPerRow; widget.setPosition(col * squareSize, height - ((row + 1) * squareSize)) }
     }
 
+    /** Keys go to the focused text zone first, otherwise to the focused browser's web page. */
     fun onKeyPress(key: String, userInitiated: Boolean = false) {
         if (userInitiated) userInputActivity?.onUserInput(UserInputKind.KEYBOARD)
-        newsWidget?.let { news ->
-            val beforeSource = news.getSourceSpec()
-            var persistedChange = false
-            val handled = runPersistentMutation(
-                action = {
-                    news.handleSourcePanelKeyPress(key).also {
-                        persistedChange = news.getSourceSpec() != beforeSource
-                    }
-                },
-                changed = { it && persistedChange }
-            )
-            if (handled) {
-                if (!persistedChange) notifyTransientContentChanged()
-                return
-            }
-        }
-        layoutOverlayNotificationEmitted = false
-        if (layoutNamePrompt?.onKeyPress(key) == true) {
-            if (!layoutOverlayNotificationEmitted) notifyTransientContentChanged()
-            layoutOverlayNotificationEmitted = false
-            return
-        }
-        layoutOverlayNotificationEmitted = false
-        if (mapWidget?.onAddressKeyPress(key) == true) {
-            notifyTransientContentChanged()
-            return
-        }
-        if (textEditing.handleFocusedKeyPress(key)) return
+        if (textEditing.onKey(key)) return
+        val browser = focusedBrowserWidget ?: return
+        val before = browserPersistentSignature(browser)
+        runClassifiedInput(
+            action = {
+                browser.onKeyPress(key)
+                true
+            },
+            changed = { browserPersistentSignature(browser) != before }
+        )
     }
 
     private fun ensureDrawnAboveNativeOverlays() {
@@ -3986,19 +3954,22 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     // ==================== Text Edit Menu ====================
-    fun showTextEditMenu(clipboardContent: String?) = textEditing.showTextEditMenu(clipboardContent)
-    private fun showBrowserAddressEditMenu(widget: BrowserWidget, clipboardContent: String?) = textEditing.showBrowserAddressEditMenu(widget, clipboardContent)
+    private fun showBrowserAddressEditMenu(widget: BrowserWidget) {
+        widget.beginAddressEditing(selectAll = true)
+        ensureDrawnAboveNativeOverlays()
+        textEditing.showTextEditMenu()
+    }
 
     // ==================== Public Accessors ====================
     fun setPhoneClipboard(content: String?)                                                                             = textEditing.setPhoneClipboard(content)
-    fun hasFocusedWidget():                                                                                     Boolean = focusedWidget != null || focusedBrowserWidget != null || mapWidget?.isAddressEntryFocused() == true
-    fun isMenuVisible():                                                                                        Boolean = contextMenu?.isVisible == true || textEditMenu?.isVisible == true || formattingMenu?.isVisible == true || layoutNamePrompt?.isVisible == true
+    fun hasFocusedWidget():                                                                                     Boolean = textEditing.hasFocus || focusedBrowserWidget != null
+    fun isMenuVisible():                                                                                        Boolean = contextMenu?.isVisible == true || textEditing.isMenuVisible || layoutNamePrompt?.isVisible == true
     fun isClosePopupVisible():                                                                                  Boolean = closeConfirmationPopup?.isVisible == true || layoutDeleteConfirmationPopup?.isVisible == true
     fun isAnyPopupVisible():                                                                                    Boolean = isMenuVisible() || isClosePopupVisible() || pageAgentApprovalOverlay.isVisible()
     fun showPageAgentApproval(runId: String, request: PageAgentConfirmationRequest, respond: (Boolean) -> Unit) {pageAgentApprovalOverlay.show(runId, request, respond); ensureDrawnAboveNativeOverlays()}
     fun dismissPageAgentApproval(runId: String)                                                                 {pageAgentApprovalOverlay.dismiss(runId)}
-    fun dismissMenu()                                                                                           { contextMenu?.dismiss(); textEditMenu?.dismiss(); formattingMenu?.dismiss(); layoutNamePrompt?.dismiss() }
-    fun isDragging():                                                                                           Boolean = activeWidget != null || financeTileDragging || formattingMenu?.isDragging() == true
+    fun dismissMenu()                                                                                           { contextMenu?.dismiss(); textEditing.dismissMenus(); layoutNamePrompt?.dismiss() }
+    fun isDragging():                                                                                           Boolean = activeWidget != null || financeTileDragging || textEditing.formattingMenu?.isDragging() == true
 
     // ==================== 3DOF Mode ====================
     /**
@@ -4105,8 +4076,7 @@ class WidgetContainer @JvmOverloads constructor(
         if (isAnyPopupVisible() || mapOverlayVisible || focusedBrowserWidget?.isEditingAddress() == true || fullscreenBrowserWidget?.isEditingAddress() == true) {ensureDrawnAboveNativeOverlays()}
         mapWidget?.drawScreenOverlay(canvas)
         contextMenu?.draw(canvas)
-        textEditMenu?.draw(canvas)
-        formattingMenu?.draw(canvas)
+        textEditing.drawMenus(canvas)
         settingsController.drawHoverControlsLayoutEditor(canvas)  // Draw the hover-controls editor before the close-app confirmation so the popup appears on top of it when the user invokes Close from the editor's context menu.
         closeConfirmationPopup?.draw(canvas)
         layoutDeleteConfirmationPopup?.draw(canvas)
@@ -4205,16 +4175,11 @@ class WidgetContainer @JvmOverloads constructor(
                 true
             }
             is TextBoxWidget -> {
-                val before = textPersistentSignature(host)
-                runClassifiedInput(
-                    action = { host.getKeyboard()?.onTap(cx, cy) == true },
-                    changed = { textPersistentSignature(host) != before }
-                )
+                tapKeyboard(host.getKeyboard(), cx, cy)
                 true
             }
             is MapWidget -> {
-                host.getAddressKeyboard()?.onTap(cx, cy)
-                notifyTransientContentChanged()
+                tapKeyboard(host.getAddressKeyboard(), cx, cy)
                 true
             }
             else -> false
@@ -4259,8 +4224,7 @@ class WidgetContainer @JvmOverloads constructor(
         if (layoutDeleteConfirmationPopup?.isVisible == true) return true
         if (layoutNamePrompt?.isVisible == true) return true
         if (contextMenu?.isVisible == true) return true
-        if (textEditMenu?.isVisible == true) return true
-        if (formattingMenu?.isVisible == true) return true
+        if (textEditing.isMenuVisible) return true
         return false
     }
 
@@ -4563,8 +4527,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun dismissAllTransientOverlays() {
         contextMenu?.dismiss()
-        textEditMenu?.dismiss()
-        formattingMenu?.dismiss()
+        textEditing.dismissMenus()
         closeConfirmationPopup?.dismiss()
         layoutDeleteConfirmationPopup?.dismiss()
         settingsController.dismissAll()
@@ -4672,7 +4635,6 @@ class WidgetContainer @JvmOverloads constructor(
             lifecycleController.open(textLifecycle) { widget }
             applyFullscreenState(widget, template.isFullscreen)
             if (!widget.isMinimized) {
-                widget.setFocused(true)
                 setFocusedWidget(widget)
             }
             widget

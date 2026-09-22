@@ -58,6 +58,9 @@ import com.everyday.everyday_glasses.widgets.map.backend.navigationFailureMessag
 import com.everyday.everyday_glasses.widgets.map.backend.toCompactBannerText
 import com.everyday.everyday_glasses.runtime.MapWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import com.everyday.everyday_glasses.interaction.user_input.TextEditAction
+import com.everyday.everyday_glasses.interaction.user_input.TextZone
+import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
 import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 import com.everyday.everyday_glasses.ui.components.KeyboardOverlayController
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
@@ -158,7 +161,40 @@ class MapWidget(
     private var addressFocused = false
     private var addressText = ""
     private val addressKeyboard = KeyboardOverlayController().apply {
-        onKeyPressed = { key -> onAddressKeyPress(key) }
+        onKeyPressed = { key ->
+            textZoneHost?.takeIf { addressEntryVisible }?.let { host ->
+                if (!host.isFocused(addressZone)) {
+                    setAddressFocus(true)
+                    host.focus(addressZone)
+                }
+                host.onKey(key)
+            }
+        }
+    }
+    private val addressTextBounds = RectF()
+
+    /** The destination field; typing, selection and clipboard are handled by the text editing controller. */
+    val addressZone: TextZone = object : TextZone {
+        override val kind = TextZoneKind.FIELD
+        override val bounds: RectF
+            get() = addressTextBounds.apply {
+                set(addressFieldBounds.left + 8f, addressFieldBounds.top, addressFieldBounds.right - 8f, addressFieldBounds.bottom)
+            }
+        override val isScreenSpace = true
+        override val fieldTextSize = 13f
+        override fun content(): CharSequence = addressText
+        override fun onTextEditAction(action: TextEditAction) {
+            when (action) {
+                is TextEditAction.Changed -> addressText = action.content.toString()
+                is TextEditAction.Submitted -> {
+                    addressText = action.text
+                    submitAddressEntry()
+                }
+                TextEditAction.Released -> setAddressFocus(false)
+                TextEditAction.LayoutChanged -> Unit
+            }
+            invalidate?.invoke()
+        }
     }
     private val navigationService = LocalWalkingNavigationService()
     private val liveGuidance = LiveWalkingGuidanceEngine()
@@ -619,6 +655,7 @@ class MapWidget(
                 }
                 addressFieldBounds.contains(px, py) -> {
                     setAddressFocus(true)
+                    textZoneHost?.tap(addressZone, px, py)
                     addressKeyboard.show()
                     updateAddressKeyboardLayout()
                     updateAddressLayout()
@@ -695,7 +732,9 @@ class MapWidget(
         }
         addressText = ""
         addressEntryVisible = true
+        updateAddressLayout()
         setAddressFocus(true)
+        textZoneHost?.focus(addressZone)
         addressKeyboard.hide()
         invalidate?.invoke()
         return true
@@ -712,18 +751,6 @@ class MapWidget(
         navigationChoiceScrollOffset = 0f
         searchAttribution = ""
         if (wasOpen) invalidate?.invoke()
-    }
-
-    /** Receives both phone keyboard keys and the custom glasses keyboard keys. */
-    fun onAddressKeyPress(key: String): Boolean {
-        if (!addressEntryVisible || !addressFocused) return false
-        when (key) {
-            "BACKSPACE" -> if (addressText.isNotEmpty()) addressText = addressText.dropLast(1)
-            "ENTER", "\n", "\r" -> submitAddressEntry()
-            else -> addressText += key
-        }
-        invalidate?.invoke()
-        return true
     }
 
     /** Starts phone-first address resolution/route calculation with one bounded local fallback. */
@@ -1424,6 +1451,7 @@ class MapWidget(
     }
 
     private fun setAddressFocus(focused: Boolean) {
+        if (!focused) textZoneHost?.release(addressZone)
         if (addressFocused == focused) return
         addressFocused = focused
         onAddressFocusChanged?.invoke(focused)
@@ -1957,11 +1985,15 @@ class MapWidget(
         addressHintPaint.style = Paint.Style.STROKE
         canvas.drawRoundRect(addressFieldBounds, 7f, 7f, if (addressFocused) rim else addressHintPaint.apply { style = Paint.Style.STROKE })
         addressHintPaint.style = Paint.Style.FILL
-        val text = addressText.takeIf { it.isNotBlank() } ?: "Destination address"
-        val paint = if (addressText.isBlank()) addressHintPaint else label
-        paint.textAlign = Paint.Align.LEFT
-        paint.textSize = 13f
-        canvas.drawText(text.take(36), addressFieldBounds.left + 8f, addressFieldBounds.centerY() - (paint.ascent() + paint.descent()) / 2f, paint)
+        canvas.withClip(addressZone.bounds) {
+            if (textZoneHost?.drawZone(this, addressZone) != true) {
+                val text = addressText.takeIf { it.isNotBlank() } ?: "Destination address"
+                val paint = if (addressText.isBlank()) addressHintPaint else label
+                paint.textAlign = Paint.Align.LEFT
+                paint.textSize = 13f
+                drawText(text.take(36), addressFieldBounds.left + 8f, addressFieldBounds.centerY() - (paint.ascent() + paint.descent()) / 2f, paint)
+            }
+        }
         drawAddressAction(canvas, addressSubmitBounds, "Go", addressActionPaint)
         drawAddressAction(canvas, addressCancelBounds, "Cancel", addressCancelPaint)
         label.textAlign = Paint.Align.LEFT

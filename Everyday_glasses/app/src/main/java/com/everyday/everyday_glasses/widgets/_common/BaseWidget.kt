@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.util.Log
+import com.everyday.everyday_glasses.interaction.user_input.TextZoneHost
 import com.everyday.everyday_glasses.runtime.WidgetLifecycle
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleListener
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
@@ -183,6 +184,9 @@ abstract class BaseWidget(
     // ==================== Lifecycle listener ====================
 
     var lifecycleListener: WidgetLifecycleListener? = null
+
+    /** Routes every text field or text area of this widget through the shared text editing controller. */
+    var textZoneHost: TextZoneHost? = null
 
     // ==================== Paints ====================
 

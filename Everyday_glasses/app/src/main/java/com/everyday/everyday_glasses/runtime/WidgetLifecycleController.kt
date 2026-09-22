@@ -1,6 +1,7 @@
 package com.everyday.everyday_glasses.runtime
 
 import android.os.Looper
+import com.everyday.everyday_glasses.interaction.user_input.TextZoneHost
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
@@ -116,7 +117,8 @@ class WidgetLifecycleController(
     private val onChanged: () -> Unit,
     private val registry: WidgetRegistry,
     private val onMutationStarted: () -> Unit = {},
-    private val onMutationFinished: () -> Unit = {}
+    private val onMutationFinished: () -> Unit = {},
+    private val textZoneHost: TextZoneHost? = null
 ) : WidgetLifecycleListener {
     private val registrations = LinkedHashMap<WidgetTypeId, WidgetLifecycleRegistration<out BaseWidget, out Any>>()
     private val registrationByWidget =
@@ -322,6 +324,7 @@ class WidgetLifecycleController(
         registration: WidgetLifecycleRegistration<out BaseWidget, out Any>
     ) {
         try {
+            candidate.textZoneHost = textZoneHost
             registration.configureAndRegister(candidate, this)
             registrationByWidget[candidate] = registration
             destroyed.remove(candidate)

@@ -15,7 +15,6 @@ internal class NewsFeatureController(
     private val withTransientChanges: (() -> Unit) -> Unit,
     private val notifyTransientChange: () -> Unit,
     private val notifyPersistentChange: () -> Unit,
-    private val notifyFocusChange: (Boolean) -> Unit,
 ) {
     // Pending country code for news widget
     private var pendingCountryCode: String? = null
@@ -139,10 +138,6 @@ internal class NewsFeatureController(
                         )
                     )
                 )
-            }
-
-            override fun onSourceInputFocusChanged(focused: Boolean) {
-                notifyFocusChange(focused)
             }
         }
 

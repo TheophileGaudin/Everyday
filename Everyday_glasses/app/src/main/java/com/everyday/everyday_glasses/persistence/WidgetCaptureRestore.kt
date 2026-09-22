@@ -39,8 +39,6 @@ class WidgetCaptureRestore {
 
     /** Widget restore events consumed by [com.everyday.everyday_glasses.WidgetContainer]. */
     var listener: WidgetPersistenceListener? = null
-    private val onWidgetFocusChanged: ((BaseWidget?, Boolean) -> Unit)?
-        get() = listener?.let { value -> { widget, focused -> value.onWidgetFocusChanged(widget, focused) } }
     private val onWidgetStateChanged: (() -> Unit)? get() = listener?.let { value -> { value.onWidgetStateChanged() } }
 
     // ==================== Common-field helpers ====================
@@ -481,9 +479,6 @@ class WidgetCaptureRestore {
                 restoreCommonState(this, state, adjustedX, adjustedY)
 
                 listener = object : TextBoxWidgetListener {
-                    override fun onFocusChanged(focused: Boolean) {
-                        onWidgetFocusChanged?.invoke(this@apply, focused)
-                    }
                     override fun onStateChanged(state: TextBoxWidget.State) {
                         onWidgetStateChanged?.invoke()
                     }

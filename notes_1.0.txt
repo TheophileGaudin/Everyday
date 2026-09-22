@@ -17,6 +17,7 @@ Localized map refreshing
 
 Refactor
 General codebase refactor: files classified in categories for easier navigation by humans and agents
+Text edition refactor: unification of text edition across fields from different UI components
 Migrated a number of functionalities in WidgetContainer to dedicated services.
 Extracted a number of classes from MainActivity and WidgetContainer to reduce the number of responsibilities in these central files
 Grouped a number of callbacks into interfaces.

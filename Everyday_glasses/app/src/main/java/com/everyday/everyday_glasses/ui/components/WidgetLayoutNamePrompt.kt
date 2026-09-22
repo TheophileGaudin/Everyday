@@ -5,6 +5,11 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import androidx.core.graphics.toColorInt
+import androidx.core.graphics.withClip
+import com.everyday.everyday_glasses.interaction.user_input.TextEditAction
+import com.everyday.everyday_glasses.interaction.user_input.TextZone
+import com.everyday.everyday_glasses.interaction.user_input.TextZoneHost
+import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
 
 /**
  * Small modal prompt used for naming saved widget layouts.
@@ -25,17 +30,47 @@ class WidgetLayoutNamePrompt(
 
     var handler: LayoutNameHandler? = null
 
+    /** Edits [nameZone] while the prompt is shown. */
+    var textZoneHost: TextZoneHost? = null
+
     private var text = ""
-    private var allSelected = false
     private var errorMessage: String? = null
 
     private val promptRect = RectF()
     private val inputRect = RectF()
+    private val inputTextRect = RectF()
     private val saveButtonRect = RectF()
     private val cancelButtonRect = RectF()
 
     private val keyboardOverlay = KeyboardOverlayController().apply {
-        onKeyPressed = { key -> this@WidgetLayoutNamePrompt.onKeyPress(key) }
+        onKeyPressed = { key ->
+            textZoneHost?.let { host ->
+                if (!host.isFocused(nameZone)) host.focus(nameZone)
+                host.onKey(key)
+            }
+        }
+    }
+
+    /** The name field; typing, selection and clipboard are handled by the text editing controller. */
+    val nameZone: TextZone = object : TextZone {
+        override val kind = TextZoneKind.FIELD
+        override val bounds: RectF get() = inputTextRect
+        override val isScreenSpace = true
+        override val fieldTextSize: Float get() = textPaint.textSize
+        override fun content(): CharSequence = text
+        override fun onTextEditAction(action: TextEditAction) {
+            when (action) {
+                is TextEditAction.Changed -> {
+                    text = action.content.toString()
+                    errorMessage = null
+                }
+                is TextEditAction.Submitted -> {
+                    text = action.text
+                    submit()
+                }
+                TextEditAction.Released, TextEditAction.LayoutChanged -> Unit
+            }
+        }
     }
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -79,11 +114,6 @@ class WidgetLayoutNamePrompt(
         textAlign = Paint.Align.LEFT
     }
 
-    private val selectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = "#665B8DEF".toColorInt()
-        style = Paint.Style.FILL
-    }
-
     private val primaryButtonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = "#4A90D9".toColorInt()
         style = Paint.Style.FILL
@@ -107,16 +137,17 @@ class WidgetLayoutNamePrompt(
 
     fun show(initialName: String) {
         text = initialName
-        allSelected = true
         errorMessage = null
         isVisible = true
         keyboardOverlay.show()
         updateLayout()
+        textZoneHost?.focus(nameZone, selectAll = true)
     }
 
     fun dismiss() {
         if (!isVisible) return
         isVisible = false
+        textZoneHost?.release(nameZone)
         keyboardOverlay.hide()
         errorMessage = null
         handler?.onPromptDismissed()
@@ -125,35 +156,6 @@ class WidgetLayoutNamePrompt(
     fun showError(message: String) {
         if (!isVisible) return
         errorMessage = message
-    }
-
-    fun onKeyPress(key: String): Boolean {
-        if (!isVisible) return false
-
-        when (key) {
-            "BACKSPACE" -> {
-                if (allSelected) {
-                    text = ""
-                    allSelected = false
-                } else if (text.isNotEmpty()) {
-                    text = text.dropLast(1)
-                }
-            }
-            "ENTER", "\n" -> submit()
-            else -> {
-                if (key.isNotEmpty()) {
-                    if (allSelected) {
-                        text = key
-                        allSelected = false
-                    } else {
-                        text += key
-                    }
-                }
-            }
-        }
-
-        errorMessage = null
-        return true
     }
 
     fun onTap(x: Float, y: Float): Boolean {
@@ -171,7 +173,7 @@ class WidgetLayoutNamePrompt(
             return true
         }
         if (inputRect.contains(x, y)) {
-            allSelected = true
+            textZoneHost?.tap(nameZone, x.coerceIn(inputTextRect.left, inputTextRect.right), y)
             return true
         }
         if (!promptRect.contains(x, y)) {
@@ -198,24 +200,12 @@ class WidgetLayoutNamePrompt(
         canvas.drawRoundRect(inputRect, 6f, 6f, inputPaint)
         canvas.drawRoundRect(inputRect, 6f, 6f, inputBorderPaint)
 
-        val textLeft = inputRect.left + 12f
-        val baseline = inputRect.centerY() - (textPaint.descent() + textPaint.ascent()) / 2f
-        val displayText = fitFromEnd(text, inputRect.width() - 24f)
-        if (allSelected && displayText.isNotEmpty()) {
-            val selectionRight = (textLeft + textPaint.measureText(displayText)).coerceAtMost(inputRect.right - 10f)
-            canvas.drawRoundRect(
-                RectF(
-                    textLeft - 2f,
-                    inputRect.top + 7f,
-                    selectionRight + 2f,
-                    inputRect.bottom - 7f
-                ),
-                4f,
-                4f,
-                selectionPaint
-            )
+        canvas.withClip(inputTextRect) {
+            if (textZoneHost?.drawZone(this, nameZone) != true) {
+                val baseline = inputRect.centerY() - (textPaint.descent() + textPaint.ascent()) / 2f
+                drawText(fitFromEnd(text, inputTextRect.width()), inputTextRect.left, baseline, textPaint)
+            }
         }
-        canvas.drawText(displayText, textLeft, baseline, textPaint)
 
         errorMessage?.let {
             canvas.drawText(it, inputRect.left, inputRect.bottom + 18f, errorPaint)
@@ -246,6 +236,7 @@ class WidgetLayoutNamePrompt(
         val top = 22f
         promptRect.set(left, top, left + PROMPT_WIDTH.coerceAtMost(screenWidth - 16f), top + PROMPT_HEIGHT)
         inputRect.set(promptRect.left + 20f, promptRect.top + 54f, promptRect.right - 20f, promptRect.top + 100f)
+        inputTextRect.set(inputRect.left + 12f, inputRect.top, inputRect.right - 12f, inputRect.bottom)
 
         val buttonTop = promptRect.bottom - BUTTON_HEIGHT - 18f
         val buttonWidth = 116f

@@ -34,6 +34,9 @@ import android.widget.FrameLayout
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
+import com.everyday.everyday_glasses.interaction.user_input.TextEditAction
+import com.everyday.everyday_glasses.interaction.user_input.TextZone
+import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentFullscreenMode
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentPageSnapshot
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentScreenshot
@@ -448,41 +451,56 @@ class BrowserWidget(
         return urlBarBounds.contains(px, py) || (isEditingUrl && urlEditorBounds.contains(px, py))
     }
 
+    /** Opens the address editor and hands it to the text editing controller. */
     fun beginAddressEditing(selectAll: Boolean = true) {
         setFocused(true)
-        isEditingUrl = true
-        editingUrlText.clear()
-        editingUrlText.append(getUrl() ?: "")
-        isUrlTextSelected = selectAll && editingUrlText.isNotEmpty()
-        urlEditorScrollLine = 0
-        updateUrlEditorBounds()
+        if (!isEditingUrl) {
+            isEditingUrl = true
+            editingUrlText.clear()
+            editingUrlText.append(getUrl() ?: "")
+            updateUrlEditorBounds()
+        }
+        textZoneHost?.focus(addressZone, selectAll)
         listener?.onKeyboardRequested(true)
     }
 
-    fun addressHasSelection(): Boolean = isEditingUrl && isUrlTextSelected && editingUrlText.isNotEmpty()
+    private val addressTextBounds = RectF()
 
-    fun getSelectedAddressText(): String = if (addressHasSelection()) editingUrlText.toString() else ""
-
-    fun cutSelectedAddressText(): String {
-        val selected = getSelectedAddressText()
-        if (selected.isNotEmpty()) {
-            editingUrlText.clear()
-            isUrlTextSelected = false
-            urlEditorScrollLine = 0
+    /** The address bar field; typing, selection and clipboard are handled by the text editing controller. */
+    val addressZone: TextZone = object : TextZone {
+        override val kind = TextZoneKind.FIELD
+        override val bounds: RectF
+            get() = addressTextBounds.apply {
+                set(
+                    urlEditorBounds.left + URL_EDITOR_PADDING,
+                    urlEditorBounds.top + URL_EDITOR_PADDING,
+                    urlEditorBounds.right - URL_EDITOR_PADDING,
+                    urlEditorBounds.bottom - URL_EDITOR_PADDING
+                )
+            }
+        override val fieldTextSize: Float get() = urlTextPaint.textSize
+        override val fieldWraps = true
+        override fun content(): CharSequence = editingUrlText
+        override fun persistentState(): Any? = getUrl()
+        override fun onTextEditAction(action: TextEditAction) {
+            when (action) {
+                is TextEditAction.Changed -> {
+                    editingUrlText.clear()
+                    editingUrlText.append(action.content)
+                    updateUrlEditorBounds()
+                }
+                is TextEditAction.Submitted -> navigateToAddress(action.text)
+                TextEditAction.Released -> exitAddressEditing()
+                TextEditAction.LayoutChanged -> Unit
+            }
+            listener?.onStateChanged(state)
         }
-        return selected
     }
 
-    fun copySelectedAddressText(): String = getSelectedAddressText()
-
-    fun pasteIntoAddress(content: String) {
-        if (!isEditingUrl) beginAddressEditing()
-        replaceSelectionOrAppend(content)
-    }
-
-    fun selectAllAddressText() {
-        if (!isEditingUrl) beginAddressEditing()
-        isUrlTextSelected = editingUrlText.isNotEmpty()
+    private fun exitAddressEditing() {
+        isEditingUrl = false
+        editingUrlText.clear()
+        urlEditorBounds.setEmpty()
     }
 
     // Bounds (navigation bar - close button inherited from BaseWidget)
@@ -503,7 +521,7 @@ class BrowserWidget(
 
     // Keyboard overlay shared logic (layout, hit-test, drawing, visibility)
     private val keyboardOverlay = KeyboardOverlayController().apply {
-        onKeyPressed = { key -> handleKeyboardInput(key) }
+        onKeyPressed = { key -> if (textZoneHost?.isFocused(addressZone) == true) textZoneHost?.onKey(key) else onKeyPress(key) }
     }
     private val keyboardButtonBounds: RectF
         get() = keyboardOverlay.buttonBounds
@@ -553,14 +571,6 @@ class BrowserWidget(
         color = "#CCFFFFFF".toColorInt()
         style = Paint.Style.STROKE
         strokeWidth = 1.5f
-    }
-
-    private val urlSelectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = "#664488FF".toColorInt()
-    }
-
-    private val urlScrollbarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = "#88FFFFFF".toColorInt()
     }
 
     private val urlTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -657,8 +667,6 @@ class BrowserWidget(
     // URL editing state
     private var isEditingUrl = false
     private var editingUrlText = StringBuilder()
-    private var isUrlTextSelected = false
-    private var urlEditorScrollLine = 0
 
     // User agent toggle state
     private var isDesktopMode = false
@@ -1685,13 +1693,6 @@ class BrowserWidget(
     }
 
     /**
-     * Handle keyboard input - send to WebView's focused input field.
-     */
-    private fun handleKeyboardInput(key: String) {
-        onKeyPress(key)
-    }
-
-    /**
      * Get the bounds of the WebView content area.
      */
     private fun getWebViewBounds(): RectF {
@@ -1883,11 +1884,8 @@ class BrowserWidget(
             webView?.clearFocus()
             // Exit URL editing mode when losing focus
             if (isEditingUrl) {
-                isEditingUrl = false
-                isUrlTextSelected = false
-                editingUrlText.clear()
-                urlEditorScrollLine = 0
-                urlEditorBounds.setEmpty()
+                exitAddressEditing()
+                textZoneHost?.release(addressZone)
             }
         }
     }
@@ -2018,15 +2016,6 @@ class BrowserWidget(
         }
     }
 
-    private fun replaceSelectionOrAppend(text: String) {
-        if (isUrlTextSelected) {
-            editingUrlText.clear()
-            isUrlTextSelected = false
-        }
-        editingUrlText.append(text)
-        scrollAddressEditorToCursor()
-    }
-
     private fun normalizeAddressInput(input: String): String {
         val trimmed = input.trim()
         if (trimmed.isEmpty()) return HOME_URL
@@ -2065,27 +2054,10 @@ class BrowserWidget(
         }
         ensureActiveWebView()
         webView?.loadUrl(url)
-        isEditingUrl = false
-        isUrlTextSelected = false
-        editingUrlText.clear()
-        urlEditorScrollLine = 0
+        exitAddressEditing()
+        textZoneHost?.release(addressZone)
         listener?.onKeyboardRequested(false)
         listener?.onStateChanged(state)
-    }
-
-    private fun navigateFromAddressBar() {
-        val url = normalizeAddressInput(editingUrlText.toString())
-        currentTab()?.apply {
-            savedState = null
-            this.url = url
-        }
-        ensureActiveWebView()
-        webView?.loadUrl(url)
-        isEditingUrl = false
-        isUrlTextSelected = false
-        editingUrlText.clear()
-        urlEditorScrollLine = 0
-        listener?.onKeyboardRequested(false)
     }
 
     private fun wrapAddressText(text: String, maxWidth: Float): List<String> {
@@ -2119,38 +2091,9 @@ class BrowserWidget(
         )
     }
 
-    private fun scrollAddressEditorToCursor() {
-        val maxTextWidth = (urlBarBounds.width() - URL_EDITOR_PADDING * 2).coerceAtLeast(1f)
-        val lineCount = wrapAddressText(editingUrlText.toString(), maxTextWidth).size
-        urlEditorScrollLine = (lineCount - URL_EDITOR_MAX_ROWS).coerceAtLeast(0)
-        updateUrlEditorBounds()
-    }
-
+    /** Sends a key to the web page; address bar keys are handled by the text editing controller. */
     fun onKeyPress(key: String) {
         if (!isFocused) return
-
-        // Handle URL editing mode
-        if (isEditingUrl) {
-            when (key) {
-                "BACKSPACE" -> {
-                    if (isUrlTextSelected) {
-                        editingUrlText.clear()
-                        isUrlTextSelected = false
-                    } else if (editingUrlText.isNotEmpty()) {
-                        editingUrlText.deleteAt(editingUrlText.length - 1)
-                    }
-                    scrollAddressEditorToCursor()
-                }
-                "ENTER", "\n" -> {
-                    navigateFromAddressBar()
-                }
-                "SPACE", " " -> replaceSelectionOrAppend(" ")
-                else -> {
-                    if (key.isNotEmpty()) replaceSelectionOrAppend(key)
-                }
-            }
-            return
-        }
 
         val wv = webView ?: ensureActiveWebView() ?: return
 
@@ -2306,13 +2249,7 @@ class BrowserWidget(
 
     // Scrolling support (for future external scroll control)
     override fun onScroll(dy: Float) {
-        if (isEditingUrl && urlEditorBounds.contains(cursorSafeX, cursorSafeY)) {
-            val maxTextWidth = (urlEditorBounds.width() - URL_EDITOR_PADDING * 2).coerceAtLeast(1f)
-            val lines = wrapAddressText(editingUrlText.toString(), maxTextWidth)
-            val maxScroll = (lines.size - URL_EDITOR_MAX_ROWS).coerceAtLeast(0)
-            urlEditorScrollLine = (urlEditorScrollLine + if (dy > 0) 1 else -1).coerceIn(0, maxScroll)
-            return
-        }
+        if (isEditingUrl && urlEditorBounds.contains(cursorSafeX, cursorSafeY)) return
         (webView ?: ensureActiveWebView())?.scrollBy(0, dy.toInt())
     }
 
@@ -2530,7 +2467,11 @@ class BrowserWidget(
                 true
             }
             HitArea.NAV_URL -> {
-                beginAddressEditing(selectAll = true)
+                if (isEditingUrl && textZoneHost?.isFocused(addressZone) == true) {
+                    textZoneHost?.tap(addressZone, px, py)
+                } else {
+                    beginAddressEditing(selectAll = true)
+                }
                 true
             }
             HitArea.NEW_TAB -> {
@@ -2554,11 +2495,8 @@ class BrowserWidget(
 
                 // Exit URL editing mode when tapping content (but don't hide keyboard - WebView may need it)
                 if (isEditingUrl) {
-                    isEditingUrl = false
-                    isUrlTextSelected = false
-                    editingUrlText.clear()
-                    urlEditorScrollLine = 0
-                    urlEditorBounds.setEmpty()
+                    exitAddressEditing()
+                    textZoneHost?.release(addressZone)
                 }
 
                 performContentTap(px, py)
@@ -2744,88 +2682,16 @@ class BrowserWidget(
         val textY = urlBarBounds.centerY() - (urlTextPaint.descent() + urlTextPaint.ascent()) / 2
         canvas.drawText(displayUrl, urlBarBounds.left + 8f, textY, urlTextPaint)
 
-        // Draw cursor at end when editing
-        if (isEditingUrl && isFocused) {
-            val textWidth = urlTextPaint.measureText(displayUrl)
-            val cursorX = (urlBarBounds.left + 8f + textWidth).coerceAtMost(urlBarBounds.right - 8f)
-            canvas.drawLine(cursorX, urlBarBounds.top + 6f, cursorX, urlBarBounds.bottom - 6f, navIconPaint)
-        }
     }
 
     private fun drawFocusedUrlEditor(canvas: Canvas) {
-        if (!isEditingUrl || !isFocused) return
+        if (!isEditingUrl || textZoneHost?.isFocused(addressZone) != true) return
 
         updateUrlEditorBounds()
-        val maxTextWidth = (urlEditorBounds.width() - URL_EDITOR_PADDING * 2).coerceAtLeast(1f)
-        val lines = wrapAddressText(editingUrlText.toString(), maxTextWidth)
-        val visibleRows = lines.size.coerceIn(1, URL_EDITOR_MAX_ROWS)
-        val maxScroll = (lines.size - visibleRows).coerceAtLeast(0)
-        urlEditorScrollLine = urlEditorScrollLine.coerceIn(0, maxScroll)
-
         canvas.drawRoundRect(urlEditorBounds, 4f, 4f, urlEditorPaint)
         canvas.drawRoundRect(urlEditorBounds, 4f, 4f, urlEditorBorderPaint)
-
-        val lineHeight = urlTextPaint.fontSpacing
-        val firstBaseline = urlEditorBounds.top + URL_EDITOR_PADDING - urlTextPaint.fontMetrics.ascent
-        val endLine = (urlEditorScrollLine + visibleRows).coerceAtMost(lines.size)
-
-        canvas.withClip(
-            urlEditorBounds.left + URL_EDITOR_PADDING,
-            urlEditorBounds.top + URL_EDITOR_PADDING,
-            urlEditorBounds.right - URL_EDITOR_PADDING,
-            urlEditorBounds.bottom - URL_EDITOR_PADDING
-        ) {
-            for (i in urlEditorScrollLine until endLine) {
-                val line = lines[i]
-                val y = firstBaseline + (i - urlEditorScrollLine) * lineHeight
-                if (isUrlTextSelected && line.isNotEmpty()) {
-                    val selectedRight =
-                        urlEditorBounds.left + URL_EDITOR_PADDING + urlTextPaint.measureText(line)
-                    drawRect(
-                        urlEditorBounds.left + URL_EDITOR_PADDING,
-                        y + urlTextPaint.fontMetrics.ascent,
-                        selectedRight,
-                        y + urlTextPaint.fontMetrics.descent,
-                        urlSelectionPaint
-                    )
-                }
-                drawText(line, urlEditorBounds.left + URL_EDITOR_PADDING, y, urlTextPaint)
-            }
-
-            if (!isUrlTextSelected) {
-                val lastVisibleIndex = endLine - 1
-                val cursorLine = lines.lastIndex.coerceAtLeast(0)
-                if (cursorLine in urlEditorScrollLine..lastVisibleIndex) {
-                    val line = lines.getOrElse(cursorLine) { "" }
-                    val cursorX =
-                        (urlEditorBounds.left + URL_EDITOR_PADDING + urlTextPaint.measureText(line))
-                            .coerceAtMost(urlEditorBounds.right - URL_EDITOR_PADDING)
-                    val y = firstBaseline + (cursorLine - urlEditorScrollLine) * lineHeight
-                    drawLine(
-                        cursorX,
-                        y + urlTextPaint.fontMetrics.ascent,
-                        cursorX,
-                        y + urlTextPaint.fontMetrics.descent,
-                        navIconPaint
-                    )
-                }
-            }
-        }
-
-        if (lines.size > URL_EDITOR_MAX_ROWS) {
-            val trackTop = urlEditorBounds.top + URL_EDITOR_PADDING
-            val trackBottom = urlEditorBounds.bottom - URL_EDITOR_PADDING
-            val thumbHeight = ((trackBottom - trackTop) * visibleRows / lines.size).coerceAtLeast(10f)
-            val thumbTop = trackTop + (trackBottom - trackTop - thumbHeight) * urlEditorScrollLine / maxScroll.coerceAtLeast(1)
-            canvas.drawRoundRect(
-                urlEditorBounds.right - 5f,
-                thumbTop,
-                urlEditorBounds.right - 2f,
-                thumbTop + thumbHeight,
-                2f,
-                2f,
-                urlScrollbarPaint
-            )
+        canvas.withClip(addressZone.bounds) {
+            textZoneHost?.drawZone(this, addressZone)
         }
     }
 

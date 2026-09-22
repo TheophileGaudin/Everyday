@@ -85,7 +85,6 @@ interface NewsWidgetListener : WidgetChangeListener {
         reason: String,
         completion: (Result<NewsSnapshot>) -> Unit
     ) = Unit
-    fun onSourceInputFocusChanged(focused: Boolean) = Unit
 }
 
 interface SubtitleWidgetListener : WidgetChangeListener {
@@ -94,7 +93,6 @@ interface SubtitleWidgetListener : WidgetChangeListener {
 }
 
 interface TextBoxWidgetListener : WidgetChangeListener {
-    fun onFocusChanged(focused: Boolean) = Unit
     fun onStateChanged(state: TextBoxWidget.State) = onTransientStateChanged()
 }
 

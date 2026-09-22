@@ -10,6 +10,9 @@ import android.os.Handler
 import android.os.Looper
 import android.text.TextUtils
 import android.util.Log
+import com.everyday.everyday_glasses.interaction.user_input.TextEditAction
+import com.everyday.everyday_glasses.interaction.user_input.TextZone
+import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
 import com.everyday.everyday_glasses.runtime.NewsWidgetListener
 import com.everyday.everyday_glasses.widgets._common.WidgetDataState
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
@@ -136,6 +139,43 @@ class NewsWidget(
     private var sourcePanelQuery = ""
     private var sourcePanelCustomRss = ""
     private var sourcePanelError: String? = null
+
+    /** A source panel input; typing, selection and clipboard are handled by the text editing controller. */
+    private inner class SourceFieldZone(val field: SourcePanelField, private val row: RectF) : TextZone {
+        private val textBounds = RectF()
+        override val kind = TextZoneKind.FIELD
+        override val bounds: RectF
+            get() = textBounds.apply { set(row.left + 88f, row.top, row.right - 6f, row.bottom) }
+        override val fieldTextSize: Float get() = sourcePanelSecondaryPaint.textSize
+        override fun content(): CharSequence = when (field) {
+            SourcePanelField.QUERY -> sourcePanelQuery
+            SourcePanelField.CUSTOM_RSS -> sourcePanelCustomRss
+        }
+        override fun onTextEditAction(action: TextEditAction) {
+            when (action) {
+                is TextEditAction.Changed -> {
+                    val value = action.content.toString().take(SOURCE_INPUT_MAX_LENGTH)
+                    when (field) {
+                        SourcePanelField.QUERY -> sourcePanelQuery = value
+                        SourcePanelField.CUSTOM_RSS -> sourcePanelCustomRss = value
+                    }
+                    sourcePanelError = null
+                }
+                is TextEditAction.Submitted -> submitSourcePanelField()
+                TextEditAction.Released -> if (sourcePanelField == field) sourcePanelField = null
+                TextEditAction.LayoutChanged -> Unit
+            }
+            onStateChanged?.invoke()
+        }
+    }
+
+    private val queryFieldZone = SourceFieldZone(SourcePanelField.QUERY, querySourceBounds)
+    private val customRssFieldZone = SourceFieldZone(SourcePanelField.CUSTOM_RSS, customRssSourceBounds)
+
+    private fun zoneFor(field: SourcePanelField): TextZone = when (field) {
+        SourcePanelField.QUERY -> queryFieldZone
+        SourcePanelField.CUSTOM_RSS -> customRssFieldZone
+    }
 
     // ==================== Paints ====================
 
@@ -437,6 +477,7 @@ class NewsWidget(
 
     override fun onDestroy() {
         stopTimers()
+        releaseSourcePanelField()
     }
 
     fun release() = onDestroy()
@@ -451,8 +492,8 @@ class NewsWidget(
             decreaseFontBounds.contains(px, py) -> setFontScale(fontScale - FONT_SCALE_STEP)
             increaseFontBounds.contains(px, py) -> setFontScale(fontScale + FONT_SCALE_STEP)
             defaultSourceBounds.contains(px, py) -> requestSourceFromPanel(NewsSourceSpec.DEFAULT_LOCATION)
-            querySourceBounds.contains(px, py) -> selectSourcePanelField(SourcePanelField.QUERY)
-            customRssSourceBounds.contains(px, py) -> selectSourcePanelField(SourcePanelField.CUSTOM_RSS)
+            querySourceBounds.contains(px, py) -> selectSourcePanelField(SourcePanelField.QUERY, px, py)
+            customRssSourceBounds.contains(px, py) -> selectSourcePanelField(SourcePanelField.CUSTOM_RSS, px, py)
             applySourceBounds.contains(px, py) -> submitSourcePanelField()
             cancelSourceBounds.contains(px, py) -> closeSourcePanel()
             sourcePanelBounds.contains(px, py) -> return true
@@ -785,7 +826,8 @@ class NewsWidget(
             "Query",
             sourcePanelQuery.ifBlank { "Tap, then type an intent" },
             sourcePanelField == SourcePanelField.QUERY ||
-                (sourceSpec.kind == NewsSourceKind.QUERY && sourcePanelField == null)
+                (sourceSpec.kind == NewsSourceKind.QUERY && sourcePanelField == null),
+            queryFieldZone
         )
         drawSourcePanelRow(
             canvas,
@@ -793,7 +835,8 @@ class NewsWidget(
             "RSS URL",
             sourcePanelCustomRss.ifBlank { "Tap, then type an RSS/Atom URL" },
             sourcePanelField == SourcePanelField.CUSTOM_RSS ||
-                (sourceSpec.kind == NewsSourceKind.CUSTOM_RSS && sourcePanelField == null)
+                (sourceSpec.kind == NewsSourceKind.CUSTOM_RSS && sourcePanelField == null),
+            customRssFieldZone
         )
 
         sourcePanelError?.takeIf { it.isNotBlank() }?.let { error ->
@@ -818,7 +861,8 @@ class NewsWidget(
         bounds: RectF,
         label: String,
         value: String,
-        selected: Boolean
+        selected: Boolean,
+        zone: TextZone? = null
     ) {
         canvas.drawRoundRect(
             bounds,
@@ -828,6 +872,10 @@ class NewsWidget(
         )
         val labelY = bounds.centerY() - 3f
         canvas.drawText(label, bounds.left + 10f, labelY, sourcePanelTextPaint)
+        if (zone != null && textZoneHost?.isFocused(zone) == true) {
+            canvas.withClip(zone.bounds) { textZoneHost?.drawZone(this, zone) }
+            return
+        }
         canvas.drawText(
             truncateSourceText(value, bounds.width() - 94f, sourcePanelSecondaryPaint),
             bounds.left + 88f,
@@ -921,24 +969,27 @@ class NewsWidget(
 
     private fun closeSourcePanel(notify: Boolean = true) {
         val wasOpen = showSourcePanel || sourcePanelField != null
-        val hadInputFocus = sourcePanelField != null
         showSourcePanel = false
-        sourcePanelField = null
+        releaseSourcePanelField()
         sourcePanelError = null
-        if (hadInputFocus) listener?.onSourceInputFocusChanged(false)
         if (wasOpen && notify) onStateChanged?.invoke()
     }
 
-    private fun selectSourcePanelField(field: SourcePanelField) {
+    private fun selectSourcePanelField(field: SourcePanelField, px: Float, py: Float) {
         sourcePanelField = field
         sourcePanelError = null
-        listener?.onSourceInputFocusChanged(true)
+        textZoneHost?.tap(zoneFor(field), px, py)
         onStateChanged?.invoke()
     }
 
-    private fun requestSourceFromPanel(spec: NewsSourceSpec) {
+    private fun releaseSourcePanelField() {
+        val field = sourcePanelField ?: return
         sourcePanelField = null
-        listener?.onSourceInputFocusChanged(false)
+        textZoneHost?.release(zoneFor(field))
+    }
+
+    private fun requestSourceFromPanel(spec: NewsSourceSpec) {
+        releaseSourcePanelField()
         sourcePanelError = null
         requestSource(spec) { /* The widget owns the result and keeps failures non-destructive. */ }
     }
@@ -956,35 +1007,6 @@ class NewsWidget(
             return
         }
         requestSourceFromPanel(spec)
-    }
-
-    /** Route phone/glasses keyboard input to the active source field. */
-    fun handleSourcePanelKeyPress(key: String): Boolean {
-        if (!showSourcePanel) return false
-        val field = sourcePanelField ?: return true
-        when (key.uppercase(Locale.US)) {
-            "BACKSPACE" -> when (field) {
-                SourcePanelField.QUERY -> sourcePanelQuery = sourcePanelQuery.dropLast(1)
-                SourcePanelField.CUSTOM_RSS -> sourcePanelCustomRss = sourcePanelCustomRss.dropLast(1)
-            }
-            "ENTER", "\n", "\r" -> submitSourcePanelField()
-            "SPACE" -> appendSourcePanelText(" ", field)
-            "SHIFT", "123", "ABC", "=/<" -> return true
-            else -> if (key.length == 1) appendSourcePanelText(key, field)
-        }
-        onStateChanged?.invoke()
-        return true
-    }
-
-    private fun appendSourcePanelText(text: String, field: SourcePanelField) {
-        when (field) {
-            SourcePanelField.QUERY -> {
-                if (sourcePanelQuery.length < SOURCE_INPUT_MAX_LENGTH) sourcePanelQuery += text
-            }
-            SourcePanelField.CUSTOM_RSS -> {
-                if (sourcePanelCustomRss.length < SOURCE_INPUT_MAX_LENGTH) sourcePanelCustomRss += text
-            }
-        }
     }
 
     fun requestData(force: Boolean, reason: String) {
