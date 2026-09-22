@@ -3,7 +3,6 @@ package com.everyday.everyday_glasses.connectivity
 import android.content.Context
 import android.net.wifi.p2p.WifiP2pDevice
 import android.util.Log
-import com.everyday.everyday_glasses.connectivity.WifiDirectConnectionListener
 import com.everyday.everyday_glasses.auth_permissions.GoogleAccountSummary
 import com.everyday.everyday_glasses.auth_permissions.GooglePhoneAuthStatus
 import com.everyday.everyday_glasses.widgets.map.backend.GlassesDestinationSearchTransport

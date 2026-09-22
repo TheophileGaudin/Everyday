@@ -36,9 +36,7 @@ import com.everyday.everyday_glasses.auth_permissions.GoogleAccountHandler
 import com.everyday.everyday_glasses.interaction.user_input.TapGestureListener
 import com.everyday.everyday_glasses._threedof.ThreeDofObserver
 import com.everyday.everyday_glasses.headup_wake.WakeRequestListener
-import com.everyday.everyday_glasses.contracts.WidgetContentObserver
 import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
-import com.everyday.everyday_glasses.contracts.WidgetHost
 import com.everyday.everyday_glasses._binocular.BinocularContentClass
 import com.everyday.everyday_glasses._binocular.DisplayConfig
 import com.everyday.everyday_glasses._binocular.BinocularUpdateType
