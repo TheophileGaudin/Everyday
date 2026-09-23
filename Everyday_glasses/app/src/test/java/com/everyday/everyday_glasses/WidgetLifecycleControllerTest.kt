@@ -6,6 +6,7 @@ import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetChangeListener
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import org.json.JSONObject
@@ -30,8 +31,6 @@ class WidgetLifecycleControllerTest {
                 stateType = String::class,
                 current = { registry.singleton(WidgetTypeId.STATUS) as? FakeWidget },
                 createDefault = { FakeWidget(WidgetTypeId.STATUS) },
-                register = { registry.add(it) },
-                unregister = { registry.remove(it) },
                 teardown = { teardowns++ }
             )
         )
@@ -60,8 +59,6 @@ class WidgetLifecycleControllerTest {
                 stateCodec = codec,
                 restore = { value -> FakeWidget(WidgetTypeId.TEXT, value) },
                 capture = FakeWidget::value,
-                register = { registry.add(it) },
-                unregister = { registry.remove(it) }
             )
         )
         val record = WidgetDocument.PersistedWidgetRecord(
@@ -90,8 +87,6 @@ class WidgetLifecycleControllerTest {
                 descriptor = WidgetDescriptors[WidgetTypeId.TEXT],
                 widgetType = FakeWidget::class,
                 stateType = String::class,
-                register = { registry.add(it) },
-                unregister = { registry.remove(it) },
                 teardown = { teardowns++ }
             )
         )
@@ -116,8 +111,6 @@ class WidgetLifecycleControllerTest {
                 descriptor = WidgetDescriptors[WidgetTypeId.TEXT],
                 widgetType = FakeWidget::class,
                 stateType = String::class,
-                register = { registry.add(it) },
-                unregister = { registry.remove(it) }
             )
         )
         val first = controller.open(WidgetTypeId.TEXT) { FakeWidget(WidgetTypeId.TEXT) }!!
@@ -144,6 +137,47 @@ class WidgetLifecycleControllerTest {
 
         controller.closeAll()
         assertEquals(7, changes)
+    }
+
+    @Test
+    fun `controller installs the change channel and runs shared removal around registry removal`() {
+        val registry = WidgetRegistry()
+        val events = mutableListOf<String>()
+        val changeListener = object : WidgetChangeListener {}
+        val controller = WidgetLifecycleController(
+            runOnUiThread = { action -> action() },
+            onChanged = {},
+            registry = registry,
+            changeListener = changeListener,
+            onWidgetRemoving = { widget -> events += "removing registered=${registry.isRegistered(widget)}" },
+            onWidgetRemoved = { widget -> events += "removed registered=${registry.isRegistered(widget)}" },
+        )
+        controller.register(
+            WidgetLifecycleRegistration(
+                descriptor = WidgetDescriptors[WidgetTypeId.TEXT],
+                widgetType = FakeWidget::class,
+                stateType = String::class,
+                beforeRemove = { widget -> events += "beforeRemove registered=${registry.isRegistered(widget)}" },
+                teardown = { events += "teardown" }
+            )
+        )
+
+        val widget = controller.open(WidgetTypeId.TEXT) { FakeWidget(WidgetTypeId.TEXT) }!!
+        assertTrue(registry.isRegistered(widget))
+        assertSame(changeListener, widget.changeListener)
+
+        controller.close(widget)
+
+        assertEquals(
+            listOf(
+                "beforeRemove registered=true",
+                "removing registered=true",
+                "removed registered=false",
+                "teardown"
+            ),
+            events
+        )
+        assertNull(widget.changeListener)
     }
 
     private fun controller(registry: WidgetRegistry, onChanged: () -> Unit) =

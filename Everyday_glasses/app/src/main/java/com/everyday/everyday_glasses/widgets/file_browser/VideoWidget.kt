@@ -70,7 +70,6 @@ class VideoWidget(
     private var displayVisible = true
     private var mediaSourceActive = false
     var listener: VideoWidgetListener? = null
-    private val onStateChanged: (() -> Unit)? get() = listener?.let { value -> { value.onStateChanged() } }
     private val onPlaybackVisibilityChanged: ((Boolean) -> Unit)?
         get() = listener?.let { value -> { active -> value.onPlaybackVisibilityChanged(active) } }
 
@@ -81,7 +80,7 @@ class VideoWidget(
     init {
         backgroundPaint.color = Color.BLACK
         playerUi.onStateChanged = {
-            onStateChanged?.invoke()
+            notifyTransientChange()
         }
 
         val insertIndex = rootLayout.indexOfChild(containerView).let { if (it >= 0) it else 0 }
@@ -102,7 +101,7 @@ class VideoWidget(
         syncHostLayout()
         controller.start(autoPlay)
         setMediaSourceActive(true)
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     fun setWindowedMode() {
@@ -205,7 +204,7 @@ class VideoWidget(
         if (!playbackStarted || released) return
         controller.releaseForPause()
         setMediaSourceActive(false)
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     override fun onResume() {
@@ -227,7 +226,7 @@ class VideoWidget(
             controller.releaseForPause()
             setMediaSourceActive(false)
         }
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     override fun onDestroy() {

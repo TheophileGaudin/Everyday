@@ -71,8 +71,7 @@ class StatusBarWidget(
     private var hoveredToggleElement: StatusElement? = null
     private val toggleMenuBounds = RectF()
     private val toggleRowBounds = Array(StatusElement.entries.size) { RectF() }
-    
-    var onStateChanged: ((State) -> Unit)? = null
+
     // onFullscreenToggled provided by BaseWidget
     
     // Paints
@@ -418,7 +417,7 @@ class StatusBarWidget(
                     Log.d(TAG, "Border tapped - starting move")
                     state = State.MOVING
                     baseState = BaseState.MOVING
-                    onStateChanged?.invoke(state)
+                    notifyTransientChange()
                 }
                 true
             }

@@ -15,7 +15,6 @@ import com.everyday.everyday_glasses.interaction.user_input.TextEditAction
 import com.everyday.everyday_glasses.interaction.user_input.TextZone
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneLayout
-import com.everyday.everyday_glasses.runtime.TextBoxWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 import com.everyday.everyday_glasses.ui.components.KeyboardOverlayController
@@ -94,7 +93,7 @@ class TextBoxWidget(
 
     fun setColumns(count: Int) {
         textLayout.columns = count
-        onStateChanged?.invoke(state) // Trigger redraw
+        notifyTransientChange() // Trigger redraw
     }
 
     //expose the count of columns
@@ -126,17 +125,11 @@ class TextBoxWidget(
 
         override fun onTextEditAction(action: TextEditAction) {
             if (action is TextEditAction.Changed) richText = SpannableStringBuilder(action.content)
-            onStateChanged?.invoke(state)
+            notifyTransientChange()
         }
     }
 
     fun isFocused(): Boolean = textZoneHost?.isFocused(textZone) == true
-
-    // ==================== Callbacks ====================
-    // (onCloseRequested is inherited from BaseWidget)
-
-    var listener: TextBoxWidgetListener? = null
-    private val onStateChanged: ((State) -> Unit)? get() = listener?.let { value -> { value.onStateChanged(it) } }
 
     // ==================== Additional Paints ====================
 
@@ -233,7 +226,7 @@ class TextBoxWidget(
         if (nowVisible) {
             updateKeyboardLayout()
         }
-        onStateChanged?.invoke(state)
+        notifyTransientChange()
     }
 
 
@@ -242,7 +235,7 @@ class TextBoxWidget(
      */
     fun hideKeyboard() {
         if (keyboardOverlay.hide()) {
-            onStateChanged?.invoke(state)
+            notifyTransientChange()
         }
     }
 
@@ -405,7 +398,7 @@ class TextBoxWidget(
                 if (!isFullscreen) {
                     state = State.MOVING
                     updateBaseStateFromState()
-                    onStateChanged?.invoke(state)
+                    notifyTransientChange()
                 }
                 true
             }
@@ -431,7 +424,7 @@ class TextBoxWidget(
     override fun startDrag(isResize: Boolean) {
         super.startDrag(isResize)
         state = if (isResize) State.RESIZING else State.MOVING
-        onStateChanged?.invoke(state)
+        notifyTransientChange()
     }
 
     override fun onDrag(dx: Float, dy: Float, screenWidth: Float, screenHeight: Float) {
@@ -449,7 +442,7 @@ class TextBoxWidget(
         if (state == State.MOVING) {
             state = State.IDLE
             updateBaseStateFromState()
-            onStateChanged?.invoke(state)
+            notifyTransientChange()
         }
     }
 
@@ -469,7 +462,7 @@ class TextBoxWidget(
         richText = SpannableStringBuilder(newText)
         textLayout.resetScroll()
         textLayout.invalidate()
-        onStateChanged?.invoke(state)
+        notifyTransientChange()
     }
 
     fun setHtmlContent(html: String) {

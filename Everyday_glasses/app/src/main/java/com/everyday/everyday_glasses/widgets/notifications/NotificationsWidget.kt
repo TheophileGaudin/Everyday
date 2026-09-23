@@ -77,8 +77,6 @@ class NotificationsWidget(
     private val toastMinusBounds = RectF()
     private val toastPlusBounds = RectF()
 
-    var onStateChanged: (() -> Unit)? = null
-
     private val rowBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = "#141A22".toColorInt()
         style = Paint.Style.FILL
@@ -198,7 +196,7 @@ class NotificationsWidget(
         if (abs(clamped - widgetFontScale) < 0.001f) return
         widgetFontScale = clamped
         applyFontScales()
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     fun getWidgetFontScale(): Float = widgetFontScale
@@ -209,7 +207,7 @@ class NotificationsWidget(
         toastFontScale = clamped
         applyFontScales()
         toastScrollOffset = 0f
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     fun getToastFontScale(): Float = toastFontScale
@@ -223,7 +221,7 @@ class NotificationsWidget(
                 selectedToastKey = item.key
                 toastScrollOffset = 0f
                 showFontMenu = false
-                onStateChanged?.invoke()
+                notifyTransientChange()
                 return true
             }
         }
@@ -235,12 +233,12 @@ class NotificationsWidget(
         if (selectedToastKey != null) {
             selectedToastKey = null
             toastScrollOffset = 0f
-            onStateChanged?.invoke()
+            notifyTransientChange()
             return true
         }
         showFontMenu = !showFontMenu
         hoveredFontAction = null
-        onStateChanged?.invoke()
+        notifyTransientChange()
         return true
     }
 
@@ -255,7 +253,7 @@ class NotificationsWidget(
             else -> {
                 showFontMenu = false
                 hoveredFontAction = null
-                onStateChanged?.invoke()
+                notifyTransientChange()
             }
         }
         return true
@@ -283,7 +281,7 @@ class NotificationsWidget(
         if (selectedToastKey != null) {
             val maxScroll = buildToastLines().maxScroll
             toastScrollOffset = (toastScrollOffset + dy).coerceIn(0f, maxScroll)
-            onStateChanged?.invoke()
+            notifyTransientChange()
             return
         }
         if (notifications.isEmpty()) return
@@ -296,7 +294,7 @@ class NotificationsWidget(
         firstVisibleIndex += direction
         widgetScrollAccumulator = 0f
         clampScrollIndex()
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     override fun draw(canvas: Canvas) {

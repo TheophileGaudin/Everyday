@@ -7,13 +7,12 @@ import android.view.ViewGroup
 import com.everyday.everyday_glasses.runtime.VideoWidgetListener
 import com.everyday.everyday_glasses.widgets.file_browser.video_backend.VideoQueueRepository
 
-/** Constructs VideoWidget instances with their shared queue and callbacks. */
+/** Constructs VideoWidget instances with their shared queue and playback callback. */
 internal class VideoWidgetFactory(
     private val context: Context,
     private val rootLayout: ViewGroup,
     private val containerView: View,
     private val queueRepository: VideoQueueRepository,
-    private val onStateChanged: () -> Unit,
     private val onPlaybackVisibilityChanged: (sourceId: String, active: Boolean) -> Unit,
 ) {
     fun create(
@@ -34,9 +33,6 @@ internal class VideoWidgetFactory(
             queueItems = queueRepository.buildQueue(uri, displayName),
         ).apply {
             listener = object : VideoWidgetListener {
-                override fun onStateChanged() =
-                    this@VideoWidgetFactory.onStateChanged.invoke()
-
                 override fun onPlaybackVisibilityChanged(active: Boolean) {
                     this@VideoWidgetFactory.onPlaybackVisibilityChanged.invoke(sourceId, active)
                 }

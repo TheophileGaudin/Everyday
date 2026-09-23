@@ -1329,7 +1329,7 @@ class BrowserWidget(
                     progress = 0,
                     notifyState = !activeUrlChanged
                 )
-                if (activeUrlChanged) listener?.onPersistentStateChanged()
+                if (activeUrlChanged) notifyPersistentChange()
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {

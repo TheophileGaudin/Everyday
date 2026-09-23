@@ -328,7 +328,7 @@ class FileBrowserWidget(
 
         updateScrollBounds()
         Log.d(TAG, "Loaded ${entries.size} entries from ${directory.path}")
-        listener?.onStateChanged(state)
+        notifyTransientChange()
     }
 
     /**
@@ -985,7 +985,7 @@ class FileBrowserWidget(
 
         scrollOffset = (scrollOffset + dy).coerceIn(0f, maxScrollOffset)
         updateScrollbarThumb()
-        listener?.onStateChanged(state)
+        notifyTransientChange()
     }
 
     private fun navigateUp() {

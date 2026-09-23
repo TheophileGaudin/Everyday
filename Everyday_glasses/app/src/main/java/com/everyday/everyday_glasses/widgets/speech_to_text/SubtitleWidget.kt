@@ -68,7 +68,6 @@ class SubtitleWidget(
     var listener: SubtitleWidgetListener? = null
     private val onSubtitleControlRequested: ((SubtitleControl) -> Unit)?
         get() = listener?.let { value -> { control -> value.onSubtitleControlRequested(control) } }
-    private val onStateChanged: (() -> Unit)? get() = listener?.let { value -> { value.onStateChanged() } }
 
     private val panelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = "#D0000000".toColorInt()
@@ -168,7 +167,7 @@ class SubtitleWidget(
         if (notifyPhone) {
             sendControl(if (enabled) SubtitleControlAction.START else SubtitleControlAction.STOP)
         }
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     fun restoreOptions(
@@ -182,7 +181,7 @@ class SubtitleWidget(
             microphoneEnabled = microphoneEnabled,
             translationEnabled = translationEnabled
         )
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     fun applyStatus(status: SubtitleStatus) {
@@ -194,7 +193,7 @@ class SubtitleWidget(
             latestText = ""
             latestTextAtMs = 0L
         }
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     fun applyTranscript(transcript: SubtitleTranscript) {
@@ -206,7 +205,7 @@ class SubtitleWidget(
             statusState = SubtitleStatusState.LISTENING
             statusMessage = "Listening"
         }
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     fun onPhoneDisconnected() {
@@ -217,7 +216,7 @@ class SubtitleWidget(
         disconnectedNoticePersistent = wasCapturing
         statusState = if (wasCapturing) SubtitleStatusState.ERROR else SubtitleStatusState.STOPPED
         statusMessage = PHONE_DISCONNECTED_MESSAGE
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     override fun onPause() {
@@ -249,14 +248,14 @@ class SubtitleWidget(
                             // Microphone and translation are visible but disabled in v1.
                         }
                     }
-                    onStateChanged?.invoke()
+                    notifyTransientChange()
                     return true
                 }
             }
 
             if (!widgetBounds.contains(px, py)) {
                 optionsPanelVisible = false
-                onStateChanged?.invoke()
+                notifyTransientChange()
                 return true
             }
         }
@@ -267,7 +266,7 @@ class SubtitleWidget(
     fun onDoubleTap(px: Float, py: Float): Boolean {
         if (isMinimized || !containsPoint(px, py)) return false
         optionsPanelVisible = !optionsPanelVisible
-        onStateChanged?.invoke()
+        notifyTransientChange()
         return true
     }
 

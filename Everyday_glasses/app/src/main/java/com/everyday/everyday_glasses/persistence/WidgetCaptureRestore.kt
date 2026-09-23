@@ -1,7 +1,6 @@
 package com.everyday.everyday_glasses.persistence
 
 import android.util.Log
-import com.everyday.everyday_glasses.runtime.TextBoxWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetPersistenceListener
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
@@ -39,7 +38,6 @@ class WidgetCaptureRestore {
 
     /** Widget restore events consumed by [com.everyday.everyday_glasses.WidgetContainer]. */
     var listener: WidgetPersistenceListener? = null
-    private val onWidgetStateChanged: (() -> Unit)? get() = listener?.let { value -> { value.onWidgetStateChanged() } }
 
     // ==================== Common-field helpers ====================
 
@@ -478,11 +476,6 @@ class WidgetCaptureRestore {
 
                 restoreCommonState(this, state, adjustedX, adjustedY)
 
-                listener = object : TextBoxWidgetListener {
-                    override fun onStateChanged(state: TextBoxWidget.State) {
-                        onWidgetStateChanged?.invoke()
-                    }
-                }
             }
         }
     }

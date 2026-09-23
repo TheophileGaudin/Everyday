@@ -328,7 +328,7 @@ class FinanceWidget(
             true,
             "assistant_finance_tile_updated"
         )
-        listener?.onPersistentStateChanged()
+        notifyPersistentChange()
         return Result.success(updated)
     }
 
@@ -389,14 +389,14 @@ class FinanceWidget(
             navigationIndex = it.first
             updateInternalBounds()
             requestData(force = false, reason = "finance_nav_visible")
-            listener?.onStateChanged()
+            notifyTransientChange()
             return true
         }
 
         val tileHit = tileBounds.firstOrNull { it.second.contains(px, py) }
         if (tileHit != null) {
             selectedTileIndex = tileHit.first
-            listener?.onStateChanged()
+            notifyTransientChange()
             return true
         }
         return false
@@ -406,7 +406,7 @@ class FinanceWidget(
         if (!containsPoint(px, py)) return false
         if (!isFullscreen) {
             toggleFullscreen()
-            listener?.onStateChanged()
+            notifyTransientChange()
         }
         return true
     }
@@ -707,7 +707,7 @@ class FinanceWidget(
         updateLegacySelection()
         updateInternalBounds()
         requestData(force = false, reason = "dashboard_layout_changed")
-        listener?.onStateChanged()
+        notifyTransientChange()
         return true
     }
 
@@ -743,7 +743,7 @@ class FinanceWidget(
         }
         updateLegacySelection()
         updateInternalBounds()
-        listener?.onStateChanged()
+        notifyTransientChange()
         return true
     }
 
@@ -782,7 +782,7 @@ class FinanceWidget(
             force = true,
             reason = "tile_symbol_changed"
         )
-        listener?.onStateChanged()
+        notifyTransientChange()
     }
 
     private fun layoutTiles() {
@@ -1012,7 +1012,7 @@ class FinanceWidget(
             updateLegacySelection()
             updateInternalBounds()
             requestData(force = false, reason = "finance_tile_reordered")
-            listener?.onStateChanged()
+            notifyTransientChange()
             return true
         }
         return false

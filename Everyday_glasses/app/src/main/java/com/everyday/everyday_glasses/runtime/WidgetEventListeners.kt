@@ -6,7 +6,6 @@ import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
 import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidget
-import com.everyday.everyday_glasses.widgets.text_editor.TextBoxWidget
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.NewsSnapshot
 import com.everyday.shared.sync.NewsSourceSpec
@@ -15,10 +14,10 @@ import com.everyday.shared.sync.SubtitleControl
 /**
  * Cumulative change notifications emitted by widgets.
  *
- * Repaint is local visual feedback, transient is visible runtime state that must be mirrored,
- * and persistent includes the transient work plus a debounced dashboard save.  The default
- * implementations keep existing listener implementations source-compatible while callers
- * migrate to the more precise signal.
+ * Every widget reports through one instance of this interface, installed on
+ * [BaseWidget.changeListener] by [WidgetLifecycleController] when the widget joins the
+ * dashboard. Transient is visible runtime state that must be redrawn and mirrored; persistent
+ * includes the transient work plus a debounced dashboard save.
  */
 interface WidgetChangeListener {
     fun onTransientStateChanged() = Unit
@@ -47,26 +46,28 @@ class WidgetChangeDispatcher(
     }
 }
 
-interface BrowserWidgetListener : WidgetChangeListener {
-    fun onStateChanged(state: BrowserWidget.State) = onTransientStateChanged()
+/**
+ * Browser events besides change notifications. [onStateChanged] stays until the display
+ * visibility work package (WP5) moves its visibility refresh into the shared change path.
+ */
+interface BrowserWidgetListener {
+    fun onStateChanged(state: BrowserWidget.State) = Unit
     fun onFocusChanged(focused: Boolean) = Unit
     fun onKeyboardRequested(show: Boolean) = Unit
 }
 
-interface FileBrowserWidgetListener : WidgetChangeListener {
-    fun onStateChanged(state: FileBrowserWidget.State) = onTransientStateChanged()
+interface FileBrowserWidgetListener {
     fun onFileSelected(entry: FileBrowserWidget.FileEntry) = Unit
 }
 
-interface MapWidgetListener : WidgetChangeListener {
+interface MapWidgetListener {
     fun onMapDataRequested(point: MapGeoPoint, config: PoiDisplayConfig) = Unit
     fun onAddressFocusChanged(focused: Boolean) = Unit
     fun onNavigationResult(result: NavigationOperationResult) = Unit
     fun onStopNavigationRequested() = Unit
 }
 
-interface FinanceWidgetListener : WidgetChangeListener {
-    fun onStateChanged() = onTransientStateChanged()
+interface FinanceWidgetListener {
     fun onDataRequested(
         visibleConfigs: List<FinanceDashboardTileConfig>,
         refreshTileIds: List<String>,
@@ -75,8 +76,7 @@ interface FinanceWidgetListener : WidgetChangeListener {
     ) = Unit
 }
 
-interface NewsWidgetListener : WidgetChangeListener {
-    fun onStateChanged() = onTransientStateChanged()
+interface NewsWidgetListener {
     fun onDataRequested(countryCode: String, force: Boolean, reason: String) = Unit
     fun onSourceDataRequested(
         sourceSpec: NewsSourceSpec,
@@ -87,23 +87,16 @@ interface NewsWidgetListener : WidgetChangeListener {
     ) = Unit
 }
 
-interface SubtitleWidgetListener : WidgetChangeListener {
+interface SubtitleWidgetListener {
     fun onSubtitleControlRequested(control: SubtitleControl) = Unit
-    fun onStateChanged() = onTransientStateChanged()
 }
 
-interface TextBoxWidgetListener : WidgetChangeListener {
-    fun onStateChanged(state: TextBoxWidget.State) = onTransientStateChanged()
-}
-
-interface VideoWidgetListener : WidgetChangeListener {
-    fun onStateChanged() = onTransientStateChanged()
+interface VideoWidgetListener {
     fun onPlaybackVisibilityChanged(active: Boolean) = Unit
 }
 
-interface WidgetPersistenceListener : WidgetChangeListener {
+interface WidgetPersistenceListener {
     fun onWidgetFocusChanged(widget: BaseWidget?, focused: Boolean) = Unit
-    fun onWidgetStateChanged() = onTransientStateChanged()
     fun onBrowserKeyboardRequested(show: Boolean) = Unit
 }
 

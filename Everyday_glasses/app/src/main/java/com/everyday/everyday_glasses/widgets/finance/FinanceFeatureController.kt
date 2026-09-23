@@ -15,7 +15,6 @@ internal class FinanceFeatureController(
     private val currentWidget: () -> FinanceWidget?,
     private val currentProvider: () -> WidgetDataProvider?,
     private val runPersistentUpdate: ((() -> Result<FinanceDashboardTileConfig>) -> Result<FinanceDashboardTileConfig>),
-    private val notifyPersistentChange: () -> Unit,
     private val notifyTransientChange: () -> Unit,
     private val stableWidgetId: (BaseWidget) -> String,
 ) {
@@ -139,14 +138,6 @@ internal class FinanceFeatureController(
 
     fun configure(widget: FinanceWidget) {
         widget.listener = object : FinanceWidgetListener {
-            override fun onStateChanged() {
-                notifyTransientChange()
-            }
-
-            override fun onPersistentStateChanged() {
-                notifyPersistentChange()
-            }
-
             override fun onDataRequested(
                 visibleConfigs: List<FinanceDashboardTileConfig>,
                 refreshTileIds: List<String>,

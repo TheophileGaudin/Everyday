@@ -14,8 +14,8 @@ import kotlin.reflect.KClass
  *
  * A registration deliberately joins runtime behavior to the static [WidgetDescriptor]
  * without putting Android objects, factories, or mutable state into the descriptor itself.
- * The registry/container migration supplies the concrete membership callbacks; this class is
- * intentionally independent of either implementation while that work is in flight.
+ * Registry membership and the cleanup shared by every widget type belong to
+ * [WidgetLifecycleController]; a registration only describes what is specific to its type.
  */
 class WidgetLifecycleRegistration<W : BaseWidget, S : Any>(
     val descriptor: WidgetDescriptor,
@@ -28,10 +28,11 @@ class WidgetLifecycleRegistration<W : BaseWidget, S : Any>(
     val capture: ((W) -> S?)? = null,
     /** Runs for both newly-created and restored instances, before [register]. */
     val configure: (W) -> Unit = {},
-    /** Adds the configured instance to the live widget inventory. */
-    val register: (W) -> Unit = {},
-    /** Removes the instance from the live widget inventory. */
-    val unregister: (W) -> Unit = {},
+    /**
+     * Type-specific cleanup when an instance is closed. Runs before the shared removal steps,
+     * while the widget is still in the registry.
+     */
+    val beforeRemove: (W) -> Unit = {},
     /** Releases the resources owned by the instance. Called at most once per instance. */
     val teardown: (W) -> Unit = { it.onDestroy() },
     /** Preserves exceptional per-widget fullscreen side effects. */
@@ -71,23 +72,21 @@ class WidgetLifecycleRegistration<W : BaseWidget, S : Any>(
         return capture?.invoke(widget as W)
     }
 
-    internal fun configureAndRegister(widget: BaseWidget, listener: WidgetLifecycleListener) {
+    internal fun prepare(widget: BaseWidget, listener: WidgetLifecycleListener) {
         require(accepts(widget)) {
             "${descriptor.type} expects ${widgetType.simpleName}, got ${widget::class.simpleName}"
         }
         @Suppress("UNCHECKED_CAST")
-        (widget as W).also {
-            configure(it)
-            it.lifecycleListener = listener
-            register(it)
-        }
+        configure(widget as W)
+        widget.lifecycleListener = listener
     }
 
-    internal fun unregister(widget: BaseWidget) {
+    internal fun beforeRemove(widget: BaseWidget) {
         if (!accepts(widget)) return
         @Suppress("UNCHECKED_CAST")
-        this.unregister.invoke(widget as W)
+        this.beforeRemove.invoke(widget as W)
     }
+
 
     internal fun teardown(widget: BaseWidget) {
         if (!accepts(widget)) return
@@ -109,7 +108,10 @@ class WidgetLifecycleRegistration<W : BaseWidget, S : Any>(
 }
 
 /**
- * Owns structural widget mutations and is the common listener installed on registrations.
+ * Owns structural widget mutations and registry membership, and is the common listener
+ * installed on registrations. Every widget it registers receives [changeListener]; every widget
+ * it closes goes through the same removal sequence: the registration's `beforeRemove`, then
+ * [onWidgetRemoving], registry removal, [onWidgetRemoved], and finally teardown.
  * Every public mutation is batched into one [onChanged] notification.
  */
 class WidgetLifecycleController(
@@ -118,7 +120,10 @@ class WidgetLifecycleController(
     private val registry: WidgetRegistry,
     private val onMutationStarted: () -> Unit = {},
     private val onMutationFinished: () -> Unit = {},
-    private val textZoneHost: TextZoneHost? = null
+    private val textZoneHost: TextZoneHost? = null,
+    private val changeListener: WidgetChangeListener? = null, /** Installed on every registered widget as its single change channel. */
+    private val onWidgetRemoving: (BaseWidget) -> Unit = {},  /** Shared cleanup that still needs the widget's stable ID; runs before registry removal. */
+    private val onWidgetRemoved: (BaseWidget) -> Unit = {},   /** Shared follow-up that needs the updated inventory; runs after registry removal. */
 ) : WidgetLifecycleListener {
     private val registrations = LinkedHashMap<WidgetTypeId, WidgetLifecycleRegistration<out BaseWidget, out Any>>()
     private val registrationByWidget =
@@ -325,7 +330,9 @@ class WidgetLifecycleController(
     ) {
         try {
             candidate.textZoneHost = textZoneHost
-            registration.configureAndRegister(candidate, this)
+            candidate.changeListener = changeListener
+            registration.prepare(candidate, this)
+            registry.add(candidate)
             registrationByWidget[candidate] = registration
             destroyed.remove(candidate)
             if (candidate.isFullscreen && !candidate.isMinimized) {
@@ -350,9 +357,13 @@ class WidgetLifecycleController(
         registrationByWidget.remove(widget)
         if (currentFullscreenWidget() === widget) clearFullscreen(widget)
         try {
-            registration.unregister(widget)
+            registration.beforeRemove(widget)
+            onWidgetRemoving(widget)
+            registry.remove(widget)
+            onWidgetRemoved(widget)
         } finally {
             teardownOnce(widget, registration::teardown)
+            widget.changeListener = null
         }
         markChanged()
     }

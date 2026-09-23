@@ -63,7 +63,6 @@ class PdfWidget(
         private set
     var zoom: Float = nearestZoom(initialZoom)
         private set
-    var onStateChanged: (() -> Unit)? = null
 
     override val minimizeLabel: String = "P"
 
@@ -111,7 +110,7 @@ class PdfWidget(
             }.onFailure { error ->
                 isLoading = false
                 errorMessage = error.message ?: "Unable to open PDF"
-                mainHandler.post { onStateChanged?.invoke() }
+                mainHandler.post { notifyTransientChange() }
             }
         }
     }
@@ -122,7 +121,7 @@ class PdfWidget(
         errorMessage = null
         val generation = renderGeneration.incrementAndGet()
         worker.execute { renderCurrentPageOnWorker(generation) }
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     private fun renderCurrentPageOnWorker(generation: Int) {
@@ -151,7 +150,7 @@ class PdfWidget(
                     isLoading = false
                     errorMessage = null
                     clampPan()
-                    onStateChanged?.invoke()
+                    notifyTransientChange()
                 }
             }
         }.onFailure { error ->
@@ -159,7 +158,7 @@ class PdfWidget(
                 if (generation == renderGeneration.get()) {
                     isLoading = false
                     errorMessage = error.message ?: "Unable to render page"
-                    onStateChanged?.invoke()
+                    notifyTransientChange()
                 }
             }
         }
@@ -199,7 +198,7 @@ class PdfWidget(
         if (!isFullscreen || bitmap == null) return
         panY += dy
         clampPan()
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     private fun clampPan() {

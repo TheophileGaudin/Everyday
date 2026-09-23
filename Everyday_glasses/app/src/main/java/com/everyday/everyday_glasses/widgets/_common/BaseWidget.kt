@@ -7,6 +7,7 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.util.Log
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneHost
+import com.everyday.everyday_glasses.runtime.WidgetChangeListener
 import com.everyday.everyday_glasses.runtime.WidgetLifecycle
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleListener
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
@@ -187,6 +188,23 @@ abstract class BaseWidget(
 
     /** Routes every text field or text area of this widget through the shared text editing controller. */
     var textZoneHost: TextZoneHost? = null
+
+    /**
+     * The single channel through which this widget reports visible changes. Installed by
+     * WidgetLifecycleController when the widget joins the dashboard and cleared when it leaves,
+     * so reports made before registration or after closing are ignored.
+     */
+    var changeListener: WidgetChangeListener? = null
+
+    /** Reports a visible change that does not need saving (redraw + binocular refresh). */
+    protected fun notifyTransientChange() {
+        changeListener?.onTransientStateChanged()
+    }
+
+    /** Reports a change that must be saved with the dashboard (includes the transient work). */
+    protected fun notifyPersistentChange() {
+        changeListener?.onPersistentStateChanged()
+    }
 
     // ==================== Paints ====================
 

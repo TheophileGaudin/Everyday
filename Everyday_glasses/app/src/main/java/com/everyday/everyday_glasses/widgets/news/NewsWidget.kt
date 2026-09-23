@@ -115,7 +115,6 @@ class NewsWidget(
     private val handler = Handler(Looper.getMainLooper())
 
     var listener: NewsWidgetListener? = null
-    private val onStateChanged: (() -> Unit)? get() = listener?.let { value -> { value.onStateChanged() } }
 
     // Overlay arrows
     private val leftArrowBounds = RectF()
@@ -165,7 +164,7 @@ class NewsWidget(
                 TextEditAction.Released -> if (sourcePanelField == field) sourcePanelField = null
                 TextEditAction.LayoutChanged -> Unit
             }
-            onStateChanged?.invoke()
+            notifyTransientChange()
         }
     }
 
@@ -375,7 +374,7 @@ class NewsWidget(
         currentIndex = 0
         contentScrollOffset = 0f
         dataState.clearError()
-        onStateChanged?.invoke()
+        notifyTransientChange()
         requestData(force = true, reason = "country_changed")
         restartSwitchTimer()
         Log.d(TAG, "News country updated: $currentCountryCode")
@@ -394,7 +393,7 @@ class NewsWidget(
         pendingSourceSpec = null
         sourceSpec = spec
         sourcePanelError = null
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     /** A compact description used by assistant context and diagnostics. */
@@ -418,7 +417,7 @@ class NewsWidget(
         pendingSourceCompletion = completion
         sourcePanelError = null
         dataState.startLoading(clearError = false)
-        onStateChanged?.invoke()
+        notifyTransientChange()
 
         val callback: (Result<NewsSnapshot>) -> Unit = { result ->
             handler.post { finishSourceRequest(spec, result) }
@@ -442,7 +441,7 @@ class NewsWidget(
         if (newIndex != currentIndex) {
             currentIndex = newIndex
             contentScrollOffset = 0f
-            onStateChanged?.invoke()
+            notifyTransientChange()
         }
     }
 
@@ -453,7 +452,7 @@ class NewsWidget(
         if (abs(clamped - fontScale) < 0.001f) return
         fontScale = clamped
         applyFontScale()
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     fun getFontScale(): Float = fontScale
@@ -934,7 +933,7 @@ class NewsWidget(
                     val failure = IllegalStateException("Feed did not return usable news")
                     sourcePanelError = failure.message
                     dataState.markError(failure.message ?: "News source failed", showError = false)
-                    onStateChanged?.invoke()
+                    notifyTransientChange()
                     completion?.invoke(Result.failure(failure))
                 } else {
                     sourceSpec = requestedSpec
@@ -944,14 +943,14 @@ class NewsWidget(
                     // both paths without first emitting a redundant transient update.
                     applySnapshotInternal(snapshot, notify = false)
                     closeSourcePanel(notify = false)
-                    listener?.onPersistentStateChanged()
+                    notifyPersistentChange()
                     completion?.invoke(Result.success(snapshot))
                 }
             },
             onFailure = { failure ->
                 sourcePanelError = failure.message ?: "News source validation failed"
                 dataState.markError(sourcePanelError ?: "News source failed", showError = false)
-                onStateChanged?.invoke()
+                notifyTransientChange()
                 completion?.invoke(Result.failure(failure))
             }
         )
@@ -964,7 +963,7 @@ class NewsWidget(
         sourcePanelError = null
         sourcePanelQuery = sourceSpec.intent.orEmpty()
         sourcePanelCustomRss = sourceSpec.url.orEmpty()
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     private fun closeSourcePanel(notify: Boolean = true) {
@@ -972,14 +971,14 @@ class NewsWidget(
         showSourcePanel = false
         releaseSourcePanelField()
         sourcePanelError = null
-        if (wasOpen && notify) onStateChanged?.invoke()
+        if (wasOpen && notify) notifyTransientChange()
     }
 
     private fun selectSourcePanelField(field: SourcePanelField, px: Float, py: Float) {
         sourcePanelField = field
         sourcePanelError = null
         textZoneHost?.tap(zoneFor(field), px, py)
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     private fun releaseSourcePanelField() {
@@ -1003,7 +1002,7 @@ class NewsWidget(
             }
         }.getOrElse { failure ->
             sourcePanelError = failure.message ?: "Enter a news source"
-            onStateChanged?.invoke()
+            notifyTransientChange()
             return
         }
         requestSourceFromPanel(spec)
@@ -1011,7 +1010,7 @@ class NewsWidget(
 
     fun requestData(force: Boolean, reason: String) {
         dataState.startLoading(clearError = newsItems.isEmpty())
-        onStateChanged?.invoke()
+        notifyTransientChange()
         listener?.onDataRequested(currentCountryCode, force, reason)
     }
 
@@ -1033,12 +1032,12 @@ class NewsWidget(
         contentScrollOffset = 0f
         dataState.markLoaded()
         Log.d(TAG, "News snapshot applied: items=${newsItems.size} country=$currentCountryCode")
-        if (notify) onStateChanged?.invoke()
+        if (notify) notifyTransientChange()
     }
 
     fun applyError(message: String = "No news available") {
         dataState.markError(message, showError = newsItems.isEmpty())
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     // ==================== Layout Helpers ====================
@@ -1282,14 +1281,14 @@ class NewsWidget(
         if (newsItems.size < 2) return
         currentIndex = (currentIndex + 1) % newsItems.size
         contentScrollOffset = 0f
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     private fun showPreviousItem() {
         if (newsItems.size < 2) return
         currentIndex = if (currentIndex - 1 < 0) newsItems.lastIndex else currentIndex - 1
         contentScrollOffset = 0f
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     private fun resolveCurrentIndex(previousLink: String?): Int {

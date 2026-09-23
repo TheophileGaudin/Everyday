@@ -14,7 +14,6 @@ internal class NewsFeatureController(
     private val currentProvider: () -> WidgetDataProvider?,
     private val withTransientChanges: (() -> Unit) -> Unit,
     private val notifyTransientChange: () -> Unit,
-    private val notifyPersistentChange: () -> Unit,
 ) {
     // Pending country code for news widget
     private var pendingCountryCode: String? = null
@@ -98,14 +97,6 @@ internal class NewsFeatureController(
     }
     fun configure(widget: NewsWidget) {
         widget.listener = object : NewsWidgetListener {
-            override fun onStateChanged() {
-                notifyTransientChange()
-            }
-
-            override fun onPersistentStateChanged() {
-                notifyPersistentChange()
-            }
-
             override fun onDataRequested(
                 countryCode: String,
                 force: Boolean,
