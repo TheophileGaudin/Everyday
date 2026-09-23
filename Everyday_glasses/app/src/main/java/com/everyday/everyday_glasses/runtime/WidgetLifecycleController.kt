@@ -26,7 +26,7 @@ class WidgetLifecycleRegistration<W : BaseWidget, S : Any>(
     val createDefault: (() -> W?)? = null,
     val restore: ((S) -> W?)? = null,
     val capture: ((W) -> S?)? = null,
-    /** Runs for both newly-created and restored instances, before [register]. */
+    /** Runs for both newly-created and restored instances, before they join the registry. */
     val configure: (W) -> Unit = {},
     /**
      * Type-specific cleanup when an instance is closed. Runs before the shared removal steps,
