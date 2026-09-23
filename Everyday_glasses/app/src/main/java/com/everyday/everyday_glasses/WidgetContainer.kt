@@ -2669,6 +2669,8 @@ class WidgetContainer @JvmOverloads constructor(
         if (pageAgentApprovalOverlay.isVisible()) {
             return pageAgentApprovalOverlay.onTap(x, y)
         }
+        // The text edit and formatting menus sit above whichever surface owns the focused text zone.
+        textEditing.onMenuTap(x, y)?.let { return it }
         if (layoutNamePrompt?.isVisible == true) {
             layoutOverlayNotificationEmitted = false
             val handled = layoutNamePrompt?.onTap(x, y) ?: false
@@ -2691,7 +2693,6 @@ class WidgetContainer @JvmOverloads constructor(
         if (closeConfirmationPopup?.isVisible == true) return closeConfirmationPopup?.onTap(x, y) ?: false
         settingsController.handleHoverControlsLayoutEditorTap(x, y)?.let { return it }
         settingsController.handleShortcutsSettingsMenuTap(x, y)?.let { return it }
-        textEditing.onMenuTap(x, y)?.let { return it }
         if (contextMenu?.isVisible == true) {
             return dispatchContextMenuAction { contextMenu?.onTap(x, y) ?: false }
         }
@@ -4076,12 +4077,12 @@ class WidgetContainer @JvmOverloads constructor(
         if (isAnyPopupVisible() || mapOverlayVisible || focusedBrowserWidget?.isEditingAddress() == true || fullscreenBrowserWidget?.isEditingAddress() == true) {ensureDrawnAboveNativeOverlays()}
         mapWidget?.drawScreenOverlay(canvas)
         contextMenu?.draw(canvas)
-        textEditing.drawMenus(canvas)
         settingsController.drawHoverControlsLayoutEditor(canvas)  // Draw the hover-controls editor before the close-app confirmation so the popup appears on top of it when the user invokes Close from the editor's context menu.
         closeConfirmationPopup?.draw(canvas)
         layoutDeleteConfirmationPopup?.draw(canvas)
         settingsController.draw(canvas)
         layoutNamePrompt?.draw(canvas)
+        textEditing.drawMenus(canvas)
         pageAgentApprovalOverlay.draw(canvas)
     }
 
