@@ -800,7 +800,6 @@ class MainActivity : AppCompatActivity() {
                             connected = true,
                             phoneBatteryPercent = phoneBatteryPercent
                         )
-                        widgetContainer.onPhoneReconnected()
                     }
                 }
 

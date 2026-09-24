@@ -354,7 +354,7 @@ class WidgetContainer @JvmOverloads constructor(
             CommandAvailability.ALWAYS -> true
             CommandAvailability.APP_READY -> isReady()
             CommandAvailability.TEXT_FOCUSED -> textEditing.hasFocus || focusedBrowserWidget != null
-            CommandAvailability.BROWSER_AVAILABLE -> focusedBrowserWidget != null || fullscreenBrowserWidget != null || isReady()
+            CommandAvailability.BROWSER_AVAILABLE -> focusedBrowserWidget != null || fullscreenAs<BrowserWidget>() != null || isReady()
         }
 
         override fun toggleWidget(widgetId: CommandWidgetId) =
@@ -717,48 +717,15 @@ class WidgetContainer @JvmOverloads constructor(
     private var pendingCreateY = 0f
 
     // ==================== Fullscreen Tracking ====================
-    
-    // Transitional typed views over the registry's single fullscreen owner. These carry no
-    // state; they keep the specialized input handlers readable while fullscreen ownership is
-    // centralized in WidgetRegistry.
-    private val fullscreenTextWidget: TextBoxWidget?
-        get() = registry.fullscreenWidget as? TextBoxWidget
-    private val fullscreenBrowserWidget: BrowserWidget?
-        get() = registry.fullscreenWidget as? BrowserWidget
-    private val fullscreenImageWidget: ImageWidget?
-        get() = registry.fullscreenWidget as? ImageWidget
-    private val fullscreenVideoWidget: VideoWidget?
-        get() = registry.fullscreenWidget as? VideoWidget
-    private val fullscreenPdfWidget: PdfWidget?
-        get() = registry.fullscreenWidget as? PdfWidget
-    private val fullscreenFileBrowserWidget: FileBrowserWidget?
-        get() = registry.fullscreenWidget as? FileBrowserWidget
-    private var googleAuthBrowserWidget: BrowserWidget? = null
+
+    /**
+     * The fullscreen widget when it is a [T], otherwise null. WidgetRegistry is the single
+     * fullscreen owner; use this only where the widget type genuinely matters.
+     */
+    private inline fun <reified T : BaseWidget> fullscreenAs(): T? = registry.fullscreenWidget as? T
+
     private var browserRoutingCoordinator: BrowserRoutingCoordinator? = null
     private val webSearchHandler = WebSearchSemanticToolHandler(DuckDuckGoWebSearchProvider())
-    // registry.isFullscreen treats an absent widget as windowed. A bare identity check against
-    // registry.fullscreenWidget would report `true` for a singleton that is not on the dashboard
-    // at all, because both sides are then null.
-    private val isStatusBarFullscreen: Boolean
-        get() = registry.isFullscreen(statusBarWidget)
-    private val isLocationWidgetFullscreen: Boolean
-        get() = registry.isFullscreen(locationWidget)
-    private val isMapWidgetFullscreen: Boolean
-        get() = registry.isFullscreen(mapWidget)
-    private val isCalendarWidgetFullscreen: Boolean
-        get() = registry.isFullscreen(calendarWidget)
-    private val isFinanceWidgetFullscreen: Boolean
-        get() = registry.isFullscreen(financeWidget)
-    private val isNewsWidgetFullscreen: Boolean
-        get() = registry.isFullscreen(newsWidget)
-    private val isNotificationsWidgetFullscreen: Boolean
-        get() = registry.isFullscreen(notificationsWidget)
-    private val isSpeedometerWidgetFullscreen: Boolean
-        get() = registry.isFullscreen(speedometerWidget)
-    private val isSubtitleWidgetFullscreen: Boolean
-        get() = registry.isFullscreen(subtitleWidget)
-    private val isMirrorWidgetFullscreen: Boolean
-        get() = registry.isFullscreen(screenMirrorWidget)
 
     private val browserLifecycle by lazy {
         WidgetLifecycleRegistration(
@@ -775,7 +742,6 @@ class WidgetContainer @JvmOverloads constructor(
                 }
                 textEditing.release(widget.addressZone)
                 if (focusedBrowserWidget === widget) setFocusedWidget(null)
-                if (googleAuthBrowserWidget === widget) googleAuthBrowserWidget = null
             },
             teardown = ::destroyWidget,
             onFullscreenChanged = ::handleBrowserWidgetFullscreenSideEffects,
@@ -859,10 +825,7 @@ class WidgetContainer @JvmOverloads constructor(
     private val phoneClipboard: String? get() = textEditing.phoneClipboard
 
     // ==================== Selection Tracking ====================
-    
-    private var isTextSelectionActive = false
-    private var selectionStartX = 0f
-    private var accumulatedSelectionDx = 0f
+
     private var isLongPressSelectionMode = false
     private var pendingFormattingMenuDrag = false
 
@@ -872,7 +835,6 @@ class WidgetContainer @JvmOverloads constructor(
     
     // Two-finger scroll mode
     private var isTwoFingerScrollMode = false
-    private var currentPointerCount = 1
 
     // ==================== Host contracts ====================
 
@@ -1136,10 +1098,6 @@ class WidgetContainer @JvmOverloads constructor(
         }
     }
 
-    fun onPhoneReconnected() {
-        Log.d(TAG, "Phone reconnected")
-    }
-
     fun onHeadUpWake() {
         Log.d(TAG, "Head-up wake -> advance news item")
         newsWidget?.let { news ->
@@ -1200,7 +1158,7 @@ class WidgetContainer @JvmOverloads constructor(
      * and WebView. This method is called on the UI thread at voice-audio submission time.
      */
     fun bindFullscreenPageAgentBrowser(): PageAgentBrowserAdapter? {
-        val widget = fullscreenBrowserWidget
+        val widget = fullscreenAs<BrowserWidget>()
             ?: browserWidgets.firstOrNull { it.isInVideoFullscreen() }
             ?: return null
         val widgetId = stableWidgetId(widget)
@@ -1872,14 +1830,14 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     fun onCursorDown(x: Float, y: Float, pointerCount: Int = 1) {
-        cursorPressed = true; currentPointerCount = pointerCount; isTwoFingerScrollMode = pointerCount >= 2
+        cursorPressed = true; isTwoFingerScrollMode = pointerCount >= 2
         interactionZOrderChanged = false
         interactionPersistentNotified = false
         cursorX = x; cursorY = y; lastCursorX = x; lastCursorY = y
         cursorStabilizer.reset()
-        longPressStartX = x; longPressStartY = y; selectionStartX = x; accumulatedSelectionDx = 0f
+        longPressStartX = x; longPressStartY = y
         cancelLongPress()
-        isTextSelectionActive = false; isLongPressSelectionMode = false; pendingTextSelection = false
+        isLongPressSelectionMode = false; pendingTextSelection = false
 
         if (isTwoFingerScrollMode) return
 
@@ -1935,19 +1893,17 @@ class WidgetContainer @JvmOverloads constructor(
             scheduleLongPress()
             return
         }
-        
-        if (isFinanceWidgetFullscreen) {
-            financeWidget?.let { fw ->
-                if (fw.containsPoint(cx, cy) && fw.canStartTileDrag(cx, cy)) {
-                    pendingDragFinanceTile = true
-                    scheduleLongPress()
-                    return
-                }
+
+        fullscreenAs<FinanceWidget>()?.let { fw ->
+            if (fw.containsPoint(cx, cy) && fw.canStartTileDrag(cx, cy)) {
+                pendingDragFinanceTile = true
+                scheduleLongPress()
+                return
             }
         }
 
         if (hasFullscreenWidget()) {
-            fullscreenBrowserWidget?.let { widget ->
+            fullscreenAs<BrowserWidget>()?.let { widget ->
                 if (widget.containsPoint(cx, cy) && widget.hitTest(cx, cy) == BrowserWidget.HitArea.CONTENT) {
                     handleBrowserContentDown(widget, cx, cy)
                     return
@@ -2020,7 +1976,7 @@ class WidgetContainer @JvmOverloads constructor(
                 notifyTransientContentChanged()
                 return@Runnable
             }
-            if (pendingTextSelection) { if (textEditing.hasFocus) { textEditing.beginSelection(longPressStartX, longPressStartY); isLongPressSelectionMode = true; isTextSelectionActive = false }; pendingTextSelection = false; notifyTransientContentChanged(); return@Runnable }
+            if (pendingTextSelection) { if (textEditing.hasFocus) { textEditing.beginSelection(longPressStartX, longPressStartY); isLongPressSelectionMode = true}; pendingTextSelection = false; notifyTransientContentChanged(); return@Runnable }
             if (isWidgetLayoutLocked && hasPendingWidgetDrag()) {
                 clearPendingWidgetDrag()
                 notifyTransientContentChanged()
@@ -2099,19 +2055,10 @@ class WidgetContainer @JvmOverloads constructor(
 
     fun onCursorUp(x: Float, y: Float) {
         settingsController.handleSpeedometerUp()
-
-        // If DashboardSettings is open, end its interaction (e.g., stop slider drag).
-        settingsController.handleDashboardUp()
-
-        mapWidget?.let {
-            if (it.isPoiConfigVisible()) it.onUp()
-        }
-
-        // If the hover-controls layout editor is open, finalize any drag.
-        settingsController.handleHoverControlsLayoutEditorUp()
-
-        // Shortcuts settings menu.
-        settingsController.handleShortcutsSettingsMenuUp()
+        settingsController.handleDashboardUp() // If DashboardSettings is open, end its interaction (e.g., stop slider drag).
+        mapWidget?.let {if (it.isPoiConfigVisible()) it.onUp()}
+        settingsController.handleHoverControlsLayoutEditorUp() // If the hover-controls layout editor is open, finalize any drag.
+        settingsController.handleShortcutsSettingsMenuUp() // Shortcuts settings menu.
 
         // Notify any hover control that captured the press of the release, unless
         // the visible keyboard owns the release point.
@@ -2127,7 +2074,7 @@ class WidgetContainer @JvmOverloads constructor(
         cursorPressed = false; cancelLongPress()
         if (isScrollbarDragActive) { isScrollbarDragActive = false; scrollbarDragWidget = null }
         textEditing.formattingMenu?.let { if (it.isDragging()) it.onDragEnd() }
-        if (isLongPressSelectionMode) { textEditing.endSelection(); isLongPressSelectionMode = false; isTextSelectionActive = false }
+        if (isLongPressSelectionMode) { textEditing.endSelection(); isLongPressSelectionMode = false }
         var dragEnded = false
         if (financeTileDragging) {
             dragEnded = true
@@ -2152,11 +2099,11 @@ class WidgetContainer @JvmOverloads constructor(
         }
         interactionZOrderChanged = false
         interactionPersistentNotified = false
-        isTwoFingerScrollMode = false; currentPointerCount = 1
+        isTwoFingerScrollMode = false
     }
     
     fun onPointerCountChanged(pointerCount: Int) {
-        val wasScrollMode = isTwoFingerScrollMode; currentPointerCount = pointerCount; isTwoFingerScrollMode = pointerCount >= 2
+        val wasScrollMode = isTwoFingerScrollMode; isTwoFingerScrollMode = pointerCount >= 2
         if (isTwoFingerScrollMode && !wasScrollMode) {
             cancelLongPress()
             cancelBrowserContentTouch()
@@ -2291,8 +2238,7 @@ class WidgetContainer @JvmOverloads constructor(
             closeConfirmationPopup?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); textEditing.updateMenuHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); contextMenu?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
             layoutDeleteConfirmationPopup?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
             layoutNamePrompt?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
-            if (hasFullscreenWidget()) { fullscreenTextWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); fullscreenBrowserWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); fullscreenImageWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); fullscreenVideoWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isStatusBarFullscreen) statusBarWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isLocationWidgetFullscreen) locationWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isCalendarWidgetFullscreen) calendarWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isFinanceWidgetFullscreen) financeWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isNewsWidgetFullscreen) newsWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isNotificationsWidgetFullscreen) notificationsWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isSpeedometerWidgetFullscreen) speedometerWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isSubtitleWidgetFullscreen) subtitleWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); if (isMirrorWidgetFullscreen) screenMirrorWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) }
-            else { registry.forEachWidget { it.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) } }
+            registry.forEachWidget { it.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) }
             cursorStabilizer.reset()
             // Hover clear is transient visual state only.
             if (!isTransitioningDisplayState) { invalidateHoverVisuals() }
@@ -2327,26 +2273,11 @@ class WidgetContainer @JvmOverloads constructor(
         }
         
         // Widgets use content-space coordinates for hit testing
-        if (hasFullscreenWidget()) {
-            // Fullscreen routing uses the dedicated fullscreen references, so no windowed
-            // widget owns hover here.
+        val fullscreen = registry.fullscreenWidget
+        if (fullscreen != null) {
+            // Only the fullscreen widget is visible, so no windowed widget owns hover here.
             hoveredWidget = null
-            fullscreenTextWidget?.updateHover(if (fullscreenTextWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
-            fullscreenBrowserWidget?.updateHover(if (fullscreenBrowserWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
-            fullscreenImageWidget?.updateHover(if (fullscreenImageWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
-            fullscreenVideoWidget?.updateHover(if (fullscreenVideoWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
-            fullscreenPdfWidget?.updateHover(if (fullscreenPdfWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
-            fullscreenFileBrowserWidget?.updateHover(if (fullscreenFileBrowserWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
-            if (isStatusBarFullscreen) statusBarWidget?.updateHover(if (statusBarWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
-            if (isLocationWidgetFullscreen) locationWidget?.updateHover(if (locationWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
-            if (isMapWidgetFullscreen) mapWidget?.updateHover(if (mapWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
-            if (isCalendarWidgetFullscreen) calendarWidget?.updateHover(if (calendarWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
-            if (isFinanceWidgetFullscreen) financeWidget?.updateHover(if (financeWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
-            if (isNewsWidgetFullscreen) newsWidget?.updateHover(if (newsWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
-            if (isNotificationsWidgetFullscreen) notificationsWidget?.updateHover(if (notificationsWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
-            if (isSpeedometerWidgetFullscreen) speedometerWidget?.updateHover(if (speedometerWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
-            if (isSubtitleWidgetFullscreen) subtitleWidget?.updateHover(if (subtitleWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
-            if (isMirrorWidgetFullscreen) screenMirrorWidget?.updateHover(if (screenMirrorWidget!!.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
+            fullscreen.updateHover(if (fullscreen.containsPoint(cx, cy)) cx else Float.NEGATIVE_INFINITY, cy)
         } else {
             // Exclusive hover: only a single widget — the top-most one under the cursor —
             // may be hovered at any moment, and it stays hovered until the cursor leaves it
@@ -2369,17 +2300,8 @@ class WidgetContainer @JvmOverloads constructor(
             invalidateHoverVisuals()
         }
     }
-
     private fun clearWidgetHoverStates() {
         hoveredWidget = null
-        if (hasFullscreenWidget()) {
-            fullscreenTextWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
-            fullscreenBrowserWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
-            fullscreenImageWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
-            fullscreenVideoWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
-            fullscreenPdfWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
-            fullscreenFileBrowserWidget?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
-        }
         registry.forEachWidget { it.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) }
     }
 
@@ -2396,7 +2318,6 @@ class WidgetContainer @JvmOverloads constructor(
         // For text selection, use content-space coordinates
         if (isLongPressSelectionMode && textEditing.isSelecting) {
             textEditing.extendSelection(x, y)
-            isTextSelectionActive = true
         }
         // Menus use screen-space (head-locked)
         textEditing.formattingMenu?.let { menu ->
@@ -2425,22 +2346,15 @@ class WidgetContainer @JvmOverloads constructor(
         if (isScrollbarDragActive && scrollbarDragWidget != null) { scrollbarDragWidget?.onScrollbarDrag(dy); notifyTransientContentChanged(); return }
     }
 
-    fun getScrollbarHoveredWidget(x: Float, y: Float): TextBoxWidget? {
-        // Transform to content space for widget hit testing
-        val (cx, cy) = toContentSpace(x, y)
-        
-        fullscreenTextWidget?.let { if (it.isOverScrollbar(cx, cy)) return it }
+    /** The text box whose scrollbar is under the content-space point ([cx], [cy]), if any. */
+    private fun getScrollbarHoveredWidget(cx: Float, cy: Float): TextBoxWidget? {
+        fullscreenAs<TextBoxWidget>()?.let { if (it.isOverScrollbar(cx, cy)) return it }
         for (widget in widgets.reversed()) { if (widget.isOverScrollbar(cx, cy)) return widget }
         return null
     }
 
     fun isScrollbarDragActive(): Boolean = isScrollbarDragActive
     fun getScrollbarDragWidget(): TextBoxWidget? = scrollbarDragWidget
-
-    fun onScroll(dy: Float) {
-        for (widget in widgets) { if (widget.state == TextBoxWidget.State.HOVER_CONTENT || widget.state == TextBoxWidget.State.EDITING) { widget.onScroll(dy); notifyTransientContentChanged(); break } }
-        fullscreenTextWidget?.let { widget -> if (widget.state == TextBoxWidget.State.HOVER_CONTENT || widget.state == TextBoxWidget.State.EDITING) { widget.onScroll(dy); notifyTransientContentChanged() } }
-    }
 
     fun scrollWidgetAtCursor(cursorX: Float, cursorY: Float, dy: Float, userInitiated: Boolean = false) {
         if (userInitiated) userInputActivity?.onUserInput(UserInputKind.SCROLL)
@@ -2534,90 +2448,64 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun scrollFullscreenWidgetAt(cx: Float, cy: Float, dy: Float): Boolean {
-        if (isMapWidgetFullscreen) {
-            mapWidget?.let {
-                if ((it.isPoiConfigVisible() || it.navigationState.choices.isNotEmpty()) && it.containsPoint(cx, cy)) {
-                    it.onScroll(dy)
+        when (val widget = registry.fullscreenWidget) {
+            is MapWidget -> {
+                if ((widget.isPoiConfigVisible() || widget.navigationState.choices.isNotEmpty()) && widget.containsPoint(cx, cy)) {
+                    widget.onScroll(dy)
                     notifyTransientContentChanged()
                     return true
                 }
             }
-        }
-        fullscreenTextWidget?.let {
-            if (it.containsPoint(cx, cy)) {
-                it.onScroll(dy)
-                notifyTransientContentChanged()
-                return true
-            }
-        }
-        fullscreenBrowserWidget?.let {
-            val hit = it.hitTest(cx, cy)
-            if (hit == BrowserWidget.HitArea.CONTENT || hit == BrowserWidget.HitArea.NAV_URL) {
-                it.onScroll(dy)
-                notifyTransientContentChanged()
-                return true
-            }
-        }
-        fullscreenPdfWidget?.let {
-            if (it.containsPoint(cx, cy)) {
-                withTransientChangeBatch {
-                    it.onScroll(dy)
+            is TextBoxWidget -> {
+                if (widget.containsPoint(cx, cy)) {
+                    widget.onScroll(dy)
                     notifyTransientContentChanged()
+                    return true
                 }
-                return true
             }
-        }
-        fullscreenFileBrowserWidget?.let {
-            if (it.containsPoint(cx, cy)) {
-                withTransientChangeBatch {
-                    it.onScroll(dy)
+            is BrowserWidget -> {
+                val hit = widget.hitTest(cx, cy)
+                if (hit == BrowserWidget.HitArea.CONTENT || hit == BrowserWidget.HitArea.NAV_URL) {
+                    widget.onScroll(dy)
                     notifyTransientContentChanged()
+                    return true
                 }
-                return true
             }
-        }
-        if (isCalendarWidgetFullscreen) {
-            calendarWidget?.let {
-                if (it.containsPoint(cx, cy)) {
+            is PdfWidget, is FileBrowserWidget, is CalendarWidget -> {
+                if (widget.containsPoint(cx, cy)) {
                     withTransientChangeBatch {
-                        it.onScroll(dy)
+                        widget.onScroll(dy)
                         notifyTransientContentChanged()
                     }
                     return true
                 }
             }
-        }
-        if (isFinanceWidgetFullscreen) {
-            financeWidget?.let {
-                if (it.containsPoint(cx, cy)) {
-                    val beforeIndex = it.getNavigationIndex()
-                    if (it.onScrollAt(cx, cy, dy)) {
-                        if (it.getNavigationIndex() != beforeIndex) notifyPersistentContentChanged()
+            is FinanceWidget -> {
+                if (widget.containsPoint(cx, cy)) {
+                    val beforeIndex = widget.getNavigationIndex()
+                    if (widget.onScrollAt(cx, cy, dy)) {
+                        if (widget.getNavigationIndex() != beforeIndex) notifyPersistentContentChanged()
                         else notifyTransientContentChanged()
                     }
                     return true
                 }
             }
-        }
-        if (isNewsWidgetFullscreen) {
-            newsWidget?.let {
-                if (it.containsPoint(cx, cy)) {
-                    val beforeIndex = it.getSelectedIndex()
+            is NewsWidget -> {
+                if (widget.containsPoint(cx, cy)) {
+                    val beforeIndex = widget.getSelectedIndex()
                     runClassifiedInput(
-                        action = { it.onScroll(dy); true },
-                        changed = { it.getSelectedIndex() != beforeIndex }
+                        action = { widget.onScroll(dy); true },
+                        changed = { widget.getSelectedIndex() != beforeIndex }
                     )
                     return true
                 }
             }
-        }
-        if (isNotificationsWidgetFullscreen) {
-            notificationsWidget?.let {
-                if (it.containsPoint(cx, cy)) {
-                    val beforeIndex = it.getScrollIndex()
+            is NotificationsWidget -> {
+                if (widget.containsPoint(cx, cy)) {
+                    val beforeIndex = widget.getScrollIndex()
                     runClassifiedInput(
-                        action = { it.onScroll(dy); true },
-                        changed = { it.getScrollIndex() != beforeIndex }
+                        action = { widget.onScroll(dy); true },
+                        changed = { widget.getScrollIndex() != beforeIndex }
                     )
                     return true
                 }
@@ -2629,7 +2517,7 @@ class WidgetContainer @JvmOverloads constructor(
     // ==================== Tap Handling ====================
 
     fun handleKeyEvent(keyCode: Int, event: KeyEvent): Boolean {
-        return fullscreenVideoWidget?.handleKeyEvent(keyCode, event) == true
+        return fullscreenAs<VideoWidget>()?.handleKeyEvent(keyCode, event) == true
     }
 
     fun onTap(x: Float, y: Float): Boolean {
@@ -2750,32 +2638,8 @@ class WidgetContainer @JvmOverloads constructor(
             }
         }
 
-        if (hasFullscreenWidget()) {
-            fullscreenTextWidget?.let { if (it.containsPoint(cx, cy)) return handleTextWidgetTap(it, cx, cy); return false }
-            fullscreenBrowserWidget?.let {
-                if (it.containsPoint(cx, cy)) {
-                    if (it.hitTest(cx, cy) == BrowserWidget.HitArea.CONTENT && shouldSuppressBrowserContentTap(it)) {
-                        return true
-                    }
-                    return handleBrowserWidgetTap(it, cx, cy)
-                }
-                return false
-            }
-            fullscreenImageWidget?.let { if (it.containsPoint(cx, cy)) return handleImageWidgetTap(it, cx, cy); return false }
-            fullscreenVideoWidget?.let { if (it.containsPoint(cx, cy)) return handleVideoWidgetTap(it, cx, cy); return false }
-            fullscreenPdfWidget?.let { if (it.containsPoint(cx, cy)) return handlePdfWidgetTap(it, cx, cy); return false }
-            fullscreenFileBrowserWidget?.let { if (it.containsPoint(cx, cy)) return handleFileBrowserWidgetTap(it, cx, cy); return false }
-            if (isStatusBarFullscreen) { statusBarWidget?.let { if (it.containsPoint(cx, cy)) return handleStatusBarTap(it, cx, cy) }; return false }
-            if (isLocationWidgetFullscreen) { locationWidget?.let { if (it.containsPoint(cx, cy)) return handleLocationWidgetTap(it, cx, cy) }; return false }
-            if (isMapWidgetFullscreen) { mapWidget?.let { if (it.containsPoint(cx, cy)) return handleMapWidgetTap(it, cx, cy) }; return false }
-            if (isCalendarWidgetFullscreen) { calendarWidget?.let { if (it.containsPoint(cx, cy)) return handleCalendarWidgetTap(it, cx, cy) }; return false }
-            if (isFinanceWidgetFullscreen) { financeWidget?.let { if (it.containsPoint(cx, cy)) return handleFinanceWidgetTap(it, cx, cy) }; return false }
-            if (isNewsWidgetFullscreen) { newsWidget?.let { if (it.containsPoint(cx, cy)) return handleNewsWidgetTap(it, cx, cy) }; return false }
-            if (isNotificationsWidgetFullscreen) { notificationsWidget?.let { if (it.containsPoint(cx, cy)) return handleNotificationsWidgetTap(it, cx, cy) }; return false }
-            if (isSpeedometerWidgetFullscreen) { speedometerWidget?.let { if (it.containsPoint(cx, cy)) return handleSpeedometerWidgetTap(it, cx, cy) }; return false }
-            if (isSubtitleWidgetFullscreen) { subtitleWidget?.let { if (it.containsPoint(cx, cy)) return handleSubtitleWidgetTap(it, cx, cy) }; return false }
-            if (isMirrorWidgetFullscreen) { screenMirrorWidget?.let { if (it.containsPoint(cx, cy)) return handleMirrorWidgetTap(it, cx, cy) }; return false }
-        }
+        // A fullscreen widget is the only possible target; outside its bounds the tap does nothing.
+        registry.fullscreenWidget?.let { fullscreen -> return fullscreen.containsPoint(cx, cy) && dispatchTapToWidget(fullscreen, cx, cy)}
 
         // Modal dashboard check
         settingsController.handleDashboardTap(x, y)?.let { return it }
@@ -3058,15 +2922,74 @@ class WidgetContainer @JvmOverloads constructor(
             }
         }
 
-        fullscreenVideoWidget?.let { widget ->
-            if (widget.containsPoint(cx, cy)) {
-                withTransientChangeBatch {
-                    widget.handleContentDoubleTap(cx, cy)
-                    notifyTransientContentChanged()
+        // A fullscreen video or singleton owns every double-tap. Other fullscreen types
+        // (browser, text, image, PDF, files, mirror) continue to the browser address check below.
+        when (val fullscreen = registry.fullscreenWidget) {
+            is VideoWidget -> {
+                if (fullscreen.containsPoint(cx, cy)) {
+                    withTransientChangeBatch {
+                        fullscreen.handleContentDoubleTap(cx, cy)
+                        notifyTransientContentChanged()
+                    }
+                    return true
                 }
-                return true
+                return false
             }
-            return false
+            is StatusBarWidget -> {
+                if (fullscreen.containsPoint(cx, cy) && fullscreen.onDoubleTap(cx, cy)) {
+                    withTransientChangeBatch { notifyTransientContentChanged() }
+                    return true
+                }
+                return false
+            }
+            is LocationWidget -> {
+                if (fullscreen.containsPoint(cx, cy) && fullscreen.onDoubleTap(cx, cy)) {
+                    withTransientChangeBatch { notifyTransientContentChanged() }
+                    return true
+                }
+                return false
+            }
+            is MapWidget -> {
+                val before = mapPersistentSignature(fullscreen)
+                return fullscreen.containsPoint(cx, cy) &&
+                        runClassifiedInput({ fullscreen.onDoubleTap(cx, cy) }, { mapPersistentSignature(fullscreen) != before })
+            }
+            is CalendarWidget -> {
+                val before = fullscreen.isFullscreen to fullscreen.getFontScale()
+                return fullscreen.containsPoint(cx, cy) &&
+                        runClassifiedInput({ fullscreen.onDoubleTap(cx, cy) }, { (fullscreen.isFullscreen to fullscreen.getFontScale()) != before })
+            }
+            is FinanceWidget -> {
+                val before = listOf(fullscreen.isFullscreen, fullscreen.getTileConfigs(), fullscreen.getNavigationIndex(), fullscreen.getTilingSpan(), fullscreen.getSelectedTileConfig())
+                return fullscreen.containsPoint(cx, cy) && runClassifiedInput({ fullscreen.onDoubleTap(cx, cy) }, {
+                    listOf(fullscreen.isFullscreen, fullscreen.getTileConfigs(), fullscreen.getNavigationIndex(), fullscreen.getTilingSpan(), fullscreen.getSelectedTileConfig()) != before
+                })
+            }
+            is NewsWidget -> {
+                val before = listOf(fullscreen.isFullscreen, fullscreen.getSourceSpec(), fullscreen.getSelectedIndex(), fullscreen.getFontScale())
+                return fullscreen.containsPoint(cx, cy) && runClassifiedInput({ fullscreen.onDoubleTap(cx, cy) }, {
+                    listOf(fullscreen.isFullscreen, fullscreen.getSourceSpec(), fullscreen.getSelectedIndex(), fullscreen.getFontScale()) != before
+                })
+            }
+            is NotificationsWidget -> {
+                val before = listOf(fullscreen.isFullscreen, fullscreen.getWidgetFontScale(), fullscreen.getToastFontScale(), fullscreen.getScrollIndex())
+                return fullscreen.containsPoint(cx, cy) && runClassifiedInput({ fullscreen.onDoubleTap(cx, cy) }, {
+                    listOf(fullscreen.isFullscreen, fullscreen.getWidgetFontScale(), fullscreen.getToastFontScale(), fullscreen.getScrollIndex()) != before
+                })
+            }
+            is SubtitleWidget -> {
+                val before = fullscreen.isFullscreen to fullscreen.options
+                return fullscreen.containsPoint(cx, cy) &&
+                        runClassifiedInput({ fullscreen.onDoubleTap(cx, cy) }, { (fullscreen.isFullscreen to fullscreen.options) != before })
+            }
+            is SpeedometerWidget -> {
+                if (fullscreen.containsPoint(cx, cy)) {
+                    settingsController.showSpeedometerSettingsMenu()
+                    return true
+                }
+                return false
+            }
+            else -> Unit
         }
 
         // A windowed map owns double-tap anywhere on its visible shell, including the border.
@@ -3099,92 +3022,6 @@ class WidgetContainer @JvmOverloads constructor(
         if (!hasFullscreenWidget() && isAppContextMenuBorderDoubleTap(cx, cy)) {
             showAppContextMenu(x, y, cx, cy)
             return true
-        }
-
-        if (isStatusBarFullscreen) {
-            statusBarWidget?.let {
-                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    withTransientChangeBatch { notifyTransientContentChanged() }
-                    return true
-                }
-            }
-            return false
-        }
-
-        if (isLocationWidgetFullscreen) {
-            locationWidget?.let {
-                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    withTransientChangeBatch { notifyTransientContentChanged() }
-                    return true
-                }
-            }
-            return false
-        }
-
-        if (isMapWidgetFullscreen) {
-            mapWidget?.let {
-                val before = mapPersistentSignature(it)
-                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, { mapPersistentSignature(it) != before })) {
-                    return true
-                }
-            }
-            return false
-        }
-
-        if (isCalendarWidgetFullscreen) {
-            calendarWidget?.let {
-                val before = it.isFullscreen to it.getFontScale()
-                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, { (it.isFullscreen to it.getFontScale()) != before })) {
-                    return true
-                }
-            }
-            return false
-        }
-
-        if (isFinanceWidgetFullscreen) {
-            financeWidget?.let {
-                val before = listOf(it.isFullscreen, it.getTileConfigs(), it.getNavigationIndex(), it.getTilingSpan(), it.getSelectedTileConfig())
-                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, {
-                        listOf(it.isFullscreen, it.getTileConfigs(), it.getNavigationIndex(), it.getTilingSpan(), it.getSelectedTileConfig()) != before
-                    })) {
-                    return true
-                }
-            }
-            return false
-        }
-
-        if (isNewsWidgetFullscreen) {
-            newsWidget?.let {
-                val before = listOf(it.isFullscreen, it.getSourceSpec(), it.getSelectedIndex(), it.getFontScale())
-                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, {
-                        listOf(it.isFullscreen, it.getSourceSpec(), it.getSelectedIndex(), it.getFontScale()) != before
-                    })) {
-                    return true
-                }
-            }
-            return false
-        }
-
-        if (isNotificationsWidgetFullscreen) {
-            notificationsWidget?.let {
-                val before = listOf(it.isFullscreen, it.getWidgetFontScale(), it.getToastFontScale(), it.getScrollIndex())
-                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, {
-                        listOf(it.isFullscreen, it.getWidgetFontScale(), it.getToastFontScale(), it.getScrollIndex()) != before
-                    })) {
-                    return true
-                }
-            }
-            return false
-        }
-
-        if (isSubtitleWidgetFullscreen) {
-            subtitleWidget?.let {
-                val before = it.isFullscreen to it.options
-                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, { (it.isFullscreen to it.options) != before })) {
-                    return true
-                }
-            }
-            return false
         }
 
         if (!hasFullscreenWidget()) {
@@ -3263,23 +3100,13 @@ class WidgetContainer @JvmOverloads constructor(
             }
         }
 
-        if (isSpeedometerWidgetFullscreen) {
-            speedometerWidget?.let {
-                if (it.containsPoint(cx, cy)) {
-                    settingsController.showSpeedometerSettingsMenu()
-                    return true
-                }
-            }
-            return false
-        }
-
         focusedBrowserWidget?.let {
             if (it.isAddressHit(cx, cy)) {
                 showBrowserAddressEditMenu(it)
                 return true
             }
         }
-        fullscreenBrowserWidget?.let {
+        fullscreenAs<BrowserWidget>()?.let {
             if (it.isAddressHit(cx, cy)) {
                 showBrowserAddressEditMenu(it)
                 return true
@@ -3693,7 +3520,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun openBrowserAddress(address: String) {
         val widget = focusedBrowserWidget
-            ?: fullscreenBrowserWidget
+            ?: fullscreenAs<BrowserWidget>()
             ?: createFullscreenBrowserWidget()
             ?: return
 
@@ -4029,7 +3856,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun drawOverlayMenus(canvas: Canvas) {
         val mapOverlayVisible = mapWidget?.let {it.isAddressEntryVisible() || it.navigationState.choices.isNotEmpty()} == true
-        if (isAnyPopupVisible() || mapOverlayVisible || focusedBrowserWidget?.isEditingAddress() == true || fullscreenBrowserWidget?.isEditingAddress() == true) {ensureDrawnAboveNativeOverlays()}
+        if (isAnyPopupVisible() || mapOverlayVisible || focusedBrowserWidget?.isEditingAddress() == true || fullscreenAs<BrowserWidget>()?.isEditingAddress() == true) {ensureDrawnAboveNativeOverlays()}
         mapWidget?.drawScreenOverlay(canvas)
         contextMenu?.draw(canvas)
         settingsController.drawHoverControlsLayoutEditor(canvas)  // Draw the hover-controls editor before the close-app confirmation so the popup appears on top of it when the user invokes Close from the editor's context menu.
@@ -4047,8 +3874,8 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun drawVisibleKeyboardOverlays(canvas: Canvas) {
         if (hasFullscreenWidget()) {
-            fullscreenBrowserWidget?.takeIf { it.isKeyboardVisible }?.getKeyboard()?.draw(canvas)
-            fullscreenTextWidget?.takeIf { it.isKeyboardVisible }?.getKeyboard()?.draw(canvas)
+            fullscreenAs<BrowserWidget>()?.takeIf { it.isKeyboardVisible }?.getKeyboard()?.draw(canvas)
+            fullscreenAs<TextBoxWidget>()?.takeIf { it.isKeyboardVisible }?.getKeyboard()?.draw(canvas)
             return
         }
 
@@ -4080,15 +3907,14 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun visibleKeyboardHostAt(cx: Float, cy: Float): BaseWidget? {
         if (hasFullscreenWidget()) {
-            fullscreenBrowserWidget?.let {
+            fullscreenAs<BrowserWidget>()?.let {
                 if (it.isKeyboardVisible && it.getKeyboard()?.containsPoint(cx, cy) == true) return it
             }
-            fullscreenTextWidget?.let {
+            fullscreenAs<TextBoxWidget>()?.let {
                 if (it.isKeyboardVisible && it.getKeyboard()?.containsPoint(cx, cy) == true) return it
             }
-            if (isMapWidgetFullscreen && mapWidget?.isAddressKeyboardVisible() == true &&
-                mapWidget?.getAddressKeyboard()?.containsPoint(cx, cy) == true) {
-                return mapWidget
+            fullscreenAs<MapWidget>()?.let {
+                if (it.isAddressKeyboardVisible() && it.getAddressKeyboard()?.containsPoint(cx, cy) == true) return it
             }
             return null
         }
@@ -4496,11 +4322,8 @@ class WidgetContainer @JvmOverloads constructor(
     private fun clearWidgetsForLayoutReplace() {
         registry.allWidgets().forEach(::notifyPresentationTargetRemoved)
         exitAllFullscreen()
-
         lifecycleController.closeAll()
-
         activeWidget = null
-        googleAuthBrowserWidget = null
         notifyBrowserMinimumBrightnessChanged()
     }
 
@@ -4642,7 +4465,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     fun shouldApplyMediaBrightnessCap(): Boolean {
-        return fullscreenVideoWidget != null || screenMirrorWidget?.shouldApplyMediaBrightnessCap() == true
+        return fullscreenAs<VideoWidget>() != null || screenMirrorWidget?.shouldApplyMediaBrightnessCap() == true
     }
 
     /**
