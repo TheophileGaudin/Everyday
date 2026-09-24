@@ -267,6 +267,7 @@ class WidgetContainer @JvmOverloads constructor(
         },
         onWidgetRemoving = ::onWidgetRemoving,
         onWidgetRemoved = ::onWidgetRemoved,
+        viewportSize = { width.toFloat() to height.toFloat() },
     )
     private val assistantUiDispatcher = UiThreadDispatcher { action -> if (Looper.myLooper() == Looper.getMainLooper()) {action(); true}
     else {post(Runnable(action))}}
@@ -318,8 +319,6 @@ class WidgetContainer @JvmOverloads constructor(
     private val smartAlignment = SmartAlignmentHelper(registry)
     private val smartAlignmentRenderer = SmartAlignmentRenderer()
     private val unitSettings = UnitSettings(context)
-    /** Runtime source of truth for reopenable widget templates. */
-    private val closedTemplateRecords = LinkedHashMap<WidgetTypeId, WidgetDocument.PersistedWidgetRecord>()
 
     // ==================== 3DOF State ====================
 
@@ -737,15 +736,12 @@ class WidgetContainer @JvmOverloads constructor(
             restore = ::restoreBrowserWidget,
             configure = ::configureBrowserWidget,
             beforeRemove = { widget ->
-                widgetCaptureRestore.getBrowserWidgetState(widget)?.let {
-                    storeClosedTemplate(WidgetTypeId.BROWSER, it)
-                }
                 textEditing.release(widget.addressZone)
                 if (focusedBrowserWidget === widget) setFocusedWidget(null)
             },
             teardown = ::destroyWidget,
-            onFullscreenChanged = ::handleBrowserWidgetFullscreenSideEffects,
-            onMinimizeChanged = ::handleBrowserWidgetMinimizeSideEffects
+            onFullscreenChanged = { widget, _ -> refreshBrowserDisplayState(widget) },
+            onMinimizeChanged = { widget, _ -> refreshBrowserDisplayState(widget) }
         )
     }
     private val textLifecycle by lazy {
@@ -757,14 +753,8 @@ class WidgetContainer @JvmOverloads constructor(
             capture = widgetCaptureRestore::getTextWidgetState,
             restore = ::restoreTextWidget,
             beforeRemove = { widget ->
-                storeClosedTemplate(
-                    WidgetTypeId.TEXT,
-                    widgetCaptureRestore.getTextWidgetState(widget)
-                )
                 if (focusedWidget === widget) setFocusedWidget(null)
-            },
-            onFullscreenChanged = ::handleGenericFullscreenSideEffects,
-            onMinimizeChanged = ::handleGenericMinimizeSideEffects
+            }
         )
     }
     private val imageLifecycle by lazy {
@@ -779,9 +769,7 @@ class WidgetContainer @JvmOverloads constructor(
                 val path = widget.getImagePath()
                 val hasSibling = imageWidgets.any { it !== widget && it.getImagePath() == path }
                 if (!hasSibling) ImageWidgetStorage.deleteIfManaged(context, path)
-            },
-            onFullscreenChanged = ::handleGenericFullscreenSideEffects,
-            onMinimizeChanged = ::handleGenericMinimizeSideEffects
+            }
         )
     }
     private val videoLifecycle by lazy {
@@ -793,8 +781,7 @@ class WidgetContainer @JvmOverloads constructor(
             capture = widgetCaptureRestore::getVideoWidgetState,
             restore = ::restoreVideoWidget,
             teardown = ::destroyWidget,
-            onFullscreenChanged = ::handleVideoWidgetFullscreenSideEffects,
-            onMinimizeChanged = ::handleGenericMinimizeSideEffects
+            onFullscreenChanged = ::handleVideoWidgetFullscreenSideEffects
         )
     }
     private val pdfLifecycle by lazy {
@@ -805,18 +792,14 @@ class WidgetContainer @JvmOverloads constructor(
             stateCodec = WidgetDocument.codecs[WidgetTypeId.PDF],
             capture = widgetCaptureRestore::getPdfWidgetState,
             restore = ::restorePdfWidget,
-            teardown = ::destroyWidget,
-            onFullscreenChanged = ::handleGenericFullscreenSideEffects,
-            onMinimizeChanged = ::handleGenericMinimizeSideEffects
+            teardown = ::destroyWidget
         )
     }
     private val filesLifecycle by lazy {
         WidgetLifecycleRegistration(
             descriptor = WidgetDescriptors[WidgetTypeId.FILES],
             widgetType = FileBrowserWidget::class,
-            stateType = Unit::class,
-            onFullscreenChanged = ::handleGenericFullscreenSideEffects,
-            onMinimizeChanged = ::handleGenericMinimizeSideEffects
+            stateType = Unit::class
         )
     }
 
@@ -905,11 +888,11 @@ class WidgetContainer @JvmOverloads constructor(
             createWidget: () -> W,
             restoreWidget: (S) -> W,
             captureState: (W) -> S?,
-            storeClosedState: (S) -> Unit,
+            reopenWidget: (S) -> W = restoreWidget,
             beforeRemove: (W) -> Unit = {},
             teardown: (W) -> Unit = ::destroyWidget,
-            onFullscreen: (W, Boolean) -> Unit = ::handleSingletonRegisteredFullscreen,
-            onMinimize: (W, Boolean) -> Unit = ::handleSingletonRegisteredMinimize
+            onFullscreen: (W, Boolean) -> Unit = { _, _ -> },
+            onMinimize: (W, Boolean) -> Unit = { _, _ -> }
         ) {
             lifecycleController.register(
                 WidgetLifecycleRegistration(
@@ -920,11 +903,9 @@ class WidgetContainer @JvmOverloads constructor(
                     current = current,
                     createDefault = createWidget,
                     restore = restoreWidget,
+                    reopen = reopenWidget,
                     capture = captureState,
-                    beforeRemove = { widget ->
-                        captureState(widget)?.let(storeClosedState)
-                        beforeRemove(widget)
-                    },
+                    beforeRemove = beforeRemove,
                     teardown = teardown,
                     onFullscreenChanged = onFullscreen,
                     onMinimizeChanged = onMinimize
@@ -935,77 +916,51 @@ class WidgetContainer @JvmOverloads constructor(
         bindSingleton(
             WidgetTypeId.STATUS, StatusBarWidget::class, DashboardPersistence.StatusBarState::class,
             { statusBarWidget }, ::createStatusBarPresence, ::applyStatusBarState,
-            { widgetCaptureRestore.getStatusBarState(it) },
-            { storeClosedTemplate(WidgetTypeId.STATUS, it) })
+            { widgetCaptureRestore.getStatusBarState(it) })
         bindSingleton(
             WidgetTypeId.LOCATION, LocationWidget::class, DashboardPersistence.LocationWidgetState::class,
             { locationWidget }, ::createLocationPresence, ::applyLocationState,
-            { widgetCaptureRestore.getLocationWidgetState(it) },
-            { storeClosedTemplate(WidgetTypeId.LOCATION, it) })
+            { widgetCaptureRestore.getLocationWidgetState(it) })
         bindSingleton(
             WidgetTypeId.MAP, MapWidget::class, DashboardPersistence.MapWidgetState::class,
             { mapWidget }, ::createMapPresence, ::applyMapState,
             { widgetCaptureRestore.getMapWidgetState(it) },
-            { storeClosedTemplate(WidgetTypeId.MAP, it) },
-            beforeRemove = MapWidget::release)
+            beforeRemove = MapWidget::release,
+            onFullscreen = { widget, fullscreen -> if (!fullscreen) widget.enforceWindowedMode() })
         bindSingleton(
             WidgetTypeId.CALENDAR, CalendarWidget::class, DashboardPersistence.CalendarWidgetState::class,
             { calendarWidget }, ::createCalendarPresence, ::applyCalendarState,
-            { widgetCaptureRestore.getCalendarWidgetState(it) },
-            { storeClosedTemplate(WidgetTypeId.CALENDAR, it) })
+            { widgetCaptureRestore.getCalendarWidgetState(it) })
         bindSingleton(
             WidgetTypeId.FINANCE, FinanceWidget::class, DashboardPersistence.FinanceWidgetState::class,
             { financeWidget }, ::createFinancePresence, ::applyFinanceState,
             { widgetCaptureRestore.getFinanceWidgetState(it) },
-            { storeClosedTemplate(WidgetTypeId.FINANCE, it) },
-            onMinimize = { widget, minimized ->
-                handleSingletonRegisteredMinimize(widget, minimized)
-                financeFeatures.onMinimizeChanged(widget, minimized)
-            })
+            onMinimize = { widget, minimized -> financeFeatures.onMinimizeChanged(widget, minimized) })
         bindSingleton(
             WidgetTypeId.NEWS, NewsWidget::class, DashboardPersistence.NewsWidgetState::class,
             { newsWidget }, ::createNewsPresence, ::applyNewsState,
-            { widgetCaptureRestore.getNewsWidgetState(it) },
-            { storeClosedTemplate(WidgetTypeId.NEWS, it) })
+            { widgetCaptureRestore.getNewsWidgetState(it) })
         bindSingleton(
             WidgetTypeId.NOTIFICATIONS, NotificationsWidget::class, DashboardPersistence.NotificationsWidgetState::class,
             { notificationsWidget }, ::createNotificationsPresence, ::applyNotificationsState,
-            { widgetCaptureRestore.getNotificationsWidgetState(it) },
-            { storeClosedTemplate(WidgetTypeId.NOTIFICATIONS, it) })
+            { widgetCaptureRestore.getNotificationsWidgetState(it) })
         bindSingleton(
             WidgetTypeId.SPEEDOMETER, SpeedometerWidget::class, DashboardPersistence.SpeedometerWidgetState::class,
             { speedometerWidget }, ::createSpeedometerPresence, ::applySpeedometerState,
             { widgetCaptureRestore.getSpeedometerWidgetState(it) },
-            { storeClosedTemplate(WidgetTypeId.SPEEDOMETER, it) },
             beforeRemove = { settingsController.dismissSpeedometerSettingsMenu() })
         bindSingleton(
             WidgetTypeId.SUBTITLE, SubtitleWidget::class, DashboardPersistence.SubtitleWidgetState::class,
             { subtitleWidget }, ::createSubtitlePresence, ::applySubtitleState,
             { widgetCaptureRestore.getSubtitleWidgetState(it) },
-            { storeClosedTemplate(WidgetTypeId.SUBTITLE, it) })
+            // Reopening a closed subtitle widget resumes capture; loading a dashboard does not.
+            reopenWidget = { state -> applySubtitleState(state).also { it.setCaptureEnabled(true) } })
         bindSingleton(
             WidgetTypeId.MIRROR, ScreenMirrorWidget::class, DashboardPersistence.MirrorWidgetState::class,
             { screenMirrorWidget }, ::createMirrorPresence, ::applyMirrorState,
-            { widgetCaptureRestore.getMirrorWidgetState(it) },
-            { storeClosedTemplate(WidgetTypeId.MIRROR, it) })
+            { widgetCaptureRestore.getMirrorWidgetState(it) })
 
         lifecycleController.verifyComplete()
-    }
-
-    private fun handleSingletonRegisteredFullscreen(widget: BaseWidget, fullscreen: Boolean) {
-        if (fullscreen) {
-            widget.setFullscreenBounds(width.toFloat(), height.toFloat())
-            notificationsWidget?.setScreenHeight(height.toFloat())
-        } else if (widget is MapWidget) {
-            widget.enforceWindowedMode()
-        }
-    }
-
-    private fun handleSingletonRegisteredMinimize(widget: BaseWidget, minimized: Boolean) {
-        if (!minimized && widget.isFullscreen) {
-            widget.setFullscreenBounds(width.toFloat(), height.toFloat())
-        }
-        updateMinimizedWidgetPositions()
     }
 
     private fun setupWidgetCaptureRestoreCallbacks() {
@@ -1281,7 +1236,7 @@ class WidgetContainer @JvmOverloads constructor(
                 setFocusedWidget(null)
             }
             registry.restoreZOrder(target, session.snapshot.zOrder, parent as? ViewGroup, this)
-            updateMinimizedWidgetPositions()
+            lifecycleController.arrangeMinimizedWidgets()
         }
         notifyTransientContentChanged()
     }
@@ -1295,7 +1250,7 @@ class WidgetContainer @JvmOverloads constructor(
             if (!session.snapshot.focused && (focusedWidget === target || focusedBrowserWidget === target)) {
                 setFocusedWidget(null)
             }
-            updateMinimizedWidgetPositions()
+            lifecycleController.arrangeMinimizedWidgets()
         }
         notifyTransientContentChanged()
     }
@@ -1323,7 +1278,6 @@ class WidgetContainer @JvmOverloads constructor(
 
     /** Shared follow-up for every closed widget, run once the registry no longer contains it. */
     private fun onWidgetRemoved(@Suppress("UNUSED_PARAMETER") widget: BaseWidget) {
-        updateMinimizedWidgetPositions()
         notifyMediaBrightnessCapChanged()
         notifyBrowserMinimumBrightnessChanged()
     }
@@ -1572,33 +1526,14 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Fullscreen Management ====================
 
-    private fun handleGenericFullscreenSideEffects(widget: BaseWidget, isFullscreen: Boolean) {
-        if (isFullscreen) widget.setFullscreenBounds(width.toFloat(), height.toFloat())
-    }
-
-    private fun handleGenericMinimizeSideEffects(widget: BaseWidget, isMinimized: Boolean) {
-        if (!isMinimized && widget.isFullscreen) {
-            widget.setFullscreenBounds(width.toFloat(), height.toFloat())
-        }
-        updateMinimizedWidgetPositions()
-    }
-
-    private fun handleBrowserWidgetFullscreenSideEffects(widget: BrowserWidget, isFullscreen: Boolean) {
-        handleGenericFullscreenSideEffects(widget, isFullscreen)
-        widget.onDisplayVisibilityChanged(isBrowserWidgetVisible(widget))
-        notifyMediaBrightnessCapChanged()
-        notifyBrowserMinimumBrightnessChanged()
-    }
-
-    private fun handleBrowserWidgetMinimizeSideEffects(widget: BrowserWidget, isMinimized: Boolean) {
-        handleGenericMinimizeSideEffects(widget, isMinimized)
+    /** A browser's visibility and the brightness rules follow its fullscreen and minimized state. */
+    private fun refreshBrowserDisplayState(widget: BrowserWidget) {
         widget.onDisplayVisibilityChanged(isBrowserWidgetVisible(widget))
         notifyMediaBrightnessCapChanged()
         notifyBrowserMinimumBrightnessChanged()
     }
 
     private fun handleVideoWidgetFullscreenSideEffects(widget: VideoWidget, isFullscreen: Boolean) {
-        handleGenericFullscreenSideEffects(widget, isFullscreen)
         if (isFullscreen) widget.startPlayback(autoPlay = true)
         widget.setWindowedMode()
         notifyMediaBrightnessCapChanged()
@@ -3272,9 +3207,6 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createStatusBarPresence(): StatusBarWidget {
-        closedTemplateState<DashboardPersistence.StatusBarState>(WidgetTypeId.STATUS)?.let {
-            return applyStatusBarState(it)
-        }
         val statusWidth = 220f
         val statusHeight = 110f
         return StatusBarWidget(
@@ -3286,7 +3218,6 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createLocationPresence(): LocationWidget {
-        closedTemplateState<DashboardPersistence.LocationWidgetState>(WidgetTypeId.LOCATION)?.let {return applyLocationState(it)}
         val locationWidth = 300f
         val locationHeight = 120f
         val widget = LocationWidget(context, 20f, height - locationHeight - 20f, locationWidth, locationHeight)
@@ -3295,7 +3226,6 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createMapPresence(): MapWidget {
-        closedTemplateState<DashboardPersistence.MapWidgetState>(WidgetTypeId.MAP)?.let { return applyMapState(it) }
         val size = 210f
         return MapWidget(context, width - size - 24f, 24f, size, size).apply {
             invalidate = ::requestRepaint
@@ -3329,9 +3259,6 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createCalendarPresence(): CalendarWidget {
-        closedTemplateState<DashboardPersistence.CalendarWidgetState>(WidgetTypeId.CALENDAR)?.let {
-            return applyCalendarState(it)
-        }
         val startX = (width - CalendarWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
         val startY = (height - CalendarWidget.DEFAULT_HEIGHT - 160f).coerceAtLeast(20f)
         return CalendarWidget(
@@ -3345,9 +3272,6 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createSpeedometerPresence(): SpeedometerWidget {
-        closedTemplateState<DashboardPersistence.SpeedometerWidgetState>(WidgetTypeId.SPEEDOMETER)?.let {
-            return applySpeedometerState(it)
-        }
         val speedWidth = 220f
         val speedHeight = 110f
         val startX = (width - speedWidth - 20f).coerceAtLeast(20f)
@@ -3356,7 +3280,6 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createFinancePresence(): FinanceWidget {
-        closedTemplateState<DashboardPersistence.FinanceWidgetState>(WidgetTypeId.FINANCE)?.let {return applyFinanceState(it)}
         val widget = FinanceWidget(20f, 20f, FinanceWidget.DEFAULT_WIDTH, FinanceWidget.DEFAULT_HEIGHT)
         financeFeatures.configure(widget)
         financeFeatures.onOpened(widget, reason = "widget_toggled_on")
@@ -3364,7 +3287,6 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createNewsPresence(): NewsWidget {
-        closedTemplateState<DashboardPersistence.NewsWidgetState>(WidgetTypeId.NEWS)?.let {return applyNewsState(it)}
         val startX = (width - NewsWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
         val widget = NewsWidget(startX, 20f, NewsWidget.DEFAULT_WIDTH, NewsWidget.DEFAULT_HEIGHT)
         newsFeatures.configure(widget)
@@ -3373,9 +3295,6 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createNotificationsPresence(): NotificationsWidget {
-        closedTemplateState<DashboardPersistence.NotificationsWidgetState>(WidgetTypeId.NOTIFICATIONS)?.let {
-            return applyNotificationsState(it)
-        }
         val startX = (width - NotificationsWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
         return NotificationsWidget(
             startX, 20f, NotificationsWidget.DEFAULT_WIDTH,
@@ -3384,9 +3303,6 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createSubtitlePresence(): SubtitleWidget {
-        closedTemplateState<DashboardPersistence.SubtitleWidgetState>(WidgetTypeId.SUBTITLE)?.let {
-            return applySubtitleState(it).also { widget -> widget.setCaptureEnabled(true) }
-        }
         val subtitleWidth = SubtitleWidget.DEFAULT_WIDTH.coerceAtMost(width * 0.82f)
         val subtitleHeight = SubtitleWidget.DEFAULT_HEIGHT
         val startX = ((width - subtitleWidth) / 2f).coerceAtLeast(20f)
@@ -3395,9 +3311,6 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun createMirrorPresence(): ScreenMirrorWidget {
-        closedTemplateState<DashboardPersistence.MirrorWidgetState>(WidgetTypeId.MIRROR)?.let {
-            return applyMirrorState(it)
-        }
         return ScreenMirrorWidget(context, 20f, 20f, 180f, 320f).apply {
             configureScreenMirrorWidget(this)
         }.also { notifyMediaBrightnessCapChanged() }
@@ -3706,12 +3619,6 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     fun unfocusAll() {mapWidget?.takeIf { it.isAddressEntryFocused() }?.closeAddressEntry(); setFocusedWidget(null)}
-
-    private fun updateMinimizedWidgetPositions() {
-        if (width <= 0 || height <= 0) return
-        val minimizedWidgets = registry.getMinimizedWidgets(); val squareSize = 64f; val maxPerRow = 7
-        minimizedWidgets.forEachIndexed { index, widget -> val row = index / maxPerRow; val col = index % maxPerRow; widget.setPosition(col * squareSize, height - ((row + 1) * squareSize)) }
-    }
 
     /** Keys go to the focused text zone first, otherwise to the focused browser's web page. */
     fun onKeyPress(key: String, userInitiated: Boolean = false) {
@@ -4084,39 +3991,11 @@ class WidgetContainer @JvmOverloads constructor(
             widgets = registry.allWidgets().mapNotNull { widget ->
                 lifecycleController.captureRecord(widget, registry.stableId(widget))
             },
-            closedTemplates = closedTemplateRecords.values.toList(),
+            closedTemplates = lifecycleController.closedTemplateRecords(),
             hoverControls = settingsController.getHoverControlPlacements(),
             isFirstRun = false,
             isLayoutLocked = isWidgetLayoutLocked
         )
-
-    private fun storeClosedTemplate(type: WidgetTypeId, state: Any?) {
-        val codec = WidgetDocument.codecs[type]
-        if (state == null || codec == null) {
-            closedTemplateRecords.remove(type)
-        } else {
-            closedTemplateRecords[type] = WidgetDocument.PersistedWidgetRecord(
-                type = type,
-                instanceId = "${type.persistedId}#template",
-                state = codec.encode(state)
-            )
-        }
-    }
-
-    private fun replaceClosedTemplates(records: List<WidgetDocument.PersistedWidgetRecord>) {
-        closedTemplateRecords.clear()
-        records.forEach { record ->
-            if (WidgetDescriptors[record.type].storesClosedTemplate) {
-                closedTemplateRecords.putIfAbsent(record.type, record)
-            }
-        }
-    }
-
-    private inline fun <reified S : Any> closedTemplateState(type: WidgetTypeId): S? {
-        val record = closedTemplateRecords[type] ?: return null
-        val codec = WidgetDocument.codecs[type] ?: return null
-        return codec.decode(record.state) as? S
-    }
 
     // ==================== Shortcuts ====================
 
@@ -4282,7 +4161,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun applyPersistedContents(dashboard: WidgetDocument.PersistedDashboard) {
         shouldCreateDefaultSingletons = false
-        replaceClosedTemplates(dashboard.closedTemplates)
+        lifecycleController.replaceClosedTemplates(dashboard.closedTemplates)
 
         dashboard.widgets.forEach { record ->
             runCatching { lifecycleController.restore(record) }
@@ -4291,7 +4170,7 @@ class WidgetContainer @JvmOverloads constructor(
         settingsController.applyHoverControlPlacements(dashboard.hoverControls)
         setWidgetLayoutLocked(dashboard.isLayoutLocked, persist = false)
 
-        updateMinimizedWidgetPositions()
+        lifecycleController.arrangeMinimizedWidgets()
         notifyMediaBrightnessCapChanged()
         notifyBrowserMinimumBrightnessChanged()
         layoutManager.activeLayoutName = dashboard.activeLayoutName
@@ -4404,35 +4283,22 @@ class WidgetContainer @JvmOverloads constructor(
         ).apply {widgetCaptureRestore.restorePdfWidgetState(this, state, adjustedX, adjustedY)}
     }
 
-    private fun openClosedTextTemplate(): TextBoxWidget? {
-        val template = closedTemplateState<DashboardPersistence.TextWidgetState>(WidgetTypeId.TEXT) ?: return null
-        val widget = widgetCaptureRestore.restoreTextWidgets(listOf(template), width, height).firstOrNull() ?: return null
-        return runPersistentMutation {
-            lifecycleController.open(textLifecycle) { widget }
-            applyFullscreenState(widget, template.isFullscreen)
+    private fun openClosedTextTemplate(): TextBoxWidget? = runPersistentMutation(changed = { it != null }) {
+        (lifecycleController.openClosedTemplate(WidgetTypeId.TEXT) as? TextBoxWidget)?.also { widget ->
             if (!widget.isMinimized) {
                 setFocusedWidget(widget)
             }
-            widget
         }
     }
 
-    private fun openClosedBrowserTemplate(): BrowserWidget? {
-        val template =
-            closedTemplateState<DashboardPersistence.BrowserWidgetState>(WidgetTypeId.BROWSER)
-                ?: return null
-        val widget = restoreBrowserWidget(template) ?: return null
-
-        return runPersistentMutation {
-            lifecycleController.open(browserLifecycle) { widget }
+    private fun openClosedBrowserTemplate(): BrowserWidget? = runPersistentMutation(changed = { it != null }) {
+        (lifecycleController.openClosedTemplate(WidgetTypeId.BROWSER) as? BrowserWidget)?.also { widget ->
             notifyMediaBrightnessCapChanged()
             notifyBrowserMinimumBrightnessChanged()
-            applyFullscreenState(widget, template.isFullscreen)
             if (!widget.isMinimized) {
                 widget.setFocused(true)
                 setFocusedWidget(widget)
             }
-            widget
         }
     }
 

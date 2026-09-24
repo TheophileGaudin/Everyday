@@ -183,6 +183,56 @@ class WidgetLifecycleControllerTest {
     private fun controller(registry: WidgetRegistry, onChanged: () -> Unit) =
         WidgetLifecycleController({ action -> action() }, onChanged, registry)
 
+    @Test
+    fun `closing stores a template that the next show reopens`() {
+        val registry = WidgetRegistry()
+        val controller = controller(registry) {}
+        controller.register(
+            WidgetLifecycleRegistration(
+                descriptor = WidgetDescriptors[WidgetTypeId.STATUS],
+                widgetType = FakeWidget::class,
+                stateType = String::class,
+                stateCodec = StringCodec(WidgetTypeId.STATUS),
+                current = { registry.singleton(WidgetTypeId.STATUS) as? FakeWidget },
+                createDefault = { FakeWidget(WidgetTypeId.STATUS, "default") },
+                restore = { value -> FakeWidget(WidgetTypeId.STATUS, "reopened from $value") },
+                capture = FakeWidget::value
+            )
+        )
+
+        val first = controller.show(WidgetTypeId.STATUS) as FakeWidget
+        assertEquals("default", first.value)
+        controller.close(first)
+        assertEquals(listOf("status#template"), controller.closedTemplateRecords().map { it.instanceId })
+
+        val reopened = controller.show(WidgetTypeId.STATUS) as FakeWidget
+        assertEquals("reopened from default", reopened.value)
+    }
+
+    @Test
+    fun `fullscreen widgets are fitted to the viewport by default`() {
+        val registry = WidgetRegistry()
+        val controller = WidgetLifecycleController(
+            runOnUiThread = { action -> action() },
+            onChanged = {},
+            registry = registry,
+            viewportSize = { 640f to 480f },
+        )
+        controller.register(
+            WidgetLifecycleRegistration(
+                descriptor = WidgetDescriptors[WidgetTypeId.TEXT],
+                widgetType = FakeWidget::class,
+                stateType = String::class
+            )
+        )
+        val widget = controller.open(WidgetTypeId.TEXT) { FakeWidget(WidgetTypeId.TEXT) }!!
+
+        controller.enterFullscreen(widget)
+
+        assertEquals(640f, widget.widgetWidth)
+        assertEquals(480f, widget.widgetHeight)
+    }
+
     private class StringCodec(override val type: WidgetTypeId) : WidgetDocument.WidgetStateCodec {
         override val stateClass = String::class
         override fun encode(state: Any): JSONObject = JSONObject().put("value", state as String)
