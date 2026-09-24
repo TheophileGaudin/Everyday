@@ -10,16 +10,12 @@ import java.util.IdentityHashMap
 import kotlin.reflect.KClass
 
 /**
- * Owns structural widget mutations and registry membership, and is the common listener
- * installed on registrations. Every widget it registers receives [changeListener]; every widget
- * it closes goes through the same removal sequence: its closed template is stored, then the
- * registration's `beforeRemove`, [onWidgetRemoving], registry removal, the minimized row is
- * rearranged, [onWidgetRemoved], and finally teardown.
+ * The complete runtime contract for one widget type.
  *
- * It also owns the closed templates (one per type whose descriptor stores one), which are
- * reopened before a default instance is created, and the fullscreen/minimize side effects every
- * widget shares.
- * Every public mutation is batched into one [onChanged] notification.
+ * A registration deliberately joins runtime behavior to the static [WidgetDescriptor]
+ * without putting Android objects, factories, or mutable state into the descriptor itself.
+ * Registry membership and the cleanup shared by every widget type belong to
+ * [WidgetLifecycleController]; a registration only describes what is specific to its type.
  */
 class WidgetLifecycleRegistration<W : BaseWidget, S : Any>(
     val descriptor: WidgetDescriptor,
@@ -132,8 +128,13 @@ class WidgetLifecycleRegistration<W : BaseWidget, S : Any>(
 /**
  * Owns structural widget mutations and registry membership, and is the common listener
  * installed on registrations. Every widget it registers receives [changeListener]; every widget
- * it closes goes through the same removal sequence: the registration's `beforeRemove`, then
- * [onWidgetRemoving], registry removal, [onWidgetRemoved], and finally teardown.
+ * it closes goes through the same removal sequence: its closed template is stored, then the
+ * registration's `beforeRemove`, [onWidgetRemoving], registry removal, the minimized row is
+ * rearranged, [onWidgetRemoved], and finally teardown.
+ *
+ * It also owns the closed templates (one per type whose descriptor stores one), which are
+ * reopened before a default instance is created, and the fullscreen/minimize side effects every
+ * widget shares.
  * Every public mutation is batched into one [onChanged] notification.
  */
 class WidgetLifecycleController(
