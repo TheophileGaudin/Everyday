@@ -836,10 +836,10 @@ class FileBrowserWidget(
     }
 
     /** Only the border moves this widget and only the resize handle resizes it. */
-    override fun dragHitTest(px: Float, py: Float): BaseWidget.DragHit = when (hitTest(px, py)) {
-        HitArea.BORDER -> BaseWidget.DragHit.DRAG
-        HitArea.RESIZE_HANDLE -> BaseWidget.DragHit.RESIZE
-        else -> BaseWidget.DragHit.NONE
+    override fun dragHitTest(px: Float, py: Float): DragHit = when (hitTest(px, py)) {
+        HitArea.BORDER -> DragHit.DRAG
+        HitArea.RESIZE_HANDLE -> DragHit.RESIZE
+        else -> DragHit.NONE
     }
 
     override fun isBorderHit(px: Float, py: Float): Boolean = hitTest(px, py) == HitArea.BORDER
