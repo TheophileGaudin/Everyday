@@ -25,7 +25,6 @@ import android.renderscript.Type
 import android.util.Log
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.get
-import com.everyday.everyday_glasses.runtime.WidgetChangeListener
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets._common.WidgetInteractionState
@@ -390,7 +389,13 @@ class ScreenMirrorWidget(
             streamState == StreamState.STREAMING
     }
 
-    fun shouldApplyMediaBrightnessCap(): Boolean = isBinocularMediaActive()
+    override val requestsMediaBrightnessCap: Boolean get() = isBinocularMediaActive()
+
+    /** Re-applies display visibility (minimized may have changed) and reports the change. */
+    private fun notifyStateChanged() {
+        refreshDisplayVisibility()
+        notifyTransientChange()
+    }
 
     private fun dispatchMediaStateIfChanged() {
         val isActive = isBinocularMediaActive()
@@ -479,7 +484,7 @@ class ScreenMirrorWidget(
         if (newState != state) {
             Log.d(TAG, "State changed: $state -> $newState")
             state = newState
-            listener?.onStateChanged(state)
+            notifyStateChanged()
         }
     }
 
@@ -515,7 +520,7 @@ class ScreenMirrorWidget(
                     Log.d(TAG, "Border tapped - starting move")
                     state = State.MOVING
                     baseState = BaseState.MOVING
-                    listener?.onStateChanged(state)
+                    notifyStateChanged()
                 }
                 true
             }
@@ -544,7 +549,7 @@ class ScreenMirrorWidget(
     private fun updateStreamState(newState: StreamState) {
         if (streamState != newState) {
             streamState = newState
-            handler.post { listener?.onStreamStateChanged(newState) }
+            handler.post { notifyTransientChange() }
             dispatchMediaStateIfChanged()
         }
     }
@@ -1144,9 +1149,7 @@ class ScreenMirrorWidget(
     }
 }
 
-interface MirrorWidgetListener : WidgetChangeListener {
-    fun onStateChanged(state: ScreenMirrorWidget.State)
-    fun onStreamStateChanged(state: ScreenMirrorWidget.StreamState)
+interface MirrorWidgetListener {
     fun onFrameReady()
     fun requestMirror(start: Boolean)
     fun onMediaStateChanged(active: Boolean)

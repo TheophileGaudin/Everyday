@@ -493,7 +493,7 @@ class BrowserWidget(
                 TextEditAction.Released -> exitAddressEditing()
                 TextEditAction.LayoutChanged -> Unit
             }
-            listener?.onStateChanged(state)
+            notifyStateChanged()
         }
     }
 
@@ -690,6 +690,7 @@ class BrowserWidget(
 
     // Callbacks (onCloseRequested is inherited from BaseWidget)
     var listener: BrowserWidgetListener? = null
+    override val requestsBrowserMinimumBrightness: Boolean get() = !isMinimized
     private var isFocused = false
 
     init {
@@ -1709,7 +1710,7 @@ class BrowserWidget(
             updateKeyboardLayout()
         }
         updateWebViewLayout()
-        listener?.onStateChanged(state)
+        notifyStateChanged()
     }
 
      /**
@@ -1739,7 +1740,7 @@ class BrowserWidget(
     override fun startDrag(isResize: Boolean) {
         super.startDrag(isResize)
         state = if (isResize) State.RESIZING else State.MOVING
-        listener?.onStateChanged(state)
+        notifyStateChanged()
     }
 
     override fun onDrag(dx: Float, dy: Float, screenWidth: Float, screenHeight: Float) {
@@ -1829,11 +1830,10 @@ class BrowserWidget(
         tabs.clear()
     }
 
-    /**
-     * Helper to notify state changed callback.
-     */
+    /** Re-applies display visibility (minimized or fullscreen may have changed) and reports the change. */
     private fun notifyStateChanged() {
-        listener?.onStateChanged(state)
+        refreshDisplayVisibility()
+        notifyTransientChange()
     }
 
     /**
@@ -2057,7 +2057,7 @@ class BrowserWidget(
         exitAddressEditing()
         textZoneHost?.release(addressZone)
         listener?.onKeyboardRequested(false)
-        listener?.onStateChanged(state)
+        notifyStateChanged()
     }
 
     private fun wrapAddressText(text: String, maxWidth: Float): List<String> {
@@ -2507,7 +2507,7 @@ class BrowserWidget(
                 if (!isFullscreen) {
                     state = State.MOVING
                     baseState = BaseState.MOVING
-                    listener?.onStateChanged(state)
+                    notifyStateChanged()
                 }
                 true
             }

@@ -13,6 +13,7 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import com.everyday.everyday_glasses.runtime.VideoWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WakeSleepManager
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets.file_browser.video_backend.VideoItem
 import com.everyday.everyday_glasses.widgets.file_browser.video_backend.VideoPlayerController
@@ -76,6 +77,12 @@ class VideoWidget(
     override val minimizeLabel: String = "V"
     override val minWidth: Float = 320f
     override val minHeight: Float = 180f
+
+    /** A video only plays while the display is awake, even when it is pinned. */
+    override fun isVisibleIn(state: WakeSleepManager.DisplayState): Boolean =
+        state == WakeSleepManager.DisplayState.WAKE && !isMinimized
+
+    override val requestsMediaBrightnessCap: Boolean get() = isFullscreen
 
     init {
         backgroundPaint.color = Color.BLACK

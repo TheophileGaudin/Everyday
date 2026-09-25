@@ -147,6 +147,7 @@ class WidgetLifecycleController(
     private val onWidgetRemoving: (BaseWidget) -> Unit = {},  /** Shared cleanup that still needs the widget's stable ID; runs before registry removal. */
     private val onWidgetRemoved: (BaseWidget) -> Unit = {},   /** Shared follow-up that needs the updated inventory; runs after registry removal. */
     private val viewportSize: () -> Pair<Float, Float> = { 0f to 0f }, /** Current dashboard size, used for fullscreen bounds and the minimized row. */
+    private val displayState: () -> WakeSleepManager.DisplayState = { WakeSleepManager.DisplayState.WAKE }, /** Current glasses display state, installed on every registered widget. */
 ) : WidgetLifecycleListener {
     private companion object {
         const val MINIMIZED_SQUARE_SIZE = 64f
@@ -444,6 +445,7 @@ class WidgetLifecycleController(
         try {
             candidate.textZoneHost = textZoneHost
             candidate.changeListener = changeListener
+            candidate.glassesDisplayState = displayState()
             registration.prepare(candidate, this)
             registry.add(candidate)
             registrationByWidget[candidate] = registration

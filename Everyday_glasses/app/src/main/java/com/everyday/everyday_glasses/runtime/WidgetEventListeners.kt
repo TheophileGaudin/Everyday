@@ -4,7 +4,6 @@ import com.everyday.everyday_glasses.widgets.map.backend.MapGeoPoint
 import com.everyday.everyday_glasses.widgets.map.backend.NavigationOperationResult
 import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
-import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
 import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidget
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.NewsSnapshot
@@ -46,12 +45,8 @@ class WidgetChangeDispatcher(
     }
 }
 
-/**
- * Browser events besides change notifications. [onStateChanged] stays until the display
- * visibility work package (WP5) moves its visibility refresh into the shared change path.
- */
+/** Browser events besides change notifications. */
 interface BrowserWidgetListener {
-    fun onStateChanged(state: BrowserWidget.State) = Unit
     fun onFocusChanged(focused: Boolean) = Unit
     fun onKeyboardRequested(show: Boolean) = Unit
 }

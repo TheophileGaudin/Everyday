@@ -255,7 +255,7 @@ class WidgetContainer @JvmOverloads constructor(
     )
     private val lifecycleController = WidgetLifecycleController(
         runOnUiThread = { action -> post(action) },
-        onChanged = ::notifyPersistentContentChanged,
+        onChanged = {refreshBrightnessRules(); notifyPersistentContentChanged()}, // Opening, closing, fullscreen and minimize can all change what the brightness rules need.
         registry = registry,
         onMutationStarted = { lifecycleMutationInProgress = true },
         onMutationFinished = { lifecycleMutationInProgress = false },
@@ -265,8 +265,8 @@ class WidgetContainer @JvmOverloads constructor(
             override fun onPersistentStateChanged() = notifyPersistentContentChanged()
         },
         onWidgetRemoving = ::onWidgetRemoving,
-        onWidgetRemoved = ::onWidgetRemoved,
         viewportSize = { width.toFloat() to height.toFloat() },
+        displayState = { displayState },
     )
     private val assistantUiDispatcher = UiThreadDispatcher { action -> if (Looper.myLooper() == Looper.getMainLooper()) {action(); true}
     else {post(Runnable(action))}}
@@ -282,7 +282,6 @@ class WidgetContainer @JvmOverloads constructor(
         queueRepository = videoQueueRepository,
         onPlaybackVisibilityChanged = { sourceId, active ->
             setBinocularMediaSourceActive(sourceId, active)
-            notifyMediaBrightnessCapChanged()
         },
     )
     private val locationWeatherBinding by lazy {
@@ -738,9 +737,7 @@ class WidgetContainer @JvmOverloads constructor(
                 textEditing.release(widget.addressZone)
                 if (focusedBrowserWidget === widget) setFocusedWidget(null)
             },
-            teardown = ::destroyWidget,
-            onFullscreenChanged = { widget, _ -> refreshBrowserDisplayState(widget) },
-            onMinimizeChanged = { widget, _ -> refreshBrowserDisplayState(widget) }
+            teardown = ::destroyWidget
         )
     }
     private val textLifecycle by lazy {
@@ -888,6 +885,7 @@ class WidgetContainer @JvmOverloads constructor(
             restoreWidget: (S) -> W,
             captureState: (W) -> S?,
             reopenWidget: (S) -> W = restoreWidget,
+            configure: (W) -> Unit = {},
             beforeRemove: (W) -> Unit = {},
             teardown: (W) -> Unit = ::destroyWidget,
             onFullscreen: (W, Boolean) -> Unit = { _, _ -> },
@@ -904,6 +902,7 @@ class WidgetContainer @JvmOverloads constructor(
                     restore = restoreWidget,
                     reopen = reopenWidget,
                     capture = captureState,
+                    configure = configure,
                     beforeRemove = beforeRemove,
                     teardown = teardown,
                     onFullscreenChanged = onFullscreen,
@@ -957,7 +956,8 @@ class WidgetContainer @JvmOverloads constructor(
         bindSingleton(
             WidgetTypeId.MIRROR, ScreenMirrorWidget::class, DashboardPersistence.MirrorWidgetState::class,
             { screenMirrorWidget }, ::createMirrorPresence, ::applyMirrorState,
-            { widgetCaptureRestore.getMirrorWidgetState(it) })
+            { widgetCaptureRestore.getMirrorWidgetState(it) },
+            configure = ::configureScreenMirrorWidget)
 
         lifecycleController.verifyComplete()
     }
@@ -994,34 +994,13 @@ class WidgetContainer @JvmOverloads constructor(
                 displayState = state
                 Log.d(TAG, "Display state set to: $state")
 
-                for (browser in browserWidgets) {
-                    val view = browser.getWebView()
-                    if (view != null) {
-                        // Always keep WebView hidden when video is in fullscreen mode
-                        // (the fullscreen video view is a separate view on top)
-                        if (browser.isInVideoFullscreen()) {
-                            view.visibility = GONE
-                        } else {
-                            view.visibility = when (state) {
-                                WakeSleepManager.DisplayState.OFF -> GONE
-                                WakeSleepManager.DisplayState.SLEEP -> if (browser.isPinned) VISIBLE else GONE
-                                else -> if (browser.isMinimized) GONE else VISIBLE
-                            }
-                        }
-                    }
-                    browser.onDisplayVisibilityChanged(isBrowserWidgetVisible(browser))
+                // Each widget decides whether it is visible in this state (BaseWidget.isVisibleIn).
+                // Browsers, videos and the mirror start or stop their native views accordingly.
+                registry.forEachWidget { widget ->
+                    widget.glassesDisplayState = state
+                    widget.refreshDisplayVisibility()
                 }
-                for (video in videoWidgets) {
-                    video.onDisplayVisibilityChanged(
-                        state == WakeSleepManager.DisplayState.WAKE && !video.isMinimized
-                    )
-                }
-                notifyMediaBrightnessCapChanged()
-                notifyBrowserMinimumBrightnessChanged()
-
-                screenMirrorWidget?.let { mirror ->
-                    mirror.onDisplayVisibilityChanged(isMirrorWidgetVisible(mirror))
-                }
+                refreshBrightnessRules()
                 syncWidgetLifecycleForDisplayState()
 
                 // Clear transition flag and do a single, controlled invalidation
@@ -1275,13 +1254,6 @@ class WidgetContainer @JvmOverloads constructor(
         if (activeWidget === widget) activeWidget = null
     }
 
-    /** Shared follow-up for every closed widget, run once the registry no longer contains it. */
-    private fun onWidgetRemoved(@Suppress("UNUSED_PARAMETER") widget: BaseWidget) {
-        notifyMediaBrightnessCapChanged()
-        notifyBrowserMinimumBrightnessChanged()
-    }
-
-
     private fun requestRepaint() = contentChanges.requestRepaint() /** Requests one local redraw for pixel-only visual state. */
     private fun <T> withContentChangeSuppressed(action: () -> T): T = contentChanges.withNotificationsSuppressed(action) /** Discards callbacks produced by a temporary or restorative compound mutation. */
     /** Reports focus to the host and emits the one classified visual change for that mutation. */
@@ -1318,32 +1290,14 @@ class WidgetContainer @JvmOverloads constructor(
         contentObserver?.onBinocularContentSourceChanged(sourceId, BinocularContentClass.MEDIA, active)
     }
 
-    private fun notifyMediaBrightnessCapChanged() {
+    /** Re-evaluates the brightness rules that widgets request (media cap, browser minimum). */
+    private fun refreshBrightnessRules() {
         displaySettingsHandler?.applyMediaBrightnessCap(shouldApplyMediaBrightnessCap())
-    }
-
-    private fun notifyBrowserMinimumBrightnessChanged() {
         displaySettingsHandler?.applyBrowserMinimumBrightness(shouldApplyBrowserMinimumBrightness())
     }
 
     private fun requestLayoutSwitchBrightness() {
         displaySettingsHandler?.applyLayoutSwitchBrightness()
-    }
-
-    private fun isBrowserWidgetVisible(widget: BrowserWidget): Boolean {
-        return when (displayState) {
-            WakeSleepManager.DisplayState.OFF -> false
-            WakeSleepManager.DisplayState.SLEEP -> widget.isPinned && !widget.isMinimized
-            WakeSleepManager.DisplayState.WAKE -> !widget.isMinimized
-        }
-    }
-
-    private fun isMirrorWidgetVisible(widget: ScreenMirrorWidget): Boolean {
-        return when (displayState) {
-            WakeSleepManager.DisplayState.OFF -> false
-            WakeSleepManager.DisplayState.SLEEP -> widget.isPinned && !widget.isMinimized
-            WakeSleepManager.DisplayState.WAKE -> !widget.isMinimized
-        }
     }
 
     private fun configureBrowserWidget(widget: BrowserWidget) {
@@ -1352,44 +1306,22 @@ class WidgetContainer @JvmOverloads constructor(
                 if (focused) setFocusedWidget(widget)
                 else if (focusedBrowserWidget == widget) setFocusedWidget(null)
             }
-            override fun onStateChanged(state: BrowserWidget.State) {
-                widget.onDisplayVisibilityChanged(isBrowserWidgetVisible(widget))
-                notifyTransientContentChanged()
-            }
-            override fun onKeyboardRequested(show: Boolean) {
-                host?.requestBrowserKeyboard(show)
-            }
+            override fun onKeyboardRequested(show: Boolean) {host?.requestBrowserKeyboard(show)}
         }
-        widget.onDisplayVisibilityChanged(isBrowserWidgetVisible(widget))
-        notifyBrowserMinimumBrightnessChanged()
+        widget.refreshDisplayVisibility()
     }
 
     private fun configureScreenMirrorWidget(widget: ScreenMirrorWidget) {
         widget.listener = object : MirrorWidgetListener {
-            override fun onStateChanged(state: ScreenMirrorWidget.State) {
-                widget.onDisplayVisibilityChanged(isMirrorWidgetVisible(widget))
-                notifyTransientContentChanged()
-            }
-
-            override fun onStreamStateChanged(state: ScreenMirrorWidget.StreamState) {
-                notifyMediaBrightnessCapChanged()
-                notifyTransientContentChanged()
-            }
-
-            override fun onFrameReady() {
-                if (widget.isBinocularMediaActive()) notifyMediaFrame(widget.binocularSourceId)
-            }
-
+            override fun onFrameReady() {if (widget.isBinocularMediaActive()) notifyMediaFrame(widget.binocularSourceId)}
             override fun onMediaStateChanged(active: Boolean) {
                 setBinocularMediaSourceActive(widget.binocularSourceId, active)
+                // The mirror's media brightness cap follows its live media state.
+                refreshBrightnessRules()
             }
-
-            override fun requestMirror(start: Boolean) {
-                host?.requestMirror(start)
-            }
+            override fun requestMirror(start: Boolean) {host?.requestMirror(start)}
         }
-        widget.onDisplayVisibilityChanged(isMirrorWidgetVisible(widget))
-        notifyMediaBrightnessCapChanged()
+        widget.refreshDisplayVisibility()
     }
 
     // ==================== Initialization ====================
@@ -1524,18 +1456,9 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     // ==================== Fullscreen Management ====================
-
-    /** A browser's visibility and the brightness rules follow its fullscreen and minimized state. */
-    private fun refreshBrowserDisplayState(widget: BrowserWidget) {
-        widget.onDisplayVisibilityChanged(isBrowserWidgetVisible(widget))
-        notifyMediaBrightnessCapChanged()
-        notifyBrowserMinimumBrightnessChanged()
-    }
-
     private fun handleVideoWidgetFullscreenSideEffects(widget: VideoWidget, isFullscreen: Boolean) {
         if (isFullscreen) widget.startPlayback(autoPlay = true)
         widget.setWindowedMode()
-        notifyMediaBrightnessCapChanged()
     }
 
     // distribute location updates to widgets that are location dependent
@@ -3309,11 +3232,7 @@ class WidgetContainer @JvmOverloads constructor(
         return createSubtitleWidget(startX, startY, subtitleWidth, subtitleHeight, autoStart = true)
     }
 
-    private fun createMirrorPresence(): ScreenMirrorWidget {
-        return ScreenMirrorWidget(context, 20f, 20f, 180f, 320f).apply {
-            configureScreenMirrorWidget(this)
-        }.also { notifyMediaBrightnessCapChanged() }
-    }
+    private fun createMirrorPresence(): ScreenMirrorWidget {return ScreenMirrorWidget(context, 20f, 20f, 180f, 320f)}
 
     fun createBrowserWidget(x: Float, y: Float) {
         if (openClosedBrowserTemplate() != null) {
@@ -3332,8 +3251,6 @@ class WidgetContainer @JvmOverloads constructor(
         )
         runPersistentMutation {
             lifecycleController.open(browserLifecycle) { widget }
-            notifyMediaBrightnessCapChanged()
-            notifyBrowserMinimumBrightnessChanged()
             widget.toggleFullscreen()
             widget.setFocused(true)
             setFocusedWidget(widget)
@@ -3417,8 +3334,6 @@ class WidgetContainer @JvmOverloads constructor(
                 lifecycleController.open(browserLifecycle) { widget }?.let { opened ->
                     opened.setFocused(true)
                     setFocusedWidget(opened)
-                    notifyMediaBrightnessCapChanged()
-                    notifyBrowserMinimumBrightnessChanged()
                     BrowserWidgetPageAgentAdapter.bind(stableWidgetId(opened), opened)
                         ?: run {
                             lifecycleController.close(opened)
@@ -3455,8 +3370,6 @@ class WidgetContainer @JvmOverloads constructor(
         )
         return runPersistentMutation {
             lifecycleController.open(browserLifecycle) { widget }
-            notifyMediaBrightnessCapChanged()
-            notifyBrowserMinimumBrightnessChanged()
             widget.toggleFullscreen()
             widget
         }
@@ -3476,7 +3389,6 @@ class WidgetContainer @JvmOverloads constructor(
         )
         runPersistentMutation {
             lifecycleController.open(browserLifecycle) { widget }
-            notifyBrowserMinimumBrightnessChanged()
             widget.getWebView()?.loadUrl("https://www.youtube.com/feed/history")
             widget.toggleFullscreen()
             widget.setFocused(true)
@@ -4170,8 +4082,6 @@ class WidgetContainer @JvmOverloads constructor(
         setWidgetLayoutLocked(dashboard.isLayoutLocked, persist = false)
 
         lifecycleController.arrangeMinimizedWidgets()
-        notifyMediaBrightnessCapChanged()
-        notifyBrowserMinimumBrightnessChanged()
         layoutManager.activeLayoutName = dashboard.activeLayoutName
     }
 
@@ -4202,7 +4112,6 @@ class WidgetContainer @JvmOverloads constructor(
         exitAllFullscreen()
         lifecycleController.closeAll()
         activeWidget = null
-        notifyBrowserMinimumBrightnessChanged()
     }
 
     private fun destroyWidget(widget: BaseWidget) {
@@ -4263,8 +4172,6 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun openClosedBrowserTemplate(): BrowserWidget? = runPersistentMutation(changed = { it != null }) {
         (lifecycleController.openClosedTemplate(WidgetTypeId.BROWSER) as? BrowserWidget)?.also { widget ->
-            notifyMediaBrightnessCapChanged()
-            notifyBrowserMinimumBrightnessChanged()
             if (!widget.isMinimized) {
                 widget.setFocused(true)
                 setFocusedWidget(widget)
@@ -4295,13 +4202,8 @@ class WidgetContainer @JvmOverloads constructor(
         return widget
     }
 
-    fun shouldApplyBrowserMinimumBrightness(): Boolean {
-        return browserWidgets.any { !it.isMinimized }
-    }
-
-    fun shouldApplyMediaBrightnessCap(): Boolean {
-        return fullscreenAs<VideoWidget>() != null || screenMirrorWidget?.shouldApplyMediaBrightnessCap() == true
-    }
+    fun shouldApplyBrowserMinimumBrightness(): Boolean = registry.allWidgets().any { it.requestsBrowserMinimumBrightness }
+    fun shouldApplyMediaBrightnessCap(): Boolean = registry.allWidgets().any { it.requestsMediaBrightnessCap }
 
     /**
      * Restore or create location widget with the given state.
@@ -4399,12 +4301,8 @@ class WidgetContainer @JvmOverloads constructor(
      * Creates the widget if it doesn't exist, then restores its state.
      */
     private fun applyMirrorState(state: DashboardPersistence.MirrorWidgetState): ScreenMirrorWidget {
-        val widget = ScreenMirrorWidget(context, state.x, state.y, state.width, state.height).apply {
-            configureScreenMirrorWidget(this)
-        }
+        val widget = ScreenMirrorWidget(context, state.x, state.y, state.width, state.height)
         widgetCaptureRestore.restoreCommonFields(widget, state, width, height)
-        widget.onDisplayVisibilityChanged(isMirrorWidgetVisible(widget))
-        notifyMediaBrightnessCapChanged()
         return widget
     }
 
@@ -4414,10 +4312,8 @@ class WidgetContainer @JvmOverloads constructor(
     fun setMirroringEnabled(enabled: Boolean, phoneIp: String? = null) {
         withTransientChangeBatch {
             screenMirrorWidget?.setMirroringEnabled(enabled, phoneIp)
-            screenMirrorWidget?.onDisplayVisibilityChanged(
-                screenMirrorWidget?.let { isMirrorWidgetVisible(it) } ?: false
-            )
-            notifyMediaBrightnessCapChanged()
+            screenMirrorWidget?.refreshDisplayVisibility()
+            refreshBrightnessRules()
             notifyTransientContentChanged()
         }
     }

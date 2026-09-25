@@ -11,6 +11,7 @@ import com.everyday.everyday_glasses.runtime.WidgetChangeListener
 import com.everyday.everyday_glasses.runtime.WidgetLifecycle
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleListener
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WakeSleepManager
 
 /**
  * Abstract base class for all widgets in the Everyday glasses app.
@@ -205,6 +206,33 @@ abstract class BaseWidget(
     protected fun notifyPersistentChange() {
         changeListener?.onPersistentStateChanged()
     }
+
+    // ==================== Display visibility and brightness ====================
+
+    /**
+     * Whether the glasses display is awake, asleep or off. Installed by WidgetLifecycleController
+     * when the widget joins the dashboard, and kept current by the container.
+     */
+    var glassesDisplayState: WakeSleepManager.DisplayState = WakeSleepManager.DisplayState.WAKE
+
+    /**
+     * Whether this widget is shown on the glasses in [state]: nothing while the display is off,
+     * only pinned widgets while it sleeps, and every widget that is not minimized while awake.
+     */
+    open fun isVisibleIn(state: WakeSleepManager.DisplayState): Boolean = when (state) {
+        WakeSleepManager.DisplayState.OFF -> false
+        WakeSleepManager.DisplayState.SLEEP -> isPinned && !isMinimized
+        WakeSleepManager.DisplayState.WAKE -> !isMinimized
+    }
+
+    /** Re-applies [isVisibleIn] for the current [glassesDisplayState], e.g. after minimizing. */
+    fun refreshDisplayVisibility() = onDisplayVisibilityChanged(isVisibleIn(glassesDisplayState))
+
+    /** True while this widget needs the display's media brightness cap. */
+    open val requestsMediaBrightnessCap: Boolean get() = false
+
+    /** True while this widget needs the browser minimum brightness. */
+    open val requestsBrowserMinimumBrightness: Boolean get() = false
 
     // ==================== Paints ====================
 
