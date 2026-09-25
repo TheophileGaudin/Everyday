@@ -107,8 +107,6 @@ class CalendarWidget(
     override val minWidth: Float = MIN_WIDGET_SIZE
     override val minHeight: Float = MIN_WIDGET_SIZE
 
-    var onStateChanged: (() -> Unit)? = null
-
     private val titlePaintWindow = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textSize = BASE_TITLE_WINDOW_SIZE
@@ -249,7 +247,7 @@ class CalendarWidget(
             ?.sortedBy { it.startMs }
             ?: emptyList()
         displayStateCache = null
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     fun setFontScale(scale: Float) {
@@ -260,7 +258,7 @@ class CalendarWidget(
         geometryVersion += 1
         windowedLayoutCache = null
         fullscreenLayoutCache = null
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     fun getFontScale(): Float = fontScale
@@ -282,7 +280,7 @@ class CalendarWidget(
         }
         showFontMenu = !showFontMenu
         hoveredFontMenuAction = null
-        onStateChanged?.invoke()
+        notifyTransientChange()
         return true
     }
 
@@ -298,14 +296,14 @@ class CalendarWidget(
         super.enterFullscreen()
         contentScrollOffset = 0f
         showFontMenu = false
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     override fun exitFullscreen() {
         super.exitFullscreen()
         contentScrollOffset = 0f
         showFontMenu = false
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     override fun onScroll(dy: Float) {
@@ -316,7 +314,7 @@ class CalendarWidget(
             return
         }
         contentScrollOffset = (contentScrollOffset + dy).coerceIn(0f, layout.maxScroll)
-        onStateChanged?.invoke()
+        notifyTransientChange()
     }
 
     override fun updateHover(px: Float, py: Float) {
@@ -761,7 +759,7 @@ class CalendarWidget(
             else -> {
                 showFontMenu = false
                 hoveredFontMenuAction = null
-                onStateChanged?.invoke()
+                notifyTransientChange()
             }
         }
         return true
