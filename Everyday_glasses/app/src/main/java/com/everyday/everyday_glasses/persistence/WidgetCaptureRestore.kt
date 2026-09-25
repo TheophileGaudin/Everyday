@@ -90,14 +90,6 @@ class WidgetCaptureRestore {
     }
 
     /**
-     * Restore isPinned and minimize state on a widget from a [DashboardPersistence.CommonWidgetFields] state.
-     *
-     * @param widget The widget to restore state on
-     * @param state  The persisted common fields
-     * @param adjustedX The screen-bounds-adjusted X position for the widget
-     * @param adjustedY The screen-bounds-adjusted Y position for the widget
-     */
-    /**
      * Restore the fields every widget saves, in this order:
      * 1. its size (a status bar keeps its own size, since its state has none) and its position,
      *    both clamped to the screen;
