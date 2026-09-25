@@ -434,6 +434,8 @@ class ScreenMirrorWidget(
         return false
     }
 
+    override fun isBorderHit(px: Float, py: Float): Boolean = hitTest(px, py) == HitArea.BORDER
+
     fun hitTest(px: Float, py: Float): HitArea {
         // Check base widget buttons first (close button is handled by baseHitTest)
         val baseResult = baseHitTest(px, py)

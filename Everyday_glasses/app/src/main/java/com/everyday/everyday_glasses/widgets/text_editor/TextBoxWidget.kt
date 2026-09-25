@@ -243,6 +243,7 @@ class TextBoxWidget(
      * Get the keyboard for external hover/tap handling.
      */
     fun getKeyboard(): GlassesKeyboardView? = keyboardOverlay.getKeyboard()
+    override val visibleKeyboard: GlassesKeyboardView? get() = if (isKeyboardVisible) getKeyboard() else null
 
     // ==================== State Management ====================
 
@@ -267,6 +268,15 @@ class TextBoxWidget(
     }
 
     // ==================== Hit Testing ====================
+
+    /** Only the border moves this widget and only the resize handle resizes it. */
+    override fun dragHitTest(px: Float, py: Float): DragHit = when (hitTest(px, py)) {
+        HitArea.BORDER -> DragHit.DRAG
+        HitArea.RESIZE_HANDLE -> DragHit.RESIZE
+        else -> DragHit.NONE
+    }
+
+    override fun isBorderHit(px: Float, py: Float): Boolean = hitTest(px, py) == HitArea.BORDER
 
     fun hitTest(px: Float, py: Float): HitArea {
         // Check base widget buttons first (close button is handled by baseHitTest)

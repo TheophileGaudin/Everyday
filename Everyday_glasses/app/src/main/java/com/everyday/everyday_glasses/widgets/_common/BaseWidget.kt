@@ -12,6 +12,7 @@ import com.everyday.everyday_glasses.runtime.WidgetLifecycle
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleListener
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.runtime.WakeSleepManager
+import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 
 /**
  * Abstract base class for all widgets in the Everyday glasses app.
@@ -233,6 +234,21 @@ abstract class BaseWidget(
 
     /** True while this widget needs the browser minimum brightness. */
     open val requestsBrowserMinimumBrightness: Boolean get() = false
+
+    // ==================== Hit-testing hooks ====================
+
+    /**
+     * The on-screen keyboard this widget currently shows, if any. Its keys get input priority
+     * over everything else under the cursor, and the container draws it above the widgets
+     * unless [drawsOwnKeyboard].
+     */
+    open val visibleKeyboard: GlassesKeyboardView? get() = null
+
+    /** True when this widget draws [visibleKeyboard] itself, as part of its own overlay. */
+    open val drawsOwnKeyboard: Boolean get() = false
+
+    /** Whether ([px], [py]) is on this widget's border, where a double-tap opens the app context menu. */
+    open fun isBorderHit(px: Float, py: Float): Boolean = baseHitTest(px, py) == BaseHitArea.BORDER
 
     // ==================== Paints ====================
 

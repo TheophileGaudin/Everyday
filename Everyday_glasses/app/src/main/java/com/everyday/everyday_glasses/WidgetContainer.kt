@@ -1779,40 +1779,24 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     /**
-     * Begin the appropriate down-gesture for [widget], the resolved interaction target.
-     * Mirrors the per-type drag / content-touch handling the old fixed-priority walk did,
-     * but for exactly one widget so overlapping widgets can't compete for the press.
+     * Begin the appropriate down-gesture for [widget], the resolved interaction target, so
+     * overlapping widgets can't compete for the press. Each widget's [BaseWidget.dragHitTest]
+     * says whether the press can start a move or a resize.
      */
     private fun dispatchCursorDownToWidget(widget: BaseWidget, cx: Float, cy: Float) {
         // Z-order is part of the persisted dashboard, but a long-press drag must not save
         // its initial frame.  The drag completion below emits the single persistent signal.
         bringWidgetToFrontForInteraction(widget)
 
-        when (widget) {
-            is BrowserWidget -> when (widget.hitTest(cx, cy)) {
-                BrowserWidget.HitArea.CONTENT -> handleBrowserContentDown(widget, cx, cy)
-                BrowserWidget.HitArea.BORDER -> beginPendingWidgetDrag(widget, isResize = false)
-                BrowserWidget.HitArea.RESIZE_HANDLE -> beginPendingWidgetDrag(widget, isResize = true)
-                else -> {}
-            }
-            is FileBrowserWidget -> when (widget.hitTest(cx, cy)) {
-                FileBrowserWidget.HitArea.BORDER -> beginPendingWidgetDrag(widget, isResize = false)
-                FileBrowserWidget.HitArea.RESIZE_HANDLE -> beginPendingWidgetDrag(widget, isResize = true)
-                else -> {}
-            }
-            is TextBoxWidget -> when (widget.hitTest(cx, cy)) {
-                TextBoxWidget.HitArea.BORDER -> beginPendingWidgetDrag(widget, isResize = false)
-                TextBoxWidget.HitArea.RESIZE_HANDLE -> beginPendingWidgetDrag(widget, isResize = true)
-                else -> {}
-            }
-            // image / video / pdf share the base hit-test; border or content both start a move.
-            else -> when (widget.dragHitTest(cx, cy)) {
-                BaseWidget.DragHit.DRAG ->
-                    beginPendingWidgetDrag(widget, isResize = false)
-                BaseWidget.DragHit.RESIZE ->
-                    beginPendingWidgetDrag(widget, isResize = true)
-                else -> {}
-            }
+        // A press on a web page is forwarded to the page instead.
+        if (widget is BrowserWidget && widget.hitTest(cx, cy) == BrowserWidget.HitArea.CONTENT) {
+            handleBrowserContentDown(widget, cx, cy)
+            return
+        }
+        when (widget.dragHitTest(cx, cy)) {
+            BaseWidget.DragHit.DRAG -> beginPendingWidgetDrag(widget, isResize = false)
+            BaseWidget.DragHit.RESIZE -> beginPendingWidgetDrag(widget, isResize = true)
+            BaseWidget.DragHit.NONE -> {}
         }
     }
 
@@ -3017,15 +3001,7 @@ class WidgetContainer @JvmOverloads constructor(
     private fun isAppContextMenuBorderDoubleTap(cx: Float, cy: Float): Boolean {
         val widget = registry.getWidgetAt(cx, cy) ?: return false
         if (widget.isMinimized) return false
-
-        return when (widget) {
-            is TextBoxWidget -> widget.hitTest(cx, cy) == TextBoxWidget.HitArea.BORDER
-            is BrowserWidget -> widget.hitTest(cx, cy) == BrowserWidget.HitArea.BORDER
-            is FileBrowserWidget -> widget.hitTest(cx, cy) == FileBrowserWidget.HitArea.BORDER
-            is ScreenMirrorWidget -> widget.hitTest(cx, cy) == ScreenMirrorWidget.HitArea.BORDER
-            is StatusBarWidget -> widget.hitTest(cx, cy) == StatusBarWidget.HitArea.BORDER
-            else -> widget.baseHitTest(cx, cy) == BaseWidget.BaseHitArea.BORDER
-        }
+        return widget.isBorderHit(cx, cy)
     }
 
     fun onDragEnd(notify: Boolean = true) {
@@ -3691,22 +3667,8 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun drawVisibleKeyboardOverlays(canvas: Canvas) {
-        if (hasFullscreenWidget()) {
-            fullscreenAs<BrowserWidget>()?.takeIf { it.isKeyboardVisible }?.getKeyboard()?.draw(canvas)
-            fullscreenAs<TextBoxWidget>()?.takeIf { it.isKeyboardVisible }?.getKeyboard()?.draw(canvas)
-            return
-        }
-
-        registry.getAllSortedByZOrder().forEach { widget ->
-            when (widget) {
-                is BrowserWidget -> if (!widget.isMinimized && widget.isKeyboardVisible) {
-                    widget.getKeyboard()?.draw(canvas)
-                }
-                is TextBoxWidget -> if (!widget.isMinimized && widget.isKeyboardVisible) {
-                    widget.getKeyboard()?.draw(canvas)
-                }
-            }
-        }
+        registry.fullscreenWidget?.let { fullscreen -> if (!fullscreen.drawsOwnKeyboard) fullscreen.visibleKeyboard?.draw(canvas); return}
+        registry.getAllSortedByZOrder().forEach { widget -> if (!widget.isMinimized && !widget.drawsOwnKeyboard) widget.visibleKeyboard?.draw(canvas)}
     }
 
     private fun drawPresentationProgress(canvas: Canvas) {
@@ -3765,25 +3727,16 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun consumeVisibleKeyboardTap(cx: Float, cy: Float): Boolean {
-        return when (val host = visibleKeyboardHostAt(cx, cy)) {
-            is BrowserWidget -> {
-                val before = browserPersistentSignature(host)
-                runClassifiedInput(
-                    action = { host.getKeyboard()?.onTap(cx, cy) == true },
-                    changed = { browserPersistentSignature(host) != before }
-                )
-                true
-            }
-            is TextBoxWidget -> {
-                tapKeyboard(host.getKeyboard(), cx, cy)
-                true
-            }
-            is MapWidget -> {
-                tapKeyboard(host.getAddressKeyboard(), cx, cy)
-                true
-            }
-            else -> false
-        }
+        val host = visibleKeyboardHostAt(cx, cy) ?: return false
+        if (host is BrowserWidget) {
+            // A browser key can navigate, which is saved with the dashboard.
+            val before = browserPersistentSignature(host)
+            runClassifiedInput(
+                action = { host.visibleKeyboard?.onTap(cx, cy) == true },
+                changed = { browserPersistentSignature(host) != before }
+            )
+        } else {tapKeyboard(host.visibleKeyboard, cx, cy)}
+        return true
     }
 
     private fun clearWidgetHoverStatesExcept(except: BaseWidget?) {

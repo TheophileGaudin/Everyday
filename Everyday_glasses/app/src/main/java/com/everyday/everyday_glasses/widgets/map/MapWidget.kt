@@ -433,6 +433,9 @@ class MapWidget(
     fun isAddressEntryFocused(): Boolean = addressFocused
     fun isAddressKeyboardVisible(): Boolean = addressKeyboard.isVisible
     fun getAddressKeyboard(): GlassesKeyboardView? = addressKeyboard.getKeyboard()
+    override val visibleKeyboard: GlassesKeyboardView? get() = if (isAddressKeyboardVisible()) getAddressKeyboard() else null
+    /** The address keyboard is drawn with the rest of the address search, in [drawScreenOverlay]. */
+    override val drawsOwnKeyboard: Boolean get() = true
     fun hasActiveNavigation(): Boolean = navigationState.status != NavigationStatus.INACTIVE &&
         navigationState.status != NavigationStatus.ERROR
 
