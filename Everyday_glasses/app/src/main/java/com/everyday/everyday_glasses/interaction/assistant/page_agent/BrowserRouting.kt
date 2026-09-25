@@ -214,7 +214,7 @@ class BrowserRoutingCoordinator(
     }
 
     fun cancelActiveRuns() {
-        activeRuns.values.toList().forEach { handle ->
+        ArrayList(activeRuns.values).forEach { handle ->
             handle.cancel()
             runCatching { ui.call { dismissApproval(handle.runId) } }
         }
