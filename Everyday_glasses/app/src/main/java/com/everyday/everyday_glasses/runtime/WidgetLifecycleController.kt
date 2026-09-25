@@ -2,7 +2,6 @@ package com.everyday.everyday_glasses.runtime
 
 import android.os.Looper
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneHost
-import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import java.util.Collections
@@ -362,7 +361,6 @@ class WidgetLifecycleController(
             restored = registration.restoreCandidate(state)?.also { widget ->
                 registerCandidate(widget, registration)
                 registry.rebindStableId(widget, record.instanceId)
-                applySavedFullscreen(widget, state)
             }
         }
         return restored
@@ -394,7 +392,6 @@ class WidgetLifecycleController(
         val state = registration.stateCodec?.decode(record.state) ?: return null
         val widget = registration.reopenCandidate(state) ?: return null
         registerCandidate(widget, registration)
-        applySavedFullscreen(widget, state)
         return widget
     }
 
@@ -410,15 +407,6 @@ class WidgetLifecycleController(
             instanceId = "${widget.type.persistedId}#template",
             state = codec.encode(state)
         )
-    }
-
-    /** Re-enters fullscreen for a widget whose saved state says it was fullscreen. */
-    private fun applySavedFullscreen(widget: BaseWidget, state: Any) {
-        if (state is DashboardPersistence.CommonWidgetFields &&
-            state.isFullscreen && !widget.isMinimized && !widget.isFullscreen
-        ) {
-            widget.toggleFullscreen()
-        }
     }
 
     /** Shared fullscreen side effect, then the type-specific one. */

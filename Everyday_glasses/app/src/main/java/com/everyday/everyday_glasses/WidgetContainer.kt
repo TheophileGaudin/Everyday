@@ -155,7 +155,6 @@ import com.everyday.shared.command.CommandWidgetId
 import com.everyday.shared.transport.AssistantStatus
 import java.util.concurrent.CompletableFuture
 import kotlin.reflect.KClass
-import androidx.core.net.toUri
 
 /**
  * Central UI host and coordinator for the dashboard's widgets.
@@ -4216,23 +4215,14 @@ class WidgetContainer @JvmOverloads constructor(
         widget.onDestroy()
     }
 
-    private fun applyFullscreenState(widget: BaseWidget?, shouldBeFullscreen: Boolean) {
-        if (widget == null || !shouldBeFullscreen || widget.isMinimized || widget.isFullscreen) return
-        widget.toggleFullscreen()
-    }
-
     private fun restoreTextWidget(state: DashboardPersistence.TextWidgetState): TextBoxWidget? =
         widgetCaptureRestore.restoreTextWidgets(listOf(state), width, height).firstOrNull()
 
     private fun restoreBrowserWidget(state: DashboardPersistence.BrowserWidgetState): BrowserWidget? {
         val rootView = parent as? ViewGroup ?: return null
-        val adjustedX = state.x.coerceIn(0f, (width - state.width).coerceAtLeast(0f))
-        val adjustedY = state.y.coerceIn(0f, (height - state.height).coerceAtLeast(0f))
-        val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, width.toFloat())
-        val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, height.toFloat())
-        return browserWidgetFactory(rootView)
-            .create(adjustedX, adjustedY, adjustedWidth, adjustedHeight)
-            .apply {widgetCaptureRestore.restoreBrowserWidgetState(this, state, adjustedX, adjustedY)}
+        val widget = browserWidgetFactory(rootView).create(state.x, state.y, state.width, state.height)
+        widgetCaptureRestore.restoreBrowserWidgetState(widget, state, width, height)
+        return widget
     }
 
     private fun restoreImageWidget(state: DashboardPersistence.ImageWidgetState): ImageWidget? =
@@ -4240,47 +4230,27 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun restoreVideoWidget(state: DashboardPersistence.VideoWidgetState): VideoWidget? {
         val rootView = parent as? ViewGroup ?: return null
-        val uri = runCatching { state.uri.toUri() }.getOrNull() ?: return null
-        val readable = runCatching {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
-        }.getOrDefault(false)
-        if (!readable) return null
-
-        val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, width.toFloat())
-        val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, height.toFloat())
-        val adjustedX = state.x.coerceIn(0f, (width - adjustedWidth).coerceAtLeast(0f))
-        val adjustedY = state.y.coerceIn(0f, (height - adjustedHeight).coerceAtLeast(0f))
-        return videoWidgetFactory(rootView)
-            .create(uri, state.displayName, adjustedX, adjustedY)
-            .apply {
-                widgetWidth = adjustedWidth
-                widgetHeight = adjustedHeight
-                widgetCaptureRestore.restoreVideoWidgetState(this, state, adjustedX, adjustedY)
-            }
+        val uri = WidgetCaptureRestore.readableUri(context, state.uri) ?: return null
+        val widget = videoWidgetFactory(rootView).create(uri, state.displayName, state.x, state.y)
+        widgetCaptureRestore.restoreCommonFields(widget, state, width, height)
+        return widget
     }
 
     private fun restorePdfWidget(state: DashboardPersistence.PdfWidgetState): PdfWidget? {
-        val uri = runCatching { state.uri.toUri() }.getOrNull() ?: return null
-        val readable = runCatching {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
-        }.getOrDefault(false)
-        if (!readable) return null
-
-        val adjustedWidth = state.width.coerceIn(BaseWidget.MIN_WIDGET_SIZE, width.toFloat())
-        val adjustedHeight = state.height.coerceIn(BaseWidget.MIN_WIDGET_SIZE, height.toFloat())
-        val adjustedX = state.x.coerceIn(0f, (width - adjustedWidth).coerceAtLeast(0f))
-        val adjustedY = state.y.coerceIn(0f, (height - adjustedHeight).coerceAtLeast(0f))
-        return PdfWidget(
+        val uri = WidgetCaptureRestore.readableUri(context, state.uri) ?: return null
+        val widget = PdfWidget(
             context = context,
             contentUri = uri,
             displayName = state.displayName,
-            x = adjustedX,
-            y = adjustedY,
-            width = adjustedWidth,
-            height = adjustedHeight,
+            x = state.x,
+            y = state.y,
+            width = state.width,
+            height = state.height,
             initialPage = state.page,
             initialZoom = state.zoom
-        ).apply {widgetCaptureRestore.restorePdfWidgetState(this, state, adjustedX, adjustedY)}
+        )
+        widgetCaptureRestore.restoreCommonFields(widget, state, width, height)
+        return widget
     }
 
     private fun openClosedTextTemplate(): TextBoxWidget? = runPersistentMutation(changed = { it != null }) {
@@ -4322,7 +4292,6 @@ class WidgetContainer @JvmOverloads constructor(
     private fun applyStatusBarState(state: DashboardPersistence.StatusBarState): StatusBarWidget {
         val widget = StatusBarWidget(state.x, state.y, 220f, 110f)
         widgetCaptureRestore.restoreStatusBarPosition(widget, state, width, height)
-        applyFullscreenState(widget, state.isFullscreen)
         return widget
     }
 
@@ -4348,16 +4317,12 @@ class WidgetContainer @JvmOverloads constructor(
             setLocationMetadata(pendingMapLocationLabel, pendingMapCountryCode)
         }
         widgetCaptureRestore.restoreMapWidgetPosition(widget, state, width, height)
-        applyFullscreenState(widget, state.isFullscreen)
-        // Restore the projected preference only after fullscreen bounds/state exist.
-        widget.restorePreferences(state.mode, state.zoom, state.showLocation, state.showCountry)
         return widget
     }
 
     private fun applyLocationState(state: DashboardPersistence.LocationWidgetState): LocationWidget {val widget = LocationWidget(context, state.x, state.y, state.width, state.height)
         locationWeatherBinding.configure(widget)
         widgetCaptureRestore.restoreLocationWidgetPosition(widget, state, width, height)
-        applyFullscreenState(widget, state.isFullscreen)
         return widget
     }
 
@@ -4369,8 +4334,7 @@ class WidgetContainer @JvmOverloads constructor(
             setFontScale(state.fontScale)
             setSnapshot(pendingCalendarSnapshot)
         }
-        widgetCaptureRestore.restoreCalendarWidgetPosition(widget, state, width, height)
-        applyFullscreenState(widget, state.isFullscreen)
+        widgetCaptureRestore.restoreCommonFields(widget, state, width, height)
         return widget
     }
 
@@ -4383,7 +4347,6 @@ class WidgetContainer @JvmOverloads constructor(
         val widget = FinanceWidget(state.x, state.y, state.width, state.height)
         financeFeatures.configure(widget)
         widgetCaptureRestore.restoreFinanceWidgetPosition(widget, state, width, height)
-        applyFullscreenState(widget, state.isFullscreen)
         financeFeatures.onOpened(widget, reason = "widget_restored")
         return widget
     }
@@ -4395,7 +4358,6 @@ class WidgetContainer @JvmOverloads constructor(
         val widget = NewsWidget(state.x, state.y, state.width, state.height)
         newsFeatures.configure(widget)
         widgetCaptureRestore.restoreNewsWidgetPosition(widget, state, width, height)
-        applyFullscreenState(widget, state.isFullscreen)
         newsFeatures.onOpened(widget, reason = "widget_restored")
         return widget
     }
@@ -4405,7 +4367,6 @@ class WidgetContainer @JvmOverloads constructor(
         widgetCaptureRestore.restoreNotificationsWidgetPosition(widget, state, width, height)
         widget.setScreenHeight(height.toFloat())
         widget.setNotificationsSnapshot(latestNotificationsSnapshot)
-        applyFullscreenState(widget, state.isFullscreen)
         return widget
     }
 
@@ -4414,8 +4375,7 @@ class WidgetContainer @JvmOverloads constructor(
      */
     private fun applySpeedometerState(state: DashboardPersistence.SpeedometerWidgetState): SpeedometerWidget {
         val widget = createSpeedometerWidget(state.x, state.y, state.width, state.height)
-        widgetCaptureRestore.restoreSpeedometerWidgetPosition(widget, state, width, height)
-        applyFullscreenState(widget, state.isFullscreen)
+        widgetCaptureRestore.restoreCommonFields(widget, state, width, height)
         return widget
     }
 
@@ -4431,7 +4391,6 @@ class WidgetContainer @JvmOverloads constructor(
         )
         widget.setCaptureEnabled(false, notifyPhone = false)
         widgetCaptureRestore.restoreSubtitleWidgetPosition(widget, state, width, height)
-        applyFullscreenState(widget, state.isFullscreen)
         return widget
     }
 
@@ -4443,8 +4402,7 @@ class WidgetContainer @JvmOverloads constructor(
         val widget = ScreenMirrorWidget(context, state.x, state.y, state.width, state.height).apply {
             configureScreenMirrorWidget(this)
         }
-        widgetCaptureRestore.restoreMirrorWidgetPosition(widget, state, width, height)
-        applyFullscreenState(widget, state.isFullscreen)
+        widgetCaptureRestore.restoreCommonFields(widget, state, width, height)
         widget.onDisplayVisibilityChanged(isMirrorWidgetVisible(widget))
         notifyMediaBrightnessCapChanged()
         return widget
