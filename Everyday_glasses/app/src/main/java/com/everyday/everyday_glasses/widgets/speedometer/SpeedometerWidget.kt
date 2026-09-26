@@ -49,6 +49,7 @@ class SpeedometerWidget(
     private var speedUnit = SpeedUnit.KMH
 
     var onUnitChanged: ((SpeedUnit) -> Unit)? = null
+    var onSettingsRequested: (() -> Unit)? = null
 
     private val speedTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
@@ -119,7 +120,7 @@ class SpeedometerWidget(
         isMoving = false
     }
 
-    fun onTap(px: Float, py: Float): Boolean {
+    override fun onContentTap(px: Float, py: Float): Boolean {
         val canToggleUnit = forceVisibleWhenIdle || (isMoving && hasReliableSpeed)
         val canShowUnitChip = canToggleUnit && isHovering()
         if (canShowUnitChip && unitChipBounds.contains(px, py)) {
@@ -128,6 +129,13 @@ class SpeedometerWidget(
             return true
         }
         return false
+    }
+
+    /** A double-tap on the speedometer opens its settings. */
+    override fun onDoubleTap(px: Float, py: Float): Boolean {
+        if (!isFullscreen && baseHitTest(px, py) != BaseHitArea.CONTENT) return false
+        onSettingsRequested?.invoke()
+        return true
     }
 
     override fun updateHover(px: Float, py: Float) {

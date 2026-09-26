@@ -262,8 +262,9 @@ class CalendarWidget(
     }
 
     fun getFontScale(): Float = fontScale
-
-    fun onTap(px: Float, py: Float): Boolean {
+    override fun contentSignature(): List<Any?> = listOf(fontScale)
+    override fun onModalTap(px: Float, py: Float): Boolean = handleFontMenuTapOrDismiss(px, py)
+    override fun onContentTap(px: Float, py: Float): Boolean {
         if (handleFontMenuTapOrDismiss(px, py)) return true
         if (!isFullscreen && contentBounds.contains(px, py)) {
             toggleFullscreen()
@@ -272,7 +273,7 @@ class CalendarWidget(
         return false
     }
 
-    fun onDoubleTap(px: Float, py: Float): Boolean {
+    override fun onDoubleTap(px: Float, py: Float): Boolean {
         if (!containsPoint(px, py)) return false
         if (isFullscreen) {
             toggleFullscreen()

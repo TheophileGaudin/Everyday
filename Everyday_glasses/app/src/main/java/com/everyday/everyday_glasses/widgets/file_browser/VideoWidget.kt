@@ -135,6 +135,18 @@ class VideoWidget(
     private val shouldAutoplayOnResume: Boolean
         get() = controller.shouldAutoplayOnResume
 
+    override fun onContentTap(px: Float, py: Float): Boolean {
+        if (baseHitTest(px, py) != BaseHitArea.CONTENT) return false
+        handleContentTap(px, py)
+        return true
+    }
+
+    /** Windowed, only a double-tap on the video reaches the player; the rest does nothing. */
+    override fun onDoubleTap(px: Float, py: Float): Boolean {
+        if (isFullscreen || baseHitTest(px, py) == BaseHitArea.CONTENT) handleContentDoubleTap(px, py)
+        return true
+    }
+
     /** Forward a cursor tap in WidgetContainer content coordinates to X3player's controls. */
     fun handleContentTap(px: Float, py: Float) {
         if (isMinimized || released) return

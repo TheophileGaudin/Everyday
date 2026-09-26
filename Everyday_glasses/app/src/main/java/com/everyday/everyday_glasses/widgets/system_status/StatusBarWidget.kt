@@ -239,6 +239,8 @@ class StatusBarWidget(
     fun isPhoneBatteryVisible(): Boolean = showPhoneBattery
     fun isGlassesBatteryVisible(): Boolean = showGlassesBattery
 
+    override fun contentSignature(): List<Any?> = listOf(isTimeVisible(), isDateVisible(), isPhoneBatteryVisible(), isGlassesBatteryVisible())
+    override fun onModalTap(px: Float, py: Float): Boolean = handleToggleMenuTapOrDismiss(px, py)
     fun handleToggleMenuTapOrDismiss(px: Float, py: Float): Boolean {
         if (!showToggleMenu) return false
 
@@ -252,7 +254,7 @@ class StatusBarWidget(
         return true
     }
 
-    fun onDoubleTap(px: Float, py: Float): Boolean {
+    override fun onDoubleTap(px: Float, py: Float): Boolean {
         if (isMinimized || !containsPoint(px, py)) return false
         showToggleMenu = !showToggleMenu
         hoveredToggleElement = null
@@ -382,49 +384,7 @@ class StatusBarWidget(
             null
         }
     }
-    
-    fun onTap(px: Float, py: Float): Boolean {
-        if (handleToggleMenuTapOrDismiss(px, py)) {
-            return true
-        }
 
-        if (handleChromeTap(px, py)) return true
-
-        val hitArea = hitTest(px, py)
-        Log.d(TAG, "onTap at ($px, $py) -> hitArea=$hitArea, currentState=$state")
-
-        return when (hitArea) {
-            HitArea.RESIZE_HANDLE -> {
-                // Resize started via drag, not tap
-                true
-            }
-            HitArea.FULLSCREEN_BUTTON -> {
-                Log.d(TAG, "Fullscreen button tapped")
-                toggleFullscreen()
-                true
-            }
-            HitArea.MINIMIZE_BUTTON -> {
-                toggleMinimize()
-                true
-            }
-            HitArea.PIN_BUTTON -> {
-                isPinned = !isPinned
-                Log.d(TAG, "Pin toggled: $isPinned")
-                true
-            }
-            HitArea.BORDER -> {
-                if (!isFullscreen) {
-                    Log.d(TAG, "Border tapped - starting move")
-                    state = State.MOVING
-                    baseState = BaseState.MOVING
-                    notifyTransientChange()
-                }
-                true
-            }
-            HitArea.CONTENT -> true
-            HitArea.NONE -> false
-        }
-    }
     override fun containsPoint(px: Float, py: Float): Boolean {
         if (fullscreenButtonBounds.contains(px, py)) return true
         if (minimizeButtonBounds.contains(px, py)) return true

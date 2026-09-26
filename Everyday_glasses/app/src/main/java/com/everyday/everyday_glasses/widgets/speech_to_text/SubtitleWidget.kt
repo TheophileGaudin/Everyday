@@ -227,7 +227,8 @@ class SubtitleWidget(
         setCaptureEnabled(false, notifyPhone = true)
     }
 
-    fun onTap(px: Float, py: Float): Boolean {
+    override fun contentSignature(): List<Any?> = listOf(options)
+    override fun onContentTap(px: Float, py: Float): Boolean {
         if (toggleBounds.contains(px, py)) {
             setCaptureEnabled(!captureEnabled)
             return true
@@ -263,7 +264,7 @@ class SubtitleWidget(
         return false
     }
 
-    fun onDoubleTap(px: Float, py: Float): Boolean {
+    override fun onDoubleTap(px: Float, py: Float): Boolean {
         if (isMinimized || !containsPoint(px, py)) return false
         optionsPanelVisible = !optionsPanelVisible
         notifyTransientChange()

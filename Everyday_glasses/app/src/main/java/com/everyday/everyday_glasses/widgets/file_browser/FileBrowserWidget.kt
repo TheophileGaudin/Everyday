@@ -931,8 +931,8 @@ class FileBrowserWidget(
             state = newState
         }
     }
-
-    fun onTap(px: Float, py: Float): Boolean {
+    override val bringsToFrontOnTap: Boolean get() = true
+    override fun onTap(px: Float, py: Float): Boolean {
         if (isMinimized) {
             toggleMinimize()
             return true

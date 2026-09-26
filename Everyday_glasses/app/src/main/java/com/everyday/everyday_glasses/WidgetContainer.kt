@@ -130,7 +130,6 @@ import com.everyday.everyday_glasses.widgets.text_editor.TextBoxWidget
 import com.everyday.everyday_glasses._threedof.ThreeDofOverlay
 import com.everyday.everyday_glasses.widgets.file_browser.VideoWidget
 import com.everyday.everyday_glasses.ui.components.WidgetLayoutDeleteConfirmationPopup
-import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 import com.everyday.everyday_glasses.ui.components.WidgetLayoutNamePrompt
 import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContextCapture
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.MapAssistantActions
@@ -604,27 +603,13 @@ class WidgetContainer @JvmOverloads constructor(
     var googleAccountHandler: GoogleAccountHandler? = null
 
     // Access to widget lists via registry
-    private val widgets: List<TextBoxWidget>
-        get() = registry.textWidgets
-    
-    private val browserWidgets: List<BrowserWidget>
-        get() = registry.browserWidgets
-
-    private val imageWidgets: List<ImageWidget>
-        get() = registry.imageWidgets
-
-    private val videoWidgets: List<VideoWidget>
-        get() = registry.videoWidgets
-
-    private val pdfWidgets: List<PdfWidget>
-        get() = registry.pdfWidgets
-
-    private val fileBrowserWidgets: List<FileBrowserWidget>
-        get() = registry.fileBrowserWidgets
+    private val widgets: List<TextBoxWidget> get() = registry.textWidgets
+    private val browserWidgets: List<BrowserWidget> get() = registry.browserWidgets
+    private val imageWidgets: List<ImageWidget> get() = registry.imageWidgets
+    private val videoWidgets: List<VideoWidget> get() = registry.videoWidgets
 
     // Text widget whose text area is being edited
-    private val focusedWidget: TextBoxWidget?
-        get() = textEditing.focusedZone?.let { zone -> widgets.firstOrNull { it.textZone === zone } }
+    private val focusedWidget: TextBoxWidget? get() = textEditing.focusedZone?.let { zone -> widgets.firstOrNull { it.textZone === zone } }
 
     // Browser receiving keys for its web page (address bar keys go through the text editing controller)
     private var focusedBrowserWidget: BrowserWidget? = null
@@ -1541,9 +1526,9 @@ class WidgetContainer @JvmOverloads constructor(
         widgetHeight: Float
     ): SpeedometerWidget {
         return SpeedometerWidget(startX, startY, widgetWidth, widgetHeight).apply {
-            onUnitChanged = {
-                unitSettings.toggleSpeedOverride()
-            }
+            onUnitChanged = {unitSettings.toggleSpeedOverride()}
+            onUnitChanged = {unitSettings.toggleSpeedOverride()}
+            onSettingsRequested = { settingsController.showSpeedometerSettingsMenu() }
             setUnit(unitSettings.effectiveSpeedUnit())
             setForceVisibleWhenIdle(settingsController.getSpeedVisibilityThreshold() <= 0f)
             setSpeedData(pendingSpeedKmh, pendingSpeedQualityOk, pendingSpeedMoving)
@@ -2210,149 +2195,12 @@ class WidgetContainer @JvmOverloads constructor(
         // Transform to content space for widget hit testing
         val (cx, cy) = toContentSpace(cursorX, cursorY)
 
-        if (scrollFullscreenWidgetAt(cx, cy, dy)) return
-        if (hasFullscreenWidget()) return
-
-        mapWidget?.let {
-            if ((it.isPoiConfigVisible() || it.navigationState.choices.isNotEmpty()) && it.containsPoint(cx, cy) && !it.isMinimized) {
-                it.onScroll(dy)
-                notifyTransientContentChanged()
-                return
-            }
-        }
-        calendarWidget?.let {
-            if (it.containsPoint(cx, cy) && !it.isMinimized) {
-                withTransientChangeBatch {
-                    it.onScroll(dy)
-                    notifyTransientContentChanged()
-                }
-                return
-            }
-        }
-        financeWidget?.let {
-            if (it.containsPoint(cx, cy) && !it.isMinimized) {
-                val beforeIndex = it.getNavigationIndex()
-                it.onScroll(dy)
-                if (it.getNavigationIndex() != beforeIndex) notifyPersistentContentChanged()
-                else notifyTransientContentChanged()
-                return
-            }
-        }
-        newsWidget?.let {
-            if (it.containsPoint(cx, cy) && !it.isMinimized) {
-                val beforeIndex = it.getSelectedIndex()
-                runClassifiedInput(
-                    action = { it.onScroll(dy); true },
-                    changed = { it.getSelectedIndex() != beforeIndex }
-                )
-                return
-            }
-        }
-        notificationsWidget?.let {
-            if (it.containsPoint(cx, cy) && !it.isMinimized) {
-                val beforeIndex = it.getScrollIndex()
-                runClassifiedInput(
-                    action = { it.onScroll(dy); true },
-                    changed = { it.getScrollIndex() != beforeIndex }
-                )
-                return
-            }
-        }
-        for (widget in browserWidgets.reversed()) {
-            val hit = widget.hitTest(cx, cy)
-            if (!widget.isMinimized && (hit == BrowserWidget.HitArea.CONTENT || hit == BrowserWidget.HitArea.NAV_URL)) {
-                widget.onScroll(dy)
-                notifyTransientContentChanged()
-                return
-            }
-        }
-        for (widget in imageWidgets.reversed()) { if (widget.containsPoint(cx, cy) && !widget.isMinimized) { widget.onScroll(dy); notifyTransientContentChanged(); return } }
-        for (widget in pdfWidgets.reversed()) {
-            if (widget.containsPoint(cx, cy) && !widget.isMinimized) {
-                withTransientChangeBatch {
-                    widget.onScroll(dy)
-                    notifyTransientContentChanged()
-                }
-                return
-            }
-        }
-        for (widget in fileBrowserWidgets.reversed()) {
-            if (widget.containsPoint(cx, cy) && !widget.isMinimized) {
-                withTransientChangeBatch {
-                    widget.onScroll(dy)
-                    notifyTransientContentChanged()
-                }
-                return
-            }
-        }
-        for (widget in widgets.reversed()) { if (widget.containsPoint(cx, cy) && !widget.isMinimized) { widget.onScroll(dy); notifyTransientContentChanged(); return } }
-    }
-
-    private fun scrollFullscreenWidgetAt(cx: Float, cy: Float, dy: Float): Boolean {
-        when (val widget = registry.fullscreenWidget) {
-            is MapWidget -> {
-                if ((widget.isPoiConfigVisible() || widget.navigationState.choices.isNotEmpty()) && widget.containsPoint(cx, cy)) {
-                    widget.onScroll(dy)
-                    notifyTransientContentChanged()
-                    return true
-                }
-            }
-            is TextBoxWidget -> {
-                if (widget.containsPoint(cx, cy)) {
-                    widget.onScroll(dy)
-                    notifyTransientContentChanged()
-                    return true
-                }
-            }
-            is BrowserWidget -> {
-                val hit = widget.hitTest(cx, cy)
-                if (hit == BrowserWidget.HitArea.CONTENT || hit == BrowserWidget.HitArea.NAV_URL) {
-                    widget.onScroll(dy)
-                    notifyTransientContentChanged()
-                    return true
-                }
-            }
-            is PdfWidget, is FileBrowserWidget, is CalendarWidget -> {
-                if (widget.containsPoint(cx, cy)) {
-                    withTransientChangeBatch {
-                        widget.onScroll(dy)
-                        notifyTransientContentChanged()
-                    }
-                    return true
-                }
-            }
-            is FinanceWidget -> {
-                if (widget.containsPoint(cx, cy)) {
-                    val beforeIndex = widget.getNavigationIndex()
-                    if (widget.onScrollAt(cx, cy, dy)) {
-                        if (widget.getNavigationIndex() != beforeIndex) notifyPersistentContentChanged()
-                        else notifyTransientContentChanged()
-                    }
-                    return true
-                }
-            }
-            is NewsWidget -> {
-                if (widget.containsPoint(cx, cy)) {
-                    val beforeIndex = widget.getSelectedIndex()
-                    runClassifiedInput(
-                        action = { widget.onScroll(dy); true },
-                        changed = { widget.getSelectedIndex() != beforeIndex }
-                    )
-                    return true
-                }
-            }
-            is NotificationsWidget -> {
-                if (widget.containsPoint(cx, cy)) {
-                    val beforeIndex = widget.getScrollIndex()
-                    runClassifiedInput(
-                        action = { widget.onScroll(dy); true },
-                        changed = { widget.getScrollIndex() != beforeIndex }
-                    )
-                    return true
-                }
-            }
-        }
-        return false
+        // A screen modal first; otherwise the fullscreen widget, or the top-most widget under the cursor.
+        val fullscreen = registry.fullscreenWidget
+        val target = screenModalWidget()
+            ?: if (fullscreen != null) fullscreen.takeIf { it.containsPoint(cx, cy) }
+            else interactionTargetAt(cx, cy)?.takeUnless { it.isMinimized }
+        target?.let { runWidgetInput(it) { it.onScrollAt(cx, cy, dy) } }
     }
 
     // ==================== Tap Handling ====================
@@ -2404,83 +2252,11 @@ class WidgetContainer @JvmOverloads constructor(
         if (isHoverConfirmReleaseTapGuardActive()) return true
         if (hoverControlsConsumeTap(cx, cy)) return true
 
-        // Map address search and ambiguous destination choices are screen-level modals even
-        // when the map itself is windowed. Route them before ordinary widget hit testing so a
-        // large centered prompt cannot be obscured by another dashboard widget.
-        if (mapWidget?.isAddressEntryVisible() == true || mapWidget?.navigationState?.choices?.isNotEmpty() == true) {
-            val map = mapWidget
-            if (map != null) {
-                val before = mapPersistentSignature(map)
-                if (runClassifiedInput({ map.onTap(cx, cy) }, { mapPersistentSignature(map) != before })) {
-                return true
-                }
-            }
-        }
-
-        // POI settings are a screen-level modal when open, including in fullscreen map mode.
-        if (mapWidget?.isPoiConfigVisible() == true) {
-            val map = mapWidget
-            if (map != null) {
-                val before = mapPersistentSignature(map)
-                if (runClassifiedInput({ map.onTap(cx, cy) }, { mapPersistentSignature(map) != before })) {
-                return true
-                }
-            }
-        }
-
-        statusBarWidget?.let {
-            val before = listOf(
-                it.isTimeVisible(), it.isDateVisible(),
-                it.isPhoneBatteryVisible(), it.isGlassesBatteryVisible()
-            )
-            if (it.handleToggleMenuTapOrDismiss(cx, cy)) {
-                val after = listOf(
-                    it.isTimeVisible(), it.isDateVisible(),
-                    it.isPhoneBatteryVisible(), it.isGlassesBatteryVisible()
-                )
-                if (before != after) notifyPersistentContentChanged()
-                else notifyTransientContentChanged()
-                return true
-            }
-        }
-
-        locationWidget?.let {
-            val before = listOf(it.isWeatherVisible(), it.isTemperatureVisible(), it.isLocationVisible(), it.isCountryVisible())
-            if (it.handleToggleMenuTapOrDismiss(cx, cy)) {
-                val after = listOf(it.isWeatherVisible(), it.isTemperatureVisible(), it.isLocationVisible(), it.isCountryVisible())
-                if (before != after) notifyPersistentContentChanged()
-                else notifyTransientContentChanged()
-                return true
-            }
-        }
-
-        calendarWidget?.let {
-            val before = it.getFontScale()
-            if (runClassifiedInput({ it.handleFontMenuTapOrDismiss(cx, cy) }, { it.getFontScale() != before })) {
-                return true
-            }
-        }
-
-        newsWidget?.let {
-            val before = it.getFontScale()
-            if (runClassifiedInput({ it.handleFontMenuTapOrDismiss(cx, cy) }, { it.getFontScale() != before })) {
-                return true
-            }
-        }
-
-        notificationsWidget?.let {
-            val before = it.getWidgetFontScale() to it.getToastFontScale()
-            if (runClassifiedInput(
-                    { it.handleFontMenuTapOrDismiss(cx, cy) },
-                    { it.getWidgetFontScale() != before.first || it.getToastFontScale() != before.second }
-                )
-            ) {
-                return true
-            }
-        }
+        // Screen modals and open popups take taps anywhere, even over a fullscreen widget.
+        for (widget in widgetsTopDown()) {if (runWidgetInput(widget) { widget.onModalTap(cx, cy) }) return true}
 
         // A fullscreen widget is the only possible target; outside its bounds the tap does nothing.
-        registry.fullscreenWidget?.let { fullscreen -> return fullscreen.containsPoint(cx, cy) && dispatchTapToWidget(fullscreen, cx, cy)}
+        registry.fullscreenWidget?.let { fullscreen -> return fullscreen.containsPoint(cx, cy) && tapWidget(fullscreen, cx, cy)}
 
         // Modal dashboard check
         settingsController.handleDashboardTap(x, y)?.let { return it }
@@ -2489,243 +2265,41 @@ class WidgetContainer @JvmOverloads constructor(
         // that owns hover — so an overlapping widget can't consume a tap meant for it.
         interactionTargetAt(cx, cy)?.let { target ->
             if (target.isMinimized) { target.toggleMinimize(); return true }
-            return dispatchTapToWidget(target, cx, cy)
+            return tapWidget(target, cx, cy)
         }
 
         if (hasFocusedWidget()) { unfocusAll(); notifyTransientContentChanged(); return true }
         return false
     }
 
-    /** Dispatch a tap to [widget], the resolved (top-most / hovered) interaction target. */
-    private fun dispatchTapToWidget(widget: BaseWidget, cx: Float, cy: Float): Boolean = when (widget) {
-        is ScreenMirrorWidget -> handleMirrorWidgetTap(widget, cx, cy)
-        is StatusBarWidget -> handleStatusBarTap(widget, cx, cy)
-        is LocationWidget -> handleLocationWidgetTap(widget, cx, cy)
-        is MapWidget -> handleMapWidgetTap(widget, cx, cy)
-        is CalendarWidget -> handleCalendarWidgetTap(widget, cx, cy)
-        is FinanceWidget -> handleFinanceWidgetTap(widget, cx, cy)
-        is NewsWidget -> handleNewsWidgetTap(widget, cx, cy)
-        is NotificationsWidget -> handleNotificationsWidgetTap(widget, cx, cy)
-        is SpeedometerWidget -> handleSpeedometerWidgetTap(widget, cx, cy)
-        is SubtitleWidget -> handleSubtitleWidgetTap(widget, cx, cy)
-        is BrowserWidget -> {
-            if (widget.hitTest(cx, cy) == BrowserWidget.HitArea.CONTENT && shouldSuppressBrowserContentTap(widget)) {
-                true
-            } else {
-                handleBrowserWidgetTap(widget, cx, cy)
-            }
+    /** A tap on [widget]: the fullscreen widget, or the top-most one under the cursor. */
+    private fun tapWidget(widget: BaseWidget, cx: Float, cy: Float): Boolean {
+        if (widget is BrowserWidget && widget.hitTest(cx, cy) == BrowserWidget.HitArea.CONTENT && shouldSuppressBrowserContentTap(widget)) return true
+        val handled = runWidgetInput(widget) {
+            if (widget.bringsToFrontOnTap) bringWidgetToFront(widget)
+            widget.onTap(cx, cy)
         }
-        is ImageWidget -> handleImageWidgetTap(widget, cx, cy)
-        is VideoWidget -> handleVideoWidgetTap(widget, cx, cy)
-        is PdfWidget -> handlePdfWidgetTap(widget, cx, cy)
-        is FileBrowserWidget -> handleFileBrowserWidgetTap(widget, cx, cy)
-        is TextBoxWidget -> handleTextWidgetTap(widget, cx, cy)
-        else -> false
-    }
-
-    /**
-     * Handles the four standard base-widget chrome buttons (close / fullscreen / minimize / pin).
-     *
-     * Calls [BaseWidget.baseHitTest] once and dispatches accordingly. [onElse] receives the raw
-     * [BaseWidget.BaseHitArea] result when the hit falls outside the four base buttons, letting
-     * per-widget handlers add extra behavior; defaults to swallowing the tap (returns `true`).
-     */
-    private fun handleBaseTap(
-        widget: BaseWidget,
-        x: Float,
-        y: Float,
-        onElse: ((BaseWidget.BaseHitArea) -> Boolean)? = null
-    ): Boolean = when (val hit = widget.baseHitTest(x, y)) {
-        BaseWidget.BaseHitArea.CLOSE_BUTTON      -> {
-            runPersistentMutation { widget.lifecycleListener?.onCloseRequested(widget) }
-            true
-        }
-        BaseWidget.BaseHitArea.FULLSCREEN_BUTTON -> {
-            runPersistentMutation { widget.toggleFullscreen() }
-            true
-        }
-        BaseWidget.BaseHitArea.MINIMIZE_BUTTON   -> {
-            runPersistentMutation { widget.toggleMinimize() }
-            true
-        }
-        BaseWidget.BaseHitArea.PIN_BUTTON        -> { widget.isPinned = !widget.isPinned; notifyPersistentContentChanged(); true }
-        else                                     -> onElse?.invoke(hit) ?: true
-    }
-
-    private fun handleTextWidgetTap(widget: TextBoxWidget, x: Float, y: Float): Boolean =
-        when (widget.hitTest(x, y)) {
-            TextBoxWidget.HitArea.KEYBOARD_BUTTON -> {
-                withTransientChangeBatch {
-                    widget.toggleKeyboard()
-                    notifyTransientContentChanged()
-                }
-                true
-            }
-            TextBoxWidget.HitArea.KEYBOARD_KEY    -> {
-                tapKeyboard(widget.getKeyboard(), x, y)
-                true
-            }
-            else -> handleBaseTap(widget, x, y) { hit ->
-                if (hit == BaseWidget.BaseHitArea.CONTENT) {
-                    setFocusedWidget(widget)
-                    textEditing.tap(widget.textZone, x, y)
-                }
-                true
-            }
-        }
-
-    private fun handleImageWidgetTap(widget: ImageWidget, x: Float, y: Float): Boolean =
-        handleBaseTap(widget, x, y)
-
-    private fun handleVideoWidgetTap(widget: VideoWidget, x: Float, y: Float): Boolean =
-        handleBaseTap(widget, x, y) { hit -> if (hit == BaseWidget.BaseHitArea.CONTENT) {widget.handleContentTap(x, y)}; true}
-
-    private fun handleBrowserWidgetTap(widget: BrowserWidget, x: Float, y: Float): Boolean {
-        val hit = widget.hitTest(x, y)
-        val persistentNavigation = hit == BrowserWidget.HitArea.NAV_HOME ||
-            hit == BrowserWidget.HitArea.NEW_TAB ||
-            hit == BrowserWidget.HitArea.TAB_CLOSE ||
-            hit == BrowserWidget.HitArea.TAB ||
-            widget.baseHitTest(x, y) == BaseWidget.BaseHitArea.CLOSE_BUTTON
-        val handled = if (persistentNavigation) {
-            runPersistentMutation { widget.onTap(x, y) }
-        } else {
-            val before = browserPersistentSignature(widget)
-            runClassifiedInput(
-                action = { widget.onTap(x, y) },
-                changed = { browserPersistentSignature(widget) != before }
-            )
-        }
-        if (widget.isEditingAddress()) ensureDrawnAboveNativeOverlays()
+        if ((widget as? BrowserWidget)?.isEditingAddress() == true) ensureDrawnAboveNativeOverlays()
         return handled
     }
 
-    private fun browserPersistentSignature(widget: BrowserWidget): List<Any?> = listOf(
-        widget.getUrl(), widget.isFullscreen, widget.isMinimized, widget.isPinned
-    )
-
-    /** Keys typed on a glasses keyboard are classified by the text editing controller. */
-    private fun tapKeyboard(keyboard: GlassesKeyboardView?, x: Float, y: Float) = withTransientChangeBatch {
-        keyboard?.onTap(x, y)
-        notifyTransientContentChanged()
-    }
-
-    private fun handlePdfWidgetTap(widget: PdfWidget, x: Float, y: Float): Boolean =
-        handleBaseTap(widget, x, y) { hit ->
-            if (hit == BaseWidget.BaseHitArea.CONTENT) {
-                val before = widget.currentPage to widget.zoom
-                runClassifiedInput(
-                    action = { widget.handleContentTap(x, y); true },
-                    changed = { (widget.currentPage to widget.zoom) != before }
-                )
-            } else {
-                true
-            }
+    /**
+     * Runs one input on [widget] and classifies it once: saved when it removed the widget or
+     * changed its [BaseWidget.persistentSignature], transient otherwise.
+     */
+    private fun runWidgetInput(widget: BaseWidget, action: () -> Boolean): Boolean {
+        val before = widget.persistentSignature()
+        return runClassifiedInput(action) {
+            widget !in registry.allWidgets() || widget.persistentSignature() != before
         }
-
-    private fun handleFileBrowserWidgetTap(widget: FileBrowserWidget, x: Float, y: Float): Boolean {
-        val beforeZOrder = widget.zOrder
-        val result = runPersistentMutation(
-            action = {
-                bringWidgetToFront(widget)
-                val handled = widget.onTap(x, y)
-                // Selecting a file closes the picker through its callback, which is also a
-                // persistent widget removal even when the picker was already front-most.
-                handled to (
-                    widget.zOrder != beforeZOrder ||
-                        registry.allWidgets().none { it === widget }
-                    )
-            },
-            changed = { it.second }
-        )
-        if (!result.second) notifyTransientContentChanged()
-        return result.first
     }
 
-    private fun handleStatusBarTap(statusBar: StatusBarWidget, x: Float, y: Float): Boolean =
-        handleBaseTap(statusBar, x, y)
+    /** The widget showing a screen-level modal, if any. */
+    private fun screenModalWidget(): BaseWidget? = registry.allWidgets().firstOrNull { it.hasScreenModal }
 
-    private fun handleMirrorWidgetTap(mirror: ScreenMirrorWidget, x: Float, y: Float): Boolean =
-        handleBaseTap(mirror, x, y) {
-            if (mirror.hitTest(x, y) == ScreenMirrorWidget.HitArea.RUN_PAUSE_BUTTON) mirror.onTap(x, y) else true
-        }
-
-    private fun handleLocationWidgetTap(loc: LocationWidget, x: Float, y: Float): Boolean {
-        if (loc.onUnitTap(x, y)) {
-            notifyTransientContentChanged()
-            return true
-        }
-        return handleBaseTap(loc, x, y)
-    }
-
-    private fun handleMapWidgetTap(map: MapWidget, x: Float, y: Float): Boolean {
-        val before = mapPersistentSignature(map)
-        if (runClassifiedInput({ map.onTap(x, y) }, { mapPersistentSignature(map) != before })) return true
-        return handleBaseTap(map, x, y)
-    }
-
-    private fun mapPersistentSignature(map: MapWidget): List<Any?> = listOf(
-        map.zOrder,
-        map.isFullscreen,
-        map.mode,
-        map.zoom,
-        map.isLocationVisible(),
-        map.isCountryVisible(),
-        map.poiDisplayConfig
-    )
-
-    private fun handleCalendarWidgetTap(widget: CalendarWidget, x: Float, y: Float): Boolean {
-        val before = widget.isFullscreen to widget.getFontScale()
-        if (runClassifiedInput({ widget.onTap(x, y) }, { (widget.isFullscreen to widget.getFontScale()) != before })) return true
-        return handleBaseTap(widget, x, y)
-    }
-
-    private fun handleFinanceWidgetTap(fw: FinanceWidget, x: Float, y: Float): Boolean {
-        // Let the finance widget handle internal taps first (dropdown, time range)
-        val before = listOf(fw.isFullscreen, fw.getTileConfigs(), fw.getNavigationIndex(), fw.getTilingSpan(), fw.getSelectedTileConfig())
-        if (runClassifiedInput({ fw.onTap(x, y) }, {
-                listOf(fw.isFullscreen, fw.getTileConfigs(), fw.getNavigationIndex(), fw.getTilingSpan(), fw.getSelectedTileConfig()) != before
-            })
-        ) return true
-        return handleBaseTap(fw, x, y)
-    }
-
-    private fun handleNewsWidgetTap(nw: NewsWidget, x: Float, y: Float): Boolean {
-        // Let the news widget handle arrows/content tap first.
-        val before = listOf(nw.isFullscreen, nw.getSourceSpec(), nw.getSelectedIndex(), nw.getFontScale())
-        if (runClassifiedInput({ nw.onTap(x, y) }, {
-                listOf(nw.isFullscreen, nw.getSourceSpec(), nw.getSelectedIndex(), nw.getFontScale()) != before
-            })
-        ) return true
-        return handleBaseTap(nw, x, y)
-    }
-
-    private fun handleNotificationsWidgetTap(widget: NotificationsWidget, x: Float, y: Float): Boolean {
-        val before = listOf(widget.isFullscreen, widget.getWidgetFontScale(), widget.getToastFontScale(), widget.getScrollIndex())
-        if (runClassifiedInput({ widget.onTap(x, y) }, {
-                listOf(widget.isFullscreen, widget.getWidgetFontScale(), widget.getToastFontScale(), widget.getScrollIndex()) != before
-            })
-        ) return true
-        return handleBaseTap(widget, x, y)
-    }
-
-    private fun handleSpeedometerWidgetTap(sw: SpeedometerWidget, x: Float, y: Float): Boolean {
-        if (sw.onTap(x, y)) {
-            notifyTransientContentChanged()
-            return true
-        }
-        return handleBaseTap(sw, x, y)
-    }
-
-    private fun handleSubtitleWidgetTap(widget: SubtitleWidget, x: Float, y: Float): Boolean {
-        val before = widget.isFullscreen to widget.options
-        if (runClassifiedInput(
-                action = { widget.onTap(x, y) },
-                changed = { (widget.isFullscreen to widget.options) != before }
-            )
-        ) return true
-        return handleBaseTap(widget, x, y)
-    }
+    /** Widgets in the order they get a first look at an input: a screen modal, then top-most first. */
+    private fun widgetsTopDown(): List<BaseWidget> =
+        registry.getAllSortedByZOrder().asReversed().sortedByDescending { it.hasScreenModal }
 
     fun onDoubleTap(x: Float, y: Float): Boolean {
         if (closeConfirmationPopup?.isVisible != true) {
@@ -2754,220 +2328,23 @@ class WidgetContainer @JvmOverloads constructor(
 
         if (textEditing.onDoubleTap(x, y)) return true
 
-        if (mapWidget?.isAddressEntryVisible() == true || mapWidget?.navigationState?.choices?.isNotEmpty() == true) {
-            mapWidget?.let { map ->
-                val before = mapPersistentSignature(map)
-                if (runClassifiedInput({ map.onDoubleTap(cx, cy) }, { mapPersistentSignature(map) != before })) {
-                    return true
-                }
-            }
+        // A screen modal (the map's address search) takes double-taps anywhere.
+        screenModalWidget()?.let { modal ->
+            if (runWidgetInput(modal) { modal.onDoubleTap(cx, cy) }) return true
         }
 
-        // A fullscreen video or singleton owns every double-tap. Other fullscreen types
-        // (browser, text, image, PDF, files, mirror) continue to the browser address check below.
-        when (val fullscreen = registry.fullscreenWidget) {
-            is VideoWidget -> {
-                if (fullscreen.containsPoint(cx, cy)) {
-                    withTransientChangeBatch {
-                        fullscreen.handleContentDoubleTap(cx, cy)
-                        notifyTransientContentChanged()
-                    }
-                    return true
-                }
-                return false
-            }
-            is StatusBarWidget -> {
-                if (fullscreen.containsPoint(cx, cy) && fullscreen.onDoubleTap(cx, cy)) {
-                    withTransientChangeBatch { notifyTransientContentChanged() }
-                    return true
-                }
-                return false
-            }
-            is LocationWidget -> {
-                if (fullscreen.containsPoint(cx, cy) && fullscreen.onDoubleTap(cx, cy)) {
-                    withTransientChangeBatch { notifyTransientContentChanged() }
-                    return true
-                }
-                return false
-            }
-            is MapWidget -> {
-                val before = mapPersistentSignature(fullscreen)
-                return fullscreen.containsPoint(cx, cy) &&
-                        runClassifiedInput({ fullscreen.onDoubleTap(cx, cy) }, { mapPersistentSignature(fullscreen) != before })
-            }
-            is CalendarWidget -> {
-                val before = fullscreen.isFullscreen to fullscreen.getFontScale()
-                return fullscreen.containsPoint(cx, cy) &&
-                        runClassifiedInput({ fullscreen.onDoubleTap(cx, cy) }, { (fullscreen.isFullscreen to fullscreen.getFontScale()) != before })
-            }
-            is FinanceWidget -> {
-                val before = listOf(fullscreen.isFullscreen, fullscreen.getTileConfigs(), fullscreen.getNavigationIndex(), fullscreen.getTilingSpan(), fullscreen.getSelectedTileConfig())
-                return fullscreen.containsPoint(cx, cy) && runClassifiedInput({ fullscreen.onDoubleTap(cx, cy) }, {
-                    listOf(fullscreen.isFullscreen, fullscreen.getTileConfigs(), fullscreen.getNavigationIndex(), fullscreen.getTilingSpan(), fullscreen.getSelectedTileConfig()) != before
-                })
-            }
-            is NewsWidget -> {
-                val before = listOf(fullscreen.isFullscreen, fullscreen.getSourceSpec(), fullscreen.getSelectedIndex(), fullscreen.getFontScale())
-                return fullscreen.containsPoint(cx, cy) && runClassifiedInput({ fullscreen.onDoubleTap(cx, cy) }, {
-                    listOf(fullscreen.isFullscreen, fullscreen.getSourceSpec(), fullscreen.getSelectedIndex(), fullscreen.getFontScale()) != before
-                })
-            }
-            is NotificationsWidget -> {
-                val before = listOf(fullscreen.isFullscreen, fullscreen.getWidgetFontScale(), fullscreen.getToastFontScale(), fullscreen.getScrollIndex())
-                return fullscreen.containsPoint(cx, cy) && runClassifiedInput({ fullscreen.onDoubleTap(cx, cy) }, {
-                    listOf(fullscreen.isFullscreen, fullscreen.getWidgetFontScale(), fullscreen.getToastFontScale(), fullscreen.getScrollIndex()) != before
-                })
-            }
-            is SubtitleWidget -> {
-                val before = fullscreen.isFullscreen to fullscreen.options
-                return fullscreen.containsPoint(cx, cy) &&
-                        runClassifiedInput({ fullscreen.onDoubleTap(cx, cy) }, { (fullscreen.isFullscreen to fullscreen.options) != before })
-            }
-            is SpeedometerWidget -> {
-                if (fullscreen.containsPoint(cx, cy)) {
-                    settingsController.showSpeedometerSettingsMenu()
-                    return true
-                }
-                return false
-            }
-            else -> Unit
+        // A fullscreen widget is the only possible target, and never opens the app context menu.
+        registry.fullscreenWidget?.let { fullscreen ->
+            return fullscreen.containsPoint(cx, cy) && runWidgetInput(fullscreen) { fullscreen.onDoubleTap(cx, cy) }
         }
 
-        // A windowed map owns double-tap anywhere on its visible shell, including the border.
-        // Route it before the generic border double-tap opens the app context menu.
-        if (!hasFullscreenWidget()) {
-            mapWidget?.let { map ->
-                if (interactionTargetAt(cx, cy) === map && map.containsPoint(cx, cy)) {
-                    val before = mapPersistentSignature(map)
-                    if (runClassifiedInput(
-                            { map.onDoubleTap(cx, cy) },
-                            { mapPersistentSignature(map) != before }
-                        )) {
-                        return true
-                    }
-                }
-            }
-        }
+        // The top-most widget under the cursor gets the double-tap, unless it lands on its border.
+        val target = interactionTargetAt(cx, cy)
+        val onBorder = target != null && !target.isMinimized && target.isBorderHit(cx, cy)
+        if (target != null && !onBorder && runWidgetInput(target) { target.onDoubleTap(cx, cy) }) return true
 
-        if (!hasFullscreenWidget()) {
-            val target = interactionTargetAt(cx, cy)
-            if (
-                target is SpeedometerWidget &&
-                target.baseHitTest(cx, cy) == BaseWidget.BaseHitArea.CONTENT
-            ) {
-                settingsController.showSpeedometerSettingsMenu()
-                return true
-            }
-        }
-
-        if (!hasFullscreenWidget() && isAppContextMenuBorderDoubleTap(cx, cy)) {
-            showAppContextMenu(x, y, cx, cy)
-            return true
-        }
-
-        if (!hasFullscreenWidget()) {
-            statusBarWidget?.let {
-                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    withTransientChangeBatch { notifyTransientContentChanged() }
-                    return true
-                }
-            }
-
-            locationWidget?.let {
-                if (it.containsPoint(cx, cy) && it.onDoubleTap(cx, cy)) {
-                    withTransientChangeBatch { notifyTransientContentChanged() }
-                    return true
-                }
-            }
-
-            mapWidget?.let {
-                val before = mapPersistentSignature(it)
-                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, { mapPersistentSignature(it) != before })) {
-                    return true
-                }
-            }
-
-            calendarWidget?.let {
-                val before = it.isFullscreen to it.getFontScale()
-                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, { (it.isFullscreen to it.getFontScale()) != before })) {
-                    return true
-                }
-            }
-
-            newsWidget?.let {
-                val before = listOf(it.isFullscreen, it.getSourceSpec(), it.getSelectedIndex(), it.getFontScale())
-                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, {
-                        listOf(it.isFullscreen, it.getSourceSpec(), it.getSelectedIndex(), it.getFontScale()) != before
-                    })) {
-                    return true
-                }
-            }
-
-            notificationsWidget?.let {
-                val before = listOf(it.isFullscreen, it.getWidgetFontScale(), it.getToastFontScale(), it.getScrollIndex())
-                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, {
-                        listOf(it.isFullscreen, it.getWidgetFontScale(), it.getToastFontScale(), it.getScrollIndex()) != before
-                    })) {
-                    return true
-                }
-            }
-
-            financeWidget?.let {
-                val before = listOf(it.isFullscreen, it.getTileConfigs(), it.getNavigationIndex(), it.getTilingSpan(), it.getSelectedTileConfig())
-                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, {
-                        listOf(it.isFullscreen, it.getTileConfigs(), it.getNavigationIndex(), it.getTilingSpan(), it.getSelectedTileConfig()) != before
-                    })) {
-                    return true
-                }
-            }
-
-            subtitleWidget?.let {
-                val before = it.isFullscreen to it.options
-                if (it.containsPoint(cx, cy) && runClassifiedInput({ it.onDoubleTap(cx, cy) }, { (it.isFullscreen to it.options) != before })) {
-                    return true
-                }
-            }
-
-            for (widget in videoWidgets.asReversed()) {
-                if (!widget.containsPoint(cx, cy)) continue
-                if (widget.baseHitTest(cx, cy) == BaseWidget.BaseHitArea.CONTENT) {
-                    withTransientChangeBatch {
-                        widget.handleContentDoubleTap(cx, cy)
-                        notifyTransientContentChanged()
-                    }
-                    return true
-                }
-                return false
-            }
-        }
-
-        focusedBrowserWidget?.let {
-            if (it.isAddressHit(cx, cy)) {
-                showBrowserAddressEditMenu(it)
-                return true
-            }
-        }
-        fullscreenAs<BrowserWidget>()?.let {
-            if (it.isAddressHit(cx, cy)) {
-                showBrowserAddressEditMenu(it)
-                return true
-            }
-        }
-        if (!hasFullscreenWidget()) {
-            for (widget in browserWidgets.reversed()) {
-                if (widget.isAddressHit(cx, cy)) {
-                    showBrowserAddressEditMenu(widget)
-                    return true
-                }
-            }
-        }
-        if (hasFullscreenWidget()) return false
-
-        // Every explicit windowed-widget double-tap action has had an opportunity above.
-        // Do not silently swallow an otherwise-unhandled double-tap just because it landed
-        // inside a widget's bounds. The app context menu is the dashboard-level fallback for
-        // both widget shells/content and empty dashboard space. This also makes the behavior
-        // independent of the input source (temple gesture or phone pointer event).
+        // Any other double-tap, on a border, inside a widget or on empty space, opens the app
+        // context menu, whether it came from the temple or from the phone's pointer.
         showAppContextMenu(x, y, cx, cy)
         return true
     }
@@ -2996,12 +2373,6 @@ class WidgetContainer @JvmOverloads constructor(
         contextMenu?.setLayoutLockState(isWidgetLayoutLocked)
         contextMenu?.show(screenX, screenY)
         notifyTransientContentChanged()
-    }
-
-    private fun isAppContextMenuBorderDoubleTap(cx: Float, cy: Float): Boolean {
-        val widget = registry.getWidgetAt(cx, cy) ?: return false
-        if (widget.isMinimized) return false
-        return widget.isBorderHit(cx, cy)
     }
 
     fun onDragEnd(notify: Boolean = true) {
@@ -3512,13 +2883,13 @@ class WidgetContainer @JvmOverloads constructor(
         if (userInitiated) userInputActivity?.onUserInput(UserInputKind.KEYBOARD)
         if (textEditing.onKey(key)) return
         val browser = focusedBrowserWidget ?: return
-        val before = browserPersistentSignature(browser)
+        val before = browser.persistentSignature()
         runClassifiedInput(
             action = {
                 browser.onKeyPress(key)
                 true
             },
-            changed = { browserPersistentSignature(browser) != before }
+            changed = { browser.persistentSignature() != before }
         )
     }
 
@@ -3528,13 +2899,6 @@ class WidgetContainer @JvmOverloads constructor(
             rootView.bringChildToFront(this)
         }
         if (elevation < 10f) elevation = 10f
-    }
-
-    // ==================== Text Edit Menu ====================
-    private fun showBrowserAddressEditMenu(widget: BrowserWidget) {
-        widget.beginAddressEditing(selectAll = true)
-        ensureDrawnAboveNativeOverlays()
-        textEditing.showTextEditMenu()
     }
 
     // ==================== Public Accessors ====================
@@ -3649,9 +3013,8 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun drawOverlayMenus(canvas: Canvas) {
-        val mapOverlayVisible = mapWidget?.let {it.isAddressEntryVisible() || it.navigationState.choices.isNotEmpty()} == true
-        if (isAnyPopupVisible() || mapOverlayVisible || focusedBrowserWidget?.isEditingAddress() == true || fullscreenAs<BrowserWidget>()?.isEditingAddress() == true) {ensureDrawnAboveNativeOverlays()}
-        mapWidget?.drawScreenOverlay(canvas)
+        if (isAnyPopupVisible() || screenModalWidget() != null || focusedBrowserWidget?.isEditingAddress() == true || fullscreenAs<BrowserWidget>()?.isEditingAddress() == true) {ensureDrawnAboveNativeOverlays()}
+        registry.getAllSortedByZOrder().forEach { it.drawScreenOverlay(canvas) }
         contextMenu?.draw(canvas)
         settingsController.drawHoverControlsLayoutEditor(canvas)  // Draw the hover-controls editor before the close-app confirmation so the popup appears on top of it when the user invokes Close from the editor's context menu.
         closeConfirmationPopup?.draw(canvas)
@@ -3685,36 +3048,10 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Keyboard overlay input priority ====================
 
+    /** The widget whose visible keyboard is under ([cx], [cy]): the fullscreen one, else the top-most. */
     private fun visibleKeyboardHostAt(cx: Float, cy: Float): BaseWidget? {
-        if (hasFullscreenWidget()) {
-            fullscreenAs<BrowserWidget>()?.let {
-                if (it.isKeyboardVisible && it.getKeyboard()?.containsPoint(cx, cy) == true) return it
-            }
-            fullscreenAs<TextBoxWidget>()?.let {
-                if (it.isKeyboardVisible && it.getKeyboard()?.containsPoint(cx, cy) == true) return it
-            }
-            fullscreenAs<MapWidget>()?.let {
-                if (it.isAddressKeyboardVisible() && it.getAddressKeyboard()?.containsPoint(cx, cy) == true) return it
-            }
-            return null
-        }
-
-        return registry.getAllSortedByZOrder()
-            .asReversed()
-            .firstOrNull { widget ->
-                when (widget) {
-                    is BrowserWidget -> !widget.isMinimized &&
-                        widget.isKeyboardVisible &&
-                        widget.getKeyboard()?.containsPoint(cx, cy) == true
-                    is TextBoxWidget -> !widget.isMinimized &&
-                        widget.isKeyboardVisible &&
-                        widget.getKeyboard()?.containsPoint(cx, cy) == true
-                    is MapWidget -> !widget.isMinimized &&
-                        widget.isAddressKeyboardVisible() &&
-                        widget.getAddressKeyboard()?.containsPoint(cx, cy) == true
-                    else -> false
-                }
-            }
+        registry.fullscreenWidget?.let { fullscreen -> return fullscreen.takeIf { it.visibleKeyboard?.containsPoint(cx, cy) == true }}
+        return registry.getAllSortedByZOrder().asReversed().firstOrNull { widget -> !widget.isMinimized && widget.visibleKeyboard?.containsPoint(cx, cy) == true }
     }
 
     private fun isVisibleKeyboardAt(cx: Float, cy: Float): Boolean =
@@ -3728,14 +3065,14 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun consumeVisibleKeyboardTap(cx: Float, cy: Float): Boolean {
         val host = visibleKeyboardHostAt(cx, cy) ?: return false
-        if (host is BrowserWidget) {
-            // A browser key can navigate, which is saved with the dashboard.
-            val before = browserPersistentSignature(host)
-            runClassifiedInput(
-                action = { host.visibleKeyboard?.onTap(cx, cy) == true },
-                changed = { browserPersistentSignature(host) != before }
-            )
-        } else {tapKeyboard(host.visibleKeyboard, cx, cy)}
+        // A batch, not runWidgetInput: the text editing controller classifies typed text itself,
+        // and its notification must survive. A browser key can also navigate, which is saved.
+        val before = host.persistentSignature()
+        withTransientChangeBatch {
+            host.visibleKeyboard?.onTap(cx, cy)
+            if (host.persistentSignature() != before) notifyPersistentContentChanged()
+            else notifyTransientContentChanged()
+        }
         return true
     }
 
@@ -3772,7 +3109,7 @@ class WidgetContainer @JvmOverloads constructor(
         if (settingsController.isShortcutsSettingsMenuVisible()) return true
         if (settingsController.isDashboardSettingsVisible()) return true
         if (settingsController.isSpeedometerSettingsMenuVisible()) return true
-        if (mapWidget?.isAddressEntryVisible() == true || mapWidget?.navigationState?.choices?.isNotEmpty() == true) return true
+        if (screenModalWidget() != null) return true
         if (closeConfirmationPopup?.isVisible == true) return true
         if (layoutDeleteConfirmationPopup?.isVisible == true) return true
         if (layoutNamePrompt?.isVisible == true) return true

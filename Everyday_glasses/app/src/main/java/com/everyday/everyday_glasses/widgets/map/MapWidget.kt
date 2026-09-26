@@ -526,6 +526,10 @@ class MapWidget(
     }
 
     fun isPoiConfigVisible(): Boolean = showPoiConfig
+    override val hasScreenModal: Boolean get() = addressEntryVisible || navigationState.choices.isNotEmpty() /** Address search and ambiguous destination choices. */
+    override fun contentSignature(): List<Any?> = listOf(mode, zoom, isLocationVisible(), isCountryVisible(), poiDisplayConfig)
+    override fun onModalTap(px: Float, py: Float): Boolean = (hasScreenModal || showPoiConfig) && onContentTap(px, py) /** The POI settings panel is modal too, including over a fullscreen map. */
+    override fun isBorderHit(px: Float, py: Float): Boolean = false /** Double-taps on the map's border reach the map (address search), not the app context menu. */
 
     override fun onScroll(dy: Float) {
         if (navigationState.choices.isNotEmpty()) {
@@ -603,7 +607,7 @@ class MapWidget(
      * must remain tappable even when the map itself is a small window in the dashboard.
      */
     override fun containsPoint(px: Float, py: Float): Boolean {
-        if (addressEntryVisible || navigationState.choices.isNotEmpty()) return true
+        if (hasScreenModal) return true
         return super.containsPoint(px, py)
     }
 
@@ -623,7 +627,7 @@ class MapWidget(
     override fun shouldShowBorderButtons(): Boolean =
         !showsWindowedNavigationFooter() && super.shouldShowBorderButtons()
 
-    fun onDoubleTap(px: Float, py: Float): Boolean {
+    override fun onDoubleTap(px: Float, py: Float): Boolean {
         if (!containsPoint(px, py)) return false
         if (addressEntryVisible) {
             closeAddressEntry()
@@ -645,7 +649,7 @@ class MapWidget(
         return true
     }
 
-    fun onTap(px: Float, py: Float): Boolean {
+    override fun onContentTap(px: Float, py: Float): Boolean {
         if (addressEntryVisible) {
             when {
                 addressSubmitBounds.contains(px, py) -> {
@@ -1563,7 +1567,7 @@ class MapWidget(
     }
 
     /** Draws modal destination UI head-locked at screen scale, above dashboard transforms. */
-    fun drawScreenOverlay(canvas: Canvas) {
+    override fun drawScreenOverlay(canvas: Canvas) {
         viewportWidth = canvas.width.toFloat()
         viewportHeight = canvas.height.toFloat()
         if (addressEntryVisible) {

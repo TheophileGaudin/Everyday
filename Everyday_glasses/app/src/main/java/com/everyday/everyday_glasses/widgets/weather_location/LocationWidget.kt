@@ -294,6 +294,10 @@ class LocationWidget(
         temperatureUnit = unit
     }
 
+    override fun contentSignature(): List<Any?> = listOf(isWeatherVisible(), isTemperatureVisible(), isLocationVisible(), isCountryVisible())
+    override fun onModalTap(px: Float, py: Float): Boolean = handleToggleMenuTapOrDismiss(px, py)
+    override fun onContentTap(px: Float, py: Float): Boolean = onUnitTap(px, py) /** The unit chip; the unit is a setting, not saved with the dashboard. */
+
     fun onUnitTap(px: Float, py: Float): Boolean {
         if (!unitChipBounds.contains(px, py)) return false
         onTemperatureUnitChanged?.invoke()
@@ -313,7 +317,7 @@ class LocationWidget(
         return true
     }
 
-    fun onDoubleTap(px: Float, py: Float): Boolean {
+    override fun onDoubleTap(px: Float, py: Float): Boolean {
         if (isMinimized || !containsPoint(px, py)) return false
         showToggleMenu = !showToggleMenu
         hoveredToggleElement = null

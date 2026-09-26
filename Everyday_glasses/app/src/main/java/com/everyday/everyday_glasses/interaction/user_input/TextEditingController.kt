@@ -80,6 +80,9 @@ interface TextZoneHost {
     fun release(zone: TextZone)
     fun isFocused(zone: TextZone): Boolean
 
+    /** Shows the cut / copy / paste menu for the focused zone. */
+    fun showTextEditMenu()
+
     /** Returns true when a focused zone consumed the key. */
     fun onKey(key: String): Boolean
 
@@ -537,7 +540,7 @@ internal class TextEditingController(
         }
     }
 
-    fun showTextEditMenu() {
+    override fun showTextEditMenu() {
         val s = session ?: return
         requestPhoneClipboard()
         val bounds = s.zone.bounds

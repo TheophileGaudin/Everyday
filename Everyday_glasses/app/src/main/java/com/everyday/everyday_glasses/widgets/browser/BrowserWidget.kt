@@ -451,6 +451,14 @@ class BrowserWidget(
         return urlBarBounds.contains(px, py) || (isEditingUrl && urlEditorBounds.contains(px, py))
     }
 
+    /** A double-tap on the address bar opens the address editor with its cut / copy / paste menu. */
+    override fun onDoubleTap(px: Float, py: Float): Boolean {
+        if (!isAddressHit(px, py)) return false
+        beginAddressEditing(selectAll = true)
+        textZoneHost?.showTextEditMenu()
+        return true
+    }
+
     /** Opens the address editor and hands it to the text editing controller. */
     fun beginAddressEditing(selectAll: Boolean = true) {
         setFocused(true)
@@ -2248,6 +2256,14 @@ class BrowserWidget(
         return false
     }
 
+    /** Only the page and the address bar scroll. */
+    override fun onScrollAt(px: Float, py: Float, dy: Float): Boolean {
+        val hit = hitTest(px, py)
+        if (hit != HitArea.CONTENT && hit != HitArea.NAV_URL) return false
+        onScroll(dy)
+        return true
+    }
+
     // Scrolling support (for future external scroll control)
     override fun onScroll(dy: Float) {
         if (isEditingUrl && urlEditorBounds.contains(cursorSafeX, cursorSafeY)) return
@@ -2422,11 +2438,10 @@ class BrowserWidget(
         }
     }
 
-    fun onTap(px: Float, py: Float): Boolean {
+    override fun contentSignature(): List<Any?> = listOf(getUrl(), activeTabIndex, tabs.map { it.url }) /** Only the URL is saved; the tabs show a navigation before the page reports its new URL. */
+    override fun onTap(px: Float, py: Float): Boolean {
         if (handleChromeTap(px, py)) return true
-
         val hitArea = hitTest(px, py)
-
         return when (hitArea) {
             HitArea.FULLSCREEN_BUTTON -> {
                 toggleFullscreen()

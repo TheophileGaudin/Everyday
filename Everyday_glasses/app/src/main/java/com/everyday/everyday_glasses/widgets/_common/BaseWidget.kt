@@ -250,6 +250,62 @@ abstract class BaseWidget(
     /** Whether ([px], [py]) is on this widget's border, where a double-tap opens the app context menu. */
     open fun isBorderHit(px: Float, py: Float): Boolean = baseHitTest(px, py) == BaseHitArea.BORDER
 
+    // ==================== Tap, double-tap and scroll hooks ====================
+
+    /**
+     * True while this widget shows a screen-level modal, like the map's address search. The modal
+     * gets taps, double-taps and scrolls before any other widget, turns the hover controls off,
+     * and makes the container draw above native views.
+     */
+    open val hasScreenModal: Boolean get() = false
+
+    /** True when a tap brings this widget in front of the others (the file picker). */
+    open val bringsToFrontOnTap: Boolean get() = false
+
+    /**
+     * Saved fields, beyond the ones every widget has, that a tap, double-tap or scroll on this
+     * widget can change. Part of [persistentSignature].
+     */
+    protected open fun contentSignature(): List<Any?> = emptyList()
+
+    /** Compared before and after an input: when it changed, the dashboard is saved. */
+    fun persistentSignature(): List<Any?> =
+        listOf(zOrder, isFullscreen, isMinimized, isPinned) + contentSignature()
+
+    /**
+     * A tap this widget takes before any routing, wherever it lands: while [hasScreenModal], or
+     * while one of its popups is open and closes on an outside tap.
+     */
+    open fun onModalTap(px: Float, py: Float): Boolean = false
+
+    /**
+     * A tap routed to this widget: the fullscreen one, or the top-most one under the cursor.
+     * The widget's own controls ([onContentTap]) come first, then the chrome buttons. Any other
+     * tap inside the widget is swallowed.
+     */
+    open fun onTap(px: Float, py: Float): Boolean {
+        if (!onContentTap(px, py)) handleChromeTap(px, py)
+        return true
+    }
+
+    /** The widget's own controls. Returns false to let the chrome buttons have the tap. */
+    protected open fun onContentTap(px: Float, py: Float): Boolean = false
+
+    /**
+     * A double-tap routed to this widget. Returns false when it has no double-tap action there;
+     * a windowed widget then lets the app context menu open.
+     */
+    open fun onDoubleTap(px: Float, py: Float): Boolean = false
+
+    /** A scroll routed to this widget. Returns false when the widget didn't use it. */
+    open fun onScrollAt(px: Float, py: Float, dy: Float): Boolean {
+        onScroll(dy)
+        return true
+    }
+
+    /** Draws in screen space, above every widget, e.g. the modal of [hasScreenModal]. */
+    open fun drawScreenOverlay(canvas: Canvas) = Unit
+
     // ==================== Paints ====================
 
     protected val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -639,25 +695,14 @@ abstract class BaseWidget(
      * Returns true when the tap was consumed.
      */
     protected fun handleChromeTap(px: Float, py: Float): Boolean {
-        return when {
-            closeButtonBounds.contains(px, py) -> {
-                lifecycleListener?.onCloseRequested(this)
-                true
-            }
-            fullscreenButtonBounds.contains(px, py) -> {
-                toggleFullscreen()
-                true
-            }
-            minimizeButtonBounds.contains(px, py) -> {
-                toggleMinimize()
-                true
-            }
-            pinButtonBounds.contains(px, py) -> {
-                isPinned = !isPinned
-                true
-            }
-            else -> false
+        when (baseHitTest(px, py)) {
+            BaseHitArea.CLOSE_BUTTON -> lifecycleListener?.onCloseRequested(this)
+            BaseHitArea.FULLSCREEN_BUTTON -> toggleFullscreen()
+            BaseHitArea.MINIMIZE_BUTTON -> toggleMinimize()
+            BaseHitArea.PIN_BUTTON -> isPinned = !isPinned
+            else -> return false
         }
+        return true
     }
 
     // ==================== Fullscreen ====================

@@ -372,52 +372,14 @@ class TextBoxWidget(
 
     // ==================== Tap Handling ====================
 
-    fun onTap(px: Float, py: Float): Boolean {
-        if (handleChromeTap(px, py)) return true
-
-        val hitArea = hitTest(px, py)
-
-        return when (hitArea) {
-            HitArea.FULLSCREEN_BUTTON -> {
-                toggleFullscreen()
-                true
-            }
-            HitArea.MINIMIZE_BUTTON -> {
-                toggleMinimize()
-                true
-            }
-            HitArea.PIN_BUTTON -> {
-                isPinned = !isPinned
-                Log.d(TAG, "Pin toggled: $isPinned")
-                true
-            }
-            HitArea.KEYBOARD_BUTTON -> {
-                toggleKeyboard()
-                true
-            }
-            HitArea.KEYBOARD_KEY -> {
-                // Handle keyboard key tap
-                keyboardOverlay.onTap(px, py)
-                true
-            }
-            HitArea.CONTENT -> {
-                textZoneHost?.tap(textZone, px, py)
-                true
-            }
-            HitArea.BORDER -> {
-                if (!isFullscreen) {
-                    state = State.MOVING
-                    updateBaseStateFromState()
-                    notifyTransientChange()
-                }
-                true
-            }
-            HitArea.RESIZE_HANDLE -> {
-                // Resize started via drag, not tap
-                true
-            }
-            HitArea.SCROLLBAR -> true
-            HitArea.NONE -> false
+    override fun onContentTap(px: Float, py: Float): Boolean = when (hitTest(px, py)) {
+        HitArea.KEYBOARD_BUTTON -> { toggleKeyboard(); true }
+        // Keys are taken by the container's keyboard pass before any tap is routed here.
+        HitArea.KEYBOARD_KEY -> true
+        else -> {
+            val onText = baseHitTest(px, py) == BaseHitArea.CONTENT
+            if (onText) textZoneHost?.tap(textZone, px, py)
+            onText
         }
     }
 

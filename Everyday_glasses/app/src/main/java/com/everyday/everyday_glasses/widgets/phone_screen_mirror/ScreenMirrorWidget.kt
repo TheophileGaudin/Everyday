@@ -490,50 +490,14 @@ class ScreenMirrorWidget(
         }
     }
 
-    fun onTap(px: Float, py: Float): Boolean {
-        if (handleChromeTap(px, py)) return true
-
-        val hitArea = hitTest(px, py)
-        Log.d(TAG, "onTap at ($px, $py) -> hitArea=$hitArea, currentState=$state")
-
-        return when (hitArea) {
-            HitArea.FULLSCREEN_BUTTON -> {
-                Log.d(TAG, "Fullscreen button tapped")
-                toggleFullscreen()
-                true
-            }
-            HitArea.MINIMIZE_BUTTON -> {
-                toggleMinimize()
-                true
-            }
-            HitArea.PIN_BUTTON -> {
-                isPinned = !isPinned
-                Log.d(TAG, "Pin toggled: $isPinned")
-                true
-            }
-            HitArea.RUN_PAUSE_BUTTON -> {
-                val shouldStart = streamState != StreamState.STREAMING && streamState != StreamState.CONNECTING
-                Log.d(TAG, "Run/Pause button tapped. Requesting start=$shouldStart")
-                listener?.requestMirror(shouldStart)
-                true
-            }
-            HitArea.BORDER -> {
-                if (!isFullscreen) {
-                    Log.d(TAG, "Border tapped - starting move")
-                    state = State.MOVING
-                    baseState = BaseState.MOVING
-                    notifyStateChanged()
-                }
-                true
-            }
-            HitArea.RESIZE_HANDLE -> {
-                // Resize started via drag
-                true
-            }
-            HitArea.CONTENT -> true
-            HitArea.NONE -> false
-        }
+    override fun onContentTap(px: Float, py: Float): Boolean {
+        if (hitTest(px, py) != HitArea.RUN_PAUSE_BUTTON) return false
+        val shouldStart = streamState != StreamState.STREAMING && streamState != StreamState.CONNECTING
+        Log.d(TAG, "Run/Pause button tapped. Requesting start=$shouldStart")
+        listener?.requestMirror(shouldStart)
+        return true
     }
+
     override fun containsPoint(px: Float, py: Float): Boolean {
         if (fullscreenButtonBounds.contains(px, py)) return true
         if (minimizeButtonBounds.contains(px, py)) return true

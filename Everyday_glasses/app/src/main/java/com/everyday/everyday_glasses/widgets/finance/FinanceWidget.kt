@@ -380,7 +380,8 @@ class FinanceWidget(
         }
     }
 
-    fun onTap(px: Float, py: Float): Boolean {
+    override fun contentSignature(): List<Any?> = listOf(getTileConfigs(), getNavigationIndex(), getTilingSpan(), getSelectedTileConfig())
+    override fun onContentTap(px: Float, py: Float): Boolean {
         if (dropdownVisible) {handleDropdownTap(px, py); return true}
         if (handleTilingMenuTap(px, py)) return true
         if (handleTileControlTap(px, py)) return true
@@ -402,7 +403,7 @@ class FinanceWidget(
         return false
     }
 
-    fun onDoubleTap(px: Float, py: Float): Boolean {
+    override fun onDoubleTap(px: Float, py: Float): Boolean {
         if (!containsPoint(px, py)) return false
         if (!isFullscreen) {
             toggleFullscreen()
@@ -419,7 +420,9 @@ class FinanceWidget(
         scrollDashboard(dy)
     }
 
-    fun onScrollAt(px: Float, py: Float, dy: Float): Boolean {
+    /** Windowed, the dashboard scrolls; fullscreen, the tile or dropdown under the cursor does. */
+    override fun onScrollAt(px: Float, py: Float, dy: Float): Boolean {
+        if (!isFullscreen) return super.onScrollAt(px, py, dy)
         if (!containsPoint(px, py)) return false
         if (dropdownVisible) {
             val anchorBounds = tileBounds.firstOrNull { it.first == dropdownTileIndex }?.second

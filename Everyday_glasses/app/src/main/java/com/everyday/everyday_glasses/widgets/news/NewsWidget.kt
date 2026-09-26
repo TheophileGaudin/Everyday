@@ -501,7 +501,9 @@ class NewsWidget(
         return true
     }
 
-    fun onTap(px: Float, py: Float): Boolean {
+    override fun contentSignature(): List<Any?> = listOf(getSourceSpec(), getSelectedIndex(), getFontScale())
+    override fun onModalTap(px: Float, py: Float): Boolean = handleNewsOptionsTapOrDismiss(px, py)
+    override fun onContentTap(px: Float, py: Float): Boolean {
         if (handleNewsOptionsTapOrDismiss(px, py)) return true
 
         if (NewsInteractionPolicy.isFullscreenOptionsHit(
@@ -541,7 +543,7 @@ class NewsWidget(
         return false
     }
 
-    fun onDoubleTap(px: Float, py: Float): Boolean {
+    override fun onDoubleTap(px: Float, py: Float): Boolean {
         if (!containsPoint(px, py)) return false
         when (NewsInteractionPolicy.doubleTapAction(isFullscreen, showSourcePanel)) {
             NewsDoubleTapAction.EXIT_FULLSCREEN -> toggleFullscreen()

@@ -164,6 +164,14 @@ class PdfWidget(
         }
     }
 
+    override fun contentSignature(): List<Any?> = listOf(currentPage, zoom)
+
+    override fun onContentTap(px: Float, py: Float): Boolean {
+        if (baseHitTest(px, py) != BaseHitArea.CONTENT) return false
+        handleContentTap(px, py)
+        return true
+    }
+
     fun handleContentTap(px: Float, py: Float) {
         if (!isFullscreen) {
             toggleFullscreen()

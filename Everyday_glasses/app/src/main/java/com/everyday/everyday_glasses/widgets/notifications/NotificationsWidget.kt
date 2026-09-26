@@ -211,8 +211,9 @@ class NotificationsWidget(
     }
 
     fun getToastFontScale(): Float = toastFontScale
-
-    fun onTap(px: Float, py: Float): Boolean {
+    override fun contentSignature(): List<Any?> = listOf(getWidgetFontScale(), getToastFontScale(), getScrollIndex())
+    override fun onModalTap(px: Float, py: Float): Boolean = handleFontMenuTapOrDismiss(px, py)
+    override fun onContentTap(px: Float, py: Float): Boolean {
         if (handleFontMenuTapOrDismiss(px, py)) return true
         if (selectedToastKey != null) return toastBounds.contains(px, py)
         rowBounds.forEachIndexed { index, bounds ->
@@ -228,7 +229,7 @@ class NotificationsWidget(
         return false
     }
 
-    fun onDoubleTap(px: Float, py: Float): Boolean {
+    override fun onDoubleTap(px: Float, py: Float): Boolean {
         if (!containsPoint(px, py)) return false
         if (selectedToastKey != null) {
             selectedToastKey = null
