@@ -129,7 +129,7 @@ class MapModule(
                 }
                 override fun onAddressFocusChanged(focused: Boolean) = addressFocusChanged(map, focused)
                 override fun onNavigationResult(result: NavigationOperationResult) = services.notifyTransientChange()
-                override fun onStopNavigationRequested() = stopNavigation()
+                override fun onStopNavigationRequested() = this@MapModule.stopNavigation()
             }
             latestLocation?.let(::setLocation)
             setLocationMetadata(latestLabel, latestCountryCode)
