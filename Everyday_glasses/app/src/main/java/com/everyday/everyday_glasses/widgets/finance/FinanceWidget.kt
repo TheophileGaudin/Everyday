@@ -975,14 +975,14 @@ class FinanceWidget(
         return floor(availableH / cellH).toInt().coerceIn(1, tilingSpan)
     }
 
-    fun canStartTileDrag(px: Float, py: Float): Boolean {
+    override fun canStartInternalDrag(px: Float, py: Float): Boolean {
         if (!isFullscreen || tiles.size <= 1 || dropdownVisible || settingsVisible) return false
         if (fullscreenTilingMenuVisible && tilingMenuBounds.contains(px, py)) { return false }
         if (tileControlBounds.any { it.bounds.contains(px, py) }) return false
         return tileBounds.any { it.second.contains(px, py) }
     }
 
-    fun startTileDrag(px: Float, py: Float): Boolean {
+    override fun startInternalDrag(px: Float, py: Float): Boolean {
         val hit = tileBounds.firstOrNull { it.second.contains(px, py) } ?: return false
         tileDragIndex = hit.first
         tileDragOverSlot = slotForIndex(hit.first)
@@ -991,12 +991,12 @@ class FinanceWidget(
         return true
     }
 
-    fun onTileDrag(px: Float, py: Float) {
+    override fun onInternalDrag(px: Float, py: Float) {
         if (!tileDragActive) return
         tileDragOverSlot = slotBounds.firstOrNull { it.second.contains(px, py) }?.first ?: tileDragOverSlot
     }
 
-    fun endTileDrag(): Boolean {
+    override fun endInternalDrag(): Boolean {
         if (!tileDragActive) return false
         val from = tileDragIndex
         val targetSlot = tileDragOverSlot

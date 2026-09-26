@@ -545,7 +545,7 @@ class MapWidget(
     }
 
     /** Starts a POI slider drag using the same expanded hitbox as the Brightness slider. */
-    fun onDown(px: Float, py: Float): Boolean {
+    override fun onModalPress(px: Float, py: Float): Boolean {
         if (!showPoiConfig) return false
         activePoiSlider = poiSliderAt(px, py)
         if (activePoiSlider != PoiSlider.NONE) {
@@ -556,7 +556,7 @@ class MapWidget(
     }
 
     /** Updates the active POI slider while the cursor is held down. */
-    fun onMove(px: Float, py: Float): Boolean {
+    override fun onPressMove(px: Float, py: Float): Boolean {
         if (!showPoiConfig) return false
         val slider = activePoiSlider
         if (slider != PoiSlider.NONE) {
@@ -571,11 +571,9 @@ class MapWidget(
     }
 
     /** Ends a POI slider drag. */
-    fun onUp(): Boolean {
-        if (!showPoiConfig) return false
+    override fun onPressRelease(px: Float, py: Float) {
         activePoiSlider = PoiSlider.NONE
         activePoiSliderCategory = null
-        return true
     }
 
     override fun onDestroy() { release() }

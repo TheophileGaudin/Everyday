@@ -11,7 +11,6 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.Log
-import android.view.MotionEvent
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -230,7 +229,6 @@ class WidgetContainer @JvmOverloads constructor(
         private const val LONG_PRESS_DELAY_MS = 250L
         private const val LONG_PRESS_MAX_MOVEMENT = 20f
         private const val HOVER_CONFIRM_RELEASE_TAP_GUARD_MS = 300L
-        private const val BROWSER_TOUCH_TAP_SUPPRESSION_MS = 350L
         
         // Phone trackpad sensitivity multiplier
         private const val PHONE_TRACKPAD_SENSITIVITY = 1.5f
@@ -623,12 +621,11 @@ class WidgetContainer @JvmOverloads constructor(
     // already hovered under the cursor. See resolveHoveredWidget for the selection rules.
     private var hoveredWidget: BaseWidget? = null
 
-    // Drag state flags. All widgets share activeWidget; finance tile drag remains internal.
-    private var financeTileDragging = false
+    // Drag state. activeWidget is being moved or resized; internalDragWidget drags part of itself
+    // (a finance tile); pressCaptureWidget follows a press it captured (a web page, a POI slider).
+    private var internalDragWidget: BaseWidget? = null
+    private var pressCaptureWidget: BaseWidget? = null
     private var cursorPressed = false
-    private var activeBrowserTouchWidget: BrowserWidget? = null
-    private var suppressBrowserContentTapWidget: BrowserWidget? = null
-    private var suppressBrowserContentTapUntilMs: Long = 0L
 
     // ==================== Cursor State ====================
     
@@ -690,7 +687,7 @@ class WidgetContainer @JvmOverloads constructor(
     private var longPressStartX = 0f
     private var longPressStartY = 0f
     private var pendingDragWidget: BaseWidget? = null
-    private var pendingDragFinanceTile = false
+    private var pendingInternalDragWidget: BaseWidget? = null
     private var pendingDragIsResize = false
     private var interactionZOrderChanged = false
     private var interactionPersistentNotified = false
@@ -1666,7 +1663,7 @@ class WidgetContainer @JvmOverloads constructor(
     override fun cancelLongPress() {
         longPressRunnable?.let { handler.removeCallbacks(it) }
         longPressRunnable = null
-        pendingDragWidget = null; pendingDragFinanceTile = false; pendingDragIsResize = false; pendingTextSelection = false
+        pendingDragWidget = null; pendingInternalDragWidget = null; pendingDragIsResize = false; pendingTextSelection = false
         pendingFormattingMenuDrag = false
         textEditing.formattingMenu?.cancelLongPress()
     }
@@ -1724,9 +1721,9 @@ class WidgetContainer @JvmOverloads constructor(
 
         if (settingsController.handleSpeedometerDown(x, y)) return
 
-        // The map POI settings panel owns its drag gestures while open, including when the
-        // map is fullscreen. Route the press before normal widget/focus handling.
-        if (mapWidget?.isPoiConfigVisible() == true && mapWidget?.onDown(cx, cy) == true) return
+        // A widget panel that owns its drag gestures while open (the map's POI settings, even over
+        // a fullscreen map) takes the press before normal widget and focus handling.
+        widgetsTopDown().firstOrNull { it.onModalPress(cx, cy) }?.let { pressCaptureWidget = it; return }
         
         // A long press on the focused text zone starts a text selection.
         if (textEditing.focusedZoneContains(x, y)) {
@@ -1736,21 +1733,9 @@ class WidgetContainer @JvmOverloads constructor(
             return
         }
 
-        fullscreenAs<FinanceWidget>()?.let { fw ->
-            if (fw.containsPoint(cx, cy) && fw.canStartTileDrag(cx, cy)) {
-                pendingDragFinanceTile = true
-                scheduleLongPress()
-                return
-            }
-        }
-
-        if (hasFullscreenWidget()) {
-            fullscreenAs<BrowserWidget>()?.let { widget ->
-                if (widget.containsPoint(cx, cy) && widget.hitTest(cx, cy) == BrowserWidget.HitArea.CONTENT) {
-                    handleBrowserContentDown(widget, cx, cy)
-                    return
-                }
-            }
+        // A fullscreen widget is the only possible target; only its own content can take the press.
+        registry.fullscreenWidget?.let { fullscreen ->
+            if (fullscreen.containsPoint(cx, cy)) pressWidgetContent(fullscreen, cx, cy)
             return
         }
 
@@ -1774,10 +1759,7 @@ class WidgetContainer @JvmOverloads constructor(
         bringWidgetToFrontForInteraction(widget)
 
         // A press on a web page is forwarded to the page instead.
-        if (widget is BrowserWidget && widget.hitTest(cx, cy) == BrowserWidget.HitArea.CONTENT) {
-            handleBrowserContentDown(widget, cx, cy)
-            return
-        }
+        if (pressWidgetContent(widget, cx, cy)) return
         when (widget.dragHitTest(cx, cy)) {
             BaseWidget.DragHit.DRAG -> beginPendingWidgetDrag(widget, isResize = false)
             BaseWidget.DragHit.RESIZE -> beginPendingWidgetDrag(widget, isResize = true)
@@ -1808,12 +1790,10 @@ class WidgetContainer @JvmOverloads constructor(
                 notifyTransientContentChanged()
                 return@Runnable
             }
-            if (pendingDragFinanceTile) {
-                financeWidget?.let {
-                    val (cx, cy) = screenToContentCoordinates(longPressStartX, longPressStartY)
-                    if (it.startTileDrag(cx, cy)) financeTileDragging = true
-                }
-                pendingDragFinanceTile = false
+            pendingInternalDragWidget?.let { widget ->
+                val (cx, cy) = screenToContentCoordinates(longPressStartX, longPressStartY)
+                if (widget.startInternalDrag(cx, cy)) internalDragWidget = widget
+                pendingInternalDragWidget = null
                 notifyTransientContentChanged()
                 return@Runnable
             }
@@ -1830,59 +1810,41 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun hasPendingWidgetDrag(): Boolean =
-        pendingDragWidget != null ||
-                pendingDragFinanceTile
+        pendingDragWidget != null || pendingInternalDragWidget != null
 
     private fun clearPendingWidgetDrag() {
         pendingDragWidget = null
-        pendingDragFinanceTile = false
+        pendingInternalDragWidget = null
         pendingDragIsResize = false
         longPressRunnable = null
     }
 
-    private fun beginBrowserContentTouch(widget: BrowserWidget, x: Float, y: Float) {
-        activeBrowserTouchWidget = widget
-        widget.setFocused(true)
-        setFocusedWidget(widget)
-        widget.dispatchTouchEvent(x, y, MotionEvent.ACTION_DOWN)
-    }
-
-    private fun handleBrowserContentDown(widget: BrowserWidget, x: Float, y: Float) {
-        widget.setFocused(true)
-        setFocusedWidget(widget)
-        if (widget.shouldStartContentTouch(x, y)) {
-            beginBrowserContentTouch(widget, x, y)
+    /**
+     * A press on [widget]'s own content: an internal long-press drag (a finance tile), or a press
+     * the widget captures (a web page). Returns false when it can start moving the widget instead.
+     */
+    private fun pressWidgetContent(widget: BaseWidget, cx: Float, cy: Float): Boolean {
+        if (widget.canStartInternalDrag(cx, cy)) {
+            pendingInternalDragWidget = widget
+            scheduleLongPress()
+            return true
         }
+        if (!widget.onPress(cx, cy)) return false
+        pressCaptureWidget = widget
+        return true
     }
 
-    private fun finishBrowserContentTouch(x: Float, y: Float) {
-        val widget = activeBrowserTouchWidget ?: return
+    /** Ends the captured press at the screen point ([x], [y]), as a release or a cancel. */
+    private fun endCapturedPress(x: Float, y: Float, cancel: Boolean) {
+        val widget = pressCaptureWidget ?: return
+        pressCaptureWidget = null
         val (cx, cy) = toContentSpace(x, y)
-        widget.dispatchTouchEvent(cx, cy, MotionEvent.ACTION_UP)
-        activeBrowserTouchWidget = null
-        suppressBrowserContentTapWidget = widget
-        suppressBrowserContentTapUntilMs = SystemClock.uptimeMillis() + BROWSER_TOUCH_TAP_SUPPRESSION_MS
-    }
-
-    private fun shouldSuppressBrowserContentTap(widget: BrowserWidget): Boolean {
-        if (suppressBrowserContentTapWidget != widget) return false
-        if (SystemClock.uptimeMillis() <= suppressBrowserContentTapUntilMs) return true
-        suppressBrowserContentTapWidget = null
-        suppressBrowserContentTapUntilMs = 0L
-        return false
-    }
-
-    private fun cancelBrowserContentTouch() {
-        val widget = activeBrowserTouchWidget ?: return
-        val (cx, cy) = toContentSpace(cursorX, cursorY)
-        widget.dispatchTouchEvent(cx, cy, MotionEvent.ACTION_CANCEL)
-        activeBrowserTouchWidget = null
+        if (cancel) widget.onPressCancel(cx, cy) else widget.onPressRelease(cx, cy)
     }
 
     fun onCursorUp(x: Float, y: Float) {
         settingsController.handleSpeedometerUp()
         settingsController.handleDashboardUp() // If DashboardSettings is open, end its interaction (e.g., stop slider drag).
-        mapWidget?.let {if (it.isPoiConfigVisible()) it.onUp()}
         settingsController.handleHoverControlsLayoutEditorUp() // If the hover-controls layout editor is open, finalize any drag.
         settingsController.handleShortcutsSettingsMenuUp() // Shortcuts settings menu.
 
@@ -1895,22 +1857,17 @@ class WidgetContainer @JvmOverloads constructor(
             hoverControlsConsumeUp(cursorX, cursorY)
         }
 
-        finishBrowserContentTouch(x, y)
+        endCapturedPress(x, y, cancel = false)
 
         cursorPressed = false; cancelLongPress()
         if (isScrollbarDragActive) { isScrollbarDragActive = false; scrollbarDragWidget = null }
         textEditing.formattingMenu?.let { if (it.isDragging()) it.onDragEnd() }
         if (isLongPressSelectionMode) { textEditing.endSelection(); isLongPressSelectionMode = false }
         var dragEnded = false
-        if (financeTileDragging) {
+        internalDragWidget?.let { widget ->
             dragEnded = true
-            if (financeWidget != null) {
-                runPersistentMutation(
-                    action = { financeWidget?.endTileDrag() == true },
-                    changed = { it }
-                )
-            }
-            financeTileDragging = false
+            internalDragWidget = null
+            runPersistentMutation(action = { widget.endInternalDrag() }, changed = { it })
         }
         if (activeWidget != null) {
             dragEnded = true
@@ -1932,7 +1889,7 @@ class WidgetContainer @JvmOverloads constructor(
         val wasScrollMode = isTwoFingerScrollMode; isTwoFingerScrollMode = pointerCount >= 2
         if (isTwoFingerScrollMode && !wasScrollMode) {
             cancelLongPress()
-            cancelBrowserContentTouch()
+            endCapturedPress(cursorX, cursorY, cancel = true)
         }
     }
 
@@ -1981,18 +1938,6 @@ class WidgetContainer @JvmOverloads constructor(
             return Pair(cursorX, cursorY)
         }
 
-        // Keep POI sliders live throughout a press, matching the Brightness slider's drag
-        // behavior instead of waiting for a final tap.
-        mapWidget?.let {
-            if (it.isPoiConfigVisible()) {
-                val (mapX, mapY) = toContentSpace(cursorX, cursorY)
-                if (it.onMove(mapX, mapY)) {
-                    lastCursorX = cursorX; lastCursorY = cursorY
-                    return Pair(cursorX, cursorY)
-                }
-            }
-        }
-
         // If DashboardSettings is open, treat it as modal and route movement to it.
         // This allows slider dragging and prevents dragging widgets behind it.
         if (settingsController.handleDashboardMove(cursorX, cursorY)) {
@@ -2021,10 +1966,10 @@ class WidgetContainer @JvmOverloads constructor(
             return Pair(cursorX, cursorY)
         }
 
-        activeBrowserTouchWidget?.let { widget ->
+        // A widget that captured the press follows it (a web page, a POI slider).
+        pressCaptureWidget?.let { widget ->
             val (cx, cy) = toContentSpace(cursorX, cursorY)
-            widget.dispatchTouchEvent(cx, cy, MotionEvent.ACTION_MOVE)
-            return Pair(cursorX, cursorY)
+            if (widget.onPressMove(cx, cy)) return Pair(cursorX, cursorY)
         }
 
         handleDragOperations(cursorX, cursorY, moveDx, moveDy)
@@ -2136,15 +2081,8 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun handleDragOperations(x: Float, y: Float, dx: Float, dy: Float) {
-        if (isLongPressSelectionMode || financeTileDragging ||
-            activeWidget != null || isScrollbarDragActive
-        ) {
-            userInputActivity?.onUserInput(UserInputKind.DRAG)
-        }
-        // For text selection, use content-space coordinates
-        if (isLongPressSelectionMode && textEditing.isSelecting) {
-            textEditing.extendSelection(x, y)
-        }
+        if (isLongPressSelectionMode || internalDragWidget != null || activeWidget != null || isScrollbarDragActive) {userInputActivity?.onUserInput(UserInputKind.DRAG)}
+        if (isLongPressSelectionMode && textEditing.isSelecting) {textEditing.extendSelection(x, y)} // For text selection, use content-space coordinates
         // Menus use screen-space (head-locked)
         textEditing.formattingMenu?.let { menu ->
             if (menu.isDragging()) {
@@ -2152,19 +2090,13 @@ class WidgetContainer @JvmOverloads constructor(
                 notifyTransientContentChanged()
                 return
             }
-
-            menu.checkLongPressCancellation(
-                x,
-                y,
-                LONG_PRESS_MAX_MOVEMENT
-            )
+            menu.checkLongPressCancellation(x,y, LONG_PRESS_MAX_MOVEMENT)
         }
-        // Long-press cancellation uses screen-space (cursor movement)
-        if (longPressRunnable != null) { val totalMovement = kotlin.math.sqrt((x - longPressStartX) * (x - longPressStartX) + (y - longPressStartY) * (y - longPressStartY)); if (totalMovement > LONG_PRESS_MAX_MOVEMENT) cancelLongPress() }
+        if (longPressRunnable != null) { val totalMovement = kotlin.math.sqrt((x - longPressStartX) * (x - longPressStartX) + (y - longPressStartY) * (y - longPressStartY)); if (totalMovement > LONG_PRESS_MAX_MOVEMENT) cancelLongPress() } // Long-press cancellation uses screen-space (cursor movement)
         // Widget dragging uses delta values (works in both spaces)
-        if (financeTileDragging) {
+        internalDragWidget?.let { widget ->
             val (cx, cy) = toContentSpace(x, y)
-            financeWidget?.onTileDrag(cx, cy)
+            widget.onInternalDrag(cx, cy)
             notifyTransientContentChanged()
             return
         }
@@ -2245,7 +2177,6 @@ class WidgetContainer @JvmOverloads constructor(
 
         // Transform to content space for widget hit testing
         val (cx, cy) = toContentSpace(x, y)
-
         if (consumeVisibleKeyboardTap(cx, cy)) return true
 
         // Hover controls are above every widget, including fullscreen ones.
@@ -2274,12 +2205,11 @@ class WidgetContainer @JvmOverloads constructor(
 
     /** A tap on [widget]: the fullscreen widget, or the top-most one under the cursor. */
     private fun tapWidget(widget: BaseWidget, cx: Float, cy: Float): Boolean {
-        if (widget is BrowserWidget && widget.hitTest(cx, cy) == BrowserWidget.HitArea.CONTENT && shouldSuppressBrowserContentTap(widget)) return true
         val handled = runWidgetInput(widget) {
             if (widget.bringsToFrontOnTap) bringWidgetToFront(widget)
             widget.onTap(cx, cy)
         }
-        if ((widget as? BrowserWidget)?.isEditingAddress() == true) ensureDrawnAboveNativeOverlays()
+        if (widget.requestsDrawingAboveNativeViews) ensureDrawnAboveNativeOverlays()
         return handled
     }
 
@@ -2302,36 +2232,15 @@ class WidgetContainer @JvmOverloads constructor(
         registry.getAllSortedByZOrder().asReversed().sortedByDescending { it.hasScreenModal }
 
     fun onDoubleTap(x: Float, y: Float): Boolean {
-        if (closeConfirmationPopup?.isVisible != true) {
-            settingsController.handleHoverControlsLayoutEditorDoubleTap(x, y)?.let { return it }
-        }
-
-        if (contextMenu?.isVisible == true) {
-            return dispatchContextMenuAction { contextMenu?.onDoubleTap(x, y) ?: false }
-        }
-
-        // Fix: Check for browser video fullscreen mode (e.g. YouTube) and exit it
-        for (widget in browserWidgets) {
-            if (widget.isInVideoFullscreen()) {
-                widget.exitVideoFullscreen()
-                return true
-            }
-        }
-
-        // Transform to content space for widget hit testing
-        val (cx, cy) = toContentSpace(x, y)
-
+        if (closeConfirmationPopup?.isVisible != true) {settingsController.handleHoverControlsLayoutEditorDoubleTap(x, y)?.let { return it }}
+        if (contextMenu?.isVisible == true) {return dispatchContextMenuAction { contextMenu?.onDoubleTap(x, y) ?: false }}
+        for (widget in registry.allWidgets()) {if (widget.onDoubleTapAnywhere()) return true} // A widget can take any double-tap first, e.g. a browser leaving a web video's fullscreen.
+        val (cx, cy) = toContentSpace(x, y) // Transform to content space for widget hit testing
         if (isVisibleKeyboardAt(cx, cy)) return true
-
         if (isHoverConfirmReleaseTapGuardActive()) return true
         if (hoverControlsConsumeDoubleTap(cx, cy)) return true
-
         if (textEditing.onDoubleTap(x, y)) return true
-
-        // A screen modal (the map's address search) takes double-taps anywhere.
-        screenModalWidget()?.let { modal ->
-            if (runWidgetInput(modal) { modal.onDoubleTap(cx, cy) }) return true
-        }
+        screenModalWidget()?.let { modal -> if (runWidgetInput(modal) { modal.onDoubleTap(cx, cy) }) return true} // A screen modal (the map's address search) takes double-taps anywhere.
 
         // A fullscreen widget is the only possible target, and never opens the app context menu.
         registry.fullscreenWidget?.let { fullscreen ->
@@ -2377,16 +2286,10 @@ class WidgetContainer @JvmOverloads constructor(
 
     fun onDragEnd(notify: Boolean = true) {
         cancelLongPress()
-        if (financeTileDragging) {
-            if (notify && financeWidget != null) {
-                runPersistentMutation(
-                    action = { financeWidget?.endTileDrag() == true },
-                    changed = { it }
-                )
-            } else {
-                financeWidget?.endTileDrag()
-            }
-            financeTileDragging = false
+        internalDragWidget?.let { widget ->
+            internalDragWidget = null
+            if (notify) runPersistentMutation(action = { widget.endInternalDrag() }, changed = { it })
+            else widget.endInternalDrag()
         }
         if (activeWidget != null) {
             val widget = activeWidget
@@ -2910,7 +2813,7 @@ class WidgetContainer @JvmOverloads constructor(
     fun showPageAgentApproval(runId: String, request: PageAgentConfirmationRequest, respond: (Boolean) -> Unit) {pageAgentApprovalOverlay.show(runId, request, respond); ensureDrawnAboveNativeOverlays()}
     fun dismissPageAgentApproval(runId: String)                                                                 {pageAgentApprovalOverlay.dismiss(runId)}
     fun dismissMenu()                                                                                           { contextMenu?.dismiss(); textEditing.dismissMenus(); layoutNamePrompt?.dismiss() }
-    fun isDragging():                                                                                           Boolean = activeWidget != null || financeTileDragging || textEditing.formattingMenu?.isDragging() == true
+    fun isDragging():                                                                                           Boolean = activeWidget != null || internalDragWidget != null || textEditing.formattingMenu?.isDragging() == true
 
     // ==================== 3DOF Mode ====================
     /**
@@ -3013,7 +2916,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun drawOverlayMenus(canvas: Canvas) {
-        if (isAnyPopupVisible() || screenModalWidget() != null || focusedBrowserWidget?.isEditingAddress() == true || fullscreenAs<BrowserWidget>()?.isEditingAddress() == true) {ensureDrawnAboveNativeOverlays()}
+        if (isAnyPopupVisible() || registry.allWidgets().any { it.requestsDrawingAboveNativeViews }) ensureDrawnAboveNativeOverlays()
         registry.getAllSortedByZOrder().forEach { it.drawScreenOverlay(canvas) }
         contextMenu?.draw(canvas)
         settingsController.drawHoverControlsLayoutEditor(canvas)  // Draw the hover-controls editor before the close-app confirmation so the popup appears on top of it when the user invokes Close from the editor's context menu.

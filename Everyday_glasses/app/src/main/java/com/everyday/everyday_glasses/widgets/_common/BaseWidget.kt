@@ -306,6 +306,48 @@ abstract class BaseWidget(
     /** Draws in screen space, above every widget, e.g. the modal of [hasScreenModal]. */
     open fun drawScreenOverlay(canvas: Canvas) = Unit
 
+    /** True while the container must draw above native views (web pages), e.g. for [hasScreenModal]. */
+    open val requestsDrawingAboveNativeViews: Boolean get() = hasScreenModal
+
+    /** A double-tap anywhere, checked before everything else (a browser leaving a web video's fullscreen). */
+    open fun onDoubleTapAnywhere(): Boolean = false
+
+    // ==================== Press and drag hooks ====================
+
+    /**
+     * A press this widget takes before any routing, wherever it lands, like [onModalTap] for taps
+     * (the map's POI panel). Returns true to capture it: the moves and the release then come to
+     * [onPressMove] and [onPressRelease].
+     */
+    open fun onModalPress(px: Float, py: Float): Boolean = false
+
+    /**
+     * A press routed to this widget, before it can start moving or resizing the widget. Returns
+     * true to capture it, like [onModalPress] (a press on a web page goes to the page).
+     */
+    open fun onPress(px: Float, py: Float): Boolean = false
+
+    /** The cursor moved during a captured press. Returns false to let the move through. */
+    open fun onPressMove(px: Float, py: Float): Boolean = false
+
+    /** A captured press ended. */
+    open fun onPressRelease(px: Float, py: Float) = Unit
+
+    /** A captured press was interrupted by a second finger. By default, the same as a release. */
+    open fun onPressCancel(px: Float, py: Float) = onPressRelease(px, py)
+
+    /** Whether a long press here drags part of this widget (a finance tile) instead of moving it. */
+    open fun canStartInternalDrag(px: Float, py: Float): Boolean = false
+
+    /** Starts the internal drag at the long-press point. Returns false if it can't start. */
+    open fun startInternalDrag(px: Float, py: Float): Boolean = false
+
+    /** The cursor moved during an internal drag. */
+    open fun onInternalDrag(px: Float, py: Float) = Unit
+
+    /** Ends the internal drag. Returns true when it changed something saved. */
+    open fun endInternalDrag(): Boolean = false
+
     // ==================== Paints ====================
 
     protected val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {

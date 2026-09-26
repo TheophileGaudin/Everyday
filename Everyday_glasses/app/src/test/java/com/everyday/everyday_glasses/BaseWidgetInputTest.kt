@@ -38,10 +38,19 @@ class BaseWidgetInputTest {
         assertEquals(listOf(12f), widget.scrolls)
     }
 
+    @Test
+    fun `a cancelled press ends like a release by default`() {
+        val widget = FakeWidget()
+
+        widget.onPressCancel(3f, 4f)
+        assertEquals(listOf(3f to 4f), widget.releases)
+    }
+
     private class FakeWidget : BaseWidget(WidgetTypeId.TEXT, 0f, 0f, 10f, 10f) {
         var savedValue = 1
         var contentTaps = 0
         val scrolls = mutableListOf<Float>()
+        val releases = mutableListOf<Pair<Float, Float>>()
 
         override fun draw(canvas: Canvas) = Unit
         override fun contentSignature(): List<Any?> = listOf(savedValue)
@@ -51,6 +60,9 @@ class BaseWidgetInputTest {
         }
         override fun onScroll(dy: Float) {
             scrolls += dy
+        }
+        override fun onPressRelease(px: Float, py: Float) {
+            releases += px to py
         }
     }
 }

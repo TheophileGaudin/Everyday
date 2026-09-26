@@ -68,6 +68,7 @@ class BrowserWidget(
         private const val TAG = "BrowserWidget"
         private const val HOME_URL = "https://www.google.com"
         private const val BLANK_URL = "about:blank"
+        private const val CONTENT_TAP_SUPPRESSION_MS = 350L // After a press on the page, the tap reported for the same release is ignored for this long.
 
         // Navigation Bar Constants
         private const val NAV_BAR_HEIGHT = 44f
@@ -1899,6 +1900,46 @@ class BrowserWidget(
         }
     }
 
+    // ==================== Content touch ====================
+
+    // A press on the page is forwarded to it as a touch; the page then gets the click on release.
+    private var contentTouchActive = false
+    private var contentTapSuppressedUntilMs = 0L
+
+    /** A press on the page becomes a touch on the page: scrolling, selecting, dragging inside it. */
+    override fun onPress(px: Float, py: Float): Boolean {
+        if (hitTest(px, py) != HitArea.CONTENT) return false
+        setFocused(true)
+        contentTouchActive = shouldStartContentTouch(px, py)
+        if (contentTouchActive) dispatchTouchEvent(px, py, MotionEvent.ACTION_DOWN)
+        return true
+    }
+
+    override fun onPressMove(px: Float, py: Float): Boolean {
+        if (!contentTouchActive) return false
+        dispatchTouchEvent(px, py, MotionEvent.ACTION_MOVE)
+        return true
+    }
+
+    override fun onPressRelease(px: Float, py: Float) {
+        if (!contentTouchActive) return
+        contentTouchActive = false
+        dispatchTouchEvent(px, py, MotionEvent.ACTION_UP)
+        contentTapSuppressedUntilMs = SystemClock.uptimeMillis() + CONTENT_TAP_SUPPRESSION_MS
+    }
+
+    override fun onPressCancel(px: Float, py: Float) {
+        if (!contentTouchActive) return
+        contentTouchActive = false
+        dispatchTouchEvent(px, py, MotionEvent.ACTION_CANCEL)
+    }
+
+    /** A double-tap anywhere leaves a web video's fullscreen. */
+    override fun onDoubleTapAnywhere(): Boolean = exitVideoFullscreen()
+
+    /** The address editor is drawn by the dashboard, over the page. */
+    override val requestsDrawingAboveNativeViews: Boolean get() = isEditingAddress()
+
 
     /**
      * Dispatch touch event to WebView, translating coordinates from screen to WebView local.
@@ -2516,6 +2557,9 @@ class BrowserWidget(
                 true
             }
             HitArea.CONTENT -> {
+                // The page already got this click from the press (onPressRelease).
+                if (SystemClock.uptimeMillis() <= contentTapSuppressedUntilMs) return true
+
                 setFocused(true)
 
                 // Exit URL editing mode when tapping content (but don't hide keyboard - WebView may need it)
