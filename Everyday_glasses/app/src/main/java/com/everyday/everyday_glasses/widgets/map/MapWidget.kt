@@ -524,7 +524,6 @@ class MapWidget(
         position?.let { repository.refresh(MapGeoPoint(it.latitude, it.longitude), config) }
     }
 
-    fun isPoiConfigVisible(): Boolean = showPoiConfig
     override val hasScreenModal: Boolean get() = addressEntryVisible || navigationState.choices.isNotEmpty() /** Address search and ambiguous destination choices. */
     override fun contentSignature(): List<Any?> = listOf(mode, zoom, isLocationVisible(), isCountryVisible(), poiDisplayConfig)
     override fun onModalTap(px: Float, py: Float): Boolean = (hasScreenModal || showPoiConfig) && onContentTap(px, py) /** The POI settings panel is modal too, including over a fullscreen map. */
