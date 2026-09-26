@@ -25,6 +25,9 @@ import android.renderscript.Type
 import android.util.Log
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.get
+import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets._common.WidgetInteractionState
@@ -1119,4 +1122,58 @@ interface MirrorWidgetListener {
     fun onFrameReady()
     fun requestMirror(start: Boolean)
     fun onMediaStateChanged(active: Boolean)
+}
+
+/** Puts the phone screen mirror on the dashboard and connects its frames to the glasses output. */
+class MirrorModule(
+    private val services: DashboardServices,
+    private val context: Context,
+    private val current: () -> ScreenMirrorWidget?,
+    private val onMediaFrame: (sourceId: String) -> Unit,
+    private val setMediaSourceActive: (sourceId: String, active: Boolean) -> Unit,
+    private val refreshBrightnessRules: () -> Unit,
+    private val sendMirrorRequest: (start: Boolean) -> Unit,
+) {
+    val lifecycle = WidgetLifecycleRegistration.singleton(
+        WidgetTypeId.MIRROR, ScreenMirrorWidget::class, DashboardPersistence.MirrorWidgetState::class,
+        current = current,
+        create = { ScreenMirrorWidget(context, 20f, 20f, 180f, 320f) },
+        restore = ::restore,
+        capture = { services.captureRestore.getMirrorWidgetState(it) },
+        configure = ::configure,
+        teardown = { widget ->
+            setMediaSourceActive(widget.binocularSourceId, false)
+            widget.onDestroy()
+        },
+    )
+
+    fun setMirroringEnabled(enabled: Boolean, phoneIp: String?) {
+        services.withTransientChanges {
+            current()?.setMirroringEnabled(enabled, phoneIp)
+            current()?.refreshDisplayVisibility()
+            refreshBrightnessRules()
+            services.notifyTransientChange()
+        }
+    }
+
+    private fun restore(state: DashboardPersistence.MirrorWidgetState): ScreenMirrorWidget {
+        val widget = ScreenMirrorWidget(context, state.x, state.y, state.width, state.height)
+        services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight)
+        return widget
+    }
+
+    private fun configure(widget: ScreenMirrorWidget) {
+        widget.listener = object : MirrorWidgetListener {
+            override fun onFrameReady() {
+                if (widget.isBinocularMediaActive()) onMediaFrame(widget.binocularSourceId)
+            }
+            override fun onMediaStateChanged(active: Boolean) {
+                setMediaSourceActive(widget.binocularSourceId, active)
+                // The mirror's media brightness cap follows its live media state.
+                refreshBrightnessRules()
+            }
+            override fun requestMirror(start: Boolean) = sendMirrorRequest(start)
+        }
+        widget.refreshDisplayVisibility()
+    }
 }

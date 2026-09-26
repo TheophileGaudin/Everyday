@@ -2,21 +2,59 @@ package com.everyday.everyday_glasses.widgets.news
 
 import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.NewsSourceUpdateResult
+import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.runtime.DashboardServices
 import com.everyday.everyday_glasses.runtime.NewsWidgetListener
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.shared.sync.NewsSnapshot
 import com.everyday.shared.sync.NewsSourceSpec
 import java.util.concurrent.CompletableFuture
 
+/** Puts the news widget on the dashboard and connects it to the phone's news feeds. */
 internal class NewsFeatureController(
+    private val services: DashboardServices,
     private val ui: UiThreadDispatcher,
     private val currentWidget: () -> NewsWidget?,
     private val currentProvider: () -> WidgetDataProvider?,
-    private val withTransientChanges: (() -> Unit) -> Unit,
-    private val notifyTransientChange: () -> Unit,
 ) {
     // Pending country code for news widget
     private var pendingCountryCode: String? = null
+
+    val lifecycle = WidgetLifecycleRegistration.singleton(
+        WidgetTypeId.NEWS, NewsWidget::class, DashboardPersistence.NewsWidgetState::class,
+        current = currentWidget,
+        create = ::create,
+        restore = ::restore,
+        capture = { services.captureRestore.getNewsWidgetState(it) },
+    )
+
+    private fun create(): NewsWidget {
+        val x = (services.viewportWidth - NewsWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
+        val widget = NewsWidget(x, 20f, NewsWidget.DEFAULT_WIDTH, NewsWidget.DEFAULT_HEIGHT)
+        configure(widget)
+        onOpened(widget, reason = "widget_toggled_on")
+        return widget
+    }
+
+    private fun restore(state: DashboardPersistence.NewsWidgetState): NewsWidget {
+        val widget = NewsWidget(state.x, state.y, state.width, state.height)
+        configure(widget)
+        services.captureRestore.restoreNewsWidgetPosition(widget, state, services.viewportWidth, services.viewportHeight)
+        onOpened(widget, reason = "widget_restored")
+        return widget
+    }
+
+    /** Lifting the head to wake the display shows the next news item; saved when the selection changed. */
+    fun onHeadUpWake() {
+        val widget = currentWidget() ?: return
+        val before = widget.getSelectedIndex()
+        services.runClassifiedInput(
+            action = { widget.showNextItemOnHeadUpWake(); true },
+            changed = { widget.getSelectedIndex() != before },
+        )
+    }
 
     fun updateCountryCode(countryCode: String) {
         pendingCountryCode = countryCode
@@ -33,16 +71,16 @@ internal class NewsFeatureController(
             return
         }
 
-        withTransientChanges {
+        services.withTransientChanges {
             widget.applySnapshot(snapshot)
-            notifyTransientChange()
+            services.notifyTransientChange()
         }
     }
 
     fun applyError(message: String) {
-        withTransientChanges {
+        services.withTransientChanges {
             currentWidget()?.applyError(message)
-            notifyTransientChange()
+            services.notifyTransientChange()
         }
     }
 
@@ -95,7 +133,7 @@ internal class NewsFeatureController(
         }
         return result
     }
-    fun configure(widget: NewsWidget) {
+    private fun configure(widget: NewsWidget) {
         widget.listener = object : NewsWidgetListener {
             override fun onDataRequested(
                 countryCode: String,
@@ -135,7 +173,7 @@ internal class NewsFeatureController(
         pendingCountryCode?.let(widget::setCountryCode)
     }
 
-    fun onOpened(widget: NewsWidget, reason: String) {
+    private fun onOpened(widget: NewsWidget, reason: String) {
         widget.requestData(force = true, reason = reason)
     }
 

@@ -57,5 +57,6 @@ class WidgetModulesTest {
             transientChanges++
         }
         override fun <T> withTransientChanges(action: () -> T): T = action()
+        override fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean) = action()
     }
 }

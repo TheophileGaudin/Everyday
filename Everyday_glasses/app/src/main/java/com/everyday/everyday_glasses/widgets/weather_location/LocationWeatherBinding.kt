@@ -1,15 +1,21 @@
 package com.everyday.everyday_glasses.widgets.weather_location
-
+import android.content.Context
+import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.settings.TemperatureUnit
 import com.everyday.everyday_glasses.settings.UnitDisplayFormatter
 import com.everyday.shared.sync.WeatherData
 
 
+/** Puts the location and weather widget on the dashboard and feeds it place and weather data. */
 internal class LocationWeatherBinding(
+    private val services: DashboardServices,
+    private val context: Context,
     private val currentWidget: () -> LocationWidget?,
     private val temperatureUnit: () -> TemperatureUnit,
     private val toggleTemperatureUnit: () -> Unit,
-    private val notifyTransientChange: () -> Unit,
 ) {
     private var town: String? = null
     private var countryCode: String? = null
@@ -18,6 +24,27 @@ internal class LocationWeatherBinding(
     private var weatherText: String? = null
     private var sunriseEpochMs: Long? = null
     private var sunsetEpochMs: Long? = null
+
+    val lifecycle = WidgetLifecycleRegistration.singleton(
+        WidgetTypeId.LOCATION, LocationWidget::class, DashboardPersistence.LocationWidgetState::class,
+        current = currentWidget,
+        create = ::create,
+        restore = ::restore,
+        capture = { services.captureRestore.getLocationWidgetState(it) },
+    )
+
+    private fun create(): LocationWidget {
+        val widget = LocationWidget(context, 20f, services.viewportHeight - HEIGHT - 20f, WIDTH, HEIGHT)
+        configure(widget)
+        return widget
+    }
+
+    private fun restore(state: DashboardPersistence.LocationWidgetState): LocationWidget {
+        val widget = LocationWidget(context, state.x, state.y, state.width, state.height)
+        configure(widget)
+        services.captureRestore.restoreLocationWidgetPosition(widget, state, services.viewportWidth, services.viewportHeight)
+        return widget
+    }
 
     fun updateData(
         address: String,
@@ -34,7 +61,7 @@ internal class LocationWeatherBinding(
         widget?.setLocationData(address, weather)
         widget?.setSunTimes(sunriseEpochMs, sunsetEpochMs)
 
-        notifyTransientChange()
+        services.notifyTransientChange()
     }
 
     fun setLocationPermissionDenied() {
@@ -44,7 +71,7 @@ internal class LocationWeatherBinding(
         sunsetEpochMs = null
 
         currentWidget()?.setPermissionDenied()
-        notifyTransientChange()
+        services.notifyTransientChange()
     }
 
     fun applyLocationMetadata(
@@ -101,7 +128,7 @@ internal class LocationWeatherBinding(
         )
     }
 
-    fun configure(widget: LocationWidget) {
+    private fun configure(widget: LocationWidget) {
         widget.onTemperatureUnitChanged = toggleTemperatureUnit
         widget.setTemperatureUnit(temperatureUnit())
         if (address != null || weatherText != null) {
@@ -113,5 +140,10 @@ internal class LocationWeatherBinding(
     fun applyUnitSettings() {
         currentWidget()?.setTemperatureUnit(temperatureUnit())
         renderLocationWeather()
+    }
+
+    private companion object {
+        const val WIDTH = 300f
+        const val HEIGHT = 120f
     }
 }

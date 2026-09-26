@@ -37,4 +37,10 @@ interface DashboardServices {
 
     /** Runs [action] and reports the changes it makes as one notification. */
     fun <T> withTransientChanges(action: () -> T): T
+
+    /**
+     * Runs one input with the widgets' own notifications muted, then reports it once: saved when
+     * [changed] is true, transient otherwise. Returns what [action] returned.
+     */
+    fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean): Boolean
 }

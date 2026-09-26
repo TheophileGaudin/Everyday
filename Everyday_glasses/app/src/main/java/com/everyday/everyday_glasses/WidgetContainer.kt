@@ -49,8 +49,6 @@ import com.everyday.everyday_glasses.settings.DisplaySettingsHandler
 import com.everyday.everyday_glasses.runtime.FileBrowserWidgetListener
 import com.everyday.everyday_glasses.runtime.GeminiSettingsListener
 import com.everyday.everyday_glasses.auth_permissions.GoogleAccountHandler
-import com.everyday.everyday_glasses.runtime.MapWidgetListener
-import com.everyday.everyday_glasses.widgets.phone_screen_mirror.MirrorWidgetListener
 import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
 import com.everyday.everyday_glasses.runtime.WidgetPersistenceListener
 import com.everyday.everyday_glasses.runtime.WidgetChangeListener
@@ -72,9 +70,6 @@ import com.everyday.everyday_glasses.settings.SettingsController
 import com.everyday.everyday_glasses.interaction.user_input.UserInputActivity
 import com.everyday.everyday_glasses.interaction.user_input.UserInputKind
 import com.everyday.everyday_glasses.auth_permissions.GoogleAuthState
-import com.everyday.everyday_glasses.widgets.map.backend.MapGeoPoint
-import com.everyday.everyday_glasses.widgets.map.backend.NavigationOperationResult
-import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
 import com.everyday.everyday_glasses.widgets.map.backend.StartNavigationRequest
 import com.everyday.everyday_glasses.runtime.WidgetDescriptors
 import com.everyday.everyday_glasses.persistence.WidgetDocument
@@ -118,11 +113,13 @@ import com.everyday.everyday_glasses.widgets.finance.FinanceWidget
 import com.everyday.everyday_glasses.widgets.file_browser.ImageWidget
 import com.everyday.everyday_glasses.ui.hover_controls.LemonHoverControl
 import com.everyday.everyday_glasses.widgets.weather_location.LocationWidget
+import com.everyday.everyday_glasses.widgets.map.MapModule
 import com.everyday.everyday_glasses.widgets.map.MapWidget
 import com.everyday.everyday_glasses.widgets.news.NewsWidget
 import com.everyday.everyday_glasses.widgets.notifications.NotificationsWidget
 import com.everyday.everyday_glasses.widgets.notifications.NotificationsModule
 import com.everyday.everyday_glasses.widgets.file_browser.PdfWidget
+import com.everyday.everyday_glasses.widgets.phone_screen_mirror.MirrorModule
 import com.everyday.everyday_glasses.widgets.phone_screen_mirror.ScreenMirrorWidget
 import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidget
 import com.everyday.everyday_glasses.widgets.speedometer.SpeedState
@@ -159,7 +156,6 @@ import com.everyday.shared.command.CommandScrollDirection
 import com.everyday.shared.command.CommandWidgetId
 import com.everyday.shared.transport.AssistantStatus
 import java.util.concurrent.CompletableFuture
-import kotlin.reflect.KClass
 
 /**
  * Central UI host and coordinator for the dashboard's widgets.
@@ -290,28 +286,28 @@ class WidgetContainer @JvmOverloads constructor(
     )
     private val locationWeatherBinding by lazy {
         LocationWeatherBinding(
+            services = dashboardServices,
+            context = context,
             currentWidget = { locationWidget },
             temperatureUnit = { unitSettings.effectiveTemperatureUnit() },
             toggleTemperatureUnit = { unitSettings.toggleTemperatureOverride() },
-            notifyTransientChange = ::notifyTransientContentChanged,
         )
     }
     private val newsFeatures by lazy {
         NewsFeatureController(
+            services = dashboardServices,
             ui = assistantUiDispatcher,
             currentWidget = { newsWidget },
             currentProvider = { dataProvider },
-            withTransientChanges = { action -> withTransientChangeBatch(action) },
-            notifyTransientChange = ::notifyTransientContentChanged,
         )
     }
     private val financeFeatures by lazy {
         FinanceFeatureController(
+            services = dashboardServices,
             ui = assistantUiDispatcher,
             currentWidget = { financeWidget },
             currentProvider = { dataProvider },
             runPersistentUpdate = { action -> runPersistentMutation( action = action, changed = { result -> result.isSuccess } ) },
-            notifyTransientChange = ::notifyTransientContentChanged,
             stableWidgetId = ::widgetStableId,
         )
     }
@@ -489,11 +485,6 @@ class WidgetContainer @JvmOverloads constructor(
     val calendarWidget: CalendarWidget?
         get() = registry.calendarWidget
 
-    // Pending data for location widget
-    private var pendingMapLocation: android.location.Location? = null
-    private var pendingMapLocationLabel: String = ""
-    private var pendingMapCountryCode: String = ""
-
     //delegation of widgets to registry
     val financeWidget: FinanceWidget?             get() = registry.financeWidget
     val newsWidget: NewsWidget?                   get() = registry.newsWidget
@@ -512,6 +503,7 @@ class WidgetContainer @JvmOverloads constructor(
         override val captureRestore: WidgetCaptureRestore get() = widgetCaptureRestore
         override fun notifyTransientChange() = notifyTransientContentChanged()
         override fun <T> withTransientChanges(action: () -> T): T = withTransientChangeBatch(action)
+        override fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean): Boolean = this@WidgetContainer.runClassifiedInput(action, changed)
     }
     private val statusBarModule = StatusBarModule(dashboardServices) { statusBarWidget }
     private val calendarModule = CalendarModule(dashboardServices) { calendarWidget }
@@ -528,6 +520,24 @@ class WidgetContainer @JvmOverloads constructor(
     private val subtitleModule = SubtitleModule(dashboardServices, { subtitleWidget }) { control ->
         host?.requestSubtitleControl(control)
     }
+    private val mapModule = MapModule(
+        dashboardServices,
+        context,
+        current = { mapWidget },
+        currentProvider = { dataProvider },
+        requestRepaint = ::requestRepaint,
+        addressFocusChanged = ::onMapAddressFocusChanged,
+        dismissPresentation = ::dismissMapPresentation,
+    )
+    private val mirrorModule = MirrorModule(
+        dashboardServices,
+        context,
+        current = { screenMirrorWidget },
+        onMediaFrame = ::notifyMediaFrame,
+        setMediaSourceActive = ::setBinocularMediaSourceActive,
+        refreshBrightnessRules = ::refreshBrightnessRules,
+        sendMirrorRequest = { start -> host?.requestMirror(start) },
+    )
 
     // Settings overlays and persisted app-level settings
     private val settingsController = SettingsController(
@@ -727,7 +737,6 @@ class WidgetContainer @JvmOverloads constructor(
                 textEditing.release(widget.addressZone)
                 if (focusedBrowserWidget === widget) setFocusedWidget(null)
             },
-            teardown = ::destroyWidget
         )
     }
     private val textLifecycle by lazy {
@@ -766,7 +775,6 @@ class WidgetContainer @JvmOverloads constructor(
             stateCodec = WidgetDocument.codecs[WidgetTypeId.VIDEO],
             capture = widgetCaptureRestore::getVideoWidgetState,
             restore = ::restoreVideoWidget,
-            teardown = ::destroyWidget,
             onFullscreenChanged = ::handleVideoWidgetFullscreenSideEffects
         )
     }
@@ -778,7 +786,6 @@ class WidgetContainer @JvmOverloads constructor(
             stateCodec = WidgetDocument.codecs[WidgetTypeId.PDF],
             capture = widgetCaptureRestore::getPdfWidgetState,
             restore = ::restorePdfWidget,
-            teardown = ::destroyWidget
         )
     }
     private val filesLifecycle by lazy {
@@ -810,8 +817,6 @@ class WidgetContainer @JvmOverloads constructor(
     var contentObserver: WidgetContentObserver? = null
     var host: WidgetHost? = null
     var dataProvider: WidgetDataProvider? = null
-    private var phoneRouteTransport: GlassesRouteTransport? = null
-    private var phoneRouteConnected = false
     var userInputActivity: UserInputActivity? = null
 
     private var isCursorVisible = false
@@ -859,6 +864,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun registerWidgetLifecycles() {
+        //duplicable widget registration
         lifecycleController.register(browserLifecycle)
         lifecycleController.register(textLifecycle)
         lifecycleController.register(imageLifecycle)
@@ -866,59 +872,17 @@ class WidgetContainer @JvmOverloads constructor(
         lifecycleController.register(pdfLifecycle)
         lifecycleController.register(filesLifecycle)
 
-        fun <W : BaseWidget, S : Any> bindSingleton(
-            type: WidgetTypeId,
-            widgetType: KClass<W>,
-            stateType: KClass<S>,
-            current: () -> W?,
-            createWidget: () -> W,
-            restoreWidget: (S) -> W,
-            captureState: (W) -> S?,
-            reopenWidget: (S) -> W = restoreWidget,
-            configure: (W) -> Unit = {},
-            beforeRemove: (W) -> Unit = {},
-            teardown: (W) -> Unit = ::destroyWidget,
-            onFullscreen: (W, Boolean) -> Unit = { _, _ -> },
-            onMinimize: (W, Boolean) -> Unit = { _, _ -> }
-        ) {
-            lifecycleController.register(
-                WidgetLifecycleRegistration.singleton(
-                    type, widgetType, stateType, current, createWidget, restoreWidget, captureState,
-                    reopenWidget, configure, beforeRemove, teardown, onFullscreen, onMinimize
-                )
-            )
-        }
-
+        //singleton widget registration
         lifecycleController.register(statusBarModule.lifecycle)
-        bindSingleton(
-            WidgetTypeId.LOCATION, LocationWidget::class, DashboardPersistence.LocationWidgetState::class,
-            { locationWidget }, ::createLocationPresence, ::applyLocationState,
-            { widgetCaptureRestore.getLocationWidgetState(it) })
-        bindSingleton(
-            WidgetTypeId.MAP, MapWidget::class, DashboardPersistence.MapWidgetState::class,
-            { mapWidget }, ::createMapPresence, ::applyMapState,
-            { widgetCaptureRestore.getMapWidgetState(it) },
-            beforeRemove = MapWidget::release,
-            onFullscreen = { widget, fullscreen -> if (!fullscreen) widget.enforceWindowedMode() })
+        lifecycleController.register(locationWeatherBinding.lifecycle)
+        lifecycleController.register(mapModule.lifecycle)
         lifecycleController.register(calendarModule.lifecycle)
-        bindSingleton(
-            WidgetTypeId.FINANCE, FinanceWidget::class, DashboardPersistence.FinanceWidgetState::class,
-            { financeWidget }, ::createFinancePresence, ::applyFinanceState,
-            { widgetCaptureRestore.getFinanceWidgetState(it) },
-            onMinimize = { widget, minimized -> financeFeatures.onMinimizeChanged(widget, minimized) })
-        bindSingleton(
-            WidgetTypeId.NEWS, NewsWidget::class, DashboardPersistence.NewsWidgetState::class,
-            { newsWidget }, ::createNewsPresence, ::applyNewsState,
-            { widgetCaptureRestore.getNewsWidgetState(it) })
+        lifecycleController.register(financeFeatures.lifecycle)
+        lifecycleController.register(newsFeatures.lifecycle)
         lifecycleController.register(notificationsModule.lifecycle)
         lifecycleController.register(speedometerModule.lifecycle)
         lifecycleController.register(subtitleModule.lifecycle)
-        bindSingleton(
-            WidgetTypeId.MIRROR, ScreenMirrorWidget::class, DashboardPersistence.MirrorWidgetState::class,
-            { screenMirrorWidget }, ::createMirrorPresence, ::applyMirrorState,
-            { widgetCaptureRestore.getMirrorWidgetState(it) },
-            configure = ::configureScreenMirrorWidget)
-
+        lifecycleController.register(mirrorModule.lifecycle)
         lifecycleController.verifyComplete()
     }
 
@@ -991,26 +955,10 @@ class WidgetContainer @JvmOverloads constructor(
         }
     }
 
-    fun onHeadUpWake() {
-        Log.d(TAG, "Head-up wake -> advance news item")
-        newsWidget?.let { news ->
-            val beforeIndex = news.getSelectedIndex()
-            val persistedChange = runPersistentMutation(
-                action = {
-                    news.showNextItemOnHeadUpWake()
-                    news.getSelectedIndex() != beforeIndex
-                },
-                changed = { it }
-            )
-            if (!persistedChange) notifyTransientContentChanged()
-        }
-    }
-
+    fun onHeadUpWake() {newsFeatures.onHeadUpWake(); Log.d(TAG, "Head-up wake -> advance news item")}
     fun hasPinnedWidgets(): Boolean = registry.hasPinnedWidgets()
     fun isDisplayAwake(): Boolean = displayState == WakeSleepManager.DisplayState.WAKE
-
-    val activePresentationSession: PresentationSession?
-        get() = presentationController.activeSession
+    val activePresentationSession: PresentationSession? get() = presentationController.activeSession
 
     /**
      * Present an already-created widget for a bounded period. Set [createdByPresentation] when
@@ -1271,19 +1219,6 @@ class WidgetContainer @JvmOverloads constructor(
         widget.refreshDisplayVisibility()
     }
 
-    private fun configureScreenMirrorWidget(widget: ScreenMirrorWidget) {
-        widget.listener = object : MirrorWidgetListener {
-            override fun onFrameReady() {if (widget.isBinocularMediaActive()) notifyMediaFrame(widget.binocularSourceId)}
-            override fun onMediaStateChanged(active: Boolean) {
-                setBinocularMediaSourceActive(widget.binocularSourceId, active)
-                // The mirror's media brightness cap follows its live media state.
-                refreshBrightnessRules()
-            }
-            override fun requestMirror(start: Boolean) {host?.requestMirror(start)}
-        }
-        widget.refreshDisplayVisibility()
-    }
-
     // ==================== Initialization ====================
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -1422,7 +1357,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     // distribute location updates to widgets that are location dependent
     fun applyLocationMetadata(town: String, countryCode: String) {
-        updateMapMetadata(town, countryCode)
+        mapModule.applyLocationMetadata(town, countryCode)
         financeFeatures.updateCountryCode(countryCode)
         newsFeatures.updateCountryCode(countryCode)
         locationWeatherBinding.applyLocationMetadata(town, countryCode)
@@ -2252,63 +2187,35 @@ class WidgetContainer @JvmOverloads constructor(
         return layoutManager.requestDeleteLayout(name)
     }
 
-    private fun createLocationPresence(): LocationWidget {
-        val locationWidth = 300f
-        val locationHeight = 120f
-        val widget = LocationWidget(context, 20f, height - locationHeight - 20f, locationWidth, locationHeight)
-        locationWeatherBinding.configure(widget)
-        return widget
+    //map section
+    fun updateMapLocation(location: android.location.Location)           = mapModule.updateLocation(location)
+    fun requestPhoneMapRefresh()                                         = mapModule.requestPhoneMapRefresh()
+    fun applyMapSnapshot(snapshot: com.everyday.shared.sync.MapSnapshot) = mapModule.applySnapshot(snapshot)
+
+
+
+    /** The map's address search took or gave up the keyboard focus. */
+    private fun onMapAddressFocusChanged(map: MapWidget, focused: Boolean) {
+        val beforeZOrder = map.zOrder
+        if (focused) bringWidgetToFront(map)
+        notifyFocusChanged(persistent = focused && map.zOrder != beforeZOrder)
     }
 
-    private fun createMapPresence(): MapWidget {
-        val size = 210f
-        return MapWidget(context, width - size - 24f, 24f, size, size).apply {
-            invalidate = ::requestRepaint
-            configurePhoneRouteTransport(phoneRouteTransport)
-            onPhoneRouteConnectionChanged(phoneRouteConnected)
-            bindMapNavigation(this)
-            pendingMapLocation?.let(::setLocation)
-            setLocationMetadata(pendingMapLocationLabel, pendingMapCountryCode)
+    fun configurePhoneRouteTransport(transport: GlassesRouteTransport?)                               = mapModule.configureRouteTransport(transport)
+    fun onPhoneRouteConnectionChanged(connected: Boolean)                                             = mapModule.onRouteConnectionChanged(connected)
+    fun onPhoneRouteResult(result: com.everyday.shared.transport.RouteTransportResult)                = mapModule.onRouteResult(result)
+    fun onPhoneRouteError(error: com.everyday.shared.transport.RouteTransportError)                   = mapModule.onRouteError(error)
+    fun onPhoneDestinationSearchResult(result: com.everyday.shared.transport.DestinationSearchResult) = mapModule.onDestinationSearchResult(result)
+    fun onPhoneDestinationSearchError(error: com.everyday.shared.transport.DestinationSearchError)    = mapModule.onDestinationSearchError(error)
+
+    private fun dismissMapPresentation() {
+        val map = mapWidget ?: return
+        if (activePresentationSession?.targetId == widgetStableId(map)) {
+            dismissPresentation()
         }
     }
 
-    fun updateMapLocation(location: android.location.Location) {
-        pendingMapLocation = android.location.Location(location)
-        mapWidget?.setLocation(location)
-        notifyTransientContentChanged()
-    }
-
-    fun requestPhoneMapRefresh() {
-        mapWidget?.requestPhoneMapRefresh()
-    }
-
-    fun applyMapSnapshot(snapshot: com.everyday.shared.sync.MapSnapshot) {
-        mapWidget?.applyProxyMap(snapshot)
-        notifyTransientContentChanged()
-    }
-
-    private fun updateMapMetadata(location: String, countryCode: String) {
-        pendingMapLocationLabel = location
-        pendingMapCountryCode = countryCode
-        mapWidget?.setLocationMetadata(location, countryCode)
-    }
-
-    private fun createFinancePresence(): FinanceWidget {
-        val widget = FinanceWidget(20f, 20f, FinanceWidget.DEFAULT_WIDTH, FinanceWidget.DEFAULT_HEIGHT)
-        financeFeatures.configure(widget)
-        financeFeatures.onOpened(widget, reason = "widget_toggled_on")
-        return widget
-    }
-
-    private fun createNewsPresence(): NewsWidget {
-        val startX = (width - NewsWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
-        val widget = NewsWidget(startX, 20f, NewsWidget.DEFAULT_WIDTH, NewsWidget.DEFAULT_HEIGHT)
-        newsFeatures.configure(widget)
-        newsFeatures.onOpened(widget, reason = "widget_toggled_on")
-        return widget
-    }
-    private fun createMirrorPresence(): ScreenMirrorWidget {return ScreenMirrorWidget(context, 20f, 20f, 180f, 320f)}
-
+    //browser section
     fun createBrowserWidget(x: Float, y: Float) {
         if (openClosedBrowserTemplate() != null) {
             return
@@ -2329,64 +2236,6 @@ class WidgetContainer @JvmOverloads constructor(
             widget.toggleFullscreen()
             widget.setFocused(true)
             setFocusedWidget(widget)
-        }
-    }
-
-    private fun bindMapNavigation(map: MapWidget) {
-        map.listener = object : MapWidgetListener {
-            override fun onMapDataRequested(point: MapGeoPoint, config: PoiDisplayConfig) {
-                dataProvider?.requestMapData(point, config)
-            }
-            override fun onAddressFocusChanged(focused: Boolean) {
-                val beforeZOrder = map.zOrder
-                if (focused) bringWidgetToFront(map)
-                notifyFocusChanged(persistent = focused && map.zOrder != beforeZOrder)
-            }
-            override fun onNavigationResult(result: NavigationOperationResult) = notifyTransientContentChanged()
-            override fun onStopNavigationRequested() = stopNavigationFromMap()
-        }
-    }
-
-    fun configurePhoneRouteTransport(transport: GlassesRouteTransport?) {
-        phoneRouteTransport = transport
-        mapWidget?.configurePhoneRouteTransport(transport)
-    }
-
-    fun onPhoneRouteConnectionChanged(connected: Boolean) {
-        phoneRouteConnected = connected
-        mapWidget?.onPhoneRouteConnectionChanged(connected)
-    }
-
-    fun onPhoneRouteResult(result: com.everyday.shared.transport.RouteTransportResult) {
-        mapWidget?.onPhoneRouteResult(result)
-    }
-
-    fun onPhoneRouteError(error: com.everyday.shared.transport.RouteTransportError) {
-        mapWidget?.onPhoneRouteError(error)
-    }
-
-    fun onPhoneDestinationSearchResult(result: com.everyday.shared.transport.DestinationSearchResult) {
-        mapWidget?.onPhoneDestinationSearchResult(result)
-    }
-
-    fun onPhoneDestinationSearchError(error: com.everyday.shared.transport.DestinationSearchError) {
-        mapWidget?.onPhoneDestinationSearchError(error)
-    }
-
-    private fun stopNavigationFromMap() {
-        // Explicit stop cancels the temporary voice presentation without restoring an older map
-        // rectangle; the current map/POI/orientation state remains visible.
-        withTransientChangeBatch {
-            dismissMapPresentation()
-            mapWidget?.stopNavigation()
-            notifyTransientContentChanged()
-        }
-    }
-
-    private fun dismissMapPresentation() {
-        val map = mapWidget ?: return
-        if (activePresentationSession?.targetId == widgetStableId(map)) {
-            dismissPresentation()
         }
     }
 
@@ -3132,16 +2981,6 @@ class WidgetContainer @JvmOverloads constructor(
         activeWidget = null
     }
 
-    private fun destroyWidget(widget: BaseWidget) {
-        if (widget is ScreenMirrorWidget) {
-            setBinocularMediaSourceActive(widget.binocularSourceId, false)
-        }
-        if (widget is FinanceWidget) {
-            financeFeatures.onDestroyed()
-        }
-        widget.onDestroy()
-    }
-
     private fun restoreTextWidget(state: DashboardPersistence.TextWidgetState): TextBoxWidget? =
         widgetCaptureRestore.restoreTextWidgets(listOf(state), width, height).firstOrNull()
 
@@ -3197,6 +3036,8 @@ class WidgetContainer @JvmOverloads constructor(
         }
     }
 
+    fun setMirroringEnabled(enabled: Boolean, phoneIp: String? = null) = mirrorModule.setMirroringEnabled(enabled, phoneIp) // ==================== Screen Mirroring ====================
+
     /**
      * Call this BEFORE restoring widget state to prevent default singleton widgets from being created.
      * This should be called when the app is not a fresh install (returning user).
@@ -3205,83 +3046,10 @@ class WidgetContainer @JvmOverloads constructor(
      * first layout pass, which does not happen if the display never comes up, and an
      * unguarded save would then persist the empty container over the user's dashboard.
      */
-    fun setIsReturningUser() {
-        shouldCreateDefaultSingletons = false
-        isAwaitingRestore = true
-    }
-
-    fun shouldApplyBrowserMinimumBrightness(): Boolean = registry.allWidgets().any { it.requestsBrowserMinimumBrightness }
-    fun shouldApplyMediaBrightnessCap(): Boolean = registry.allWidgets().any { it.requestsMediaBrightnessCap }
-
-    /**
-     * Restore or create location widget with the given state.
-     * Creates the widget if it doesn't exist, then restores its state.
-     */
-    private fun applyMapState(state: DashboardPersistence.MapWidgetState): MapWidget {
-        val widget = MapWidget(context, state.x, state.y, state.width, state.height).apply {
-            invalidate = ::requestRepaint
-            configurePhoneRouteTransport(phoneRouteTransport)
-            onPhoneRouteConnectionChanged(phoneRouteConnected)
-            bindMapNavigation(this)
-            pendingMapLocation?.let(::setLocation)
-            setLocationMetadata(pendingMapLocationLabel, pendingMapCountryCode)
-        }
-        widgetCaptureRestore.restoreMapWidgetPosition(widget, state, width, height)
-        return widget
-    }
-
-    private fun applyLocationState(state: DashboardPersistence.LocationWidgetState): LocationWidget {val widget = LocationWidget(context, state.x, state.y, state.width, state.height)
-        locationWeatherBinding.configure(widget)
-        widgetCaptureRestore.restoreLocationWidgetPosition(widget, state, width, height)
-        return widget
-    }
-
-    /**
-     * Restore or create finance widget with the given state.
-     */
-    private fun applyFinanceState(
-        state: DashboardPersistence.FinanceWidgetState
-    ): FinanceWidget {
-        val widget = FinanceWidget(state.x, state.y, state.width, state.height)
-        financeFeatures.configure(widget)
-        widgetCaptureRestore.restoreFinanceWidgetPosition(widget, state, width, height)
-        financeFeatures.onOpened(widget, reason = "widget_restored")
-        return widget
-    }
-
-    /**
-     * Restore or create news widget with the given state.
-     */
-    private fun applyNewsState(state: DashboardPersistence.NewsWidgetState): NewsWidget {
-        val widget = NewsWidget(state.x, state.y, state.width, state.height)
-        newsFeatures.configure(widget)
-        widgetCaptureRestore.restoreNewsWidgetPosition(widget, state, width, height)
-        newsFeatures.onOpened(widget, reason = "widget_restored")
-        return widget
-    }
-
-    /**
-     * Restore or create mirror widget with the given state.
-     * Creates the widget if it doesn't exist, then restores its state.
-     */
-    private fun applyMirrorState(state: DashboardPersistence.MirrorWidgetState): ScreenMirrorWidget {
-        val widget = ScreenMirrorWidget(context, state.x, state.y, state.width, state.height)
-        widgetCaptureRestore.restoreCommonFields(widget, state, width, height)
-        return widget
-    }
-
-    fun isReady(): Boolean = width > 0 && height > 0
-
-    // ==================== Screen Mirroring ====================
-    fun setMirroringEnabled(enabled: Boolean, phoneIp: String? = null) {
-        withTransientChangeBatch {
-            screenMirrorWidget?.setMirroringEnabled(enabled, phoneIp)
-            screenMirrorWidget?.refreshDisplayVisibility()
-            refreshBrightnessRules()
-            notifyTransientContentChanged()
-        }
-    }
-
+    fun setIsReturningUser()                          {shouldCreateDefaultSingletons = false; isAwaitingRestore = true}
+    fun shouldApplyBrowserMinimumBrightness()         : Boolean = registry.allWidgets().any { it.requestsBrowserMinimumBrightness }
+    fun shouldApplyMediaBrightnessCap()               : Boolean = registry.allWidgets().any { it.requestsMediaBrightnessCap }
+    fun isReady()                                     : Boolean = width > 0 && height > 0
     fun onTrimMemory(level: Int)                      {browserWidgets.forEach { it.onTrimMemory(level) }}
     fun onLowMemory()                                 {browserWidgets.forEach { it.onLowMemory() }}
     fun clearDebugWebViewData(profileSummary: String) {browserWidgets.forEach { it.clearDebugWebViewData(profileSummary) }}

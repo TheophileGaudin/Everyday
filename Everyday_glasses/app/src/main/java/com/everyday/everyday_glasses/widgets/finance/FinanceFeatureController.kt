@@ -3,23 +3,56 @@ package com.everyday.everyday_glasses.widgets.finance
 import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.FinanceTileUpdateRequest
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.FinanceTileUpdateResult
+import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.runtime.DashboardServices
 import com.everyday.everyday_glasses.runtime.FinanceWidgetListener
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.FinanceSnapshot
 import java.util.concurrent.CompletableFuture
 
+/** Puts the finance widget on the dashboard and connects it to the phone's market data. */
 internal class FinanceFeatureController(
+    private val services: DashboardServices,
     private val ui: UiThreadDispatcher,
     private val currentWidget: () -> FinanceWidget?,
     private val currentProvider: () -> WidgetDataProvider?,
     private val runPersistentUpdate: ((() -> Result<FinanceDashboardTileConfig>) -> Result<FinanceDashboardTileConfig>),
-    private val notifyTransientChange: () -> Unit,
     private val stableWidgetId: (BaseWidget) -> String,
 ) {
     // Pending country code for finance widget
     private var pendingCountryCode: String? = null
+
+    val lifecycle = WidgetLifecycleRegistration.singleton(
+        WidgetTypeId.FINANCE, FinanceWidget::class, DashboardPersistence.FinanceWidgetState::class,
+        current = currentWidget,
+        create = ::create,
+        restore = ::restore,
+        capture = { services.captureRestore.getFinanceWidgetState(it) },
+        teardown = { widget ->
+            onDestroyed()
+            widget.onDestroy()
+        },
+        onMinimizeChanged = ::onMinimizeChanged,
+    )
+
+    private fun create(): FinanceWidget {
+        val widget = FinanceWidget(20f, 20f, FinanceWidget.DEFAULT_WIDTH, FinanceWidget.DEFAULT_HEIGHT)
+        configure(widget)
+        onOpened(widget, reason = "widget_toggled_on")
+        return widget
+    }
+
+    private fun restore(state: DashboardPersistence.FinanceWidgetState): FinanceWidget {
+        val widget = FinanceWidget(state.x, state.y, state.width, state.height)
+        configure(widget)
+        services.captureRestore.restoreFinanceWidgetPosition(widget, state, services.viewportWidth, services.viewportHeight)
+        onOpened(widget, reason = "widget_restored")
+        return widget
+    }
 
     fun updateCountryCode(countryCode: String) {
         pendingCountryCode = countryCode
@@ -29,14 +62,14 @@ internal class FinanceFeatureController(
     fun applySnapshot(snapshot: FinanceSnapshot, notify: Boolean = true) {
         currentWidget()?.let {
             it.applySnapshot(snapshot)
-            if (notify) notifyTransientChange()
+            if (notify) services.notifyTransientChange()
         }
     }
 
     fun applyError(message: String) {
         currentWidget()?.let {
             it.applyError(message)
-            notifyTransientChange()
+            services.notifyTransientChange()
         }
     }
 
@@ -136,7 +169,7 @@ internal class FinanceFeatureController(
         return result
     }
 
-    fun configure(widget: FinanceWidget) {
+    private fun configure(widget: FinanceWidget) {
         widget.listener = object : FinanceWidgetListener {
             override fun onDataRequested(
                 visibleConfigs: List<FinanceDashboardTileConfig>,
@@ -156,7 +189,7 @@ internal class FinanceFeatureController(
         pendingCountryCode?.let(widget::setCountryCode)
     }
 
-    fun onMinimizeChanged(
+    private fun onMinimizeChanged(
             widget: FinanceWidget,
             minimized: Boolean
         ) {
@@ -170,7 +203,7 @@ internal class FinanceFeatureController(
             }
         }
 
-    fun onOpened(widget: FinanceWidget, reason: String) {
+    private fun onOpened(widget: FinanceWidget, reason: String) {
             if (widget.isMinimized) {
                 currentProvider()?.onFinanceVisibilityChanged(false)
                 return
@@ -180,7 +213,7 @@ internal class FinanceFeatureController(
             currentProvider()?.onFinanceVisibilityChanged(true)
         }
 
-    fun onDestroyed() {
+    private fun onDestroyed() {
             currentProvider()?.onFinanceVisibilityChanged(false)
         }
 
