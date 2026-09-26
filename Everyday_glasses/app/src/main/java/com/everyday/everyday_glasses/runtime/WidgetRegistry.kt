@@ -6,14 +6,12 @@ import android.view.ViewGroup
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
 import com.everyday.everyday_glasses.widgets.calendar.CalendarWidget
-import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidget
 import com.everyday.everyday_glasses.widgets.finance.FinanceWidget
 import com.everyday.everyday_glasses.widgets.file_browser.ImageWidget
 import com.everyday.everyday_glasses.widgets.weather_location.LocationWidget
 import com.everyday.everyday_glasses.widgets.map.MapWidget
 import com.everyday.everyday_glasses.widgets.news.NewsWidget
 import com.everyday.everyday_glasses.widgets.notifications.NotificationsWidget
-import com.everyday.everyday_glasses.widgets.file_browser.PdfWidget
 import com.everyday.everyday_glasses.widgets.phone_screen_mirror.ScreenMirrorWidget
 import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidget
 import com.everyday.everyday_glasses.widgets.system_status.StatusBarWidget
@@ -55,9 +53,6 @@ class WidgetRegistry {
     val browserWidgets: List<BrowserWidget> get() = widgetsAs(WidgetTypeId.BROWSER)
     val imageWidgets: List<ImageWidget> get() = widgetsAs(WidgetTypeId.IMAGE)
     val videoWidgets: List<VideoWidget> get() = widgetsAs(WidgetTypeId.VIDEO)
-    val pdfWidgets: List<PdfWidget> get() = widgetsAs(WidgetTypeId.PDF)
-    val fileBrowserWidgets: List<FileBrowserWidget> get() = widgetsAs(WidgetTypeId.FILES)
-
     val statusBarWidget: StatusBarWidget? get() = singletonAs(WidgetTypeId.STATUS)
     val locationWidget: LocationWidget? get() = singletonAs(WidgetTypeId.LOCATION)
     val mapWidget: MapWidget? get() = singletonAs(WidgetTypeId.MAP)

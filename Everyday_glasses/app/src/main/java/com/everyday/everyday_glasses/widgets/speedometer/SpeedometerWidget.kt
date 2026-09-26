@@ -5,6 +5,9 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.text.TextPaint
+import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.settings.UnitDisplayFormatter
 import java.util.Locale
@@ -213,5 +216,66 @@ class SpeedometerWidget(
 
         val unitBaseline = speedBaseline + speedTextPaint.textSize * 0.62f
         canvas.drawText(speedUnit.label, widgetBounds.centerX(), unitBaseline, unitTextPaint)
+    }
+}
+/** Puts the speedometer on the dashboard and feeds it the speed from the location sources. */
+class SpeedometerModule(
+    private val services: DashboardServices,
+    private val current: () -> SpeedometerWidget?,
+    private val speedUnit: () -> SpeedometerWidget.SpeedUnit,
+    private val toggleSpeedUnit: () -> Unit,
+    private val showSettings: () -> Unit,
+    private val dismissSettings: () -> Unit,
+    private val forceVisibleWhenIdle: () -> Boolean,
+) {
+    // The last speed received, so that a speedometer opened later shows it right away.
+    private var latest = NO_SPEED
+
+    val lifecycle = WidgetLifecycleRegistration.singleton(
+        WidgetTypeId.SPEEDOMETER, SpeedometerWidget::class, DashboardPersistence.SpeedometerWidgetState::class,
+        current = current,
+        create = ::create,
+        restore = ::restore,
+        capture = { services.captureRestore.getSpeedometerWidgetState(it) },
+        beforeRemove = { dismissSettings() },
+    )
+
+    fun updateSpeed(state: SpeedState) {
+        latest = state
+        val changed = current()?.setSpeedData(state.speedKmh, state.qualityOk, state.isMoving) ?: false
+        if (changed && !services.isDisplayOff) services.notifyTransientChange()
+    }
+
+    fun onSpeedUnavailable() {
+        latest = NO_SPEED
+        current()?.setPermissionDenied()
+        if (!services.isDisplayOff) services.notifyTransientChange()
+    }
+
+    private fun create(): SpeedometerWidget {
+        val x = (services.viewportWidth - WIDTH - 20f).coerceAtLeast(20f)
+        val y = (services.viewportHeight - HEIGHT - 20f).coerceAtLeast(20f)
+        return build(x, y, WIDTH, HEIGHT)
+    }
+
+    private fun restore(state: DashboardPersistence.SpeedometerWidgetState): SpeedometerWidget {
+        val widget = build(state.x, state.y, state.width, state.height)
+        services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight)
+        return widget
+    }
+
+    private fun build(x: Float, y: Float, width: Float, height: Float) =
+        SpeedometerWidget(x, y, width, height).apply {
+            onUnitChanged = { toggleSpeedUnit() }
+            onSettingsRequested = showSettings
+            setUnit(speedUnit())
+            setForceVisibleWhenIdle(forceVisibleWhenIdle())
+            setSpeedData(latest.speedKmh, latest.qualityOk, latest.isMoving)
+        }
+
+    private companion object {
+        const val WIDTH = 220f
+        const val HEIGHT = 110f
+        val NO_SPEED = SpeedState(speedKmh = 0f, qualityOk = false, isMoving = false)
     }
 }

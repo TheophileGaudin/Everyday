@@ -12,7 +12,10 @@ import android.text.TextPaint
 import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
 import androidx.core.graphics.withTranslation
+import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.runtime.DashboardServices
 import com.everyday.everyday_glasses.runtime.SubtitleWidgetListener
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.shared.sync.SubtitleControl
@@ -487,4 +490,60 @@ class SubtitleWidget(
             )
         )
     }
+}
+/** Puts live subtitles on the dashboard and feeds them the phone's transcripts. */
+class SubtitleModule(
+    private val services: DashboardServices,
+    private val current: () -> SubtitleWidget?,
+    private val requestControl: (SubtitleControl) -> Unit,
+) {
+    val lifecycle = WidgetLifecycleRegistration.singleton(
+        WidgetTypeId.SUBTITLE, SubtitleWidget::class, DashboardPersistence.SubtitleWidgetState::class,
+        current = current,
+        create = ::create,
+        restore = ::restore,
+        capture = { services.captureRestore.getSubtitleWidgetState(it) },
+        // Reopening a closed subtitle widget resumes capture; loading a dashboard does not.
+        reopen = { state -> restore(state).also { it.setCaptureEnabled(true) } },
+    )
+
+    fun applyStatus(status: SubtitleStatus) = update { it.applyStatus(status) }
+    fun applyTranscript(transcript: SubtitleTranscript) = update { it.applyTranscript(transcript) }
+    fun onPhoneDisconnected() = update { it.onPhoneDisconnected() }
+
+    private fun update(action: (SubtitleWidget) -> Unit) {
+        services.withTransientChanges {
+            current()?.let(action)
+            services.notifyTransientChange()
+        }
+    }
+
+    /** A new subtitle widget starts capturing right away. */
+    private fun create(): SubtitleWidget {
+        val width = SubtitleWidget.DEFAULT_WIDTH.coerceAtMost(services.viewportWidth * 0.82f)
+        val height = SubtitleWidget.DEFAULT_HEIGHT
+        val x = ((services.viewportWidth - width) / 2f).coerceAtLeast(20f)
+        val y = (services.viewportHeight - height - 72f).coerceAtLeast(20f)
+        return build(x, y, width, height).apply { setCaptureEnabled(true) }
+    }
+
+    /** A restored subtitle widget starts with capture off. */
+    private fun restore(state: DashboardPersistence.SubtitleWidgetState): SubtitleWidget {
+        val widget = build(state.x, state.y, state.width, state.height)
+        widget.restoreOptions(
+            phonePlaybackEnabled = state.phonePlaybackEnabled,
+            microphoneEnabled = state.microphoneEnabled,
+            translationEnabled = state.translationEnabled
+        )
+        widget.setCaptureEnabled(false, notifyPhone = false)
+        services.captureRestore.restoreSubtitleWidgetPosition(widget, state, services.viewportWidth, services.viewportHeight)
+        return widget
+    }
+
+    private fun build(x: Float, y: Float, width: Float, height: Float) =
+        SubtitleWidget(x, y, width, height).apply {
+            listener = object : SubtitleWidgetListener {
+                override fun onSubtitleControlRequested(control: SubtitleControl) = requestControl(control)
+            }
+        }
 }

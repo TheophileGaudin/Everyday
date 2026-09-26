@@ -6,10 +6,13 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.text.TextPaint
 import android.util.Log
+import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets._common.WidgetInteractionState
+import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import androidx.core.graphics.toColorInt
-import com.everyday.everyday_glasses.widgets._common.BaseWidget
 
 /**
  * A movable status bar widget that displays:
@@ -63,6 +66,23 @@ class StatusBarWidget(
     var glassesBattery: Int = -1  // -1 means unknown
     var timeString: String = "--:--"
     var dateString: String = "-- --- ----"
+
+    /** Shows the phone, battery and clock data of [state]. Returns true when anything changed. */
+    fun show(state: StatusBarDisplayState): Boolean {
+        val changed = isPhoneConnected != state.isPhoneConnected ||
+                phoneBattery != state.phoneBatteryPercent ||
+                glassesBattery != state.glassesBatteryPercent ||
+                timeString != state.time ||
+                dateString != state.date
+        if (!changed) return false
+        isPhoneConnected = state.isPhoneConnected
+        phoneBattery = state.phoneBatteryPercent
+        glassesBattery = state.glassesBatteryPercent
+        timeString = state.time
+        dateString = state.date
+        return true
+    }
+
     private var showTime = true
     private var showDate = true
     private var showPhoneBattery = true
@@ -584,5 +604,45 @@ class StatusBarWidget(
         StatusElement.DATE -> "Date"
         StatusElement.PHONE_BATTERY -> "Phone battery"
         StatusElement.GLASSES_BATTERY -> "Glasses battery"
+    }
+}
+
+/** Puts the status bar on the dashboard and feeds it the phone, battery and clock data. */
+class StatusBarModule(
+    private val services: DashboardServices,
+    private val current: () -> StatusBarWidget?,
+) {
+    // The last data received, so that a status bar opened later shows it right away.
+    private var latest = StatusBarDisplayState()
+
+    val lifecycle = WidgetLifecycleRegistration.singleton(
+        WidgetTypeId.STATUS, StatusBarWidget::class, DashboardPersistence.StatusBarState::class,
+        current = current,
+        create = ::create,
+        restore = ::restore,
+        capture = { services.captureRestore.getStatusBarState(it) },
+    )
+
+    fun update(state: StatusBarDisplayState) {
+        latest = state
+        if (current()?.show(state) == true) services.notifyTransientChange()
+    }
+
+    private fun create(): StatusBarWidget = StatusBarWidget(
+        (services.viewportWidth - WIDTH) / 2f,
+        services.viewportHeight - HEIGHT - services.viewportHeight * 0.15f,
+        WIDTH,
+        HEIGHT
+    ).apply { show(latest) }
+
+    private fun restore(state: DashboardPersistence.StatusBarState): StatusBarWidget {
+        val widget = StatusBarWidget(state.x, state.y, WIDTH, HEIGHT).apply { show(latest) }
+        services.captureRestore.restoreStatusBarPosition(widget, state, services.viewportWidth, services.viewportHeight)
+        return widget
+    }
+
+    private companion object {
+        const val WIDTH = 220f
+        const val HEIGHT = 110f
     }
 }

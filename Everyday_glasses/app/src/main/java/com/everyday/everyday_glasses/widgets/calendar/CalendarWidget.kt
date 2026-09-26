@@ -9,6 +9,9 @@ import android.text.TextPaint
 import android.text.TextUtils
 import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
+import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.shared.sync.CalendarEventSnapshot
@@ -932,5 +935,47 @@ class CalendarWidget(
             fontMenuBounds.right - 10f,
             buttonTop + FONT_MENU_BUTTON_SIZE
         )
+    }
+}
+
+/** Puts the calendar on the dashboard and feeds it the phone's calendar snapshot. */
+class CalendarModule(
+    private val services: DashboardServices,
+    private val current: () -> CalendarWidget?,
+) {
+    // The last snapshot received, so that a calendar opened later shows it right away.
+    private var latest: CalendarSnapshot? = null
+
+    val lifecycle = WidgetLifecycleRegistration.singleton(
+        WidgetTypeId.CALENDAR, CalendarWidget::class, DashboardPersistence.CalendarWidgetState::class,
+        current = current,
+        create = ::create,
+        restore = ::restore,
+        capture = { services.captureRestore.getCalendarWidgetState(it) },
+    )
+
+    fun setSnapshot(snapshot: CalendarSnapshot?) {
+        latest = snapshot
+        services.withTransientChanges {
+            current()?.setSnapshot(snapshot)
+            services.notifyTransientChange()
+        }
+    }
+
+    private fun create(): CalendarWidget {
+        val x = (services.viewportWidth - CalendarWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
+        val y = (services.viewportHeight - CalendarWidget.DEFAULT_HEIGHT - 160f).coerceAtLeast(20f)
+        return CalendarWidget(x, y, CalendarWidget.DEFAULT_WIDTH, CalendarWidget.DEFAULT_HEIGHT).apply {
+            setSnapshot(latest)
+        }
+    }
+
+    private fun restore(state: DashboardPersistence.CalendarWidgetState): CalendarWidget {
+        val widget = CalendarWidget(state.x, state.y, state.width, state.height).apply {
+            setFontScale(state.fontScale)
+            setSnapshot(latest)
+        }
+        services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight)
+        return widget
     }
 }

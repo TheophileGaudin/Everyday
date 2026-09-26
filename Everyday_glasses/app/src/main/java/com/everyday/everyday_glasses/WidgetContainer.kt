@@ -51,7 +51,6 @@ import com.everyday.everyday_glasses.runtime.GeminiSettingsListener
 import com.everyday.everyday_glasses.auth_permissions.GoogleAccountHandler
 import com.everyday.everyday_glasses.runtime.MapWidgetListener
 import com.everyday.everyday_glasses.widgets.phone_screen_mirror.MirrorWidgetListener
-import com.everyday.everyday_glasses.runtime.SubtitleWidgetListener
 import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
 import com.everyday.everyday_glasses.runtime.WidgetPersistenceListener
 import com.everyday.everyday_glasses.runtime.WidgetChangeListener
@@ -97,6 +96,7 @@ import com.everyday.everyday_glasses.settings.UnitSettings
 import com.everyday.everyday_glasses.runtime.WakeSleepManager
 import com.everyday.everyday_glasses.persistence.WidgetLayoutManager
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
+import com.everyday.everyday_glasses.runtime.DashboardServices
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
@@ -108,6 +108,7 @@ import com.everyday.everyday_glasses.widgets.file_browser.video_backend.VideoQue
 import com.everyday.everyday_glasses.ui.hover_controls.BaseHoverControl
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
+import com.everyday.everyday_glasses.widgets.calendar.CalendarModule
 import com.everyday.everyday_glasses.widgets.calendar.CalendarWidget
 import com.everyday.everyday_glasses.ui.hover_controls.CloseAppHoverControl
 import com.everyday.everyday_glasses.ui.components.CloseConfirmationPopup
@@ -120,11 +121,17 @@ import com.everyday.everyday_glasses.widgets.weather_location.LocationWidget
 import com.everyday.everyday_glasses.widgets.map.MapWidget
 import com.everyday.everyday_glasses.widgets.news.NewsWidget
 import com.everyday.everyday_glasses.widgets.notifications.NotificationsWidget
+import com.everyday.everyday_glasses.widgets.notifications.NotificationsModule
 import com.everyday.everyday_glasses.widgets.file_browser.PdfWidget
 import com.everyday.everyday_glasses.widgets.phone_screen_mirror.ScreenMirrorWidget
 import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidget
+import com.everyday.everyday_glasses.widgets.speedometer.SpeedState
+import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerModule
 import com.everyday.everyday_glasses.widgets.system_status.StatusBarWidget
+import com.everyday.everyday_glasses.widgets.system_status.StatusBarDisplayState
+import com.everyday.everyday_glasses.widgets.system_status.StatusBarModule
 import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleWidget
+import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleModule
 import com.everyday.everyday_glasses.widgets.text_editor.TextBoxWidget
 import com.everyday.everyday_glasses._threedof.ThreeDofOverlay
 import com.everyday.everyday_glasses.widgets.file_browser.VideoWidget
@@ -486,35 +493,41 @@ class WidgetContainer @JvmOverloads constructor(
     private var pendingMapLocation: android.location.Location? = null
     private var pendingMapLocationLabel: String = ""
     private var pendingMapCountryCode: String = ""
-    private var pendingCalendarSnapshot: com.everyday.shared.sync.CalendarSnapshot? = null
 
-    // Finance widget - delegated to registry
-    val financeWidget: FinanceWidget?
-        get() = registry.financeWidget
+    //delegation of widgets to registry
+    val financeWidget: FinanceWidget?             get() = registry.financeWidget
+    val newsWidget: NewsWidget?                   get() = registry.newsWidget
+    val notificationsWidget: NotificationsWidget? get() = registry.notificationsWidget
+    val speedometerWidget: SpeedometerWidget?     get() = registry.speedometerWidget
+    val subtitleWidget: SubtitleWidget?           get() = registry.subtitleWidget
+    val screenMirrorWidget: ScreenMirrorWidget?   get() = registry.screenMirrorWidget
 
-    // News widget - delegated to registry
-    val newsWidget: NewsWidget?
-        get() = registry.newsWidget
+    // ==================== Widget modules ====================
 
-    val notificationsWidget: NotificationsWidget?
-        get() = registry.notificationsWidget
-
-    // Speedometer widget - delegated to registry
-    val speedometerWidget: SpeedometerWidget?
-        get() = registry.speedometerWidget
-
-    // Subtitle widget - delegated to registry
-    val subtitleWidget: SubtitleWidget?
-        get() = registry.subtitleWidget
-
-    // Pending speed data for speedometer widget
-    private var pendingSpeedKmh = 0f
-    private var pendingSpeedQualityOk = false
-    private var pendingSpeedMoving = false
-
-    // Screen mirror widget - delegated to registry
-    val screenMirrorWidget: ScreenMirrorWidget?
-        get() = registry.screenMirrorWidget
+    /** What every widget module gets from the dashboard. */
+    private val dashboardServices = object : DashboardServices {
+        override val viewportWidth: Int get() = width
+        override val viewportHeight: Int get() = height
+        override val isDisplayOff: Boolean get() = displayState == WakeSleepManager.DisplayState.OFF
+        override val captureRestore: WidgetCaptureRestore get() = widgetCaptureRestore
+        override fun notifyTransientChange() = notifyTransientContentChanged()
+        override fun <T> withTransientChanges(action: () -> T): T = withTransientChangeBatch(action)
+    }
+    private val statusBarModule = StatusBarModule(dashboardServices) { statusBarWidget }
+    private val calendarModule = CalendarModule(dashboardServices) { calendarWidget }
+    private val notificationsModule = NotificationsModule(dashboardServices) { notificationsWidget }
+    private val speedometerModule = SpeedometerModule(
+        dashboardServices,
+        current = { speedometerWidget },
+        speedUnit = { unitSettings.effectiveSpeedUnit() },
+        toggleSpeedUnit = { unitSettings.toggleSpeedOverride() },
+        showSettings = { settingsController.showSpeedometerSettingsMenu() },
+        dismissSettings = { settingsController.dismissSpeedometerSettingsMenu() },
+        forceVisibleWhenIdle = { settingsController.getSpeedVisibilityThreshold() <= 0f },
+    )
+    private val subtitleModule = SubtitleModule(dashboardServices, { subtitleWidget }) { control ->
+        host?.requestSubtitleControl(control)
+    }
 
     // Settings overlays and persisted app-level settings
     private val settingsController = SettingsController(
@@ -678,11 +691,6 @@ class WidgetContainer @JvmOverloads constructor(
             }
         )
     }
-    private var latestNotificationsSnapshot = PhoneNotificationsSnapshot(
-        items = emptyList(),
-        listenerEnabled = false,
-        capturedAtMs = 0L
-    )
     private var longPressRunnable: Runnable? = null
     private var longPressStartX = 0f
     private var longPressStartY = 0f
@@ -874,29 +882,14 @@ class WidgetContainer @JvmOverloads constructor(
             onMinimize: (W, Boolean) -> Unit = { _, _ -> }
         ) {
             lifecycleController.register(
-                WidgetLifecycleRegistration(
-                    descriptor = WidgetDescriptors[type],
-                    widgetType = widgetType,
-                    stateType = stateType,
-                    stateCodec = WidgetDocument.codecs[type],
-                    current = current,
-                    createDefault = createWidget,
-                    restore = restoreWidget,
-                    reopen = reopenWidget,
-                    capture = captureState,
-                    configure = configure,
-                    beforeRemove = beforeRemove,
-                    teardown = teardown,
-                    onFullscreenChanged = onFullscreen,
-                    onMinimizeChanged = onMinimize
+                WidgetLifecycleRegistration.singleton(
+                    type, widgetType, stateType, current, createWidget, restoreWidget, captureState,
+                    reopenWidget, configure, beforeRemove, teardown, onFullscreen, onMinimize
                 )
             )
         }
 
-        bindSingleton(
-            WidgetTypeId.STATUS, StatusBarWidget::class, DashboardPersistence.StatusBarState::class,
-            { statusBarWidget }, ::createStatusBarPresence, ::applyStatusBarState,
-            { widgetCaptureRestore.getStatusBarState(it) })
+        lifecycleController.register(statusBarModule.lifecycle)
         bindSingleton(
             WidgetTypeId.LOCATION, LocationWidget::class, DashboardPersistence.LocationWidgetState::class,
             { locationWidget }, ::createLocationPresence, ::applyLocationState,
@@ -907,10 +900,7 @@ class WidgetContainer @JvmOverloads constructor(
             { widgetCaptureRestore.getMapWidgetState(it) },
             beforeRemove = MapWidget::release,
             onFullscreen = { widget, fullscreen -> if (!fullscreen) widget.enforceWindowedMode() })
-        bindSingleton(
-            WidgetTypeId.CALENDAR, CalendarWidget::class, DashboardPersistence.CalendarWidgetState::class,
-            { calendarWidget }, ::createCalendarPresence, ::applyCalendarState,
-            { widgetCaptureRestore.getCalendarWidgetState(it) })
+        lifecycleController.register(calendarModule.lifecycle)
         bindSingleton(
             WidgetTypeId.FINANCE, FinanceWidget::class, DashboardPersistence.FinanceWidgetState::class,
             { financeWidget }, ::createFinancePresence, ::applyFinanceState,
@@ -920,21 +910,9 @@ class WidgetContainer @JvmOverloads constructor(
             WidgetTypeId.NEWS, NewsWidget::class, DashboardPersistence.NewsWidgetState::class,
             { newsWidget }, ::createNewsPresence, ::applyNewsState,
             { widgetCaptureRestore.getNewsWidgetState(it) })
-        bindSingleton(
-            WidgetTypeId.NOTIFICATIONS, NotificationsWidget::class, DashboardPersistence.NotificationsWidgetState::class,
-            { notificationsWidget }, ::createNotificationsPresence, ::applyNotificationsState,
-            { widgetCaptureRestore.getNotificationsWidgetState(it) })
-        bindSingleton(
-            WidgetTypeId.SPEEDOMETER, SpeedometerWidget::class, DashboardPersistence.SpeedometerWidgetState::class,
-            { speedometerWidget }, ::createSpeedometerPresence, ::applySpeedometerState,
-            { widgetCaptureRestore.getSpeedometerWidgetState(it) },
-            beforeRemove = { settingsController.dismissSpeedometerSettingsMenu() })
-        bindSingleton(
-            WidgetTypeId.SUBTITLE, SubtitleWidget::class, DashboardPersistence.SubtitleWidgetState::class,
-            { subtitleWidget }, ::createSubtitlePresence, ::applySubtitleState,
-            { widgetCaptureRestore.getSubtitleWidgetState(it) },
-            // Reopening a closed subtitle widget resumes capture; loading a dashboard does not.
-            reopenWidget = { state -> applySubtitleState(state).also { it.setCaptureEnabled(true) } })
+        lifecycleController.register(notificationsModule.lifecycle)
+        lifecycleController.register(speedometerModule.lifecycle)
+        lifecycleController.register(subtitleModule.lifecycle)
         bindSingleton(
             WidgetTypeId.MIRROR, ScreenMirrorWidget::class, DashboardPersistence.MirrorWidgetState::class,
             { screenMirrorWidget }, ::createMirrorPresence, ::applyMirrorState,
@@ -1407,7 +1385,6 @@ class WidgetContainer @JvmOverloads constructor(
             applyDefaultLayoutReplacingCurrent()
         }
 
-        notificationsWidget?.setScreenHeight(h.toFloat())
         updateFullscreenBounds()
         Log.d(TAG, "Container sized: ${w}x${h}")
     }
@@ -1452,102 +1429,33 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     //update features of the Weather and location widget
-    fun setLocationPermissionDenied() = locationWeatherBinding.setLocationPermissionDenied()
+    fun setLocationPermissionDenied()           = locationWeatherBinding.setLocationPermissionDenied()
     fun applyWeatherData(weather: WeatherData?) = locationWeatherBinding.applyWeatherData(weather)
 
     //update features of the Finance widget
-    fun applyFinanceSnapshot(snapshot: FinanceSnapshot, notify: Boolean = true) = financeFeatures.applySnapshot(snapshot, notify)
-    fun applyFinanceError(message: String) = financeFeatures.applyError(message)
-    fun currentFinanceVisibleConfigs(): List<FinanceDashboardTileConfig> = financeFeatures.currentVisibleConfigs()
+    fun applyFinanceSnapshot(snapshot: FinanceSnapshot, notify: Boolean = true)                          = financeFeatures.applySnapshot(snapshot, notify)
+    fun applyFinanceError(message: String)                                                               = financeFeatures.applyError(message)
+    fun currentFinanceVisibleConfigs(): List<FinanceDashboardTileConfig>                                 = financeFeatures.currentVisibleConfigs()
     fun updateFinanceTile(request: FinanceTileUpdateRequest): CompletableFuture<FinanceTileUpdateResult> = financeFeatures.updateTile(request)
 
     //update features of the News widget
-    fun applyNewsSnapshot(snapshot: NewsSnapshot) = newsFeatures.applySnapshot(snapshot)
-    fun applyNewsError(message: String) = newsFeatures.applyError(message)
-    fun currentNewsCountryCode(): String? = newsFeatures.currentCountryCode()
-    fun currentNewsSourceSpec(): NewsSourceSpec? = newsFeatures.currentSourceSpec()
+    fun applyNewsSnapshot(snapshot: NewsSnapshot)                                            = newsFeatures.applySnapshot(snapshot)
+    fun applyNewsError(message: String)                                                      = newsFeatures.applyError(message)
+    fun currentNewsCountryCode(): String?                                                    = newsFeatures.currentCountryCode()
+    fun currentNewsSourceSpec(): NewsSourceSpec?                                             = newsFeatures.currentSourceSpec()
     fun setNewsSource(sourceSpec: NewsSourceSpec): CompletableFuture<NewsSourceUpdateResult> = newsFeatures.setSource(sourceSpec)
 
-    fun updateSpeedData(speedKmh: Float, qualityOk: Boolean, isMoving: Boolean) {
-        pendingSpeedKmh = speedKmh
-        pendingSpeedQualityOk = qualityOk
-        pendingSpeedMoving = isMoving
-        val changed = speedometerWidget?.setSpeedData(speedKmh, qualityOk, isMoving) ?: false
-        if (changed && displayState != WakeSleepManager.DisplayState.OFF) {
-            notifyTransientContentChanged()
-        }
-    }
-
-    fun setSpeedPermissionDenied() {
-        pendingSpeedKmh = 0f
-        pendingSpeedQualityOk = false
-        pendingSpeedMoving = false
-        speedometerWidget?.setPermissionDenied()
-        if (displayState != WakeSleepManager.DisplayState.OFF) {
-            notifyTransientContentChanged()
-        }
-    }
-
-    fun applySubtitleStatus(status: SubtitleStatus) {
-        withTransientChangeBatch {
-            subtitleWidget?.applyStatus(status)
-            notifyTransientContentChanged()
-        }
-    }
-
-    fun applySubtitleTranscript(transcript: SubtitleTranscript) {
-        withTransientChangeBatch {
-            subtitleWidget?.applyTranscript(transcript)
-            notifyTransientContentChanged()
-        }
-    }
-
-    fun onSubtitlePhoneDisconnected() {
-        withTransientChangeBatch {
-            subtitleWidget?.onPhoneDisconnected()
-            notifyTransientContentChanged()
-        }
-    }
+    //update features on speedometer and subtitle widgets
+    fun updateSpeedData(state: SpeedState)                      = speedometerModule.updateSpeed(state)
+    fun setSpeedPermissionDenied()                              = speedometerModule.onSpeedUnavailable()
+    fun applySubtitleStatus(status: SubtitleStatus)             = subtitleModule.applyStatus(status)
+    fun applySubtitleTranscript(transcript: SubtitleTranscript) = subtitleModule.applyTranscript(transcript)
+    fun onSubtitlePhoneDisconnected()                           = subtitleModule.onPhoneDisconnected()
 
     fun setSpeedVisibilityThreshold(thresholdKmh: Float) {
         val forceVisibleChanged = settingsController.setSpeedVisibilityThreshold(thresholdKmh)
         if (forceVisibleChanged && displayState != WakeSleepManager.DisplayState.OFF) {
             notifyTransientContentChanged()
-        }
-    }
-
-    private fun createSpeedometerWidget(
-        startX: Float,
-        startY: Float,
-        widgetWidth: Float,
-        widgetHeight: Float
-    ): SpeedometerWidget {
-        return SpeedometerWidget(startX, startY, widgetWidth, widgetHeight).apply {
-            onUnitChanged = {unitSettings.toggleSpeedOverride()}
-            onUnitChanged = {unitSettings.toggleSpeedOverride()}
-            onSettingsRequested = { settingsController.showSpeedometerSettingsMenu() }
-            setUnit(unitSettings.effectiveSpeedUnit())
-            setForceVisibleWhenIdle(settingsController.getSpeedVisibilityThreshold() <= 0f)
-            setSpeedData(pendingSpeedKmh, pendingSpeedQualityOk, pendingSpeedMoving)
-        }
-    }
-
-    private fun createSubtitleWidget(
-        startX: Float,
-        startY: Float,
-        widgetWidth: Float,
-        widgetHeight: Float,
-        autoStart: Boolean
-    ): SubtitleWidget {
-        return SubtitleWidget(startX, startY, widgetWidth, widgetHeight).apply {
-            listener = object : SubtitleWidgetListener {
-                override fun onSubtitleControlRequested(control: SubtitleControl) {
-                    host?.requestSubtitleControl(control)
-                }
-            }
-            if (autoStart) {
-                setCaptureEnabled(true)
-            }
         }
     }
 
@@ -1559,41 +1467,13 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun updateFullscreenBounds() {
         if (width <= 0 || height <= 0) return
-        notificationsWidget?.setScreenHeight(height.toFloat())
+        registry.forEachWidget { it.onViewportSizeChanged(width.toFloat(), height.toFloat()) }
         registry.fullscreenWidget?.setFullscreenBounds(width.toFloat(), height.toFloat())
     }
 
-    fun updateStatusBar(isPhoneConnected: Boolean, phoneBattery: Int, glassesBattery: Int, time: String, date: String) {
-        val statusBar = statusBarWidget ?: return
-        val changed =
-            statusBar.isPhoneConnected != isPhoneConnected ||
-                statusBar.phoneBattery != phoneBattery ||
-                statusBar.glassesBattery != glassesBattery ||
-                statusBar.timeString != time ||
-                statusBar.dateString != date
-
-        if (!changed) return
-
-        statusBar.apply {
-            this.isPhoneConnected = isPhoneConnected
-            this.phoneBattery = phoneBattery
-            this.glassesBattery = glassesBattery
-            this.timeString = time
-            this.dateString = date
-        }
-        notifyTransientContentChanged()
-    }
-
-    fun setCalendarSnapshot(snapshot: com.everyday.shared.sync.CalendarSnapshot?) {
-        pendingCalendarSnapshot = snapshot
-        withTransientChangeBatch {
-            calendarWidget?.setSnapshot(snapshot)
-            notifyTransientContentChanged()
-        }
-    }
-
-    fun observeLiveLocationCountry(countryCode: String): Boolean =
-        UnitSettings.normalizeCountryCode(countryCode)?.let {
+    fun updateStatusBar(state: StatusBarDisplayState)                             = statusBarModule.update(state)
+    fun setCalendarSnapshot(snapshot: com.everyday.shared.sync.CalendarSnapshot?) = calendarModule.setSnapshot(snapshot)
+    fun observeLiveLocationCountry(countryCode: String): Boolean = UnitSettings.normalizeCountryCode(countryCode)?.let {
             unitSettings.observeLiveCountry(it)
             true
         } ?: false
@@ -1606,13 +1486,7 @@ class WidgetContainer @JvmOverloads constructor(
         locationWeatherBinding.applyUnitSettings()
     }
 
-    fun applyNotificationsSnapshot(snapshot: PhoneNotificationsSnapshot) {
-        latestNotificationsSnapshot = snapshot
-        withTransientChangeBatch {
-            notificationsWidget?.setNotificationsSnapshot(snapshot)
-            notifyTransientContentChanged()
-        }
-    }
+    fun applyNotificationsSnapshot(snapshot: PhoneNotificationsSnapshot) = notificationsModule.applySnapshot(snapshot)
 
     // ==================== Z-Order Management ====================
     private fun bringWidgetToFront(widget: BaseWidget) {registry.bringToFront(widget, parent as? ViewGroup, this)}
@@ -2378,17 +2252,6 @@ class WidgetContainer @JvmOverloads constructor(
         return layoutManager.requestDeleteLayout(name)
     }
 
-    private fun createStatusBarPresence(): StatusBarWidget {
-        val statusWidth = 220f
-        val statusHeight = 110f
-        return StatusBarWidget(
-            (width - statusWidth) / 2f,
-            height - statusHeight - height * 0.15f,
-            statusWidth,
-            statusHeight
-        )
-    }
-
     private fun createLocationPresence(): LocationWidget {
         val locationWidth = 300f
         val locationHeight = 120f
@@ -2430,27 +2293,6 @@ class WidgetContainer @JvmOverloads constructor(
         mapWidget?.setLocationMetadata(location, countryCode)
     }
 
-    private fun createCalendarPresence(): CalendarWidget {
-        val startX = (width - CalendarWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
-        val startY = (height - CalendarWidget.DEFAULT_HEIGHT - 160f).coerceAtLeast(20f)
-        return CalendarWidget(
-            startX,
-            startY,
-            CalendarWidget.DEFAULT_WIDTH,
-            CalendarWidget.DEFAULT_HEIGHT
-        ).apply {
-            setSnapshot(pendingCalendarSnapshot)
-        }
-    }
-
-    private fun createSpeedometerPresence(): SpeedometerWidget {
-        val speedWidth = 220f
-        val speedHeight = 110f
-        val startX = (width - speedWidth - 20f).coerceAtLeast(20f)
-        val startY = (height - speedHeight - 20f).coerceAtLeast(20f)
-        return createSpeedometerWidget(startX, startY, speedWidth, speedHeight)
-    }
-
     private fun createFinancePresence(): FinanceWidget {
         val widget = FinanceWidget(20f, 20f, FinanceWidget.DEFAULT_WIDTH, FinanceWidget.DEFAULT_HEIGHT)
         financeFeatures.configure(widget)
@@ -2465,23 +2307,6 @@ class WidgetContainer @JvmOverloads constructor(
         newsFeatures.onOpened(widget, reason = "widget_toggled_on")
         return widget
     }
-
-    private fun createNotificationsPresence(): NotificationsWidget {
-        val startX = (width - NotificationsWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
-        return NotificationsWidget(
-            startX, 20f, NotificationsWidget.DEFAULT_WIDTH,
-            NotificationsWidget.DEFAULT_HEIGHT, height.toFloat()
-        ).apply {setNotificationsSnapshot(latestNotificationsSnapshot)}
-    }
-
-    private fun createSubtitlePresence(): SubtitleWidget {
-        val subtitleWidth = SubtitleWidget.DEFAULT_WIDTH.coerceAtMost(width * 0.82f)
-        val subtitleHeight = SubtitleWidget.DEFAULT_HEIGHT
-        val startX = ((width - subtitleWidth) / 2f).coerceAtLeast(20f)
-        val startY = (height - subtitleHeight - 72f).coerceAtLeast(20f)
-        return createSubtitleWidget(startX, startY, subtitleWidth, subtitleHeight, autoStart = true)
-    }
-
     private fun createMirrorPresence(): ScreenMirrorWidget {return ScreenMirrorWidget(context, 20f, 20f, 180f, 320f)}
 
     fun createBrowserWidget(x: Float, y: Float) {
@@ -3385,16 +3210,6 @@ class WidgetContainer @JvmOverloads constructor(
         isAwaitingRestore = true
     }
 
-    /**
-     * Restore or create status bar widget with the given state.
-     * Creates the widget if it doesn't exist, then restores its state.
-     */
-    private fun applyStatusBarState(state: DashboardPersistence.StatusBarState): StatusBarWidget {
-        val widget = StatusBarWidget(state.x, state.y, 220f, 110f)
-        widgetCaptureRestore.restoreStatusBarPosition(widget, state, width, height)
-        return widget
-    }
-
     fun shouldApplyBrowserMinimumBrightness(): Boolean = registry.allWidgets().any { it.requestsBrowserMinimumBrightness }
     fun shouldApplyMediaBrightnessCap(): Boolean = registry.allWidgets().any { it.requestsMediaBrightnessCap }
 
@@ -3422,18 +3237,6 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     /**
-     * Restore or create calendar widget with the given state.
-     */
-    private fun applyCalendarState(state: DashboardPersistence.CalendarWidgetState): CalendarWidget {
-        val widget = CalendarWidget(state.x, state.y, state.width, state.height).apply {
-            setFontScale(state.fontScale)
-            setSnapshot(pendingCalendarSnapshot)
-        }
-        widgetCaptureRestore.restoreCommonFields(widget, state, width, height)
-        return widget
-    }
-
-    /**
      * Restore or create finance widget with the given state.
      */
     private fun applyFinanceState(
@@ -3454,38 +3257,6 @@ class WidgetContainer @JvmOverloads constructor(
         newsFeatures.configure(widget)
         widgetCaptureRestore.restoreNewsWidgetPosition(widget, state, width, height)
         newsFeatures.onOpened(widget, reason = "widget_restored")
-        return widget
-    }
-
-    private fun applyNotificationsState(state: DashboardPersistence.NotificationsWidgetState): NotificationsWidget {
-        val widget = NotificationsWidget(state.x, state.y, state.width, state.height, height.toFloat())
-        widgetCaptureRestore.restoreNotificationsWidgetPosition(widget, state, width, height)
-        widget.setScreenHeight(height.toFloat())
-        widget.setNotificationsSnapshot(latestNotificationsSnapshot)
-        return widget
-    }
-
-    /**
-     * Restore or create speedometer widget with the given state.
-     */
-    private fun applySpeedometerState(state: DashboardPersistence.SpeedometerWidgetState): SpeedometerWidget {
-        val widget = createSpeedometerWidget(state.x, state.y, state.width, state.height)
-        widgetCaptureRestore.restoreCommonFields(widget, state, width, height)
-        return widget
-    }
-
-    /**
-     * Restore or create subtitle widget with capture off.
-     */
-    private fun applySubtitleState(state: DashboardPersistence.SubtitleWidgetState): SubtitleWidget {
-        val widget = createSubtitleWidget(state.x, state.y, state.width, state.height, autoStart = false)
-        widget.restoreOptions(
-            phonePlaybackEnabled = state.phonePlaybackEnabled,
-            microphoneEnabled = state.microphoneEnabled,
-            translationEnabled = state.translationEnabled
-        )
-        widget.setCaptureEnabled(false, notifyPhone = false)
-        widgetCaptureRestore.restoreSubtitleWidgetPosition(widget, state, width, height)
         return widget
     }
 

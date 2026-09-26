@@ -799,6 +799,9 @@ abstract class BaseWidget(
         Log.d(TAG, "Set fullscreen bounds: ${widgetWidth}x${widgetHeight}")
     }
 
+    /** The dashboard changed size. Fullscreen bounds are handled by [setFullscreenBounds]. */
+    open fun onViewportSizeChanged(width: Float, height: Float) = Unit
+
     // ==================== Minimize ====================
 
     open fun toggleMinimize() {

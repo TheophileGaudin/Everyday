@@ -9,6 +9,9 @@ import android.text.TextUtils
 import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.shared.sync.PhoneNotificationItem
 import com.everyday.shared.sync.PhoneNotificationsSnapshot
@@ -161,6 +164,7 @@ class NotificationsWidget(
         updateInternalBounds()
     }
 
+    override fun onViewportSizeChanged(width: Float, height: Float) = setScreenHeight(height)
     fun setScreenHeight(value: Float) {
         screenHeight = value.coerceAtLeast(1f)
         clampScrollIndex()
@@ -569,4 +573,45 @@ class NotificationsWidget(
             this < 0f -> -1
             else -> 0
         }
+}
+
+/** Puts the phone's notifications on the dashboard and feeds it the latest snapshot. */
+class NotificationsModule(
+    private val services: DashboardServices,
+    private val current: () -> NotificationsWidget?,
+) {
+    // The last snapshot received, so that a widget opened later shows it right away.
+    private var latest = PhoneNotificationsSnapshot(items = emptyList(), listenerEnabled = false, capturedAtMs = 0L)
+
+    val lifecycle = WidgetLifecycleRegistration.singleton(
+        WidgetTypeId.NOTIFICATIONS, NotificationsWidget::class, DashboardPersistence.NotificationsWidgetState::class,
+        current = current,
+        create = ::create,
+        restore = ::restore,
+        capture = { services.captureRestore.getNotificationsWidgetState(it) },
+    )
+
+    fun applySnapshot(snapshot: PhoneNotificationsSnapshot) {
+        latest = snapshot
+        services.withTransientChanges {
+            current()?.setNotificationsSnapshot(snapshot)
+            services.notifyTransientChange()
+        }
+    }
+
+    private fun create(): NotificationsWidget {
+        val x = (services.viewportWidth - NotificationsWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
+        return NotificationsWidget(
+            x, 20f, NotificationsWidget.DEFAULT_WIDTH, NotificationsWidget.DEFAULT_HEIGHT,
+            services.viewportHeight.toFloat()
+        ).apply { setNotificationsSnapshot(latest) }
+    }
+
+    private fun restore(state: DashboardPersistence.NotificationsWidgetState): NotificationsWidget {
+        val widget = NotificationsWidget(state.x, state.y, state.width, state.height, services.viewportHeight.toFloat())
+        services.captureRestore.restoreNotificationsWidgetPosition(widget, state, services.viewportWidth, services.viewportHeight)
+        widget.setScreenHeight(services.viewportHeight.toFloat())
+        widget.setNotificationsSnapshot(latest)
+        return widget
+    }
 }

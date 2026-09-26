@@ -65,6 +65,40 @@ class WidgetLifecycleRegistration<W : BaseWidget, S : Any>(
         }
     }
 
+    companion object {
+        /** A singleton type's registration; its descriptor and saved-state codec come from [type]. */
+        fun <W : BaseWidget, S : Any> singleton(
+            type: WidgetTypeId,
+            widgetType: KClass<W>,
+            stateType: KClass<S>,
+            current: () -> W?,
+            create: () -> W,
+            restore: (S) -> W,
+            capture: (W) -> S?,
+            reopen: (S) -> W = restore,
+            configure: (W) -> Unit = {},
+            beforeRemove: (W) -> Unit = {},
+            teardown: (W) -> Unit = { it.onDestroy() },
+            onFullscreenChanged: (W, Boolean) -> Unit = { _, _ -> },
+            onMinimizeChanged: (W, Boolean) -> Unit = { _, _ -> },
+        ) = WidgetLifecycleRegistration(
+            descriptor = WidgetDescriptors[type],
+            widgetType = widgetType,
+            stateType = stateType,
+            stateCodec = WidgetDocument.codecs[type],
+            current = current,
+            createDefault = create,
+            restore = restore,
+            reopen = reopen,
+            capture = capture,
+            configure = configure,
+            beforeRemove = beforeRemove,
+            teardown = teardown,
+            onFullscreenChanged = onFullscreenChanged,
+            onMinimizeChanged = onMinimizeChanged,
+        )
+    }
+
     internal fun accepts(widget: BaseWidget): Boolean = widgetType.isInstance(widget)
 
     internal fun reopenCandidate(state: Any): W? {

@@ -240,18 +240,8 @@ class MainActivity : AppCompatActivity() {
         locationSpeedController = LocationSpeedController(
             activity = this,
 
-            onSpeedChanged = { state ->
-                widgetContainer.updateSpeedData(
-                    state.speedKmh,
-                    state.qualityOk,
-                    state.isMoving
-                )
-            },
-
-            onSpeedUnavailable = {
-                widgetContainer.setSpeedPermissionDenied()
-            },
-
+            onSpeedChanged = { state -> widgetContainer.updateSpeedData(state) },
+            onSpeedUnavailable = { widgetContainer.setSpeedPermissionDenied() },
             onLocationUpdated = { location ->
                 widgetContainer.updateMapLocation(location)
 
@@ -259,7 +249,6 @@ class MainActivity : AppCompatActivity() {
                     dataSyncCoordinator.onLocalLocationChanged()
                 }
             },
-
             onLocationUnavailable = {
                 widgetContainer.withTransientChangeBatch {
                     widgetContainer.setLocationPermissionDenied()
@@ -654,23 +643,11 @@ class MainActivity : AppCompatActivity() {
         statusBarController = StatusBarController(
             context = this,
             callbacks = object : StatusBarControllerCallbacks {
-                override fun applyStatusBarState(state: StatusBarDisplayState) {
-                    widgetContainer.updateStatusBar(
-                        isPhoneConnected = state.isPhoneConnected,
-                        phoneBattery = state.phoneBatteryPercent,
-                        glassesBattery = state.glassesBatteryPercent,
-                        time = state.time,
-                        date = state.date
-                    )
-                }
-
+                override fun applyStatusBarState(state: StatusBarDisplayState) { widgetContainer.updateStatusBar(state) }
                 override fun onChargingChanged(charging: Boolean) {
                     binocularView.setChargingState(charging)
-
                     val changed = brightnessController.setCharging(charging)
-                    if (changed) {
-                        Log.d(TAG, "Charging state changed: charging=$charging")
-                    }
+                    if (changed) {Log.d(TAG, "Charging state changed: charging=$charging")}
                 }
             }
         )
