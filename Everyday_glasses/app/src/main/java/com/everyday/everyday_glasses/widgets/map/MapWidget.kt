@@ -429,7 +429,6 @@ class MapWidget(
         )
     }
 
-    fun isAddressEntryVisible(): Boolean = addressEntryVisible
     fun isAddressEntryFocused(): Boolean = addressFocused
     fun isAddressKeyboardVisible(): Boolean = addressKeyboard.isVisible
     fun getAddressKeyboard(): GlassesKeyboardView? = addressKeyboard.getKeyboard()

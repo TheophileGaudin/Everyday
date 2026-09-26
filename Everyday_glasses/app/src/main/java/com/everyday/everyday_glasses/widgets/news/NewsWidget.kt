@@ -478,12 +478,7 @@ class NewsWidget(
         stopTimers()
         releaseSourcePanelField()
     }
-
     fun release() = onDestroy()
-
-    fun handleFontMenuTapOrDismiss(px: Float, py: Float): Boolean =
-        handleNewsOptionsTapOrDismiss(px, py)
-
     fun handleNewsOptionsTapOrDismiss(px: Float, py: Float): Boolean {
         if (!showSourcePanel) return false
 
