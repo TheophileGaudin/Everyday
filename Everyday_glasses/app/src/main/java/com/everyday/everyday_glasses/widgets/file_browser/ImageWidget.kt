@@ -8,7 +8,6 @@ import android.graphics.RectF
 import android.util.Log
 import android.content.Context
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
-import com.everyday.everyday_glasses.widgets.file_browser.ImageWidgetStorage
 import com.everyday.everyday_glasses.runtime.DashboardServices
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId

@@ -555,7 +555,7 @@ class TextBoxWidget(
 class TextBoxModule(
     private val services: DashboardServices,
     private val focus: (TextBoxWidget) -> Unit,
-    private val releaseFocus: (TextBoxWidget) -> Unit,
+    releaseFocus: (TextBoxWidget) -> Unit,
 ) {
     val lifecycle = WidgetLifecycleRegistration.multiple(
         WidgetTypeId.TEXT, TextBoxWidget::class, DashboardPersistence.TextWidgetState::class,
