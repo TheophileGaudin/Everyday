@@ -47,7 +47,6 @@ class WidgetChangeDispatcher(
 
 /** Browser events besides change notifications. */
 interface BrowserWidgetListener {
-    fun onFocusChanged(focused: Boolean) = Unit
     fun onKeyboardRequested(show: Boolean) = Unit
 }
 

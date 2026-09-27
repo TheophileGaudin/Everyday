@@ -377,8 +377,6 @@ internal class TextEditingController(
         private set
     var formattingMenu: FormattingMenu? = null
         private set
-
-    val focusedZone: TextZone? get() = session?.zone
     val hasFocus: Boolean get() = session != null
 
     /** The web page taking typed keys when no text zone (other than its own field) does. */

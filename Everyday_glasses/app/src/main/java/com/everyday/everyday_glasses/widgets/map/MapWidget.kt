@@ -428,8 +428,6 @@ class MapWidget(
             it.longitude
         )
     }
-
-    fun isAddressEntryFocused(): Boolean = addressFocused
     /** Giving up the keyboard closes the address search. */
     override fun releaseKeyFocus() {if (addressFocused) closeAddressEntry()}
     fun isAddressKeyboardVisible(): Boolean = addressKeyboard.isVisible
