@@ -6,6 +6,11 @@ import android.graphics.Canvas
 import android.graphics.Rect
 import android.graphics.RectF
 import android.util.Log
+import android.content.Context
+import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.widgets.file_browser.ImageWidgetStorage
+import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 
@@ -106,4 +111,31 @@ class ImageWidget(
     }
 
     fun getImagePath(): String = imagePath
+}
+/** Puts images on the dashboard, and deletes an imported image file once no widget shows it. */
+class ImageModule(
+    private val services: DashboardServices,
+    private val context: Context,
+    private val all: () -> List<ImageWidget>,
+) {
+    val lifecycle = WidgetLifecycleRegistration.multiple(
+        WidgetTypeId.IMAGE, ImageWidget::class, DashboardPersistence.ImageWidgetState::class,
+        capture = { services.captureRestore.getImageWidgetState(it) },
+        restore = { state ->
+            services.captureRestore
+                .restoreImageWidgets(listOf(state), services.viewportWidth, services.viewportHeight)
+                .firstOrNull()
+        },
+        beforeRemove = ::deleteFileIfUnused,
+    )
+
+    fun open(path: String, x: Float, y: Float) {
+        services.open(WidgetTypeId.IMAGE) { ImageWidget(x, y, path) }
+    }
+
+    private fun deleteFileIfUnused(widget: ImageWidget) {
+        val path = widget.getImagePath()
+        val hasSibling = all().any { it !== widget && it.getImagePath() == path }
+        if (!hasSibling) ImageWidgetStorage.deleteIfManaged(context, path)
+    }
 }

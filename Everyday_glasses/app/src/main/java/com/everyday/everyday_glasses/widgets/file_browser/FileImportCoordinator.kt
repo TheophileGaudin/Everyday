@@ -9,7 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
 import android.util.Log
-import com.everyday.everyday_glasses.persistence.ImageWidgetStorage
+import com.everyday.everyday_glasses.widgets.file_browser.ImageWidgetStorage
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream

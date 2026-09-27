@@ -15,7 +15,9 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.everyday.everyday_glasses.runtime.DashboardServices
 import com.everyday.everyday_glasses.runtime.FileBrowserWidgetListener
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.widgets._common.WidgetInteractionState
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import java.io.File
@@ -1008,4 +1010,32 @@ class FileBrowserWidget(
         loadDirectory(getDefaultDirectory())
     }
 
+}
+/** Opens the file picker. Picking a file hands it over and closes the picker; pickers aren't saved. */
+class FileBrowserModule(
+    private val services: DashboardServices,
+    private val context: Context,
+    private val centerCursor: () -> Unit,
+) {
+    val lifecycle = WidgetLifecycleRegistration.multiple(WidgetTypeId.FILES, FileBrowserWidget::class, Unit::class)
+
+    fun open(filter: FileBrowserWidget.FileFilter, onPicked: (FileBrowserWidget.FileEntry) -> Unit) {
+        // Half the dashboard's width and 70% of its height, within limits, centered.
+        val width = (services.viewportWidth * 0.5f).coerceIn(300f, 500f)
+        val height = (services.viewportHeight * 0.7f).coerceIn(300f, 600f)
+        val x = ((services.viewportWidth - width) / 2f).coerceAtLeast(0f)
+        val y = ((services.viewportHeight - height) / 2f).coerceAtLeast(0f)
+        val picker = FileBrowserWidget(context, x, y, width, height, filter)
+        picker.listener = object : FileBrowserWidgetListener {
+            override fun onFileSelected(entry: FileBrowserWidget.FileEntry) {
+                onPicked(entry)
+                services.close(picker)
+            }
+        }
+        services.open(WidgetTypeId.FILES) { picker }
+        // Opening the picker may complete asynchronously after a runtime/all-files permission
+        // screen. Re-center after the widget actually exists so hover chrome is visible at once
+        // and two-finger scrolling is routed to the new browser without a priming drag.
+        centerCursor()
+    }
 }

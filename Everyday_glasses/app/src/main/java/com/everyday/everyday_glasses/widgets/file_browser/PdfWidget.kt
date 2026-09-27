@@ -21,6 +21,10 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import androidx.core.graphics.createBitmap
+import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
+import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 
 /** Canvas-backed PDF reader. Only the visible page bitmap is retained. */
@@ -336,4 +340,43 @@ class PdfWidget(
     }
 
     private fun nearestZoom(value: Float): Float = ZOOM_LEVELS.minByOrNull { abs(it - value) } ?: 1f
+}
+/** Puts PDF documents on the dashboard; a new one opens fullscreen. */
+class PdfModule(
+    private val services: DashboardServices,
+    private val context: Context,
+) {
+    val lifecycle = WidgetLifecycleRegistration.multiple(
+        WidgetTypeId.PDF, PdfWidget::class, DashboardPersistence.PdfWidgetState::class,
+        capture = { services.captureRestore.getPdfWidgetState(it) },
+        restore = ::restore,
+    )
+
+    fun open(uri: Uri, displayName: String) {
+        val x = ((services.viewportWidth - 360f) / 2f).coerceAtLeast(0f)
+        val y = ((services.viewportHeight - 260f) / 2f).coerceAtLeast(0f)
+        val widget = PdfWidget(context, uri, displayName, x, y)
+        services.runPersistentMutation {
+            services.open(WidgetTypeId.PDF) { widget }
+            widget.toggleFullscreen()
+        }
+    }
+
+    /** A document that can't be read anymore is dropped from the dashboard. */
+    private fun restore(state: DashboardPersistence.PdfWidgetState): PdfWidget? {
+        val uri = WidgetCaptureRestore.readableUri(context, state.uri) ?: return null
+        val widget = PdfWidget(
+            context = context,
+            contentUri = uri,
+            displayName = state.displayName,
+            x = state.x,
+            y = state.y,
+            width = state.width,
+            height = state.height,
+            initialPage = state.page,
+            initialZoom = state.zoom
+        )
+        services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight)
+        return widget
+    }
 }

@@ -12,6 +12,7 @@ import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfigState
 import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayMode
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
+import com.everyday.everyday_glasses.widgets.file_browser.ImageWidgetStorage
 import com.everyday.shared.sync.FinanceAssetType
 import com.everyday.shared.sync.FinanceChartType
 import com.everyday.shared.sync.FinanceDashboardTileConfig

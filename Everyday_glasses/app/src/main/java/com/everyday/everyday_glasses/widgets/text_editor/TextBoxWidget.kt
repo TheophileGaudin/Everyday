@@ -15,6 +15,9 @@ import com.everyday.everyday_glasses.interaction.user_input.TextEditAction
 import com.everyday.everyday_glasses.interaction.user_input.TextZone
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneLayout
+import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 import com.everyday.everyday_glasses.ui.components.KeyboardOverlayController
@@ -542,5 +545,65 @@ class TextBoxWidget(
      */
     private fun drawKeyboardButton(canvas: Canvas) {
         keyboardOverlay.drawButton(canvas)
+    }
+}
+
+/**
+ * Puts text boxes on the dashboard: from the menu (reopening the last closed one first), for the
+ * assistant, and from the saved dashboard.
+ */
+class TextBoxModule(
+    private val services: DashboardServices,
+    private val focus: (TextBoxWidget) -> Unit,
+    private val releaseFocus: (TextBoxWidget) -> Unit,
+) {
+    val lifecycle = WidgetLifecycleRegistration.multiple(
+        WidgetTypeId.TEXT, TextBoxWidget::class, DashboardPersistence.TextWidgetState::class,
+        capture = { services.captureRestore.getTextWidgetState(it) },
+        restore = { state ->
+            services.captureRestore
+                .restoreTextWidgets(listOf(state), services.viewportWidth, services.viewportHeight)
+                .firstOrNull()
+        },
+        beforeRemove = releaseFocus,
+    )
+
+    /** Opens a text box at ([x], [y]), or reopens the last closed one, and focuses it. */
+    fun open(x: Float, y: Float) {
+        if (reopenClosed() != null) return
+        val width = services.viewportWidth * DEFAULT_WIDTH_PERCENT
+        val height = services.viewportHeight * DEFAULT_HEIGHT_PERCENT
+        val box = TextBoxWidget(
+            x.coerceIn(0f, services.viewportWidth - width),
+            y.coerceIn(0f, services.viewportHeight - height),
+            width,
+            height
+        )
+        services.runPersistentMutation {
+            services.open(WidgetTypeId.TEXT) { box }
+            focus(box)
+        }
+    }
+
+    /** A large centered box for text the assistant presents; null before the dashboard has a size. */
+    fun openForAssistant(): TextBoxWidget? {
+        if (services.viewportWidth <= 0 || services.viewportHeight <= 0) return null
+        val width = (services.viewportWidth * 0.72f).coerceAtMost(services.viewportWidth.toFloat())
+        val height = (services.viewportHeight * 0.55f).coerceAtMost(services.viewportHeight.toFloat())
+        val x = ((services.viewportWidth - width) / 2f).coerceAtLeast(0f)
+        val y = ((services.viewportHeight - height) / 2f).coerceAtLeast(0f)
+        return services.open(WidgetTypeId.TEXT) { TextBoxWidget(x, y, width, height) }
+    }
+
+    private fun reopenClosed(): TextBoxWidget? = services.runPersistentMutation(changed = { it != null }) {
+        (services.openClosedTemplate(WidgetTypeId.TEXT) as? TextBoxWidget)?.also { box ->
+            if (!box.isMinimized) focus(box)
+        }
+    }
+
+    companion object {
+        /** Size of a new text box, as a fraction of the dashboard. */
+        const val DEFAULT_WIDTH_PERCENT = 0.30f
+        const val DEFAULT_HEIGHT_PERCENT = 0.15f
     }
 }

@@ -43,4 +43,19 @@ interface DashboardServices {
      * [changed] is true, transient otherwise. Returns what [action] returned.
      */
     fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean): Boolean
+
+    /**
+     * Runs [action] with the widgets' own notifications muted, then saves the dashboard when
+     * [changed] says its result changed something.
+     */
+    fun <T> runPersistentMutation(changed: (T) -> Boolean = { true }, action: () -> T): T
+
+    /** Adds a new widget of a multiple-instance [type]; null when [create] gives none. */
+    fun <W : BaseWidget> open(type: WidgetTypeId, create: () -> W?): W?
+
+    /** Reopens the last closed widget of [type] from its saved template, if there is one. */
+    fun openClosedTemplate(type: WidgetTypeId): BaseWidget?
+
+    /** Closes [widget], with its type's cleanup. */
+    fun close(widget: BaseWidget)
 }

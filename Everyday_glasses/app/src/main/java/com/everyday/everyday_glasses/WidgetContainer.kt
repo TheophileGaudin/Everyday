@@ -46,7 +46,6 @@ import com.everyday.everyday_glasses.interaction.assistant.WebSearchSemanticTool
 import com.everyday.everyday_glasses.runtime.DashboardChangeCoordinator
 import com.everyday.everyday_glasses.runtime.BrowserWidgetListener
 import com.everyday.everyday_glasses.settings.DisplaySettingsHandler
-import com.everyday.everyday_glasses.runtime.FileBrowserWidgetListener
 import com.everyday.everyday_glasses.runtime.GeminiSettingsListener
 import com.everyday.everyday_glasses.auth_permissions.GoogleAccountHandler
 import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
@@ -75,7 +74,6 @@ import com.everyday.everyday_glasses.runtime.WidgetDescriptors
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets.browser.BrowserWidgetFactory
-import com.everyday.everyday_glasses.widgets.file_browser.VideoWidgetFactory
 import com.everyday.everyday_glasses.ui.components.CloseConfirmationHandler
 import com.everyday.everyday_glasses.ui.components.ContextMenuHandler
 import com.everyday.everyday_glasses.interaction.user_input.CursorStabilizer
@@ -96,10 +94,8 @@ import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
-import com.everyday.everyday_glasses.persistence.ImageWidgetStorage
 import com.everyday.everyday_glasses.persistence.LayoutLibrary
 import com.everyday.everyday_glasses.persistence.ShortcutsStore
-import com.everyday.everyday_glasses.widgets.file_browser.video_backend.VideoQueueRepository
 import com.everyday.everyday_glasses.ui.hover_controls.BaseHoverControl
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
@@ -108,9 +104,10 @@ import com.everyday.everyday_glasses.widgets.calendar.CalendarWidget
 import com.everyday.everyday_glasses.ui.hover_controls.CloseAppHoverControl
 import com.everyday.everyday_glasses.ui.components.CloseConfirmationPopup
 import com.everyday.everyday_glasses.ui.components.ContextMenu
+import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserModule
 import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidget
 import com.everyday.everyday_glasses.widgets.finance.FinanceWidget
-import com.everyday.everyday_glasses.widgets.file_browser.ImageWidget
+import com.everyday.everyday_glasses.widgets.file_browser.ImageModule
 import com.everyday.everyday_glasses.ui.hover_controls.LemonHoverControl
 import com.everyday.everyday_glasses.widgets.weather_location.LocationWidget
 import com.everyday.everyday_glasses.widgets.map.MapModule
@@ -118,7 +115,7 @@ import com.everyday.everyday_glasses.widgets.map.MapWidget
 import com.everyday.everyday_glasses.widgets.news.NewsWidget
 import com.everyday.everyday_glasses.widgets.notifications.NotificationsWidget
 import com.everyday.everyday_glasses.widgets.notifications.NotificationsModule
-import com.everyday.everyday_glasses.widgets.file_browser.PdfWidget
+import com.everyday.everyday_glasses.widgets.file_browser.PdfModule
 import com.everyday.everyday_glasses.widgets.phone_screen_mirror.MirrorModule
 import com.everyday.everyday_glasses.widgets.phone_screen_mirror.ScreenMirrorWidget
 import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidget
@@ -129,8 +126,10 @@ import com.everyday.everyday_glasses.widgets.system_status.StatusBarDisplayState
 import com.everyday.everyday_glasses.widgets.system_status.StatusBarModule
 import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleWidget
 import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleModule
+import com.everyday.everyday_glasses.widgets.text_editor.TextBoxModule
 import com.everyday.everyday_glasses.widgets.text_editor.TextBoxWidget
 import com.everyday.everyday_glasses._threedof.ThreeDofOverlay
+import com.everyday.everyday_glasses.widgets.file_browser.VideoModule
 import com.everyday.everyday_glasses.widgets.file_browser.VideoWidget
 import com.everyday.everyday_glasses.ui.components.WidgetLayoutDeleteConfirmationPopup
 import com.everyday.everyday_glasses.ui.components.WidgetLayoutNamePrompt
@@ -225,9 +224,6 @@ class WidgetContainer @JvmOverloads constructor(
 
     companion object {
         private const val TAG = "WidgetContainer"
-
-        private const val DEFAULT_TEXTBOX_WIDTH_PERCENT = 0.30f
-        private const val DEFAULT_TEXTBOX_HEIGHT_PERCENT = 0.15f
         private const val DEFAULT_SPEED_VISIBILITY_THRESHOLD_KMH = 1f
         private const val LONG_PRESS_DELAY_MS = 250L
         private const val LONG_PRESS_MAX_MOVEMENT = 20f
@@ -243,7 +239,6 @@ class WidgetContainer @JvmOverloads constructor(
     private val stabilizedCursorDelta = PointF()
     private val registry = WidgetRegistry()
     private val widgetCaptureRestore = WidgetCaptureRestore()
-    private val videoQueueRepository = VideoQueueRepository(context)
     /** Every text field and text area of the app is edited through this controller. */
     private val textEditing = TextEditingController(
         toContentSpace = ::screenToContentCoordinates,
@@ -274,15 +269,6 @@ class WidgetContainer @JvmOverloads constructor(
         context = context,
         rootLayout = rootView,
         containerView = this,
-    )
-    private fun videoWidgetFactory(rootView: ViewGroup) = VideoWidgetFactory(
-        context = context,
-        rootLayout = rootView,
-        containerView = this,
-        queueRepository = videoQueueRepository,
-        onPlaybackVisibilityChanged = { sourceId, active ->
-            setBinocularMediaSourceActive(sourceId, active)
-        },
     )
     private val locationWeatherBinding by lazy {
         LocationWeatherBinding(
@@ -362,9 +348,7 @@ class WidgetContainer @JvmOverloads constructor(
             if (visible) lifecycleController.show(type) else lifecycleController.hide(type)
         }
 
-        override fun createTextWidget() {
-            createTextBox(pendingCreateX, pendingCreateY)
-        }
+        override fun createTextWidget() {textModule.open(pendingCreateX, pendingCreateY)}
         override fun createBrowserWidget() = createBrowserWidget(pendingCreateX, pendingCreateY)
         override fun openYouTubeHistory() = createYouTubeBrowserWidget()
         override fun loadLayout(name: String): Boolean = loadCommandLayout(name)
@@ -412,8 +396,8 @@ class WidgetContainer @JvmOverloads constructor(
         onActionSelected = { invocation ->
             userInputActivity?.onUserInput(UserInputKind.SHORTCUT)
             if (invocation.commandId == commandRegistry.createText.id) {
-                pendingCreateX = (width * 0.5f) - (width * DEFAULT_TEXTBOX_WIDTH_PERCENT) / 2f
-                pendingCreateY = (height * 0.5f) - (height * DEFAULT_TEXTBOX_HEIGHT_PERCENT) / 2f
+                pendingCreateX = (width * 0.5f) - (width * TextBoxModule.DEFAULT_WIDTH_PERCENT) / 2f
+                pendingCreateY = (height * 0.5f) - (height * TextBoxModule.DEFAULT_HEIGHT_PERCENT) / 2f
             } else if (invocation.commandId == commandRegistry.createBrowser.id) {
                 pendingCreateX = 0f
                 pendingCreateY = 0f
@@ -441,7 +425,7 @@ class WidgetContainer @JvmOverloads constructor(
         TextAssistantActions(
             ui = assistantUiDispatcher,
             findTextWidget = { id -> findWidgetByStableId(id) as? TextBoxWidget },
-            createTextWidget = ::createAssistantTextWidget,
+            createTextWidget = textModule::openForAssistant,
             clearEditing = { widget ->
                 widget.hideKeyboard()
                 textEditing.release(widget.textZone)
@@ -503,7 +487,11 @@ class WidgetContainer @JvmOverloads constructor(
         override val captureRestore: WidgetCaptureRestore get() = widgetCaptureRestore
         override fun notifyTransientChange() = notifyTransientContentChanged()
         override fun <T> withTransientChanges(action: () -> T): T = withTransientChangeBatch(action)
-        override fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean): Boolean = this@WidgetContainer.runClassifiedInput(action, changed)
+        override fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean): Boolean      = this@WidgetContainer.runClassifiedInput(action, changed)
+        override fun <T> runPersistentMutation(changed: (T) -> Boolean, action: () -> T): T = this@WidgetContainer.runPersistentMutation(changed, action)
+        override fun <W : BaseWidget> open(type: WidgetTypeId, create: () -> W?): W? = lifecycleController.open(type, create)
+        override fun openClosedTemplate(type: WidgetTypeId): BaseWidget? = lifecycleController.openClosedTemplate(type)
+        override fun close(widget: BaseWidget) = lifecycleController.close(widget)
     }
     private val statusBarModule = StatusBarModule(dashboardServices) { statusBarWidget }
     private val calendarModule = CalendarModule(dashboardServices) { calendarWidget }
@@ -538,6 +526,23 @@ class WidgetContainer @JvmOverloads constructor(
         refreshBrightnessRules = ::refreshBrightnessRules,
         sendMirrorRequest = { start -> host?.requestMirror(start) },
     )
+    private val textModule = TextBoxModule(
+        dashboardServices,
+        focus = { setFocusedWidget(it) },
+        releaseFocus = { if (focusedWidget === it) setFocusedWidget(null) },
+    )
+    private val imageModule = ImageModule(dashboardServices, context) { registry.imageWidgets }
+    private val videoModule = VideoModule(
+        dashboardServices,
+        context,
+        rootLayout = { parent as? ViewGroup },
+        containerView = this,
+        setMediaSourceActive = ::setBinocularMediaSourceActive,
+    )
+    private val pdfModule = PdfModule(dashboardServices, context)
+    private val fileBrowserModule = FileBrowserModule(dashboardServices, context) { host?.requestCursorCenter() }
+
+
 
     // Settings overlays and persisted app-level settings
     private val settingsController = SettingsController(
@@ -626,7 +631,6 @@ class WidgetContainer @JvmOverloads constructor(
     // Access to widget lists via registry
     private val widgets: List<TextBoxWidget> get() = registry.textWidgets
     private val browserWidgets: List<BrowserWidget> get() = registry.browserWidgets
-    private val imageWidgets: List<ImageWidget> get() = registry.imageWidgets
     private val videoWidgets: List<VideoWidget> get() = registry.videoWidgets
 
     // Text widget whose text area is being edited
@@ -739,62 +743,6 @@ class WidgetContainer @JvmOverloads constructor(
             },
         )
     }
-    private val textLifecycle by lazy {
-        WidgetLifecycleRegistration(
-            descriptor = WidgetDescriptors[WidgetTypeId.TEXT],
-            widgetType = TextBoxWidget::class,
-            stateType = DashboardPersistence.TextWidgetState::class,
-            stateCodec = WidgetDocument.codecs[WidgetTypeId.TEXT],
-            capture = widgetCaptureRestore::getTextWidgetState,
-            restore = ::restoreTextWidget,
-            beforeRemove = { widget ->
-                if (focusedWidget === widget) setFocusedWidget(null)
-            }
-        )
-    }
-    private val imageLifecycle by lazy {
-        WidgetLifecycleRegistration(
-            descriptor = WidgetDescriptors[WidgetTypeId.IMAGE],
-            widgetType = ImageWidget::class,
-            stateType = DashboardPersistence.ImageWidgetState::class,
-            stateCodec = WidgetDocument.codecs[WidgetTypeId.IMAGE],
-            capture = widgetCaptureRestore::getImageWidgetState,
-            restore = ::restoreImageWidget,
-            beforeRemove = { widget ->
-                val path = widget.getImagePath()
-                val hasSibling = imageWidgets.any { it !== widget && it.getImagePath() == path }
-                if (!hasSibling) ImageWidgetStorage.deleteIfManaged(context, path)
-            }
-        )
-    }
-    private val videoLifecycle by lazy {
-        WidgetLifecycleRegistration(
-            descriptor = WidgetDescriptors[WidgetTypeId.VIDEO],
-            widgetType = VideoWidget::class,
-            stateType = DashboardPersistence.VideoWidgetState::class,
-            stateCodec = WidgetDocument.codecs[WidgetTypeId.VIDEO],
-            capture = widgetCaptureRestore::getVideoWidgetState,
-            restore = ::restoreVideoWidget,
-            onFullscreenChanged = ::handleVideoWidgetFullscreenSideEffects
-        )
-    }
-    private val pdfLifecycle by lazy {
-        WidgetLifecycleRegistration(
-            descriptor = WidgetDescriptors[WidgetTypeId.PDF],
-            widgetType = PdfWidget::class,
-            stateType = DashboardPersistence.PdfWidgetState::class,
-            stateCodec = WidgetDocument.codecs[WidgetTypeId.PDF],
-            capture = widgetCaptureRestore::getPdfWidgetState,
-            restore = ::restorePdfWidget,
-        )
-    }
-    private val filesLifecycle by lazy {
-        WidgetLifecycleRegistration(
-            descriptor = WidgetDescriptors[WidgetTypeId.FILES],
-            widgetType = FileBrowserWidget::class,
-            stateType = Unit::class
-        )
-    }
 
     // ==================== Phone Clipboard to forward to relevant editors ====================
 
@@ -864,13 +812,13 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun registerWidgetLifecycles() {
-        //duplicable widget registration
+        //multi-instance widget registration
         lifecycleController.register(browserLifecycle)
-        lifecycleController.register(textLifecycle)
-        lifecycleController.register(imageLifecycle)
-        lifecycleController.register(videoLifecycle)
-        lifecycleController.register(pdfLifecycle)
-        lifecycleController.register(filesLifecycle)
+        lifecycleController.register(textModule.lifecycle)
+        lifecycleController.register(imageModule.lifecycle)
+        lifecycleController.register(videoModule.lifecycle)
+        lifecycleController.register(pdfModule.lifecycle)
+        lifecycleController.register(fileBrowserModule.lifecycle)
 
         //singleton widget registration
         lifecycleController.register(statusBarModule.lifecycle)
@@ -1347,12 +1295,6 @@ class WidgetContainer @JvmOverloads constructor(
     private fun triggerCloseAppConfirmation() {
         closeConfirmationPopup?.show()
         notifyTransientContentChanged()
-    }
-
-    // ==================== Fullscreen Management ====================
-    private fun handleVideoWidgetFullscreenSideEffects(widget: VideoWidget, isFullscreen: Boolean) {
-        if (isFullscreen) widget.startPlayback(autoPlay = true)
-        widget.setWindowedMode()
     }
 
     // distribute location updates to widgets that are location dependent
@@ -2320,98 +2262,11 @@ class WidgetContainer @JvmOverloads constructor(
         }
     }
 
-    fun createImageWidget(path: String, x: Float = -1f, y: Float = -1f) {
-        val createX = if (x >= 0) x else pendingCreateX
-        val createY = if (y >= 0) y else pendingCreateY
-        
-        val widget = ImageWidget(createX, createY, path)
-        lifecycleController.open(imageLifecycle) { widget }
-    }
-
-    fun createVideoWidget(
-        uri: android.net.Uri,
-        displayName: String,
-        x: Float = -1f,
-        y: Float = -1f,
-    ) {
-        val rootView = parent as? ViewGroup ?: return
-        val createX = if (x >= 0f) x else ((width - 360f) / 2f).coerceAtLeast(0f)
-        val createY = if (y >= 0f) y else ((height - 220f) / 2f).coerceAtLeast(0f)
-        val widget = videoWidgetFactory(rootView).create(uri, displayName, createX, createY)
-        runPersistentMutation {
-            lifecycleController.open(videoLifecycle) { widget }
-            widget.toggleFullscreen()
-        }
-    }
-
-    fun createPdfWidget(uri: android.net.Uri, displayName: String, x: Float = -1f, y: Float = -1f) {
-        val createX = if (x >= 0f) x else ((width - 360f) / 2f).coerceAtLeast(0f)
-        val createY = if (y >= 0f) y else ((height - 260f) / 2f).coerceAtLeast(0f)
-        val widget = PdfWidget(context, uri, displayName, createX, createY)
-        runPersistentMutation {
-            lifecycleController.open(pdfLifecycle) { widget }
-            widget.toggleFullscreen()
-        }
-    }
-
-    /**
-     * Create a file browser widget for selecting files.
-     * @param filter The file type filter to use (default: IMAGES)
-     * @param onFileSelected Callback when a file is selected (provides FileEntry with path and optional URI)
-     */
-    fun createFileBrowserWidget(
-        filter: FileBrowserWidget.FileFilter = FileBrowserWidget.FileFilter.IMAGES,
-        x: Float = -1f,
-        y: Float = -1f,
-        onFileSelected: ((FileBrowserWidget.FileEntry) -> Unit)? = null
-    ) {
-        // Use screen-relative sizing (50% width, 70% height) to avoid widget being too large
-        val browserWidth = (width * 0.5f).coerceIn(300f, 500f)
-        val browserHeight = (height * 0.7f).coerceIn(300f, 600f)
-
-        // Center the widget if no position specified, otherwise use the specified position
-        val createX = if (x >= 0) x.coerceIn(0f, (width - browserWidth).coerceAtLeast(0f))
-                      else ((width - browserWidth) / 2f).coerceAtLeast(0f)
-        val createY = if (y >= 0) y.coerceIn(0f, (height - browserHeight).coerceAtLeast(0f))
-                      else ((height - browserHeight) / 2f).coerceAtLeast(0f)
-
-        val widget = FileBrowserWidget(
-            context,
-            createX,
-            createY,
-            browserWidth,
-            browserHeight,
-            filter
-        ).apply {
-            listener = object : FileBrowserWidgetListener {
-                override fun onFileSelected(entry: FileBrowserWidget.FileEntry) {
-                    onFileSelected?.invoke(entry)
-                    removeFileBrowserWidget(this@apply)
-                }
-            }
-        }
-        lifecycleController.open(filesLifecycle) { widget }
-        // Opening the picker may complete asynchronously after a runtime/all-files permission
-        // screen. Re-center after the widget actually exists so hover chrome is visible at once
-        // and two-finger scrolling is routed to the new browser without a priming drag.
-        host?.requestCursorCenter()
-    }
-    private fun removeFileBrowserWidget(widget: FileBrowserWidget) {lifecycleController.close(widget)}
-
-    private fun buildTextBox(x: Float, y: Float, boxWidth: Float, boxHeight: Float): TextBoxWidget = TextBoxWidget(x, y, boxWidth, boxHeight)
-
-    fun createTextBox(x: Float, y: Float) {
-        if (openClosedTextTemplate() != null) {
-            return
-        }
-        val boxWidth = width * DEFAULT_TEXTBOX_WIDTH_PERCENT; val boxHeight = height * DEFAULT_TEXTBOX_HEIGHT_PERCENT
-        val adjustedX = x.coerceIn(0f, width - boxWidth); val adjustedY = y.coerceIn(0f, height - boxHeight)
-        val widget = buildTextBox(adjustedX, adjustedY, boxWidth, boxHeight)
-        runPersistentMutation {
-            lifecycleController.open(textLifecycle) { widget }
-            setFocusedWidget(widget)
-        }
-    }
+    //file widgets
+    fun createImageWidget(path: String)                              = imageModule.open(path, pendingCreateX, pendingCreateY)
+    fun createVideoWidget(uri: android.net.Uri, displayName: String) = videoModule.open(uri, displayName)
+    fun createPdfWidget(uri: android.net.Uri, displayName: String)   = pdfModule.open(uri, displayName)
+    fun createFileBrowserWidget(filter: FileBrowserWidget.FileFilter, onFileSelected: (FileBrowserWidget.FileEntry) -> Unit) = fileBrowserModule.open(filter, onFileSelected)
 
     /**
      * Focus for typing: a text widget's text area, or a browser page whose web content receives
@@ -2842,16 +2697,6 @@ class WidgetContainer @JvmOverloads constructor(
      */
     fun presentAssistantText(request: AssistantTextPresentationRequest) =  textAssistantActions.present(request)
 
-    private fun createAssistantTextWidget(): TextBoxWidget? {
-        if (!isReady()) return null
-        val boxWidth = (width * 0.72f).coerceAtMost(width.toFloat())
-        val boxHeight = (height * 0.55f).coerceAtMost(height.toFloat())
-        val x = ((width - boxWidth) / 2f).coerceAtLeast(0f)
-        val y = ((height - boxHeight) / 2f).coerceAtLeast(0f)
-        val widget = buildTextBox(x, y, boxWidth, boxHeight)
-        return lifecycleController.open(textLifecycle) { widget }
-    }
-
     private fun hideAssistantIme() {
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager ?: return
         val token = windowToken ?: return
@@ -2981,50 +2826,11 @@ class WidgetContainer @JvmOverloads constructor(
         activeWidget = null
     }
 
-    private fun restoreTextWidget(state: DashboardPersistence.TextWidgetState): TextBoxWidget? =
-        widgetCaptureRestore.restoreTextWidgets(listOf(state), width, height).firstOrNull()
-
     private fun restoreBrowserWidget(state: DashboardPersistence.BrowserWidgetState): BrowserWidget? {
         val rootView = parent as? ViewGroup ?: return null
         val widget = browserWidgetFactory(rootView).create(state.x, state.y, state.width, state.height)
         widgetCaptureRestore.restoreBrowserWidgetState(widget, state, width, height)
         return widget
-    }
-
-    private fun restoreImageWidget(state: DashboardPersistence.ImageWidgetState): ImageWidget? =
-        widgetCaptureRestore.restoreImageWidgets(listOf(state), width, height).firstOrNull()
-
-    private fun restoreVideoWidget(state: DashboardPersistence.VideoWidgetState): VideoWidget? {
-        val rootView = parent as? ViewGroup ?: return null
-        val uri = WidgetCaptureRestore.readableUri(context, state.uri) ?: return null
-        val widget = videoWidgetFactory(rootView).create(uri, state.displayName, state.x, state.y)
-        widgetCaptureRestore.restoreCommonFields(widget, state, width, height)
-        return widget
-    }
-
-    private fun restorePdfWidget(state: DashboardPersistence.PdfWidgetState): PdfWidget? {
-        val uri = WidgetCaptureRestore.readableUri(context, state.uri) ?: return null
-        val widget = PdfWidget(
-            context = context,
-            contentUri = uri,
-            displayName = state.displayName,
-            x = state.x,
-            y = state.y,
-            width = state.width,
-            height = state.height,
-            initialPage = state.page,
-            initialZoom = state.zoom
-        )
-        widgetCaptureRestore.restoreCommonFields(widget, state, width, height)
-        return widget
-    }
-
-    private fun openClosedTextTemplate(): TextBoxWidget? = runPersistentMutation(changed = { it != null }) {
-        (lifecycleController.openClosedTemplate(WidgetTypeId.TEXT) as? TextBoxWidget)?.also { widget ->
-            if (!widget.isMinimized) {
-                setFocusedWidget(widget)
-            }
-        }
     }
 
     private fun openClosedBrowserTemplate(): BrowserWidget? = runPersistentMutation(changed = { it != null }) {
