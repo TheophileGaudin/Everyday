@@ -70,6 +70,21 @@ interface TextZone {
     fun onTextEditAction(action: TextEditAction)
 }
 
+/** A web page that takes typed keys itself while it has the keyboard focus. */
+interface KeyTarget {
+    /** The page's own text field (its address bar). Editing it keeps the page focused. */
+    val ownField: TextZone?
+
+    /** A key typed while the page has the keyboard and no text zone takes it. */
+    fun onPageKey(key: String)
+
+    /** What a typed key can change that is saved with the dashboard (the page address). */
+    fun savedState(): Any?
+
+    /** The page no longer has the keyboard. */
+    fun onKeyFocusLost()
+}
+
 /** What zone owners use to reach the controller. */
 interface TextZoneHost {
     fun focus(zone: TextZone, selectAll: Boolean = false)
@@ -88,6 +103,15 @@ interface TextZoneHost {
 
     /** Draws the live text of [zone] if it is focused; returns false otherwise. */
     fun drawZone(canvas: Canvas, zone: TextZone): Boolean
+
+    /** Gives the keyboard to a web page. Its own field ([KeyTarget.ownField]) may stay focused. */
+    fun focusPage(page: KeyTarget)
+
+    /** Takes the keyboard back from [page], if it has it. */
+    fun releasePage(page: KeyTarget)
+
+    /** Nothing takes typed keys any more: no text zone, no web page. */
+    fun clearAllFocus()
 }
 
 // ==================== Rendering ====================
@@ -356,6 +380,14 @@ internal class TextEditingController(
 
     val focusedZone: TextZone? get() = session?.zone
     val hasFocus: Boolean get() = session != null
+
+    /** The web page taking typed keys when no text zone (other than its own field) does. */
+    var focusedPage: KeyTarget? = null
+        private set
+
+    /** Something takes typed keys: a text zone or a web page. */
+    val hasKeyFocus: Boolean get() = session != null || focusedPage != null
+
     val isSelecting: Boolean get() = session?.selecting == true
     val isMenuVisible: Boolean get() = textEditMenu?.isVisible == true || formattingMenu?.isVisible == true
 
@@ -378,6 +410,40 @@ internal class TextEditingController(
         if (session != null) switchTo(null)
     }
 
+    override fun focusPage(page: KeyTarget) {
+        if (session?.zone !== page.ownField) clearFocus()
+        if (focusedPage === page) return
+        val previous = focusedPage
+        focusedPage = page
+        previous?.onKeyFocusLost()
+        notifyFocusChanged(true)
+    }
+
+    override fun releasePage(page: KeyTarget) {
+        if (focusedPage === page) clearPageFocus()
+    }
+
+    override fun clearAllFocus() {
+        clearFocus()
+        clearPageFocus()
+    }
+
+    private fun clearPageFocus() {
+        val page = focusedPage ?: return
+        focusedPage = null
+        page.onKeyFocusLost()
+        notifyFocusChanged(false)
+    }
+
+    /** A typed key goes to the focused text zone, otherwise to the focused web page. */
+    fun typeKey(key: String) {
+        if (onKey(key)) return
+        val page = focusedPage ?: return
+        val before = page.savedState()
+        // A key can make the page navigate, which is saved with the dashboard.
+        runClassifiedInput({ page.onPageKey(key); true }, { page.savedState() != before })
+    }
+
     override fun isFocused(zone: TextZone): Boolean = session?.zone === zone
 
     /** Only one zone is focused. The old zone learns it lost focus after the new one is set. */
@@ -392,6 +458,13 @@ internal class TextEditingController(
             previous?.zone?.onTextEditAction(TextEditAction.Released)
         } finally {
             switchingFocus = false
+        }
+        // Only one thing takes typed keys: a newly focused zone ends typing into a web page,
+        // unless it is that page's own field.
+        val page = focusedPage
+        if (zone != null && page != null && zone !== page.ownField) {
+            focusedPage = null
+            page.onKeyFocusLost()
         }
         notifyFocusChanged(zone != null)
     }

@@ -134,6 +134,16 @@ class TextBoxWidget(
 
     fun isFocused(): Boolean = textZoneHost?.isFocused(textZone) == true
 
+    override val hasKeyFocus: Boolean get() = isFocused()
+
+    override fun takeKeyFocus() {
+        textZoneHost?.focus(textZone)
+    }
+
+    override fun releaseKeyFocus() {
+        textZoneHost?.release(textZone)
+    }
+
     // ==================== Additional Paints ====================
 
     private val focusedBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -554,8 +564,6 @@ class TextBoxWidget(
  */
 class TextBoxModule(
     private val services: DashboardServices,
-    private val focus: (TextBoxWidget) -> Unit,
-    releaseFocus: (TextBoxWidget) -> Unit,
 ) {
     val lifecycle = WidgetLifecycleRegistration.multiple(
         WidgetTypeId.TEXT, TextBoxWidget::class, DashboardPersistence.TextWidgetState::class,
@@ -565,7 +573,7 @@ class TextBoxModule(
                 .restoreTextWidgets(listOf(state), services.viewportWidth, services.viewportHeight)
                 .firstOrNull()
         },
-        beforeRemove = releaseFocus,
+        beforeRemove = TextBoxWidget::releaseKeyFocus,
     )
 
     /** Opens a text box at ([x], [y]), or reopens the last closed one, and focuses it. */
@@ -581,7 +589,7 @@ class TextBoxModule(
         )
         services.runPersistentMutation {
             services.open(WidgetTypeId.TEXT) { box }
-            focus(box)
+            box.takeKeyFocus()
         }
     }
 
@@ -597,7 +605,7 @@ class TextBoxModule(
 
     private fun reopenClosed(): TextBoxWidget? = services.runPersistentMutation(changed = { it != null }) {
         (services.openClosedTemplate(WidgetTypeId.TEXT) as? TextBoxWidget)?.also { box ->
-            if (!box.isMinimized) focus(box)
+            if (!box.isMinimized) box.takeKeyFocus()
         }
     }
 

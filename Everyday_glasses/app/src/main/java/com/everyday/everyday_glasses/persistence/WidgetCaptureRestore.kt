@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import androidx.core.net.toUri
-import com.everyday.everyday_glasses.runtime.WidgetPersistenceListener
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
 import com.everyday.everyday_glasses.widgets.calendar.CalendarWidget
@@ -47,9 +46,6 @@ class WidgetCaptureRestore {
             return uri.takeIf { readable }
         }
     }
-
-    /** Widget restore events consumed by [com.everyday.everyday_glasses.WidgetContainer]. */
-    var listener: WidgetPersistenceListener? = null
 
     // ==================== Common-field helpers ====================
 

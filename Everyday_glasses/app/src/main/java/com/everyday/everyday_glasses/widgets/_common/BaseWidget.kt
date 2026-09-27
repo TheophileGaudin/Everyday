@@ -348,6 +348,17 @@ abstract class BaseWidget(
     /** Ends the internal drag. Returns true when it changed something saved. */
     open fun endInternalDrag(): Boolean = false
 
+    // ==================== Keyboard focus ====================
+
+    /** True while typed keys go to this widget: a text box's text, a browser's page. */
+    open val hasKeyFocus: Boolean get() = false
+
+    /** Gives this widget the keyboard. A widget that doesn't type takes it away from everyone. */
+    open fun takeKeyFocus() {textZoneHost?.clearAllFocus()}
+
+    /** Gives the keyboard up if this widget has it, e.g. when it closes. */
+    open fun releaseKeyFocus() = Unit
+
     // ==================== Paints ====================
 
     protected val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {

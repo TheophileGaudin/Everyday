@@ -1,6 +1,12 @@
 package com.everyday.everyday_glasses.widgets._common
 
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
 import android.os.Handler
+import android.os.SystemClock
+import com.everyday.everyday_glasses.runtime.WidgetRegistry
 import kotlin.math.min
 
 enum class PresentationMode {
@@ -247,5 +253,212 @@ class PresentationController(
         }
         delegate.onSessionEnded(session, reason)
         return true
+    }
+}
+/**
+ * Shows a dashboard widget temporarily for the assistant, draws its countdown ring, and puts the
+ * widget back when the presentation ends. [PresentationController] decides *when* each step
+ * happens; this class applies it to the widget.
+ */
+class WidgetPresenter(
+    scheduler: PresentationScheduler,
+    private val registry: WidgetRegistry,
+    private val viewportSize: () -> Pair<Float, Float>,
+    private val closeWidget: (BaseWidget) -> Unit,
+    private val bringToFront: (BaseWidget) -> Unit,
+    private val restoreZOrder: (BaseWidget, Int) -> Unit,
+    private val arrangeMinimizedWidgets: () -> Unit,
+    private val clearKeyFocus: () -> Unit,
+    private val withNotificationsSuppressed: (() -> Unit) -> Unit,
+    private val notifyTransientChange: () -> Unit,
+    nowElapsedMs: () -> Long = { SystemClock.elapsedRealtime() },
+) : PresentationLifecycleDelegate {
+    private val controller = PresentationController(scheduler, nowElapsedMs, this)
+    private var progress: PresentationProgress? = null
+    private val ringBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 5f
+        strokeCap = Paint.Cap.ROUND
+        color = Color.argb(170, 0, 0, 0)
+    }
+    private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+        strokeCap = Paint.Cap.ROUND
+        color = Color.WHITE
+    }
+
+    val activeSession: PresentationSession? get() = controller.activeSession
+
+    /**
+     * Presents [widget] for a bounded period. Set [createdByPresentation] when the caller created
+     * the widget only for this presentation; RESTORE_PREVIOUS then closes it.
+     */
+    fun present(widget: BaseWidget, spec: PresentationSpec, createdByPresentation: Boolean = false): Boolean {
+        val targetId = registry.stableId(widget)
+        val session = controller.start(targetId, spec) {
+            if (registry.allWidgets().none { it === widget }) {
+                null
+            } else {
+                snapshotOf(widget, existedBeforePresentation = !createdByPresentation)
+            }
+        }
+        return session != null
+    }
+
+    fun cancelForUserInput(): Boolean = controller.cancelForUserInput()
+
+    fun dismiss(): Boolean = controller.dismiss()
+
+    /** Closes a presented widget; the removal isn't reported as a dashboard change. */
+    fun remove(widget: BaseWidget) {
+        withNotificationsSuppressed { closeWidget(widget) }
+    }
+
+    /** A widget is closing: a presentation of it ends where it is. */
+    fun onWidgetRemoving(widget: BaseWidget) {
+        val targetId = runCatching { registry.stableId(widget) }.getOrNull() ?: return
+        controller.onTargetRemoved(targetId)
+    }
+
+    /** The countdown ring at the presented widget's top-left corner. */
+    fun draw(canvas: Canvas) {
+        val progress = progress ?: return
+        val target = registry.findByStableId(progress.targetId) ?: return
+        val bounds = target.getBounds()
+        val (width, height) = viewportSize()
+        val centerX = (bounds.left + 16f).coerceIn(RING_RADIUS + 2f, width - RING_RADIUS - 2f)
+        val centerY = (bounds.top + 16f).coerceIn(RING_RADIUS + 2f, height - RING_RADIUS - 2f)
+        val ring = RectF(centerX - RING_RADIUS, centerY - RING_RADIUS, centerX + RING_RADIUS, centerY + RING_RADIUS)
+        canvas.drawCircle(centerX, centerY, RING_RADIUS, ringBackgroundPaint)
+        canvas.drawArc(ring, -90f, progress.fraction * 360f, false, ringPaint)
+    }
+
+    override fun onProgressChanged(progress: PresentationProgress?) {
+        this.progress = progress
+        notifyTransientChange()
+    }
+
+    override fun onPresentationStarted(session: PresentationSession) {
+        val widget = registry.findByStableId(session.targetId) ?: return
+        withNotificationsSuppressed {
+            if (widget.isMinimized) widget.toggleMinimize()
+            when (session.spec.mode) {
+                PresentationMode.FULLSCREEN -> if (!widget.isFullscreen) widget.toggleFullscreen()
+                PresentationMode.WINDOWED -> if (widget.isFullscreen) widget.toggleFullscreen()
+            }
+            // Presentation z-order is temporary and must not rewrite the dashboard layout.
+            bringToFront(widget)
+        }
+        notifyTransientChange()
+    }
+
+    override fun onRestorePrevious(session: PresentationSession) {
+        val target = registry.findByStableId(session.targetId)
+        if (!session.snapshot.existedBeforePresentation) {
+            target?.let {
+                remove(it)
+                notifyTransientChange()
+            }
+            return
+        }
+        target ?: return
+
+        withNotificationsSuppressed {
+            normalize(target)
+            target.isPinned = session.snapshot.pinned
+            if (session.snapshot.minimized) {
+                setBounds(target, session.snapshot.windowedBounds)
+                if (session.snapshot.wasFullscreenBeforeMinimize) {
+                    target.toggleFullscreen()
+                    target.toggleMinimize()
+                } else {
+                    target.toggleMinimize()
+                }
+                setBounds(target, session.snapshot.bounds)
+            } else if (session.snapshot.fullscreen) {
+                setBounds(target, session.snapshot.windowedBounds)
+                target.toggleFullscreen()
+            } else {
+                setBounds(target, session.snapshot.bounds)
+                if (!session.snapshot.visible && !target.isMinimized) target.toggleMinimize()
+            }
+
+            if (session.snapshot.focused) {
+                target.takeKeyFocus()
+            } else if (target.hasKeyFocus) {
+                clearKeyFocus()
+            }
+            restoreZOrder(target, session.snapshot.zOrder)
+            arrangeMinimizedWidgets()
+        }
+        notifyTransientChange()
+    }
+
+    override fun onLeaveWindowed(session: PresentationSession) {
+        val target = registry.findByStableId(session.targetId) ?: return
+        withNotificationsSuppressed {
+            normalize(target)
+            target.isPinned = session.snapshot.pinned
+            setBounds(target, session.snapshot.windowedBounds)
+            if (!session.snapshot.focused && target.hasKeyFocus) clearKeyFocus()
+            arrangeMinimizedWidgets()
+        }
+        notifyTransientChange()
+    }
+
+    override fun onClose(targetId: String) {
+        registry.findByStableId(targetId)?.let {
+            remove(it)
+            notifyTransientChange()
+        }
+    }
+
+    private fun snapshotOf(widget: BaseWidget, existedBeforePresentation: Boolean): PresentationSnapshot {
+        val rendered = widget.getBounds()
+        val renderedBounds = PresentationBounds(rendered.left, rendered.top, rendered.right, rendered.bottom)
+        val windowed = if (widget.isMinimized) {
+            val width = widget.savedMinWidth.takeIf { it > 0f } ?: rendered.width()
+            val height = widget.savedMinHeight.takeIf { it > 0f } ?: rendered.height()
+            PresentationBounds(
+                widget.savedMinX,
+                widget.savedMinY,
+                widget.savedMinX + width,
+                widget.savedMinY + height
+            )
+        } else {
+            val bounds = widget.getPersistenceBounds()
+            PresentationBounds(bounds.left, bounds.top, bounds.right, bounds.bottom)
+        }
+        return PresentationSnapshot(
+            existedBeforePresentation = existedBeforePresentation,
+            visible = !widget.isMinimized,
+            bounds = renderedBounds,
+            fullscreen = widget.isFullscreen,
+            focused = widget.hasKeyFocus,
+            zOrder = widget.zOrder,
+            windowedBounds = windowed,
+            minimized = widget.isMinimized,
+            wasFullscreenBeforeMinimize = widget.wasFullscreenBeforeMinimize,
+            pinned = widget.isPinned
+        )
+    }
+
+    private fun normalize(widget: BaseWidget) {
+        if (widget.isFullscreen) widget.toggleFullscreen()
+        if (widget.isMinimized) widget.toggleMinimize()
+        // A minimized widget may re-enter fullscreen as part of its normal restore path.
+        if (widget.isFullscreen) widget.toggleFullscreen()
+    }
+
+    private fun setBounds(widget: BaseWidget, bounds: PresentationBounds) {
+        widget.x = bounds.left
+        widget.y = bounds.top
+        widget.widgetWidth = bounds.width
+        widget.widgetHeight = bounds.height
+    }
+
+    private companion object {
+        const val RING_RADIUS = 9f
     }
 }

@@ -2,13 +2,9 @@ package com.everyday.everyday_glasses
 
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
 import android.graphics.PointF
-import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.Log
 import android.view.KeyEvent
@@ -49,7 +45,6 @@ import com.everyday.everyday_glasses.settings.DisplaySettingsHandler
 import com.everyday.everyday_glasses.runtime.GeminiSettingsListener
 import com.everyday.everyday_glasses.auth_permissions.GoogleAccountHandler
 import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
-import com.everyday.everyday_glasses.runtime.WidgetPersistenceListener
 import com.everyday.everyday_glasses.runtime.WidgetChangeListener
 import com.everyday.everyday_glasses._binocular.BinocularContentClass
 import com.everyday.everyday_glasses.interaction.commands.AppCommandCapabilities
@@ -57,14 +52,8 @@ import com.everyday.everyday_glasses.interaction.commands.AppCommandExecutor
 import com.everyday.everyday_glasses.interaction.commands.AppCommandResult
 import com.everyday.everyday_glasses.widgets.map.backend.GlassesRouteTransport
 import com.everyday.everyday_glasses.widgets._common.HandlerPresentationScheduler
-import com.everyday.everyday_glasses.widgets._common.PresentationBounds
-import com.everyday.everyday_glasses.widgets._common.PresentationController
-import com.everyday.everyday_glasses.widgets._common.PresentationLifecycleDelegate
-import com.everyday.everyday_glasses.widgets._common.PresentationMode
-import com.everyday.everyday_glasses.widgets._common.PresentationProgress
 import com.everyday.everyday_glasses.widgets._common.PresentationSession
-import com.everyday.everyday_glasses.widgets._common.PresentationSnapshot
-import com.everyday.everyday_glasses.widgets._common.PresentationSpec
+import com.everyday.everyday_glasses.widgets._common.WidgetPresenter
 import com.everyday.everyday_glasses.settings.SettingsController
 import com.everyday.everyday_glasses.interaction.user_input.UserInputActivity
 import com.everyday.everyday_glasses.interaction.user_input.UserInputKind
@@ -243,7 +232,7 @@ class WidgetContainer @JvmOverloads constructor(
     private val textEditing = TextEditingController(
         toContentSpace = ::screenToContentCoordinates,
         requestPhoneClipboard = { host?.requestClipboard() },
-        notifyFocusChanged = { onTextZoneFocusChanged() },
+        notifyFocusChanged = { notifyFocusChanged() },
         notifyTransientChange = ::notifyTransientContentChanged,
         notificationGeneration = ::contentNotificationGeneration,
         runClassifiedInput = { action, changed -> runClassifiedInput(action, changed) },
@@ -336,8 +325,8 @@ class WidgetContainer @JvmOverloads constructor(
         override fun isAvailable(requirement: CommandAvailability): Boolean = when (requirement) {
             CommandAvailability.ALWAYS -> true
             CommandAvailability.APP_READY -> isReady()
-            CommandAvailability.TEXT_FOCUSED -> textEditing.hasFocus || focusedBrowserWidget != null
-            CommandAvailability.BROWSER_AVAILABLE -> focusedBrowserWidget != null || fullscreenAs<BrowserWidget>() != null || isReady()
+            CommandAvailability.TEXT_FOCUSED -> textEditing.hasKeyFocus
+            CommandAvailability.BROWSER_AVAILABLE -> textEditing.focusedPage != null || fullscreenAs<BrowserWidget>() != null || isReady()
         }
 
         override fun toggleWidget(widgetId: CommandWidgetId) =
@@ -419,7 +408,7 @@ class WidgetContainer @JvmOverloads constructor(
     private var hoverConfirmTapGuardUntilMs: Long = 0L
 
     // ==================== Assistant Actions ====================
-    private val assistantUiContextCapture by lazy {AssistantUiContextCapture(registry = registry, screenSize = {width to height}, activeLayoutName = {layoutManager.activeLayoutName}, focusedWidget = {focusedWidget ?: focusedBrowserWidget})}
+    private val assistantUiContextCapture by lazy {AssistantUiContextCapture(registry = registry, screenSize = {width to height}, activeLayoutName = {layoutManager.activeLayoutName}, focusedWidget = ::keyFocusWidget)}
 
     private val textAssistantActions by lazy {
         TextAssistantActions(
@@ -428,12 +417,11 @@ class WidgetContainer @JvmOverloads constructor(
             createTextWidget = textModule::openForAssistant,
             clearEditing = { widget ->
                 widget.hideKeyboard()
-                textEditing.release(widget.textZone)
-                setFocusedWidget(null)
+                textEditing.clearAllFocus()
                 hideAssistantIme()
             },
-            presentWidget = { widget, spec, created -> presentWidget(widget, spec, created) },
-            removePresentationTarget = ::removePresentationTarget,
+            presentWidget = { widget, spec, created -> presenter.present(widget, spec, created) },
+            removePresentationTarget = presenter::remove,
         )
     }
 
@@ -445,7 +433,7 @@ class WidgetContainer @JvmOverloads constructor(
                 mapWidget
             },
             currentMap = { mapWidget },
-            present = { widget, spec -> presentWidget(widget, spec) },
+            present = { widget, spec -> presenter.present(widget, spec) },
             dismissPresentation = ::dismissMapPresentation,
             withTransientChanges = { action -> withTransientChangeBatch(action) },
             notifyTransientChange = ::notifyTransientContentChanged,
@@ -526,11 +514,7 @@ class WidgetContainer @JvmOverloads constructor(
         refreshBrightnessRules = ::refreshBrightnessRules,
         sendMirrorRequest = { start -> host?.requestMirror(start) },
     )
-    private val textModule = TextBoxModule(
-        dashboardServices,
-        focus = { setFocusedWidget(it) },
-        releaseFocus = { if (focusedWidget === it) setFocusedWidget(null) },
-    )
+    private val textModule = TextBoxModule(dashboardServices)
     private val imageModule = ImageModule(dashboardServices, context) { registry.imageWidgets }
     private val videoModule = VideoModule(
         dashboardServices,
@@ -633,12 +617,6 @@ class WidgetContainer @JvmOverloads constructor(
     private val browserWidgets: List<BrowserWidget> get() = registry.browserWidgets
     private val videoWidgets: List<VideoWidget> get() = registry.videoWidgets
 
-    // Text widget whose text area is being edited
-    private val focusedWidget: TextBoxWidget? get() = textEditing.focusedZone?.let { zone -> widgets.firstOrNull { it.textZone === zone } }
-
-    // Browser receiving keys for its web page (address bar keys go through the text editing controller)
-    private var focusedBrowserWidget: BrowserWidget? = null
-
     // Widget being dragged
     private var activeWidget: BaseWidget? = null
     private var isWidgetLayoutLocked = false
@@ -664,47 +642,18 @@ class WidgetContainer @JvmOverloads constructor(
     // ==================== Long-press Detection ====================
     
     private val handler = Handler(Looper.getMainLooper())
-    private var presentationProgress: PresentationProgress? = null
-    private val presentationProgressBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 5f
-        strokeCap = Paint.Cap.ROUND
-        color = Color.argb(170, 0, 0, 0)
-    }
-    private val presentationProgressPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 3f
-        strokeCap = Paint.Cap.ROUND
-        color = Color.WHITE
-    }
-    private val presentationController by lazy {
-        PresentationController(
-            scheduler = HandlerPresentationScheduler(handler),
-            nowElapsedMs = { SystemClock.elapsedRealtime() },
-            delegate = object : PresentationLifecycleDelegate {
-                override fun onPresentationStarted(session: PresentationSession) {
-                    applyPresentation(session)
-                }
-
-                override fun onRestorePrevious(session: PresentationSession) {
-                    restorePresentationPrevious(session)
-                }
-
-                override fun onLeaveWindowed(session: PresentationSession) {
-                    leavePresentationWindowed(session)
-                }
-
-                override fun onClose(targetId: String) {
-                    closePresentationTarget(targetId)
-                }
-
-                override fun onProgressChanged(progress: PresentationProgress?) {
-                    presentationProgress = progress
-                    notifyTransientContentChanged()
-                }
-            }
-        )
-    }
+    private val presenter = WidgetPresenter(
+        scheduler = HandlerPresentationScheduler(handler),
+        registry = registry,
+        viewportSize = { width.toFloat() to height.toFloat() },
+        closeWidget = { lifecycleController.close(it) },
+        bringToFront = ::bringWidgetToFront,
+        restoreZOrder = { widget, zOrder -> registry.restoreZOrder(widget, zOrder, parent as? ViewGroup, this) },
+        arrangeMinimizedWidgets = { lifecycleController.arrangeMinimizedWidgets() },
+        clearKeyFocus = { textEditing.clearAllFocus() },
+        withNotificationsSuppressed = { action -> withContentChangeSuppressed(action) },
+        notifyTransientChange = ::notifyTransientContentChanged,
+    )
     private var longPressRunnable: Runnable? = null
     private var longPressStartX = 0f
     private var longPressStartY = 0f
@@ -737,10 +686,7 @@ class WidgetContainer @JvmOverloads constructor(
             capture = widgetCaptureRestore::getBrowserWidgetState,
             restore = ::restoreBrowserWidget,
             configure = ::configureBrowserWidget,
-            beforeRemove = { widget ->
-                textEditing.release(widget.addressZone)
-                if (focusedBrowserWidget === widget) setFocusedWidget(null)
-            },
+            beforeRemove = BrowserWidget::releaseKeyFocus,
         )
     }
 
@@ -801,15 +747,11 @@ class WidgetContainer @JvmOverloads constructor(
     init {
         setWillNotDraw(false)
         registerWidgetLifecycles()
-        setupWidgetCaptureRestoreCallbacks()
         unitSettings.onChanged = { applyEffectiveUnitSettings() } // Callers own the classified notification for unit changes; applying the derived widget presentation here must not emit a second transient callback.
         applyEffectiveUnitSettings()
     }
 
-    override fun onDetachedFromWindow() {
-        presentationController.dismiss()
-        super.onDetachedFromWindow()
-    }
+    override fun onDetachedFromWindow() {presenter.dismiss(); super.onDetachedFromWindow()}
 
     private fun registerWidgetLifecycles() {
         //multi-instance widget registration
@@ -834,23 +776,6 @@ class WidgetContainer @JvmOverloads constructor(
         lifecycleController.verifyComplete()
     }
 
-    private fun setupWidgetCaptureRestoreCallbacks() {
-        widgetCaptureRestore.listener = object : WidgetPersistenceListener {
-            override fun onWidgetFocusChanged(widget: BaseWidget?, focused: Boolean) {
-                if (focused && widget != null) {
-                    setFocusedWidget(widget)
-                } else if (!focused) {
-                    if (widget is BrowserWidget && focusedBrowserWidget == widget) {
-                        setFocusedWidget(null)
-                    }
-                }
-            }
-
-            override fun onBrowserKeyboardRequested(show: Boolean) {
-                host?.requestBrowserKeyboard(show)
-            }
-        }
-    }
 
     // ==================== Public State Queries ====================
 
@@ -906,34 +831,12 @@ class WidgetContainer @JvmOverloads constructor(
     fun onHeadUpWake() {newsFeatures.onHeadUpWake(); Log.d(TAG, "Head-up wake -> advance news item")}
     fun hasPinnedWidgets(): Boolean = registry.hasPinnedWidgets()
     fun isDisplayAwake(): Boolean = displayState == WakeSleepManager.DisplayState.WAKE
-    val activePresentationSession: PresentationSession? get() = presentationController.activeSession
 
-    /**
-     * Present an already-created widget for a bounded period. Set [createdByPresentation] when
-     * the caller created the widget solely for this presentation; RESTORE_PREVIOUS then closes it.
-     */
-    fun presentWidget(
-        widget: BaseWidget,
-        spec: PresentationSpec,
-        createdByPresentation: Boolean = false
-    ): Boolean {
-        val targetId = widgetStableId(widget)
-        val session = presentationController.start(targetId, spec) {
-            if (!registry.allWidgets().any { it === widget }) {
-                null
-            } else {
-                capturePresentationSnapshot(widget, existedBeforePresentation = !createdByPresentation)
-            }
-        }
-        return session != null
-    }
-
-    fun cancelPresentationForUserInput(): Boolean = presentationController.cancelForUserInput()
-
-    fun dismissPresentation(): Boolean = presentationController.dismiss()
-
-    /** Stable ID used by assistant context and temporary presentation targeting. */
-    fun widgetStableId(widget: BaseWidget): String = stableWidgetId(widget)
+    // Widget presentation by assistant
+    val activePresentationSession: PresentationSession? get() = presenter.activeSession
+    fun cancelPresentationForUserInput(): Boolean = presenter.cancelForUserInput()
+    fun dismissPresentation(): Boolean = presenter.dismiss()
+    fun widgetStableId(widget: BaseWidget): String = stableWidgetId(widget) /** Stable ID used by assistant context and temporary presentation targeting. */
 
     /**
      * Returns the requested browser instance without falling back to another browser.
@@ -960,158 +863,20 @@ class WidgetContainer @JvmOverloads constructor(
         val widget = if (normalizedId != null) {
             findBrowserWidgetByStableId(normalizedId)
         } else {
-            focusedBrowserWidget?.takeIf { !it.isMinimized }
+            (textEditing.focusedPage as? BrowserWidget)?.takeIf { !it.isMinimized }
                 ?: browserWidgets.firstOrNull { !it.isMinimized }
         } ?: return null
         val stableId = stableWidgetId(widget)
         return BrowserWidgetPageAgentAdapter.bind(stableId, widget)
     }
+    private fun stableWidgetId(widget: BaseWidget): String          = registry.stableId(widget)
+    private fun findWidgetByStableId(targetId: String): BaseWidget? = registry.findByStableId(targetId)
 
-    private fun stableWidgetId(widget: BaseWidget): String = registry.stableId(widget)
-    private fun findWidgetByStableId(targetId: String): BaseWidget? =
-        registry.findByStableId(targetId)
 
-    private fun capturePresentationSnapshot(
-        widget: BaseWidget,
-        existedBeforePresentation: Boolean
-    ): PresentationSnapshot {
-        val rendered = widget.getBounds()
-        val renderedBounds =
-            PresentationBounds(rendered.left, rendered.top, rendered.right, rendered.bottom)
-        val windowed = if (widget.isMinimized) {
-            val width = widget.savedMinWidth.takeIf { it > 0f } ?: rendered.width()
-            val height = widget.savedMinHeight.takeIf { it > 0f } ?: rendered.height()
-            PresentationBounds(
-                widget.savedMinX,
-                widget.savedMinY,
-                widget.savedMinX + width,
-                widget.savedMinY + height
-            )
-        } else {
-            val bounds = widget.getPersistenceBounds()
-            PresentationBounds(bounds.left, bounds.top, bounds.right, bounds.bottom)
-        }
-        return PresentationSnapshot(
-            existedBeforePresentation = existedBeforePresentation,
-            visible = !widget.isMinimized,
-            bounds = renderedBounds,
-            fullscreen = widget.isFullscreen,
-            focused = focusedWidget === widget || focusedBrowserWidget === widget,
-            zOrder = widget.zOrder,
-            windowedBounds = windowed,
-            minimized = widget.isMinimized,
-            wasFullscreenBeforeMinimize = widget.wasFullscreenBeforeMinimize,
-            pinned = widget.isPinned
-        )
-    }
-
-    private fun applyPresentation(session: PresentationSession) {
-        val widget = findWidgetByStableId(session.targetId) ?: return
-        withContentChangeSuppressed {
-            if (widget.isMinimized) widget.toggleMinimize()
-            when (session.spec.mode) {
-                PresentationMode.FULLSCREEN -> if (!widget.isFullscreen) widget.toggleFullscreen()
-                PresentationMode.WINDOWED -> if (widget.isFullscreen) widget.toggleFullscreen()
-            }
-            // Presentation z-order is temporary and must not rewrite the dashboard layout.
-            bringWidgetToFront(widget)
-        }
-        notifyTransientContentChanged()
-    }
-
-    private fun normalizePresentationWidget(widget: BaseWidget) {
-        if (widget.isFullscreen) widget.toggleFullscreen()
-        if (widget.isMinimized) widget.toggleMinimize()
-        // A minimized widget may re-enter fullscreen as part of its normal restore path.
-        if (widget.isFullscreen) widget.toggleFullscreen()
-    }
-
-    private fun setWidgetBounds(widget: BaseWidget, bounds: PresentationBounds) {
-        widget.x = bounds.left
-        widget.y = bounds.top
-        widget.widgetWidth = bounds.width
-        widget.widgetHeight = bounds.height
-    }
-
-    private fun restorePresentationPrevious(session: PresentationSession) {
-        val target = findWidgetByStableId(session.targetId)
-        if (!session.snapshot.existedBeforePresentation) {
-            target?.let {
-                removePresentationTarget(it)
-                notifyTransientContentChanged()
-            }
-            return
-        }
-        target ?: return
-
-        withContentChangeSuppressed {
-            normalizePresentationWidget(target)
-            target.isPinned = session.snapshot.pinned
-            if (session.snapshot.minimized) {
-                setWidgetBounds(target, session.snapshot.windowedBounds)
-                if (session.snapshot.wasFullscreenBeforeMinimize) {
-                    target.toggleFullscreen()
-                    target.toggleMinimize()
-                } else {
-                    target.toggleMinimize()
-                }
-                setWidgetBounds(target, session.snapshot.bounds)
-            } else if (session.snapshot.fullscreen) {
-                setWidgetBounds(target, session.snapshot.windowedBounds)
-                target.toggleFullscreen()
-            } else {
-                setWidgetBounds(target, session.snapshot.bounds)
-                if (!session.snapshot.visible && !target.isMinimized) target.toggleMinimize()
-            }
-
-            if (session.snapshot.focused) {
-                setFocusedWidget(target)
-            } else if (focusedWidget === target || focusedBrowserWidget === target) {
-                setFocusedWidget(null)
-            }
-            registry.restoreZOrder(target, session.snapshot.zOrder, parent as? ViewGroup, this)
-            lifecycleController.arrangeMinimizedWidgets()
-        }
-        notifyTransientContentChanged()
-    }
-
-    private fun leavePresentationWindowed(session: PresentationSession) {
-        val target = findWidgetByStableId(session.targetId) ?: return
-        withContentChangeSuppressed {
-            normalizePresentationWidget(target)
-            target.isPinned = session.snapshot.pinned
-            setWidgetBounds(target, session.snapshot.windowedBounds)
-            if (!session.snapshot.focused && (focusedWidget === target || focusedBrowserWidget === target)) {
-                setFocusedWidget(null)
-            }
-            lifecycleController.arrangeMinimizedWidgets()
-        }
-        notifyTransientContentChanged()
-    }
-
-    private fun closePresentationTarget(targetId: String) {
-        findWidgetByStableId(targetId)?.let {
-            removePresentationTarget(it)
-            notifyTransientContentChanged()
-        }
-    }
-
-    private fun removePresentationTarget(widget: BaseWidget) {
-        withContentChangeSuppressed { lifecycleController.close(widget) }
-    }
-
-    private fun notifyPresentationTargetRemoved(widget: BaseWidget) {
-        presentationController.onTargetRemoved(runCatching { stableWidgetId(widget) }.getOrNull() ?: return)
-    }
-
-    /** Shared cleanup for every closed widget, run while it still has its stable ID. */
-    private fun onWidgetRemoving(widget: BaseWidget) {
-        notifyPresentationTargetRemoved(widget)
-        if (activeWidget === widget) activeWidget = null
-    }
-
-    private fun requestRepaint() = contentChanges.requestRepaint() /** Requests one local redraw for pixel-only visual state. */
+    private fun onWidgetRemoving(widget: BaseWidget)                {presenter.onWidgetRemoving(widget) ; if (activeWidget === widget) activeWidget = null} /** Shared cleanup for every closed widget, run while it still has its stable ID. */
+    private fun requestRepaint()                                    = contentChanges.requestRepaint() /** Requests one local redraw for pixel-only visual state. */
     private fun <T> withContentChangeSuppressed(action: () -> T): T = contentChanges.withNotificationsSuppressed(action) /** Discards callbacks produced by a temporary or restorative compound mutation. */
+
     /** Reports focus to the host and emits the one classified visual change for that mutation. */
     private fun notifyFocusChanged(persistent: Boolean = false) {
         // The phone keyboard follows text focus, which is not a suppressible dashboard change:
@@ -1157,13 +922,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun configureBrowserWidget(widget: BrowserWidget) {
-        widget.listener = object : BrowserWidgetListener {
-            override fun onFocusChanged(focused: Boolean) {
-                if (focused) setFocusedWidget(widget)
-                else if (focusedBrowserWidget == widget) setFocusedWidget(null)
-            }
-            override fun onKeyboardRequested(show: Boolean) {host?.requestBrowserKeyboard(show)}
-        }
+        widget.listener = object : BrowserWidgetListener {override fun onKeyboardRequested(show: Boolean) {host?.requestBrowserKeyboard(show)}}
         widget.refreshDisplayVisibility()
     }
 
@@ -1478,7 +1237,7 @@ class WidgetContainer @JvmOverloads constructor(
         
         // A long press on the focused text zone starts a text selection.
         if (textEditing.focusedZoneContains(x, y)) {
-            focusedWidget?.let(::bringWidgetToFrontForInteraction)
+            keyFocusWidget()?.let(::bringWidgetToFrontForInteraction)
             pendingTextSelection = true
             scheduleLongPress()
             return
@@ -2177,7 +1936,6 @@ class WidgetContainer @JvmOverloads constructor(
             lifecycleController.open(browserLifecycle) { widget }
             widget.toggleFullscreen()
             widget.setFocused(true)
-            setFocusedWidget(widget)
         }
     }
 
@@ -2199,7 +1957,6 @@ class WidgetContainer @JvmOverloads constructor(
             action = {
                 lifecycleController.open(browserLifecycle) { widget }?.let { opened ->
                     opened.setFocused(true)
-                    setFocusedWidget(opened)
                     BrowserWidgetPageAgentAdapter.bind(stableWidgetId(opened), opened)
                         ?: run {
                             lifecycleController.close(opened)
@@ -2212,7 +1969,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun openBrowserAddress(address: String) {
-        val widget = focusedBrowserWidget
+        val widget = textEditing.focusedPage as? BrowserWidget
             ?: fullscreenAs<BrowserWidget>()
             ?: createFullscreenBrowserWidget()
             ?: return
@@ -2221,7 +1978,7 @@ class WidgetContainer @JvmOverloads constructor(
             if (widget.isMinimized) widget.toggleMinimize()
             bringWidgetToFront(widget)
             widget.setFocused(true)
-            setFocusedWidget(widget)
+            textEditing.clearAllFocus()
             widget.navigateToAddress(address, autoFullscreenVideo = true)
         }
     }
@@ -2258,7 +2015,6 @@ class WidgetContainer @JvmOverloads constructor(
             widget.getWebView()?.loadUrl("https://www.youtube.com/feed/history")
             widget.toggleFullscreen()
             widget.setFocused(true)
-            setFocusedWidget(widget)
         }
     }
 
@@ -2268,62 +2024,10 @@ class WidgetContainer @JvmOverloads constructor(
     fun createPdfWidget(uri: android.net.Uri, displayName: String)   = pdfModule.open(uri, displayName)
     fun createFileBrowserWidget(filter: FileBrowserWidget.FileFilter, onFileSelected: (FileBrowserWidget.FileEntry) -> Unit) = fileBrowserModule.open(filter, onFileSelected)
 
-    /**
-     * Focus for typing: a text widget's text area, or a browser page whose web content receives
-     * keys directly. Other fields request focus from the text editing controller themselves.
-     */
-    private fun setFocusedWidget(widget: BaseWidget?) {
-        when (widget) {
-            is TextBoxWidget -> {
-                setBrowserFocus(null)
-                textEditing.focus(widget.textZone)
-            }
-            is BrowserWidget -> {
-                if (textEditing.focusedZone !== widget.addressZone) textEditing.clearFocus()
-                setBrowserFocus(widget)
-            }
-            else -> {
-                textEditing.clearFocus()
-                setBrowserFocus(null)
-            }
-        }
-    }
-
-    private fun setBrowserFocus(widget: BrowserWidget?) {
-        val previous = focusedBrowserWidget
-        if (previous === widget) return
-        focusedBrowserWidget = widget
-        previous?.setFocused(false)
-        notifyFocusChanged()
-    }
-
-    /** Only one thing takes typed keys: a newly focused text zone ends web page typing. */
-    private fun onTextZoneFocusChanged() {
-        val browser = focusedBrowserWidget
-        val zone = textEditing.focusedZone
-        if (browser != null && zone != null && zone !== browser.addressZone) {
-            focusedBrowserWidget = null
-            browser.setFocused(false)
-        }
-        notifyFocusChanged()
-    }
-
-    fun unfocusAll() {mapWidget?.takeIf { it.isAddressEntryFocused() }?.closeAddressEntry(); setFocusedWidget(null)}
-
-    /** Keys go to the focused text zone first, otherwise to the focused browser's web page. */
-    fun onKeyPress(key: String, userInitiated: Boolean = false) {
-        if (userInitiated) userInputActivity?.onUserInput(UserInputKind.KEYBOARD)
-        if (textEditing.onKey(key)) return
-        val browser = focusedBrowserWidget ?: return
-        val before = browser.persistentSignature()
-        runClassifiedInput(
-            action = {
-                browser.onKeyPress(key)
-                true
-            },
-            changed = { browser.persistentSignature() != before }
-        )
-    }
+    //keyboard focus handling
+    private fun keyFocusWidget(): BaseWidget? = registry.allWidgets().firstOrNull { it.hasKeyFocus } /** The widget that typed keys go to: a text box or a browser page. */
+    fun unfocusAll() {registry.forEachWidget { it.releaseKeyFocus() }; textEditing.clearAllFocus()} /** Takes the keyboard from everything, closing the map's address search if it has it. */
+    fun onKeyPress(key: String, userInitiated: Boolean = false) {if (userInitiated) userInputActivity?.onUserInput(UserInputKind.KEYBOARD); textEditing.typeKey(key)} /** Keys go to the focused text zone first, otherwise to the focused browser's web page. */
 
     private fun ensureDrawnAboveNativeOverlays() {
         val rootView = parent as? ViewGroup ?: return
@@ -2335,7 +2039,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Public Accessors ====================
     fun setPhoneClipboard(content: String?)                                                                             = textEditing.setPhoneClipboard(content)
-    fun hasFocusedWidget():                                                                                     Boolean = textEditing.hasFocus || focusedBrowserWidget != null
+    fun hasFocusedWidget():                                                                                     Boolean = textEditing.hasKeyFocus
     fun isMenuVisible():                                                                                        Boolean = contextMenu?.isVisible == true || textEditing.isMenuVisible || layoutNamePrompt?.isVisible == true
     fun isClosePopupVisible():                                                                                  Boolean = closeConfirmationPopup?.isVisible == true || layoutDeleteConfirmationPopup?.isVisible == true
     fun isAnyPopupVisible():                                                                                    Boolean = isMenuVisible() || isClosePopupVisible() || pageAgentApprovalOverlay.isVisible()
@@ -2383,7 +2087,7 @@ class WidgetContainer @JvmOverloads constructor(
                 pinnedFullscreenWidget.draw(canvas)
                 if (!settingsController.isHoverControlsLayoutEditorVisible()) {drawHoverControls(canvas)}
                 drawVisibleKeyboardOverlays(canvas)
-                drawPresentationProgress(canvas)
+                presenter.draw(canvas)
                 drawOverlayMenus(canvas)
                 return
             }
@@ -2394,7 +2098,7 @@ class WidgetContainer @JvmOverloads constructor(
                 drawHoverControls(canvas)
             }
             drawVisibleKeyboardOverlays(canvas)
-            drawPresentationProgress(canvas)
+            presenter.draw(canvas)
             drawOverlayMenus(canvas)
             return
         }
@@ -2408,7 +2112,7 @@ class WidgetContainer @JvmOverloads constructor(
                 drawHoverControls(canvas)
             }
             drawVisibleKeyboardOverlays(canvas)
-            drawPresentationProgress(canvas)
+            presenter.draw(canvas)
             drawOverlayMenus(canvas)
             return
         }
@@ -2437,7 +2141,7 @@ class WidgetContainer @JvmOverloads constructor(
 
         threeDofOverlay.draw(canvas)            // Draw 3DOF overlay (boundary rectangle - moves with content to show head-locked area)
         if (transform.applies) canvas.restore() // Restore canvas if 3DOF was applied
-        drawPresentationProgress(canvas)
+        presenter.draw(canvas)
         drawOverlayMenus(canvas)         // Draw menus (not affected by 3DOF - stay head-locked like cursor)
 
         // Note: Brightness dimming is handled at window level via WindowManager.LayoutParams.screenBrightness
@@ -2464,18 +2168,6 @@ class WidgetContainer @JvmOverloads constructor(
     private fun drawVisibleKeyboardOverlays(canvas: Canvas) {
         registry.fullscreenWidget?.let { fullscreen -> if (!fullscreen.drawsOwnKeyboard) fullscreen.visibleKeyboard?.draw(canvas); return}
         registry.getAllSortedByZOrder().forEach { widget -> if (!widget.isMinimized && !widget.drawsOwnKeyboard) widget.visibleKeyboard?.draw(canvas)}
-    }
-
-    private fun drawPresentationProgress(canvas: Canvas) {
-        val progress = presentationProgress ?: return
-        val target = findWidgetByStableId(progress.targetId) ?: return
-        val bounds = target.getBounds()
-        val radius = 9f
-        val centerX = (bounds.left + 16f).coerceIn(radius + 2f, width - radius - 2f)
-        val centerY = (bounds.top + 16f).coerceIn(radius + 2f, height - radius - 2f)
-        val ring = RectF(centerX - radius, centerY - radius, centerX + radius, centerY + radius)
-        canvas.drawCircle(centerX, centerY, radius, presentationProgressBackgroundPaint)
-        canvas.drawArc(ring, -90f, progress.fraction * 360f, false, presentationProgressPaint)
     }
 
     // ==================== Keyboard overlay input priority ====================
@@ -2816,11 +2508,11 @@ class WidgetContainer @JvmOverloads constructor(
         layoutNamePrompt?.dismiss()
         cancelLongPress()
         cancelHoverControlInteractions()
-        setFocusedWidget(null)
+        textEditing.clearAllFocus()
     }
 
     private fun clearWidgetsForLayoutReplace() {
-        registry.allWidgets().forEach(::notifyPresentationTargetRemoved)
+        registry.allWidgets().forEach(presenter::onWidgetRemoving)
         exitAllFullscreen()
         lifecycleController.closeAll()
         activeWidget = null
@@ -2835,10 +2527,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun openClosedBrowserTemplate(): BrowserWidget? = runPersistentMutation(changed = { it != null }) {
         (lifecycleController.openClosedTemplate(WidgetTypeId.BROWSER) as? BrowserWidget)?.also { widget ->
-            if (!widget.isMinimized) {
-                widget.setFocused(true)
-                setFocusedWidget(widget)
-            }
+            if (!widget.isMinimized) {widget.setFocused(true)}
         }
     }
 
@@ -2859,5 +2548,5 @@ class WidgetContainer @JvmOverloads constructor(
     fun onTrimMemory(level: Int)                      {browserWidgets.forEach { it.onTrimMemory(level) }}
     fun onLowMemory()                                 {browserWidgets.forEach { it.onLowMemory() }}
     fun clearDebugWebViewData(profileSummary: String) {browserWidgets.forEach { it.clearDebugWebViewData(profileSummary) }}
-    fun release()                                     {presentationController.dismiss() ; lifecycleController.closeAll()}
+    fun release()                                     {presenter.dismiss() ; lifecycleController.closeAll()}
 }

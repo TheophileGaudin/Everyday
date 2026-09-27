@@ -34,6 +34,7 @@ import android.widget.FrameLayout
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
+import com.everyday.everyday_glasses.interaction.user_input.KeyTarget
 import com.everyday.everyday_glasses.interaction.user_input.TextEditAction
 import com.everyday.everyday_glasses.interaction.user_input.TextZone
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
@@ -62,7 +63,7 @@ class BrowserWidget(
     y: Float,
     widgetWidth: Float,
     widgetHeight: Float
-) : BaseWidget(WidgetTypeId.BROWSER, x, y, widgetWidth, widgetHeight) {
+) : BaseWidget(WidgetTypeId.BROWSER, x, y, widgetWidth, widgetHeight), KeyTarget {
 
     companion object {
         private const val TAG = "BrowserWidget"
@@ -1880,11 +1881,26 @@ class BrowserWidget(
         return true
     }
 
+    // ==================== Keyboard focus ====================
+
+    override val ownField: TextZone get() = addressZone
+    override fun onPageKey(key: String) = onKeyPress(key)
+    override fun savedState(): Any = persistentSignature()
+    override fun onKeyFocusLost() = setFocused(false)
+
+    override val hasKeyFocus: Boolean get() = isFocused
+    override fun takeKeyFocus() = setFocused(true)
+
+    override fun releaseKeyFocus() {
+        textZoneHost?.release(addressZone)
+        setFocused(false)
+    }
+
     // Input handling
     fun setFocused(focused: Boolean) {
         if (isFocused == focused) return
         isFocused = focused
-        listener?.onFocusChanged(focused)
+        if (focused) textZoneHost?.focusPage(this) else textZoneHost?.releasePage(this)
 
         if (focused) {
             ensureActiveWebView()

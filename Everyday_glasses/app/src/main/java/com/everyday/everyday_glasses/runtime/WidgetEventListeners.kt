@@ -90,11 +90,6 @@ interface VideoWidgetListener {
     fun onPlaybackVisibilityChanged(active: Boolean) = Unit
 }
 
-interface WidgetPersistenceListener {
-    fun onWidgetFocusChanged(widget: BaseWidget?, focused: Boolean) = Unit
-    fun onBrowserKeyboardRequested(show: Boolean) = Unit
-}
-
 interface GeminiSettingsListener {
     fun onPasteGeminiKey() = Unit
     fun onRemoveGeminiKey() = Unit
