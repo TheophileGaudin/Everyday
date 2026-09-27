@@ -149,7 +149,7 @@ import java.util.concurrent.CompletableFuture
  * The other owners: [WidgetRegistry] (the widgets and their order), [WidgetLifecycleController]
  * (opening, closing, closed templates), [TextEditingController] (keyboard focus),
  * [WidgetPresenter] (assistant presentations), [WidgetLayoutManager] (layouts and replacing the
- * dashboard) and [settingsController] (the settings screens, also used by the activity).
+ * dashboard) and [SettingsController] (the settings screens, also used by the activity).
  */
 /** Observes user-visible content changes produced by [com.everyday.everyday_glasses.WidgetContainer]. */
 interface WidgetContentObserver {

@@ -16,8 +16,6 @@ import com.everyday.everyday_glasses.widgets.phone_screen_mirror.ScreenMirrorWid
 import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidget
 import com.everyday.everyday_glasses.widgets.system_status.StatusBarWidget
 import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleWidget
-import com.everyday.everyday_glasses.widgets.text_editor.TextBoxWidget
-import com.everyday.everyday_glasses.widgets.file_browser.VideoWidget
 import com.everyday.everyday_glasses.widgets._common.WidgetHitTestCache
 import java.util.IdentityHashMap
 
@@ -49,10 +47,8 @@ class WidgetRegistry {
     var fullscreenWidget: BaseWidget? = null
         private set
 
-    val textWidgets: List<TextBoxWidget> get() = widgetsAs(WidgetTypeId.TEXT)
     val browserWidgets: List<BrowserWidget> get() = widgetsAs(WidgetTypeId.BROWSER)
     val imageWidgets: List<ImageWidget> get() = widgetsAs(WidgetTypeId.IMAGE)
-    val videoWidgets: List<VideoWidget> get() = widgetsAs(WidgetTypeId.VIDEO)
     val statusBarWidget: StatusBarWidget? get() = singletonAs(WidgetTypeId.STATUS)
     val weatherWidget: WeatherWidget? get() = singletonAs(WidgetTypeId.LOCATION)
     val mapWidget: MapWidget? get() = singletonAs(WidgetTypeId.MAP)
