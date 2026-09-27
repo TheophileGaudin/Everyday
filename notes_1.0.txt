@@ -22,3 +22,12 @@ Migrated a number of functionalities in WidgetContainer to dedicated services.
 Extracted a number of classes from MainActivity and WidgetContainer to reduce the number of responsibilities in these central files
 Grouped a number of callbacks into interfaces.
 Defined boundary between active dashboard and listing of saved layouts
+
+
+Behaviors to investigate before full release:
+=> make sure the agent can run map searches
+=> make it so the images are saved if they are made part of a layout
+=> investigate performance in general
+
+Questions: 
+=> how to re order the content of WidgetContainer in a way making it easier to read without impacting functionality

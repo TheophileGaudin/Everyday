@@ -18,7 +18,6 @@ import com.everyday.everyday_glasses.interaction.assistant.AssistantModel
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.AssistantTextPresentationRequest
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolCatalog
 import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContext
-import com.everyday.everyday_glasses.interaction.assistant.AssistantVoiceHoverControl
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserRoutingCoordinator
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserWidgetPageAgentAdapter
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.ConfigureMapPoisRequest
@@ -79,20 +78,17 @@ import com.everyday.everyday_glasses.runtime.DashboardServices
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.LayoutLibrary
-import com.everyday.everyday_glasses.persistence.ShortcutsStore
-import com.everyday.everyday_glasses.ui.hover_controls.BaseHoverControl
+import com.everyday.everyday_glasses.ui.hover_controls.HoverControlsLayer
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
 import com.everyday.everyday_glasses.widgets.calendar.CalendarModule
 import com.everyday.everyday_glasses.widgets.calendar.CalendarWidget
-import com.everyday.everyday_glasses.ui.hover_controls.CloseAppHoverControl
 import com.everyday.everyday_glasses.ui.components.CloseConfirmationPopup
 import com.everyday.everyday_glasses.ui.components.ContextMenu
 import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserModule
 import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidget
 import com.everyday.everyday_glasses.widgets.finance.FinanceWidget
 import com.everyday.everyday_glasses.widgets.file_browser.ImageModule
-import com.everyday.everyday_glasses.ui.hover_controls.LemonHoverControl
 import com.everyday.everyday_glasses.widgets.weather_location.LocationWidget
 import com.everyday.everyday_glasses.widgets.map.MapModule
 import com.everyday.everyday_glasses.widgets.map.MapWidget
@@ -209,7 +205,6 @@ class WidgetContainer @JvmOverloads constructor(
         private const val DEFAULT_SPEED_VISIBILITY_THRESHOLD_KMH = 1f
         private const val LONG_PRESS_DELAY_MS = 250L
         private const val LONG_PRESS_MAX_MOVEMENT = 20f
-        private const val HOVER_CONFIRM_RELEASE_TAP_GUARD_MS = 300L
         
         // Phone trackpad sensitivity multiplier
         private const val PHONE_TRACKPAD_SENSITIVITY = 1.5f
@@ -347,29 +342,12 @@ class WidgetContainer @JvmOverloads constructor(
         override fun commandFinished() = Unit
     }
 
-    private val closeAppHoverControl = CloseAppHoverControl {
-        executeCommand(commandRegistry.invocation(commandRegistry.closeApp))
-    }
-    private val assistantVoiceHoverControl = AssistantVoiceHoverControl {
-        host?.toggleAssistantVoice()
-    }
-
-    // Mutable list of lemon shortcuts; loaded lazily from disk on first access so the
-    // file read doesn't happen during construction (context.getExternalFilesDir is fine
-    // but disk I/O during init is best avoided).
-    private var lemonShortcuts: MutableList<AppCommandInvocation>? = null
-    private fun ensureLemonShortcuts(): MutableList<AppCommandInvocation> {
-        val cached = lemonShortcuts
-        if (cached != null) return cached
-        val loaded = ShortcutsStore.load(context, commandRegistry).toMutableList()
-        lemonShortcuts = loaded
-        return loaded
-    }
-
-    private val lemonHoverControl: LemonHoverControl = LemonHoverControl(
+    private val hoverControlsLayer = HoverControlsLayer(
+        context = context,
         commandRegistry = commandRegistry,
-        shortcutsProvider = { ensureLemonShortcuts() },
-        onActionSelected = { invocation ->
+        closeApp = { executeCommand(commandRegistry.invocation(commandRegistry.closeApp)) },
+        toggleAssistantVoice = { host?.toggleAssistantVoice() },
+        runShortcut = { invocation ->
             userInputActivity?.onUserInput(UserInputKind.SHORTCUT)
             if (invocation.commandId == commandRegistry.createText.id) {
                 pendingCreateX = (width * 0.5f) - (width * TextBoxModule.DEFAULT_WIDTH_PERCENT) / 2f
@@ -381,18 +359,11 @@ class WidgetContainer @JvmOverloads constructor(
             executeCommand(invocation)
             host?.requestCursorCenter()
         },
-        invalidate = { invalidateHoverVisuals() }
+        requestCursorCenter = { host?.requestCursorCenter() },
+        repaint = { invalidateHoverVisuals() },
+        notifyTransientChange = { notifyTransientContentChanged() },
+        isModalOpen = { isAnyModalOverHoverControls() },
     )
-
-    private val hoverControls: List<BaseHoverControl> = listOf(
-        closeAppHoverControl,
-        assistantVoiceHoverControl,
-        lemonHoverControl
-    )
-
-    /** Hover control currently capturing the cursor (between down and up). */
-    private var capturedHoverControl: BaseHoverControl? = null
-    private var hoverConfirmTapGuardUntilMs: Long = 0L
 
     // ==================== Assistant Actions ====================
     private val assistantUiContextCapture by lazy {AssistantUiContextCapture(registry = registry, screenSize = {width to height}, activeLayoutName = {layoutManager.activeLayoutName}, focusedWidget = ::keyFocusWidget)}
@@ -575,8 +546,8 @@ class WidgetContainer @JvmOverloads constructor(
         disconnectGoogle = { googleAccountHandler?.disconnectGoogleAccount() },
         retryGoogleAuth = { googleAccountHandler?.retryGoogleAuthentication() },
         commandRegistry = commandRegistry,
-        shortcutsProvider = { ensureLemonShortcuts().toList() },
-        onShortcutsChanged = { updated -> applyShortcuts(updated) }
+        shortcutsProvider = { hoverControlsLayer.shortcuts() },
+        onShortcutsChanged = { updated -> hoverControlsLayer.applyShortcuts(updated) }
     )
     private val layoutLibrary = LayoutLibrary(context)
     private val layoutManager = WidgetLayoutManager(
@@ -897,8 +868,7 @@ class WidgetContainer @JvmOverloads constructor(
         smartAlignment.screenWidth = w.toFloat()
         smartAlignment.screenHeight = h.toFloat()
 
-        updateDefaultHoverControlBounds(w.toFloat(), h.toFloat())
-        lemonHoverControl.setScreenSize(w.toFloat(), h.toFloat())
+        hoverControlsLayer.onSizeChanged(w.toFloat(), h.toFloat())
         contextMenu = ContextMenu(w.toFloat(), h.toFloat(), commandRegistry) { type -> registry.widgets(type).isNotEmpty() }.apply {
             setLayoutLockState(isWidgetLayoutLocked)
             handler = object : ContextMenuHandler {
@@ -918,36 +888,12 @@ class WidgetContainer @JvmOverloads constructor(
         }
         layoutManager.createOverlays(w.toFloat(), h.toFloat(), textEditing)
         settingsController.createSpeedometerSettingsMenu(w.toFloat(), h.toFloat())
-        settingsController.createHoverControlsLayoutEditor(w.toFloat(), h.toFloat(), hoverControls) // Initialize the hover-controls layout editor. Constructing it snaps the controls to default grid cells, so this must run after updateDefaultHoverControlBounds.
+        settingsController.createHoverControlsLayoutEditor(w.toFloat(), h.toFloat(), hoverControlsLayer.controls) // Initialize the hover-controls layout editor. Constructing it snaps the controls to default grid cells, so this must run after hoverControlsLayer.onSizeChanged.
         layoutManager.createDefaultLayoutIfFirstRun()         // Only create the built-in Standard layout on first run. For returning users, the restoration code will create widgets based on saved state.
         updateFullscreenBounds()
         Log.d(TAG, "Container sized: ${w}x${h}")
     }
-
-    private fun updateDefaultHoverControlBounds(containerWidth: Float, containerHeight: Float) {
-        // Initial fallback positions in case the layout editor hasn't been created yet.
-        // The editor takes over and snaps these to grid centers as soon as it is built.
-        closeAppHoverControl.setBounds(
-            containerWidth - CloseAppHoverControl.DEFAULT_SIZE - CloseAppHoverControl.DEFAULT_MARGIN,
-            CloseAppHoverControl.DEFAULT_MARGIN,
-            CloseAppHoverControl.DEFAULT_SIZE
-        )
-        assistantVoiceHoverControl.setBounds(
-            containerWidth - AssistantVoiceHoverControl.DEFAULT_SIZE,
-            containerHeight - AssistantVoiceHoverControl.DEFAULT_SIZE,
-            AssistantVoiceHoverControl.DEFAULT_SIZE
-        )
-        lemonHoverControl.setBounds(
-            CloseAppHoverControl.DEFAULT_MARGIN,
-            containerHeight - LemonHoverControl.DEFAULT_SIZE - CloseAppHoverControl.DEFAULT_MARGIN,
-            LemonHoverControl.DEFAULT_SIZE
-        )
-    }
-
-    private fun triggerCloseAppConfirmation() {
-        closeConfirmationPopup?.show()
-        notifyTransientContentChanged()
-    }
+    private fun triggerCloseAppConfirmation() {closeConfirmationPopup?.show(); notifyTransientContentChanged()}
 
     // distribute location updates to widgets that are location dependent
     fun applyLocationMetadata(town: String, countryCode: String) {
@@ -1095,8 +1041,8 @@ class WidgetContainer @JvmOverloads constructor(
         // Hover controls sit above every widget — including fullscreen ones — so let any
         // currently-interacting (e.g. lemon mid-magnify) control or any hover-control
         // whose bounds contain the cursor consume the press before widget hit-testing.
-        if (isVisibleKeyboardAt(cx, cy)) {cancelHoverControlInteractions(); updateKeyboardHoverAt(cx, cy); notifyTransientContentChanged(); return}
-        if (hoverControlsConsumeDown(cx, cy)) return
+        if (isVisibleKeyboardAt(cx, cy)) {hoverControlsLayer.cancelInteractions(); updateKeyboardHoverAt(cx, cy); notifyTransientContentChanged(); return}
+        if (hoverControlsLayer.onCursorDown(cx, cy)) return
 
         val scrollbarWidget = getScrollbarHoveredWidget(cx, cy)
         if (scrollbarWidget != null) { isScrollbarDragActive = true; this.scrollbarDragWidget = scrollbarWidget }
@@ -1237,12 +1183,7 @@ class WidgetContainer @JvmOverloads constructor(
         // Notify any hover control that captured the press of the release, unless
         // the visible keyboard owns the release point.
         val (cx, cy) = toContentSpace(cursorX, cursorY)
-        if (isVisibleKeyboardAt(cx, cy)) {
-            cancelHoverControlInteractions()
-        } else {
-            hoverControlsConsumeUp(cursorX, cursorY)
-        }
-
+        if (isVisibleKeyboardAt(cx, cy)) {hoverControlsLayer.cancelInteractions()} else {hoverControlsLayer.onCursorUp(cursorX, cursorY)}
         endCapturedPress(x, y, cancel = false)
 
         cursorPressed = false; cancelLongPress()
@@ -1286,7 +1227,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     fun onMove(dx: Float, dy: Float, source: InputSource = InputSource.GLASSES_TEMPLE): Pair<Float, Float> {
-        capturedHoverControl?.takeIf { it.freezesCursorWhileInteracting() }?.let { control ->
+        if (hoverControlsLayer.freezesCursor) {
             val moveDelta = if (source == InputSource.PHONE_TRACKPAD) {
                 stabilizedCursorDelta.apply {
                     set(dx * PHONE_TRACKPAD_SENSITIVITY, dy * PHONE_TRACKPAD_SENSITIVITY)
@@ -1294,7 +1235,7 @@ class WidgetContainer @JvmOverloads constructor(
             } else {
                 cursorStabilizer.processInto(dx, dy, stabilizedCursorDelta)
             }
-            if (control.onCursorMove(cursorX, cursorY, moveDelta.x, moveDelta.y)) {
+            if (hoverControlsLayer.onCursorMove(cursorX, cursorY, moveDelta.x, moveDelta.y)) {
                 lastCursorX = cursorX
                 lastCursorY = cursorY
                 return Pair(cursorX, cursorY)
@@ -1330,9 +1271,7 @@ class WidgetContainer @JvmOverloads constructor(
         }
 
         // Same for the hover-controls layout editor.
-        if (closeConfirmationPopup?.isVisible != true &&
-            settingsController.handleHoverControlsLayoutEditorMove(cursorX, cursorY)
-        ) {
+        if (closeConfirmationPopup?.isVisible != true && settingsController.handleHoverControlsLayoutEditorMove(cursorX, cursorY)) {
             lastCursorX = cursorX; lastCursorY = cursorY
             return Pair(cursorX, cursorY)
         }
@@ -1344,11 +1283,7 @@ class WidgetContainer @JvmOverloads constructor(
 
         val moveDx = cursorX - lastCursorX; val moveDy = cursorY - lastCursorY
         lastCursorX = cursorX; lastCursorY = cursorY
-
-        // Forward moves to a hover control that captured the cursor on down.
-        if (hoverControlsConsumeMove(cursorX, cursorY, moveDx, moveDy)) {
-            return Pair(cursorX, cursorY)
-        }
+        if (hoverControlsLayer.onCursorMove(cursorX, cursorY, moveDx, moveDy)) {return Pair(cursorX, cursorY)} // Forward moves to a hover control that captured the cursor on down.
 
         // A widget that captured the press follows it (a web page, a POI slider).
         pressCaptureWidget?.let { widget ->
@@ -1381,7 +1316,7 @@ class WidgetContainer @JvmOverloads constructor(
         // controls behind it are hidden, so suppress the regular hover pass.
         if (settingsController.isHoverControlsLayoutEditorVisible()) {
             hoveredWidget = null
-            hoverControls.forEach { it.clearHover() }
+            hoverControlsLayer.clearHover()
             registry.forEachWidget { it.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) }
             if (!isTransitioningDisplayState) invalidateHoverVisuals()
             return
@@ -1389,7 +1324,7 @@ class WidgetContainer @JvmOverloads constructor(
 
         if (!isVisible) {
             hoveredWidget = null
-            hoverControls.forEach { it.clearHover() }
+            hoverControlsLayer.clearHover()
             closeConfirmationPopup?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); textEditing.updateMenuHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); contextMenu?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
             layoutManager.updateOverlayHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
             registry.forEachWidget { it.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) }
@@ -1402,7 +1337,7 @@ class WidgetContainer @JvmOverloads constructor(
         val (cx, cy) = toContentSpace(x, y)
 
         if (updateKeyboardHoverAt(cx, cy)) {
-            hoverControls.forEach { it.clearHover() }
+            hoverControlsLayer.clearHover()
             clearWidgetHoverStatesExcept(visibleKeyboardHostAt(cx, cy))
             if (!isTransitioningDisplayState) invalidateHoverVisuals()
             return
@@ -1410,19 +1345,12 @@ class WidgetContainer @JvmOverloads constructor(
         
         // Hover controls live above every widget, including fullscreen ones, so they
         // always receive hover updates whenever the cursor is visible.
-        hoverControls.forEach { it.updateHover(cx, cy) }
+        hoverControlsLayer.updateHover(cx, cy)
 
         // Menus stay head-locked, use screen coords
         closeConfirmationPopup?.updateHover(x, y); textEditing.updateMenuHover(x, y); contextMenu?.updateHover(x, y)
         layoutManager.updateOverlayHover(x, y)
-
-        if (!isAnyModalOverHoverControls() && hoverControls.any { it.isHovered || it.isInteracting() }) {
-            clearWidgetHoverStates()
-            if (!isTransitioningDisplayState) {
-                invalidateHoverVisuals()
-            }
-            return
-        }
+        if (hoverControlsLayer.ownsHover) {clearWidgetHoverStates(); if (!isTransitioningDisplayState) {invalidateHoverVisuals()}; return}
         
         // Widgets use content-space coordinates for hit testing
         val fullscreen = registry.fullscreenWidget
@@ -1537,8 +1465,7 @@ class WidgetContainer @JvmOverloads constructor(
         if (consumeVisibleKeyboardTap(cx, cy)) return true
 
         // Hover controls are above every widget, including fullscreen ones.
-        if (isHoverConfirmReleaseTapGuardActive()) return true
-        if (hoverControlsConsumeTap(cx, cy)) return true
+        if (hoverControlsLayer.onTap(cx, cy)) return true
 
         // Screen modals and open popups take taps anywhere, even over a fullscreen widget.
         for (widget in widgetsTopDown()) {if (runWidgetInput(widget) { widget.onModalTap(cx, cy) }) return true}
@@ -1594,8 +1521,7 @@ class WidgetContainer @JvmOverloads constructor(
         for (widget in registry.allWidgets()) {if (widget.onDoubleTapAnywhere()) return true} // A widget can take any double-tap first, e.g. a browser leaving a web video's fullscreen.
         val (cx, cy) = toContentSpace(x, y) // Transform to content space for widget hit testing
         if (isVisibleKeyboardAt(cx, cy)) return true
-        if (isHoverConfirmReleaseTapGuardActive()) return true
-        if (hoverControlsConsumeDoubleTap(cx, cy)) return true
+        if (hoverControlsLayer.onDoubleTap(cx, cy)) return true
         if (textEditing.onDoubleTap(x, y)) return true
         screenModalWidget()?.let { modal -> if (runWidgetInput(modal) { modal.onDoubleTap(cx, cy) }) return true} // A screen modal (the map's address search) takes double-taps anywhere.
 
@@ -1816,7 +1742,7 @@ class WidgetContainer @JvmOverloads constructor(
             if (pinnedFullscreenWidget != null) {
                 // Only draw the pinned fullscreen widget - it covers everything else
                 pinnedFullscreenWidget.draw(canvas)
-                if (!settingsController.isHoverControlsLayoutEditorVisible()) {drawHoverControls(canvas)}
+                if (!settingsController.isHoverControlsLayoutEditorVisible()) {hoverControlsLayer.draw(canvas)}
                 drawVisibleKeyboardOverlays(canvas)
                 presenter.draw(canvas)
                 drawOverlayMenus(canvas)
@@ -1825,9 +1751,7 @@ class WidgetContainer @JvmOverloads constructor(
 
             // No pinned fullscreen widget - draw all pinned widgets normally
             for (widget in registry.getPinnedWidgetsSortedByZOrder()) widget.draw(canvas)
-            if (!settingsController.isHoverControlsLayoutEditorVisible()) {
-                drawHoverControls(canvas)
-            }
+            if (!settingsController.isHoverControlsLayoutEditorVisible()) {hoverControlsLayer.draw(canvas)}
             drawVisibleKeyboardOverlays(canvas)
             presenter.draw(canvas)
             drawOverlayMenus(canvas)
@@ -1839,9 +1763,7 @@ class WidgetContainer @JvmOverloads constructor(
             registry.fullscreenWidget?.draw(canvas)
             // Hover controls stay above fullscreen widgets so the user can always reach
             // them (Close, YouTube history, the lemon shortcuts, …).
-            if (!settingsController.isHoverControlsLayoutEditorVisible()) {
-                drawHoverControls(canvas)
-            }
+            if (!settingsController.isHoverControlsLayoutEditorVisible()) {hoverControlsLayer.draw(canvas)}
             drawVisibleKeyboardOverlays(canvas)
             presenter.draw(canvas)
             drawOverlayMenus(canvas)
@@ -1857,7 +1779,7 @@ class WidgetContainer @JvmOverloads constructor(
         val editorActive = settingsController.isHoverControlsLayoutEditorVisible()
         if (!editorActive) {
             for (widget in registry.getAllSortedByZOrder()) {widget.draw(canvas)} // Draw all widgets (affected by 3DOF transformation)
-            drawHoverControls(canvas)                // Hover controls are dashboard overlays and should visually win over any widget they overlap while hovered, except for visible keyboard keys.
+            hoverControlsLayer.draw(canvas)               // Hover controls are dashboard overlays and should visually win over any widget they overlap while hovered, except for visible keyboard keys.
             drawVisibleKeyboardOverlays(canvas)
         }
 
@@ -1891,7 +1813,6 @@ class WidgetContainer @JvmOverloads constructor(
         textEditing.drawMenus(canvas)
         pageAgentApprovalOverlay.draw(canvas)
     }
-    private fun drawHoverControls(canvas: Canvas) {hoverControls.forEach { it.draw(canvas) }}
     private fun drawVisibleKeyboardOverlays(canvas: Canvas) {
         registry.fullscreenWidget?.let { fullscreen -> if (!fullscreen.drawsOwnKeyboard) fullscreen.visibleKeyboard?.draw(canvas); return}
         registry.getAllSortedByZOrder().forEach { widget -> if (!widget.isMinimized && !widget.drawsOwnKeyboard) widget.visibleKeyboard?.draw(canvas)}
@@ -1932,101 +1853,18 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Hover-control input pipeline ====================
 
-    /**
-     * Forward a cursor-down. Returns true if a hover control captured the press; the
-     * caller should stop further widget hit-testing in that case.
-     */
-    private fun hoverControlsConsumeDown(cx: Float, cy: Float): Boolean {
-        if (isAnyModalOverHoverControls()) return false
-        // Iterate top-most last so it gets first crack (matches draw order which is also
-        // last-on-top).
-        for (control in hoverControls.asReversed()) {
-            if (!control.isPlaced) continue
-            if (control.onCursorDown(cx, cy)) {
-                capturedHoverControl = control
-                invalidateHoverVisuals()
-                return true
-            }
-        }
-        return false
-    }
-
     private fun isAnyModalOverHoverControls(): Boolean {
         if (settingsController.isHoverControlsLayoutEditorVisible()) return true
-        if (settingsController.isShortcutsSettingsMenuVisible()) return true
-        if (settingsController.isDashboardSettingsVisible()) return true
-        if (settingsController.isSpeedometerSettingsMenuVisible()) return true
-        if (screenModalWidget() != null) return true
-        if (closeConfirmationPopup?.isVisible == true) return true
-        if (layoutManager.isDeleteConfirmationVisible) return true
-        if (layoutManager.isNamePromptVisible) return true
-        if (contextMenu?.isVisible == true) return true
-        if (textEditing.isMenuVisible) return true
+        if (settingsController.isShortcutsSettingsMenuVisible())     return true
+        if (settingsController.isDashboardSettingsVisible())         return true
+        if (settingsController.isSpeedometerSettingsMenuVisible())   return true
+        if (screenModalWidget() != null)                             return true
+        if (closeConfirmationPopup?.isVisible == true)               return true
+        if (layoutManager.isDeleteConfirmationVisible)               return true
+        if (layoutManager.isNamePromptVisible)                       return true
+        if (contextMenu?.isVisible == true)                          return true
+        if (textEditing.isMenuVisible)                               return true
         return false
-    }
-
-    private fun hoverControlsConsumeMove(cx: Float, cy: Float, dx: Float, dy: Float): Boolean {
-        val captured = capturedHoverControl ?: return false
-        return captured.onCursorMove(cx, cy, dx, dy)
-    }
-
-    private fun hoverControlsConsumeUp(cx: Float, cy: Float): Boolean {
-        val captured = capturedHoverControl ?: return false
-        val handled = captured.onCursorUp(cx, cy)
-        if (handled && captured.shouldGuardTapAfterCursorUp()) {
-            hoverConfirmTapGuardUntilMs = System.currentTimeMillis() + HOVER_CONFIRM_RELEASE_TAP_GUARD_MS
-        }
-        capturedHoverControl = null
-        return handled
-    }
-
-    /**
-     * Tap pass for hover controls. Any control with a still-active interaction state
-     * (e.g. the lemon in CONFIRMING) gets the tap first, even when the cursor is outside
-     * its idle bounds — taps outside a magnified slice need to reach the lemon to cancel
-     * the selection.
-     */
-    private fun hoverControlsConsumeTap(cx: Float, cy: Float): Boolean {
-        // Interacting controls always take precedence regardless of cursor position.
-        for (control in hoverControls.asReversed()) {
-            if (control.isInteracting() && control.handleTap(cx, cy)) {
-                return true
-            }
-        }
-        if (isAnyModalOverHoverControls()) return false
-        for (control in hoverControls.asReversed()) {
-            if (!control.isPlaced) continue
-            if (control.handleTap(cx, cy)) return true
-        }
-        return false
-    }
-
-    private fun hoverControlsConsumeDoubleTap(cx: Float, cy: Float): Boolean {
-        for (control in hoverControls.asReversed()) {
-            if (control.isInteracting() && control.handleDoubleTap(cx, cy)) {
-                notifyTransientContentChanged()
-                if (control === lemonHoverControl) {
-                    host?.requestCursorCenter()
-                }
-                return true
-            }
-        }
-        return false
-    }
-
-    private fun isHoverConfirmReleaseTapGuardActive(): Boolean {
-        if (hoverConfirmTapGuardUntilMs <= 0L) return false
-        if (System.currentTimeMillis() > hoverConfirmTapGuardUntilMs) {
-            hoverConfirmTapGuardUntilMs = 0L
-            return false
-        }
-        return hoverControls.any { it.isInteracting() }
-    }
-
-    private fun cancelHoverControlInteractions() {
-        for (control in hoverControls) control.cancelInteraction()
-        capturedHoverControl = null
-        hoverConfirmTapGuardUntilMs = 0L
     }
 
     // ==================== Persistence ====================
@@ -2043,25 +1881,6 @@ class WidgetContainer @JvmOverloads constructor(
             isLayoutLocked = isWidgetLayoutLocked
         )
 
-    // ==================== Shortcuts ====================
-
-    private fun applyShortcuts(invocations: List<AppCommandInvocation>) {
-        val list = ensureLemonShortcuts()
-        list.clear()
-        // De-dup by id and cap to MAX_LEMON_SLICES.
-        val seen = mutableSetOf<String>()
-        for (invocation in invocations) {
-            if (invocation.commandId in seen) continue
-            val definition = commandRegistry.find(invocation.commandId) ?: continue
-            if (!definition.shortcutEligible) continue
-            seen.add(invocation.commandId)
-            list.add(invocation)
-            if (list.size >= AppCommandRegistry.MAX_LEMON_COMMANDS) break
-        }
-        ShortcutsStore.save(context, commandRegistry, list.toList())
-        lemonHoverControl.cancelInteraction()
-        notifyTransientContentChanged()
-    }
 
     fun executeCommand(invocation: AppCommandInvocation): AppCommandResult = commandExecutor.execute(invocation)
     fun configureBrowserRouting(routing: BrowserRoutingCoordinator?) {browserRoutingCoordinator = routing}
@@ -2115,12 +1934,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     /** Capture only runtime layout metadata for the next assistant request. */
     fun assistantUiContext(): AssistantUiContext = assistantUiContextCapture.capture()
-    fun setAssistantStatus(status: AssistantStatus) {
-        assistantVoiceHoverControl.configured = status.configured
-        assistantVoiceHoverControl.state = status.state
-        notifyTransientContentChanged()
-    }
-
+    fun setAssistantStatus(status: AssistantStatus) {hoverControlsLayer.setAssistantStatus(status); notifyTransientContentChanged()}
     fun configureAssistantSettings(
         onPasteKey: (String) -> Unit,
         onRemoveKey: () -> Unit,
@@ -2153,7 +1967,7 @@ class WidgetContainer @JvmOverloads constructor(
         layoutManager.dismissOverlays()
         settingsController.dismissAll()
         cancelLongPress()
-        cancelHoverControlInteractions()
+        hoverControlsLayer.cancelInteractions()
         textEditing.clearAllFocus()
     }
 
