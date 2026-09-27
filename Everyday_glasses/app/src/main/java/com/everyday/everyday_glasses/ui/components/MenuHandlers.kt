@@ -1,15 +1,11 @@
 package com.everyday.everyday_glasses.ui.components
 
 interface ContextMenuHandler {
-    fun submenuItemsFor(item: ContextMenu.MenuItem): List<ContextMenu.SubMenuItem>
     fun selectItem(item: ContextMenu.MenuItem)
-    fun selectSubmenuItem(
-        parent: ContextMenu.MenuItem,
-        item: ContextMenu.SubMenuItem
-    ): Boolean
+    /** Double tap on a layout under Layouts > Load: true when its delete confirmation opened. */
+    fun requestDeleteLayout(name: String): Boolean
     fun onMenuDismissed()
 }
-
 interface TextEditCommandHandler {
     fun cut()
     fun copy()
@@ -45,3 +41,4 @@ interface LayoutNameHandler {
     fun submitLayoutName(name: String)
     fun onPromptDismissed()
 }
+

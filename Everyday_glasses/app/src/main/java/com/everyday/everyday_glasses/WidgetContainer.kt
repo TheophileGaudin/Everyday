@@ -65,8 +65,6 @@ import com.everyday.everyday_glasses.widgets.browser.BrowserModule
 import com.everyday.everyday_glasses.ui.components.CloseConfirmationHandler
 import com.everyday.everyday_glasses.ui.components.ContextMenuHandler
 import com.everyday.everyday_glasses.interaction.user_input.CursorStabilizer
-import com.everyday.everyday_glasses.ui.components.LayoutDeletionHandler
-import com.everyday.everyday_glasses.ui.components.LayoutNameHandler
 import com.everyday.everyday_glasses.widgets._common.SmartAlignmentHelper
 import com.everyday.everyday_glasses.widgets._common.SmartAlignmentRenderer
 import com.everyday.everyday_glasses._threedof.DashboardTransform
@@ -79,7 +77,6 @@ import com.everyday.everyday_glasses.persistence.WidgetLayoutManager
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
 import com.everyday.everyday_glasses.runtime.DashboardServices
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
-import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.LayoutLibrary
 import com.everyday.everyday_glasses.persistence.ShortcutsStore
@@ -118,8 +115,6 @@ import com.everyday.everyday_glasses.widgets.text_editor.TextBoxWidget
 import com.everyday.everyday_glasses._threedof.ThreeDofOverlay
 import com.everyday.everyday_glasses.widgets.file_browser.VideoModule
 import com.everyday.everyday_glasses.widgets.file_browser.VideoWidget
-import com.everyday.everyday_glasses.ui.components.WidgetLayoutDeleteConfirmationPopup
-import com.everyday.everyday_glasses.ui.components.WidgetLayoutNamePrompt
 import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContextCapture
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.MapAssistantActions
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.TextAssistantActions
@@ -296,7 +291,6 @@ class WidgetContainer @JvmOverloads constructor(
     private var contextMenu: ContextMenu? = null
     private var contextMenuDispatchDepth = 0
     private var closeConfirmationPopup: CloseConfirmationPopup? = null
-    private var layoutDeleteConfirmationPopup: WidgetLayoutDeleteConfirmationPopup? = null
     private val pageAgentApprovalOverlay =
         PageAgentApprovalOverlay(::notifyPersistentContentChanged)
 
@@ -333,7 +327,7 @@ class WidgetContainer @JvmOverloads constructor(
         override fun createTextWidget() {textModule.open(pendingCreateX, pendingCreateY)}
         override fun createBrowserWidget() = browserModule.openFromMenu(pendingCreateX, pendingCreateY)
         override fun openYouTubeHistory() = browserModule.openYouTubeHistory()
-        override fun loadLayout(name: String): Boolean = loadCommandLayout(name)
+        override fun loadLayout(name: String): Boolean = layoutManager.loadLayout(name)
         override fun toggleLayoutLock() = setWidgetLayoutLocked(!isWidgetLayoutLocked)
         override fun saveLayout() = layoutManager.saveCurrentLayout()
         override fun saveLayoutAs() = layoutManager.showSaveLayoutAsPrompt()
@@ -584,31 +578,31 @@ class WidgetContainer @JvmOverloads constructor(
         shortcutsProvider = { ensureLemonShortcuts().toList() },
         onShortcutsChanged = { updated -> applyShortcuts(updated) }
     )
-    private var layoutNamePrompt: WidgetLayoutNamePrompt? = null
-    private var layoutOverlayNotificationEmitted = false
-    private var layoutNameSaveInProgress = false
-    private var layoutDeleteInProgress = false
     private val layoutLibrary = LayoutLibrary(context)
     private val layoutManager = WidgetLayoutManager(
         layouts = layoutLibrary,
-        captureDashboard = ::captureWidgetDashboardWithoutLayoutName,
-        showNamePrompt = { suggestedName ->
-            dismissMenu()
-            layoutNamePrompt?.show(suggestedName)
+        services = dashboardServices,
+        lifecycle = lifecycleController,
+        host = object : WidgetLayoutManager.Host {
+            override fun captureDashboard()                         = captureWidgetDashboardWithoutLayoutName()
+            override fun notifyPersistentChange()                   = notifyPersistentContentChanged()
+            override fun notifyRestored()                           = notifyDashboardRestored()
+            override fun reportKeyFocus()                           { contentObserver?.onFocusChanged(hasFocusedWidget()) }
+            override fun dismissMenus()                             = dismissMenu()
+            override fun dismissTransientOverlays()                 = dismissAllTransientOverlays()
+            override fun <T> suppressingChanges(action: () -> T): T = withContentChangeSuppressed(action)
+            override fun clearWidgets() {
+                registry.allWidgets().forEach(presenter::onWidgetRemoving)
+                exitAllFullscreen()
+                lifecycleController.closeAll()
+                activeWidget = null
+            }
+            override fun applyHoverControls(placements: List<DashboardPersistence.HoverControlPlacementState>?) = settingsController.applyHoverControlPlacements(placements)
+            override fun resetHoverControls()                       = settingsController.resetHoverControlPlacementsToDefault(notify = false)
+            override fun restoreLayoutLock(locked: Boolean)         = setWidgetLayoutLocked(locked, persist = false)
+            override fun onLayoutSwitch()                           { displaySettingsHandler?.applyLayoutSwitchBrightness() }
         },
-        showNameError = { error -> layoutNamePrompt?.showError(error) },
-        dismissNamePrompt = { layoutNamePrompt?.dismiss() },
-        showDeleteConfirmation = { name -> layoutDeleteConfirmationPopup?.show(name) },
-        notifyTransientContentChanged = {
-            layoutOverlayNotificationEmitted = true
-            notifyTransientContentChanged()
-        },
-        notifyPersistentContentChanged = {
-            layoutOverlayNotificationEmitted = true
-            notifyPersistentContentChanged()
-        }
     )
-
     var displaySettingsHandler: DisplaySettingsHandler? = null
     var googleAccountHandler: GoogleAccountHandler? = null
 
@@ -707,22 +701,11 @@ class WidgetContainer @JvmOverloads constructor(
     private var isTransitioningDisplayState = false
     private var isHostPaused = false
 
-    // Flag to control whether default singleton widgets should be created.
-    // Set to false after restoring state on a returning user to prevent recreating closed widgets.
-    private var shouldCreateDefaultSingletons = true
-
-    /**
-     * True between learning that a saved dashboard exists and actually applying it.
-     * While set, saving is suppressed so a not-yet-restored container cannot overwrite
-     * the stored document. See [setIsReturningUser].
-     */
-    private var isAwaitingRestore = false
-
     /**
      * True while a stored dashboard is known to exist but has not been applied yet.
      * Anything that persists the container must refuse to write while this holds.
      */
-    val isAwaitingDashboardRestore: Boolean get() = isAwaitingRestore
+    val isAwaitingDashboardRestore: Boolean get() = layoutManager.isAwaitingRestore
     private var lifecycleMutationInProgress = false
     private val contentChanges = DashboardChangeCoordinator(
         repaint              = {if (Looper.myLooper() == Looper.getMainLooper()) invalidate() else postInvalidate()},
@@ -902,8 +885,6 @@ class WidgetContainer @JvmOverloads constructor(
         displaySettingsHandler?.applyBrowserMinimumBrightness(shouldApplyBrowserMinimumBrightness())
     }
 
-    private fun requestLayoutSwitchBrightness() {displaySettingsHandler?.applyLayoutSwitchBrightness()}
-
     // ==================== Initialization ====================
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -918,93 +899,27 @@ class WidgetContainer @JvmOverloads constructor(
 
         updateDefaultHoverControlBounds(w.toFloat(), h.toFloat())
         lemonHoverControl.setScreenSize(w.toFloat(), h.toFloat())
-
-        contextMenu = ContextMenu(w.toFloat(), h.toFloat(), commandRegistry).apply {
+        contextMenu = ContextMenu(w.toFloat(), h.toFloat(), commandRegistry) { type -> registry.widgets(type).isNotEmpty() }.apply {
             setLayoutLockState(isWidgetLayoutLocked)
             handler = object : ContextMenuHandler {
-                override fun submenuItemsFor(item: ContextMenu.MenuItem) = getUpdatedSubmenuItems(item)
                 override fun selectItem(item: ContextMenu.MenuItem) = handleMenuItemSelected(item)
-                override fun selectSubmenuItem(
-                    parent: ContextMenu.MenuItem,
-                    item: ContextMenu.SubMenuItem
-                ) = handleSubmenuItemDoubleTapped(item)
+                override fun requestDeleteLayout(name: String) = layoutManager.requestDeleteLayout(name)
                 override fun onMenuDismissed() {
                     if (contextMenuDispatchDepth == 0) notifyTransientContentChanged()
                 }
             }
         }
-
         textEditing.createMenus(w.toFloat(), h.toFloat())
-
         closeConfirmationPopup = CloseConfirmationPopup(w.toFloat(), h.toFloat()).apply {
             handler = object : CloseConfirmationHandler {
                 override fun confirmClose() { host?.requestClose() }
                 override fun onPopupDismissed() = notifyTransientContentChanged()
             }
         }
-
-        layoutDeleteConfirmationPopup = WidgetLayoutDeleteConfirmationPopup(
-            w.toFloat(),
-            h.toFloat()
-        ).apply {
-            handler = object : LayoutDeletionHandler {
-                override fun deleteLayout(name: String) {
-                    layoutDeleteInProgress = true
-                    try {
-                        layoutManager.deleteLayoutByName(name)
-                    } finally {
-                        layoutDeleteInProgress = false
-                    }
-                }
-                override fun onPopupDismissed() {
-                    if (!layoutDeleteInProgress) {
-                        layoutOverlayNotificationEmitted = true
-                        notifyTransientContentChanged()
-                    }
-                }
-            }
-        }
-
+        layoutManager.createOverlays(w.toFloat(), h.toFloat(), textEditing)
         settingsController.createSpeedometerSettingsMenu(w.toFloat(), h.toFloat())
-
-        // Initialize the hover-controls layout editor. Constructing it snaps the controls
-        // to default grid cells, so this must run after updateDefaultHoverControlBounds.
-        settingsController.createHoverControlsLayoutEditor(
-            w.toFloat(),
-            h.toFloat(),
-            hoverControls
-        )
-
-        layoutNamePrompt = WidgetLayoutNamePrompt(w.toFloat(), h.toFloat()).apply {
-            textZoneHost = textEditing
-            handler = object : LayoutNameHandler {
-                override fun submitLayoutName(name: String) {
-                    layoutNameSaveInProgress = true
-                    try {
-                        layoutManager.saveLayoutWithName(name)
-                    } finally {
-                        layoutNameSaveInProgress = false
-                    }
-                }
-                override fun onPromptDismissed() {
-                    if (layoutNameSaveInProgress) {
-                        // The save callback below owns the cumulative visual update. Keep the
-                        // host focus state current without emitting a second transient signal.
-                        contentObserver?.onFocusChanged(hasFocusedWidget())
-                    } else {
-                        layoutOverlayNotificationEmitted = true
-                        notifyFocusChanged()
-                    }
-                }
-            }
-        }
-
-        // Only create the built-in Standard layout on first run.
-        // For returning users, the restoration code will create widgets based on saved state.
-        if (shouldCreateDefaultSingletons) {
-            applyDefaultLayoutReplacingCurrent()
-        }
-
+        settingsController.createHoverControlsLayoutEditor(w.toFloat(), h.toFloat(), hoverControls) // Initialize the hover-controls layout editor. Constructing it snaps the controls to default grid cells, so this must run after updateDefaultHoverControlBounds.
+        layoutManager.createDefaultLayoutIfFirstRun()         // Only create the built-in Standard layout on first run. For returning users, the restoration code will create widgets based on saved state.
         updateFullscreenBounds()
         Log.d(TAG, "Container sized: ${w}x${h}")
     }
@@ -1168,36 +1083,19 @@ class WidgetContainer @JvmOverloads constructor(
 
         if (isTwoFingerScrollMode) return
 
-        layoutNamePrompt?.let { prompt ->
-            if (prompt.isVisible) {
-                if (textEditing.focusedZoneContains(x, y)) { pendingTextSelection = true; scheduleLongPress() }
-                notifyTransientContentChanged()
-                return
-            }
+        if (layoutManager.isNamePromptVisible) {
+            if (textEditing.focusedZoneContains(x, y)) { pendingTextSelection = true; scheduleLongPress() }
+            notifyTransientContentChanged()
+            return
         }
-
-        // The hover-controls layout editor is fully modal; consume input before any
-        // widget hit-testing.
-        if (closeConfirmationPopup?.isVisible != true &&
-            settingsController.handleHoverControlsLayoutEditorDown(x, y)
-        ) return
-
-        // Shortcuts settings menu is also modal.
-        if (settingsController.handleShortcutsSettingsMenuDown(x, y)) return
-
-        // Transform to content space for hit testing against widgets
-        val (cx, cy) = toContentSpace(x, y)
+        if (closeConfirmationPopup?.isVisible != true && settingsController.handleHoverControlsLayoutEditorDown(x, y)) return // The hover-controls layout editor is fully modal; consume input before any widget hit-testing.
+        if (settingsController.handleShortcutsSettingsMenuDown(x, y)) return // Shortcuts settings menu is also modal.
+        val (cx, cy) = toContentSpace(x, y) // Transform to content space for hit testing against widgets
 
         // Hover controls sit above every widget — including fullscreen ones — so let any
         // currently-interacting (e.g. lemon mid-magnify) control or any hover-control
         // whose bounds contain the cursor consume the press before widget hit-testing.
-        if (isVisibleKeyboardAt(cx, cy)) {
-            cancelHoverControlInteractions()
-            updateKeyboardHoverAt(cx, cy)
-            notifyTransientContentChanged()
-            return
-        }
-
+        if (isVisibleKeyboardAt(cx, cy)) {cancelHoverControlInteractions(); updateKeyboardHoverAt(cx, cy); notifyTransientContentChanged(); return}
         if (hoverControlsConsumeDown(cx, cy)) return
 
         val scrollbarWidget = getScrollbarHoveredWidget(cx, cy)
@@ -1413,11 +1311,9 @@ class WidgetContainer @JvmOverloads constructor(
         }
         updateHover(cursorX, cursorY, isCursorVisible)
 
-        layoutNamePrompt?.let { prompt ->
-            if (prompt.isVisible) {
-                lastCursorX = cursorX; lastCursorY = cursorY
-                return Pair(cursorX, cursorY)
-            }
+        if (layoutManager.isNamePromptVisible) {
+            lastCursorX = cursorX; lastCursorY = cursorY
+            return Pair(cursorX, cursorY)
         }
 
         // If SpeedometerSettings is open, treat it as modal and route movement to it.
@@ -1495,12 +1391,10 @@ class WidgetContainer @JvmOverloads constructor(
             hoveredWidget = null
             hoverControls.forEach { it.clearHover() }
             closeConfirmationPopup?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); textEditing.updateMenuHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY); contextMenu?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
-            layoutDeleteConfirmationPopup?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
-            layoutNamePrompt?.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
+            layoutManager.updateOverlayHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
             registry.forEachWidget { it.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY) }
             cursorStabilizer.reset()
-            // Hover clear is transient visual state only.
-            if (!isTransitioningDisplayState) { invalidateHoverVisuals() }
+            if (!isTransitioningDisplayState) { invalidateHoverVisuals() } // Hover clear is transient visual state only.
             return
         }
         
@@ -1520,8 +1414,7 @@ class WidgetContainer @JvmOverloads constructor(
 
         // Menus stay head-locked, use screen coords
         closeConfirmationPopup?.updateHover(x, y); textEditing.updateMenuHover(x, y); contextMenu?.updateHover(x, y)
-        layoutDeleteConfirmationPopup?.updateHover(x, y)
-        layoutNamePrompt?.updateHover(x, y)
+        layoutManager.updateOverlayHover(x, y)
 
         if (!isAnyModalOverHoverControls() && hoverControls.any { it.isHovered || it.isInteracting() }) {
             clearWidgetHoverStates()
@@ -1630,37 +1523,13 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     fun onTap(x: Float, y: Float): Boolean {
-        // Menus use screen-space coordinates (head-locked)
-        if (pageAgentApprovalOverlay.isVisible()) {
-            return pageAgentApprovalOverlay.onTap(x, y)
-        }
-        // The text edit and formatting menus sit above whichever surface owns the focused text zone.
-        textEditing.onMenuTap(x, y)?.let { return it }
-        if (layoutNamePrompt?.isVisible == true) {
-            layoutOverlayNotificationEmitted = false
-            val handled = layoutNamePrompt?.onTap(x, y) ?: false
-            if (handled && !layoutOverlayNotificationEmitted) notifyTransientContentChanged()
-            layoutOverlayNotificationEmitted = false
-            return handled
-        }
-        if (layoutDeleteConfirmationPopup?.isVisible == true) {
-            layoutOverlayNotificationEmitted = false
-            layoutDeleteInProgress = true
-            val handled = try {
-                layoutDeleteConfirmationPopup?.onTap(x, y) ?: false
-            } finally {
-                layoutDeleteInProgress = false
-            }
-            if (handled && !layoutOverlayNotificationEmitted) notifyTransientContentChanged()
-            layoutOverlayNotificationEmitted = false
-            return handled
-        }
+        if (pageAgentApprovalOverlay.isVisible()) {return pageAgentApprovalOverlay.onTap(x, y)} // Menus use screen-space coordinates (head-locked)
+        textEditing.onMenuTap(x, y)?.let { return it } // The text edit and formatting menus sit above whichever surface owns the focused text zone.
+        layoutManager.onOverlayTap(x, y)?.let { return it }
         if (closeConfirmationPopup?.isVisible == true) return closeConfirmationPopup?.onTap(x, y) ?: false
         settingsController.handleHoverControlsLayoutEditorTap(x, y)?.let { return it }
         settingsController.handleShortcutsSettingsMenuTap(x, y)?.let { return it }
-        if (contextMenu?.isVisible == true) {
-            return dispatchContextMenuAction { contextMenu?.onTap(x, y) ?: false }
-        }
+        if (contextMenu?.isVisible == true) { return dispatchContextMenuAction { contextMenu?.onTap(x, y) ?: false }}
         settingsController.handleSpeedometerTap(x, y)?.let { return it }
 
         // Transform to content space for widget hit testing
@@ -1813,57 +1682,15 @@ class WidgetContainer @JvmOverloads constructor(
     /** setter for Google authentication*/
     fun setGoogleAuthState(state: GoogleAuthState) {settingsController.setGoogleAuthState(state)}
 
-    /**
-     * Get updated submenu items with current widget presence state.
-     */
-    private fun getUpdatedSubmenuItems(item: ContextMenu.MenuItem): List<ContextMenu.SubMenuItem> {
-        if (item.id == "toggle_widgets") {
-            return WidgetDescriptors.all
-                .filter { it.commandId != null }
-                .sortedBy { it.menuOrder }
-                .map { descriptor ->
-                    val definition = commandRegistry.widgetDefinition(requireNotNull(descriptor.commandId))
-                    ContextMenu.SubMenuItem(
-                        definition.id,
-                        descriptor.label,
-                        registry.widgets(descriptor.type).isNotEmpty()
-                    )
-                }
-        }
-        if (item.id == "layouts") {
-            val loadItems = commandRegistry.shortcutDefinitions().mapNotNull { definition ->
-                commandRegistry.layoutName(definition)?.let { ContextMenu.SubMenuItem(definition.id, it) }
-            }
-            return listOf(
-                ContextMenu.SubMenuItem(commandRegistry.saveLayout.id, commandRegistry.saveLayout.label),
-                ContextMenu.SubMenuItem(commandRegistry.saveLayoutAs.id, commandRegistry.saveLayoutAs.label),
-                ContextMenu.SubMenuItem("layout_load_menu", "Load", submenu = loadItems)
-            )
-        }
-        return item.submenu ?: emptyList()
-    }
-
     fun setSmartAlignmentEnabled(enabled: Boolean) {
         smartAlignment.enabled = enabled
     }
     fun setWidgetLayoutLocked(locked: Boolean, persist: Boolean = true) {
-        if (isWidgetLayoutLocked == locked) {
-            contextMenu?.setLayoutLockState(isWidgetLayoutLocked)
-            return
-        }
+        if (isWidgetLayoutLocked == locked) {contextMenu?.setLayoutLockState(isWidgetLayoutLocked); return}
         isWidgetLayoutLocked = locked
         contextMenu?.setLayoutLockState(isWidgetLayoutLocked)
-        if (locked) {
-            cancelLongPress()
-            onDragEnd(notify = false)
-        }
+        if (locked) {cancelLongPress(); onDragEnd(notify = false)}
         if (persist) notifyPersistentContentChanged()
-    }
-
-    private fun handleSubmenuItemDoubleTapped(subItem: ContextMenu.SubMenuItem): Boolean {
-        val definition = commandRegistry.find(subItem.id) ?: return false
-        val name = commandRegistry.layoutName(definition) ?: return false
-        return layoutManager.requestDeleteLayout(name)
     }
 
     //map section
@@ -1945,12 +1772,12 @@ class WidgetContainer @JvmOverloads constructor(
     // ==================== Public Accessors ====================
     fun setPhoneClipboard(content: String?)                                                                             = textEditing.setPhoneClipboard(content)
     fun hasFocusedWidget():                                                                                     Boolean = textEditing.hasKeyFocus
-    fun isMenuVisible():                                                                                        Boolean = contextMenu?.isVisible == true || textEditing.isMenuVisible || layoutNamePrompt?.isVisible == true
-    fun isClosePopupVisible():                                                                                  Boolean = closeConfirmationPopup?.isVisible == true || layoutDeleteConfirmationPopup?.isVisible == true
+    fun isMenuVisible():                                                                                        Boolean = contextMenu?.isVisible == true || textEditing.isMenuVisible || layoutManager.isNamePromptVisible
+    fun isClosePopupVisible():                                                                                  Boolean = closeConfirmationPopup?.isVisible == true || layoutManager.isDeleteConfirmationVisible
     fun isAnyPopupVisible():                                                                                    Boolean = isMenuVisible() || isClosePopupVisible() || pageAgentApprovalOverlay.isVisible()
     fun showPageAgentApproval(runId: String, request: PageAgentConfirmationRequest, respond: (Boolean) -> Unit) {pageAgentApprovalOverlay.show(runId, request, respond); ensureDrawnAboveNativeOverlays()}
     fun dismissPageAgentApproval(runId: String)                                                                 {pageAgentApprovalOverlay.dismiss(runId)}
-    fun dismissMenu()                                                                                           { contextMenu?.dismiss(); textEditing.dismissMenus(); layoutNamePrompt?.dismiss() }
+    fun dismissMenu()                                                                                           { contextMenu?.dismiss(); textEditing.dismissMenus(); layoutManager.dismissNamePrompt() }
     fun isDragging():                                                                                           Boolean = activeWidget != null || internalDragWidget != null || textEditing.formattingMenu?.isDragging() == true
 
     // ==================== 3DOF Mode ====================
@@ -2058,9 +1885,9 @@ class WidgetContainer @JvmOverloads constructor(
         contextMenu?.draw(canvas)
         settingsController.drawHoverControlsLayoutEditor(canvas)  // Draw the hover-controls editor before the close-app confirmation so the popup appears on top of it when the user invokes Close from the editor's context menu.
         closeConfirmationPopup?.draw(canvas)
-        layoutDeleteConfirmationPopup?.draw(canvas)
+        layoutManager.drawDeleteConfirmation(canvas)
         settingsController.draw(canvas)
-        layoutNamePrompt?.draw(canvas)
+        layoutManager.drawNamePrompt(canvas)
         textEditing.drawMenus(canvas)
         pageAgentApprovalOverlay.draw(canvas)
     }
@@ -2131,8 +1958,8 @@ class WidgetContainer @JvmOverloads constructor(
         if (settingsController.isSpeedometerSettingsMenuVisible()) return true
         if (screenModalWidget() != null) return true
         if (closeConfirmationPopup?.isVisible == true) return true
-        if (layoutDeleteConfirmationPopup?.isVisible == true) return true
-        if (layoutNamePrompt?.isVisible == true) return true
+        if (layoutManager.isDeleteConfirmationVisible) return true
+        if (layoutManager.isNamePromptVisible) return true
         if (contextMenu?.isVisible == true) return true
         if (textEditing.isMenuVisible) return true
         return false
@@ -2313,98 +2140,21 @@ class WidgetContainer @JvmOverloads constructor(
         settingsController.setAssistantConfiguration(configuration, models, detail)
     }
 
-    private fun loadCommandLayout(name: String): Boolean {
-        if (!isReady()) return false
-        val builtIn = BuiltInLayouts.buildDashboard(name, width.toFloat(), height.toFloat())
-        if (builtIn != null) {
-            requestLayoutSwitchBrightness()
-            applyPersistedDashboardReplacingCurrent(builtIn, notifyRestored = false)
-            layoutManager.activeLayoutName = name
-            notifyPersistentContentChanged()
-            return true
-        }
-        val saved = layoutLibrary.load(name) ?: return false
-        requestLayoutSwitchBrightness()
-        applyPersistedDashboardReplacingCurrent(saved, notifyRestored = false)
-        layoutManager.activeLayoutName = name
-        notifyPersistentContentChanged()
-        return true
-    }
-
     fun executeOpenUrlCommand(address: String): AppCommandResult = executeCommand(
         AppCommandInvocation(commandRegistry.openUrl.id, AppCommandArguments.Url(address))
     )
 
-    fun applyPersistedDashboardReplacingCurrent(
-        dashboard: WidgetDocument.PersistedDashboard,
-        notifyRestored: Boolean = true,
-    ) {
-        if (!isReady()) return
-
-        val previousDashboard = captureWidgetDashboardWithoutLayoutName().copy(
-            activeLayoutName = layoutManager.activeLayoutName,
-        )
-        withContentChangeSuppressed {
-            try {
-                dismissAllTransientOverlays()
-                clearWidgetsForLayoutReplace()
-                applyPersistedContents(dashboard)
-            } catch (failure: Throwable) {
-                runCatching {
-                    clearWidgetsForLayoutReplace()
-                    applyPersistedContents(previousDashboard)
-                }.exceptionOrNull()?.let(failure::addSuppressed)
-                throw failure
-            }
-        }
-
-        // The container now reflects a stored dashboard, so saving is safe again.
-        isAwaitingRestore = false
-        if (notifyRestored) notifyDashboardRestored()
-    }
-
-    private fun applyPersistedContents(dashboard: WidgetDocument.PersistedDashboard) {
-        shouldCreateDefaultSingletons = false
-        lifecycleController.replaceClosedTemplates(dashboard.closedTemplates)
-
-        dashboard.widgets.forEach { record ->
-            runCatching { lifecycleController.restore(record) }
-                .onFailure { Log.w(TAG, "Skipping invalid persisted ${record.type.persistedId} widget", it) }
-        }
-        settingsController.applyHoverControlPlacements(dashboard.hoverControls)
-        setWidgetLayoutLocked(dashboard.isLayoutLocked, persist = false)
-
-        lifecycleController.arrangeMinimizedWidgets()
-        layoutManager.activeLayoutName = dashboard.activeLayoutName
-    }
-
-    private fun applyDefaultLayoutReplacingCurrent() {
-        val defaultDashboard = BuiltInLayouts.buildDashboard(
-            DashboardPersistence.DEFAULT_LAYOUT_NAME,
-            width.toFloat(),
-            height.toFloat()
-        ) ?: return
-        settingsController.resetHoverControlPlacementsToDefault(notify = false)
-        applyPersistedDashboardReplacingCurrent(defaultDashboard)
-    }
+    fun applyPersistedDashboardReplacingCurrent(dashboard: WidgetDocument.PersistedDashboard) = layoutManager.replaceDashboard(dashboard)
 
     private fun dismissAllTransientOverlays() {
         contextMenu?.dismiss()
         textEditing.dismissMenus()
         closeConfirmationPopup?.dismiss()
-        layoutDeleteConfirmationPopup?.dismiss()
+        layoutManager.dismissOverlays()
         settingsController.dismissAll()
-        layoutNamePrompt?.dismiss()
         cancelLongPress()
         cancelHoverControlInteractions()
         textEditing.clearAllFocus()
-    }
-
-    private fun clearWidgetsForLayoutReplace() {
-        registry.allWidgets().forEach(presenter::onWidgetRemoving)
-        exitAllFullscreen()
-        lifecycleController.closeAll()
-        activeWidget = null
     }
 
     fun setMirroringEnabled(enabled: Boolean, phoneIp: String? = null) = mirrorModule.setMirroringEnabled(enabled, phoneIp) // ==================== Screen Mirroring ====================
@@ -2417,7 +2167,7 @@ class WidgetContainer @JvmOverloads constructor(
      * first layout pass, which does not happen if the display never comes up, and an
      * unguarded save would then persist the empty container over the user's dashboard.
      */
-    fun setIsReturningUser()                          {shouldCreateDefaultSingletons = false; isAwaitingRestore = true}
+    fun setIsReturningUser()                          = layoutManager.expectSavedDashboard()
     fun shouldApplyBrowserMinimumBrightness()         : Boolean = registry.allWidgets().any { it.requestsBrowserMinimumBrightness }
     fun shouldApplyMediaBrightnessCap()               : Boolean = registry.allWidgets().any { it.requestsMediaBrightnessCap }
     fun isReady()                                     : Boolean = width > 0 && height > 0

@@ -4,6 +4,14 @@ import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.stateOf
 import com.everyday.everyday_glasses.widgets.map.backend.MapViewMode
 import com.everyday.everyday_glasses.widgets.map.backend.MapZoom
 import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.persistence.LayoutLibrary
+import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
+import com.everyday.everyday_glasses.persistence.WidgetLayoutManager
+import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
+import com.everyday.everyday_glasses.runtime.WidgetRegistry
+import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import android.content.ContextWrapper
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
@@ -248,4 +256,74 @@ class WidgetLayoutPersistenceTest {
         }
         return WidgetDocument.codecs.getValue(type).decode(record.state) as S
     }
+    @Test
+    fun `a returning user's dashboard gets no default layout and no save until it is restored`() {
+        val host = FakeLayoutHost()
+        val manager = layoutManager(host)
+
+        manager.expectSavedDashboard()
+        manager.createDefaultLayoutIfFirstRun()
+
+        assertTrue(manager.isAwaitingRestore)
+        assertEquals(0, host.clears)
+
+        manager.replaceDashboard(WidgetDocument.PersistedDashboard(widgets = emptyList(), activeLayoutName = "Work"))
+
+        assertFalse(manager.isAwaitingRestore)
+        assertEquals(1, host.restores)
+        assertEquals("Work", manager.activeLayoutName)
+    }
+
+    @Test
+    fun `the default layout is created on first run only`() {
+        val host = FakeLayoutHost()
+        val manager = layoutManager(host)
+
+        manager.createDefaultLayoutIfFirstRun()
+        manager.createDefaultLayoutIfFirstRun()
+
+        assertEquals(1, host.clears)
+        assertEquals(1, host.hoverResets)
+    }
+
+    private fun layoutManager(host: FakeLayoutHost) = WidgetLayoutManager(
+        layouts = LayoutLibrary(ContextWrapper(null)),
+        services = FakeServices(),
+        lifecycle = WidgetLifecycleController({ action -> action() }, {}, WidgetRegistry()),
+        host = host,
+    )
+
+    private class FakeLayoutHost : WidgetLayoutManager.Host {
+        var clears = 0
+        var restores = 0
+        var hoverResets = 0
+        override fun captureDashboard() = WidgetDocument.PersistedDashboard(widgets = emptyList())
+        override fun notifyPersistentChange() = Unit
+        override fun notifyRestored() { restores++ }
+        override fun reportKeyFocus() = Unit
+        override fun dismissMenus() = Unit
+        override fun dismissTransientOverlays() = Unit
+        override fun <T> suppressingChanges(action: () -> T): T = action()
+        override fun clearWidgets() { clears++ }
+        override fun applyHoverControls(placements: List<DashboardPersistence.HoverControlPlacementState>?) = Unit
+        override fun resetHoverControls() { hoverResets++ }
+        override fun restoreLayoutLock(locked: Boolean) = Unit
+        override fun onLayoutSwitch() = Unit
+    }
+
+    private class FakeServices : DashboardServices {
+        override val viewportWidth = 640
+        override val viewportHeight = 480
+        override val isDisplayOff = false
+        override val captureRestore = WidgetCaptureRestore()
+        override fun notifyTransientChange() = Unit
+        override fun <T> withTransientChanges(action: () -> T): T = action()
+        override fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean) = action()
+        override fun <T> runPersistentMutation(changed: (T) -> Boolean, action: () -> T): T = action()
+        override fun <W : BaseWidget> open(type: WidgetTypeId, create: () -> W?): W? = create()
+        override fun openClosedTemplate(type: WidgetTypeId): BaseWidget? = null
+        override fun close(widget: BaseWidget) = Unit
+    }
+
+
 }

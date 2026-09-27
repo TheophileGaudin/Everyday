@@ -6,6 +6,8 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.util.Log
 import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
+import com.everyday.everyday_glasses.runtime.WidgetDescriptors
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import kotlin.math.max
 import kotlin.math.min
 import androidx.core.graphics.toColorInt
@@ -19,7 +21,8 @@ import androidx.core.graphics.toColorInt
 class ContextMenu(
     private val screenWidth: Float,
     private val screenHeight: Float,
-    private val commandRegistry: AppCommandRegistry
+    private val commandRegistry: AppCommandRegistry,
+    private val isWidgetShown: (WidgetTypeId) -> Boolean,
 ) {
     companion object {
         private const val TAG = "ContextMenu"
@@ -294,7 +297,7 @@ class ContextMenu(
             if (!rect.contains(px, py)) continue
 
             if (entry is Entry.SubMenu && isSelectable(entry.item)) {
-                val handled = handler?.selectSubmenuItem(entry.parent, entry.item) == true
+                val handled = layoutNameOf(entry.item)?.let { handler?.requestDeleteLayout(it) } == true
                 if (handled) {
                     dismiss()
                 } else if (pageStack.size > 1) {
@@ -420,8 +423,34 @@ class ContextMenu(
         dismiss()
     }
 
+    /** [item]'s page as it is now: which widgets are shown, and which layouts are saved. */
+    private fun currentSubmenu(item: MenuItem): List<SubMenuItem> = when (item.id) {
+        "toggle_widgets" -> WidgetDescriptors.all
+            .filter { it.commandId != null }
+            .sortedBy { it.menuOrder }
+            .map { descriptor ->
+                val definition = commandRegistry.widgetDefinition(requireNotNull(descriptor.commandId))
+                SubMenuItem(definition.id, descriptor.label, isWidgetShown(descriptor.type))
+            }
+        "layouts" -> {
+            val loadItems = commandRegistry.shortcutDefinitions().mapNotNull { definition ->
+                commandRegistry.layoutName(definition)?.let { SubMenuItem(definition.id, it) }
+            }
+            listOf(
+                SubMenuItem(commandRegistry.saveLayout.id, commandRegistry.saveLayout.label),
+                SubMenuItem(commandRegistry.saveLayoutAs.id, commandRegistry.saveLayoutAs.label),
+                SubMenuItem("layout_load_menu", "Load", submenu = loadItems)
+            )
+        }
+        else -> item.submenu ?: emptyList()
+    }
+
+    /** The name of the layout [item] loads, when it loads one. */
+    private fun layoutNameOf(item: SubMenuItem): String? =
+        commandRegistry.find(item.id)?.let(commandRegistry::layoutName)
+
     private fun openMenuPage(item: MenuItem) {
-        val freshItems = handler?.submenuItemsFor(item) ?: item.submenu ?: emptyList()
+        val freshItems = currentSubmenu(item)
         val refreshedItem = item.copy(submenu = freshItems)
         replaceRootItem(refreshedItem)
         pageStack.add(
