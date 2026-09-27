@@ -116,11 +116,11 @@ class VideoWidget(
         syncHostLayout()
     }
 
-    fun onCursorActivity() {
+    override fun onCursorActivity() {
         if (!isMinimized && !released) playerUi.onUserActivity()
     }
 
-    fun onCursorVisibilityChanged(visible: Boolean) {
+    override fun onCursorVisibilityChanged(visible: Boolean) {
         if (!isMinimized && !released) playerUi.onCursorVisibilityChanged(visible)
     }
 
@@ -163,7 +163,7 @@ class VideoWidget(
         return playerUi.handleDoubleTap(localX, localY)
     }
 
-    fun handleKeyEvent(keyCode: Int, event: KeyEvent): Boolean = playerUi.handleKeyEvent(keyCode, event)
+    override fun handleKeyEvent(keyCode: Int, event: KeyEvent): Boolean = playerUi.handleKeyEvent(keyCode, event)
 
     private fun dispatchSyntheticTap(localX: Float, localY: Float) {
         val target = playerUi.root

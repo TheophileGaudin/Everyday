@@ -13,7 +13,7 @@ import com.everyday.shared.sync.NewsSourceSpec
 import java.util.concurrent.CompletableFuture
 
 /** Puts the news widget on the dashboard and connects it to the phone's news feeds. */
-internal class NewsFeatureController(
+internal class NewsModule(
     private val services: DashboardServices,
     private val ui: UiThreadDispatcher,
     private val currentWidget: () -> NewsWidget?,

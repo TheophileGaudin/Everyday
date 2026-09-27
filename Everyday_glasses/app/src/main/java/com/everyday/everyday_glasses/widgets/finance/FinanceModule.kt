@@ -15,7 +15,7 @@ import com.everyday.shared.sync.FinanceSnapshot
 import java.util.concurrent.CompletableFuture
 
 /** Puts the finance widget on the dashboard and connects it to the phone's market data. */
-internal class FinanceFeatureController(
+internal class FinanceModule(
     private val services: DashboardServices,
     private val ui: UiThreadDispatcher,
     private val currentWidget: () -> FinanceWidget?,

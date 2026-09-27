@@ -9,7 +9,7 @@ import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
 import com.everyday.everyday_glasses.widgets.calendar.CalendarWidget
 import com.everyday.everyday_glasses.widgets.finance.FinanceWidget
 import com.everyday.everyday_glasses.widgets.file_browser.ImageWidget
-import com.everyday.everyday_glasses.widgets.weather_location.LocationWidget
+import com.everyday.everyday_glasses.widgets.weather_location.WeatherWidget
 import com.everyday.everyday_glasses.widgets.map.MapWidget
 import com.everyday.everyday_glasses.widgets.news.NewsWidget
 import com.everyday.everyday_glasses.widgets.notifications.NotificationsWidget
@@ -277,8 +277,8 @@ class WidgetCaptureRestore {
     /**
      * Get location widget state for persistence.
      */
-    fun getLocationWidgetState(locationWidget: LocationWidget?): DashboardPersistence.LocationWidgetState? {
-        return locationWidget?.let {
+    fun getLocationWidgetState(weatherWidget: WeatherWidget?): DashboardPersistence.LocationWidgetState? {
+        return weatherWidget?.let {
             val c = extractCommonFields(it)
             DashboardPersistence.LocationWidgetState(
                 x = c.x, y = c.y, width = c.width, height = c.height,
@@ -529,12 +529,12 @@ class WidgetCaptureRestore {
 
     /** Restore the location widget's element visibility and common fields. */
     fun restoreLocationWidgetPosition(
-        locationWidget: LocationWidget?,
+        weatherWidget: WeatherWidget?,
         state: DashboardPersistence.LocationWidgetState,
         screenWidth: Int,
         screenHeight: Int
     ) {
-        locationWidget?.let { loc ->
+        weatherWidget?.let { loc ->
             restoreCommonFields(loc, state, screenWidth, screenHeight) {
                 loc.setElementVisibility(
                     showWeather = state.showWeather,

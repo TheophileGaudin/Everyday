@@ -449,6 +449,7 @@ class WidgetLifecycleController(
         val state = registration.stateCodec?.decode(record.state) ?: return null
         val widget = registration.reopenCandidate(state) ?: return null
         registerCandidate(widget, registration)
+        closedTemplates.remove(registration.descriptor.type) // Used up: the next new widget of this type starts from its default.
         return widget
     }
 

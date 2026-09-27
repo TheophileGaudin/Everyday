@@ -10,10 +10,10 @@ import com.everyday.shared.sync.WeatherData
 
 
 /** Puts the location and weather widget on the dashboard and feeds it place and weather data. */
-internal class LocationWeatherBinding(
+internal class WeatherModule(
     private val services: DashboardServices,
     private val context: Context,
-    private val currentWidget: () -> LocationWidget?,
+    private val currentWidget: () -> WeatherWidget?,
     private val temperatureUnit: () -> TemperatureUnit,
     private val toggleTemperatureUnit: () -> Unit,
 ) {
@@ -26,21 +26,21 @@ internal class LocationWeatherBinding(
     private var sunsetEpochMs: Long? = null
 
     val lifecycle = WidgetLifecycleRegistration.singleton(
-        WidgetTypeId.LOCATION, LocationWidget::class, DashboardPersistence.LocationWidgetState::class,
+        WidgetTypeId.LOCATION, WeatherWidget::class, DashboardPersistence.LocationWidgetState::class,
         current = currentWidget,
         create = ::create,
         restore = ::restore,
         capture = { services.captureRestore.getLocationWidgetState(it) },
     )
 
-    private fun create(): LocationWidget {
-        val widget = LocationWidget(context, 20f, services.viewportHeight - HEIGHT - 20f, WIDTH, HEIGHT)
+    private fun create(): WeatherWidget {
+        val widget = WeatherWidget(context, 20f, services.viewportHeight - HEIGHT - 20f, WIDTH, HEIGHT)
         configure(widget)
         return widget
     }
 
-    private fun restore(state: DashboardPersistence.LocationWidgetState): LocationWidget {
-        val widget = LocationWidget(context, state.x, state.y, state.width, state.height)
+    private fun restore(state: DashboardPersistence.LocationWidgetState): WeatherWidget {
+        val widget = WeatherWidget(context, state.x, state.y, state.width, state.height)
         configure(widget)
         services.captureRestore.restoreLocationWidgetPosition(widget, state, services.viewportWidth, services.viewportHeight)
         return widget
@@ -128,7 +128,7 @@ internal class LocationWeatherBinding(
         )
     }
 
-    private fun configure(widget: LocationWidget) {
+    private fun configure(widget: WeatherWidget) {
         widget.onTemperatureUnitChanged = toggleTemperatureUnit
         widget.setTemperatureUnit(temperatureUnit())
         if (address != null || weatherText != null) {

@@ -14,7 +14,7 @@ import java.util.Calendar
 import androidx.core.graphics.toColorInt
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 
-class LocationWidget(
+class WeatherWidget(
     private val context: Context,
     x: Float,
     y: Float,

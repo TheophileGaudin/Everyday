@@ -225,8 +225,8 @@ class MainActivity : AppCompatActivity() {
 
         brightnessController.initialize()
         val brightnessState = brightnessController.restore()
-        widgetContainer.setBrightness(brightnessState.requestedBrightness)
-        widgetContainer.setAdaptiveBrightnessEnabled(brightnessState.adaptiveEnabled)
+        widgetContainer.settingsController.setBrightness(brightnessState.requestedBrightness)
+        widgetContainer.settingsController.setAdaptiveBrightnessEnabled(brightnessState.adaptiveEnabled)
 
         brightnessController.setMediaBrightnessCap(
             widgetContainer.shouldApplyMediaBrightnessCap()
@@ -356,7 +356,7 @@ class MainActivity : AppCompatActivity() {
                     detail: String
                 ) {
                     runOnUiThread {
-                        widgetContainer.setAssistantConfiguration(configuration, models, detail)
+                        widgetContainer.settingsController.setAssistantConfiguration(configuration, models, detail)
                     }
                 }
             },
@@ -994,7 +994,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateGoogleAuthUi(state: GoogleAuthState) {
-        widgetContainer.setGoogleAuthState(state)
+        widgetContainer.settingsController.setGoogleAuthState(state)
     }
 
 
@@ -1025,10 +1025,10 @@ class MainActivity : AppCompatActivity() {
      * Save head-up wake settings to SharedPreferences.
      */
     private fun saveHeadUpSettings() {
-        val headUpTimeMs = widgetContainer.getHeadUpTime()
-        val wakeDurationMs = widgetContainer.getWakeDuration()
-        val angleThreshold = widgetContainer.getAngleThreshold()
-        val headsUpEnabled = widgetContainer.getHeadsUpEnabled()
+        val headUpTimeMs = widgetContainer.settingsController.getHeadUpTime()
+        val wakeDurationMs = widgetContainer.settingsController.getWakeDuration()
+        val angleThreshold = widgetContainer.settingsController.getAngleThreshold()
+        val headsUpEnabled = widgetContainer.settingsController.getHeadsUpEnabled()
         settingsStore.saveHeadUpSettings(
             HeadUpSettings(
                 holdTimeMs = headUpTimeMs,
@@ -1046,10 +1046,10 @@ class MainActivity : AppCompatActivity() {
     private fun restoreHeadUpSettings() {
         val settings = settingsStore.loadHeadUpSettings()
 
-        widgetContainer.setHeadUpTime(settings.holdTimeMs)
-        widgetContainer.setWakeDuration(settings.wakeDurationMs)
-        widgetContainer.setAngleThreshold(settings.angleThresholdDegrees)
-        widgetContainer.setHeadsUpEnabled(settings.enabled)
+        widgetContainer.settingsController.setHeadUpTime(settings.holdTimeMs)
+        widgetContainer.settingsController.setWakeDuration(settings.wakeDurationMs)
+        widgetContainer.settingsController.setAngleThreshold(settings.angleThresholdDegrees)
+        widgetContainer.settingsController.setHeadsUpEnabled(settings.enabled)
 
         // Apply to HeadUpWakeManager if initialized
         if (::headUpWakeManager.isInitialized) {
@@ -1136,10 +1136,10 @@ class MainActivity : AppCompatActivity() {
     private fun setupHeadUpWakeManager() {
         headUpWakeManager = HeadUpWakeManager(this)
 
-        headUpWakeManager.headUpHoldTimeMs = widgetContainer.getHeadUpTime()
-        headUpWakeManager.wakeDurationMs = widgetContainer.getWakeDuration()
-        headUpWakeManager.pitchChangeThreshold = widgetContainer.getAngleThreshold()
-        headUpWakeManager.isHeadsUpGestureEnabled = widgetContainer.getHeadsUpEnabled()
+        headUpWakeManager.headUpHoldTimeMs = widgetContainer.settingsController.getHeadUpTime()
+        headUpWakeManager.wakeDurationMs = widgetContainer.settingsController.getWakeDuration()
+        headUpWakeManager.pitchChangeThreshold = widgetContainer.settingsController.getAngleThreshold()
+        headUpWakeManager.isHeadsUpGestureEnabled = widgetContainer.settingsController.getHeadsUpEnabled()
 
         headUpWakeManager.wakeRequestListener = object : WakeRequestListener {
             override fun onWakeRequested() {

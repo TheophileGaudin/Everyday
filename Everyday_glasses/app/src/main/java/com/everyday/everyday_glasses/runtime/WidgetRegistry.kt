@@ -8,7 +8,7 @@ import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
 import com.everyday.everyday_glasses.widgets.calendar.CalendarWidget
 import com.everyday.everyday_glasses.widgets.finance.FinanceWidget
 import com.everyday.everyday_glasses.widgets.file_browser.ImageWidget
-import com.everyday.everyday_glasses.widgets.weather_location.LocationWidget
+import com.everyday.everyday_glasses.widgets.weather_location.WeatherWidget
 import com.everyday.everyday_glasses.widgets.map.MapWidget
 import com.everyday.everyday_glasses.widgets.news.NewsWidget
 import com.everyday.everyday_glasses.widgets.notifications.NotificationsWidget
@@ -54,7 +54,7 @@ class WidgetRegistry {
     val imageWidgets: List<ImageWidget> get() = widgetsAs(WidgetTypeId.IMAGE)
     val videoWidgets: List<VideoWidget> get() = widgetsAs(WidgetTypeId.VIDEO)
     val statusBarWidget: StatusBarWidget? get() = singletonAs(WidgetTypeId.STATUS)
-    val locationWidget: LocationWidget? get() = singletonAs(WidgetTypeId.LOCATION)
+    val weatherWidget: WeatherWidget? get() = singletonAs(WidgetTypeId.LOCATION)
     val mapWidget: MapWidget? get() = singletonAs(WidgetTypeId.MAP)
     val calendarWidget: CalendarWidget? get() = singletonAs(WidgetTypeId.CALENDAR)
     val financeWidget: FinanceWidget? get() = singletonAs(WidgetTypeId.FINANCE)

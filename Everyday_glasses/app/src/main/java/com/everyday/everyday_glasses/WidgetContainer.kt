@@ -13,8 +13,6 @@ import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import com.everyday.everyday_glasses.interaction.commands.AwaitingCommandUiDispatcher
 import com.everyday.everyday_glasses.interaction.user_input.TextEditingController
-import com.everyday.everyday_glasses.interaction.assistant.AssistantConfiguration
-import com.everyday.everyday_glasses.interaction.assistant.AssistantModel
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.AssistantTextPresentationRequest
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolCatalog
 import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContext
@@ -55,7 +53,6 @@ import com.everyday.everyday_glasses.widgets._common.WidgetPresenter
 import com.everyday.everyday_glasses.settings.SettingsController
 import com.everyday.everyday_glasses.interaction.user_input.UserInputActivity
 import com.everyday.everyday_glasses.interaction.user_input.UserInputKind
-import com.everyday.everyday_glasses.auth_permissions.GoogleAuthState
 import com.everyday.everyday_glasses.widgets.map.backend.StartNavigationRequest
 import com.everyday.everyday_glasses.runtime.WidgetDescriptors
 import com.everyday.everyday_glasses.persistence.WidgetDocument
@@ -89,7 +86,7 @@ import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserModule
 import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidget
 import com.everyday.everyday_glasses.widgets.finance.FinanceWidget
 import com.everyday.everyday_glasses.widgets.file_browser.ImageModule
-import com.everyday.everyday_glasses.widgets.weather_location.LocationWidget
+import com.everyday.everyday_glasses.widgets.weather_location.WeatherWidget
 import com.everyday.everyday_glasses.widgets.map.MapModule
 import com.everyday.everyday_glasses.widgets.map.MapWidget
 import com.everyday.everyday_glasses.widgets.news.NewsWidget
@@ -110,14 +107,13 @@ import com.everyday.everyday_glasses.widgets.text_editor.TextBoxModule
 import com.everyday.everyday_glasses.widgets.text_editor.TextBoxWidget
 import com.everyday.everyday_glasses._threedof.ThreeDofOverlay
 import com.everyday.everyday_glasses.widgets.file_browser.VideoModule
-import com.everyday.everyday_glasses.widgets.file_browser.VideoWidget
 import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContextCapture
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.MapAssistantActions
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.TextAssistantActions
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
-import com.everyday.everyday_glasses.widgets.finance.FinanceFeatureController
-import com.everyday.everyday_glasses.widgets.news.NewsFeatureController
-import com.everyday.everyday_glasses.widgets.weather_location.LocationWeatherBinding
+import com.everyday.everyday_glasses.widgets.finance.FinanceModule
+import com.everyday.everyday_glasses.widgets.news.NewsModule
+import com.everyday.everyday_glasses.widgets.weather_location.WeatherModule
 import com.everyday.shared.sync.FinanceSnapshot
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.NewsSnapshot
@@ -135,32 +131,25 @@ import com.everyday.shared.transport.AssistantStatus
 import java.util.concurrent.CompletableFuture
 
 /**
- * Central UI host and coordinator for the dashboard's widgets.
+ * The dashboard view. It dispatches input, drawing and app data to the widgets and to the layers
+ * above them, and holds no logic specific to one widget type.
  *
- * WidgetContainer owns the currently displayed collection of widgets and coordinates
- * how they are created, presented, interacted with, updated, persisted, and removed.
- * Individual widget classes remain responsible for rendering and behavior specific
- * to their own content.
+ * - Input: taps, double-taps, presses, moves, drags and scrolls go to the first taker, in order:
+ *   the menus and popups, the visible keyboard, [HoverControlsLayer], a screen modal, then the
+ *   fullscreen or top-most widget through [BaseWidget]'s input hooks. The press, long-press and
+ *   drag state lives here because it is that dispatch.
+ * - Drawing: the widgets in z-order (moved as one layer in 3DOF), then the hover controls,
+ *   the keyboards, the presentation and the head-locked menus.
+ * - Data: the public `apply…` / `update…` / `set…` methods pass through to each widget type's
+ *   module (`StatusBarModule`, `MapModule`, `BrowserModule`, …), which owns that type's creation,
+ *   restore, listeners and latest data.
+ * - Changes: each mutation is reported once, as transient or persistent, through
+ *   [DashboardChangeCoordinator] to [WidgetContentObserver].
  *
- * Its main responsibilities are:
- * - Creating, registering, restoring, closing, and arranging widgets
- * - Routing taps, pointer movement, dragging, keyboard input, and hover interactions
- * - Coordinating focus, context menus, formatting controls, and other UI overlays
- * - Drawing widgets and applying fullscreen, minimized, presentation, and 3DOF states
- * - Delivering app data and external updates to the appropriate visible widgets
- * - Capturing and restoring dashboard state in cooperation with persistence classes
- * - Exposing widget operations to app commands and assistant tools
- *
- * Supporting components own narrower parts of this work, including:
- * - WidgetRegistry for the active widget collection, lookup, and display ordering
- * - WidgetLifecycleController for widget registration, closing, and cleanup
- * - WidgetCaptureRestore for translating between live widgets and persisted state
- * - PresentationController for temporary widget presentation modes and transitions
- * - CursorStabilizer for smoothing cursor movement
- * - ThreeDofOverlay and related helpers for 3DOF display behavior
- *
- * This class coordinates these systems; it should not contain the internal
- * content-specific logic of individual widget types.
+ * The other owners: [WidgetRegistry] (the widgets and their order), [WidgetLifecycleController]
+ * (opening, closing, closed templates), [TextEditingController] (keyboard focus),
+ * [WidgetPresenter] (assistant presentations), [WidgetLayoutManager] (layouts and replacing the
+ * dashboard) and [settingsController] (the settings screens, also used by the activity).
  */
 /** Observes user-visible content changes produced by [com.everyday.everyday_glasses.WidgetContainer]. */
 interface WidgetContentObserver {
@@ -242,17 +231,17 @@ class WidgetContainer @JvmOverloads constructor(
     )
     private val assistantUiDispatcher = UiThreadDispatcher { action -> if (Looper.myLooper() == Looper.getMainLooper()) {action(); true}
     else {post(Runnable(action))}}
-    private val locationWeatherBinding by lazy {
-        LocationWeatherBinding(
+    private val weatherModule by lazy {
+        WeatherModule(
             services = dashboardServices,
             context = context,
-            currentWidget = { locationWidget },
+            currentWidget = { weatherWidget },
             temperatureUnit = { unitSettings.effectiveTemperatureUnit() },
             toggleTemperatureUnit = { unitSettings.toggleTemperatureOverride() },
         )
     }
     private val newsFeatures by lazy {
-        NewsFeatureController(
+        NewsModule(
             services = dashboardServices,
             ui = assistantUiDispatcher,
             currentWidget = { newsWidget },
@@ -260,13 +249,13 @@ class WidgetContainer @JvmOverloads constructor(
         )
     }
     private val financeFeatures by lazy {
-        FinanceFeatureController(
+        FinanceModule(
             services = dashboardServices,
             ui = assistantUiDispatcher,
             currentWidget = { financeWidget },
             currentProvider = { dataProvider },
             runPersistentUpdate = { action -> runPersistentMutation( action = action, changed = { result -> result.isSuccess } ) },
-            stableWidgetId = ::widgetStableId,
+            stableWidgetId = ::stableWidgetId,
         )
     }
 
@@ -400,28 +389,16 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     // ==================== Widget References ====================
-    
-    // Status bar widget - delegated to registry
-    val statusBarWidget: StatusBarWidget?
-        get() = registry.statusBarWidget
-
-    // Location widget - delegated to registry
-    val locationWidget: LocationWidget?
-        get() = registry.locationWidget
-
-    val mapWidget: MapWidget?
-        get() = registry.mapWidget
-
-    val calendarWidget: CalendarWidget?
-        get() = registry.calendarWidget
-
-    //delegation of widgets to registry
-    val financeWidget: FinanceWidget?             get() = registry.financeWidget
-    val newsWidget: NewsWidget?                   get() = registry.newsWidget
-    val notificationsWidget: NotificationsWidget? get() = registry.notificationsWidget
-    val speedometerWidget: SpeedometerWidget?     get() = registry.speedometerWidget
-    val subtitleWidget: SubtitleWidget?           get() = registry.subtitleWidget
-    val screenMirrorWidget: ScreenMirrorWidget?   get() = registry.screenMirrorWidget
+    private val statusBarWidget: StatusBarWidget?         get() = registry.statusBarWidget
+    private val weatherWidget: WeatherWidget?           get() = registry.weatherWidget
+    private val mapWidget: MapWidget?                     get() = registry.mapWidget
+    private val calendarWidget: CalendarWidget?           get() = registry.calendarWidget
+    private val financeWidget: FinanceWidget?             get() = registry.financeWidget
+    private val newsWidget: NewsWidget?                   get() = registry.newsWidget
+    private val notificationsWidget: NotificationsWidget? get() = registry.notificationsWidget
+    private val speedometerWidget: SpeedometerWidget?     get() = registry.speedometerWidget
+    private val subtitleWidget: SubtitleWidget?           get() = registry.subtitleWidget
+    private val screenMirrorWidget: ScreenMirrorWidget?   get() = registry.screenMirrorWidget
 
     // ==================== Widget modules ====================
 
@@ -494,7 +471,7 @@ class WidgetContainer @JvmOverloads constructor(
 
 
     // Settings overlays and persisted app-level settings
-    private val settingsController = SettingsController(
+    val settingsController = SettingsController(
         resources = resources,
         defaultSpeedVisibilityThresholdKmh = DEFAULT_SPEED_VISIBILITY_THRESHOLD_KMH,
         notifyTransientContentChanged = ::notifyTransientContentChanged,
@@ -578,9 +555,7 @@ class WidgetContainer @JvmOverloads constructor(
     var googleAccountHandler: GoogleAccountHandler? = null
 
     // Access to widget lists via registry
-    private val widgets: List<TextBoxWidget> get() = registry.textWidgets
     private val browserWidgets: List<BrowserWidget> get() = registry.browserWidgets
-    private val videoWidgets: List<VideoWidget> get() = registry.videoWidgets
 
     // Widget being dragged
     private var activeWidget: BaseWidget? = null
@@ -648,29 +623,23 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Selection Tracking ====================
 
-    private var isLongPressSelectionMode = false
-    private var pendingFormattingMenuDrag = false
-
-    // Scrollbar dragging state
-    private var isScrollbarDragActive = false
-    private var scrollbarDragWidget: TextBoxWidget? = null
-    
-    // Two-finger scroll mode
-    private var isTwoFingerScrollMode = false
+    private var isLongPressSelectionMode         = false
+    private var pendingFormattingMenuDrag        = false
+    private var scrollbarDragWidget: BaseWidget? = null // Scrollbar dragging state
+    private var isTwoFingerScrollMode            = false // Two-finger scroll mode
 
     // ==================== Host contracts ====================
 
-    var contentObserver: WidgetContentObserver? = null
-    var host: WidgetHost? = null
-    var dataProvider: WidgetDataProvider? = null
-    var userInputActivity: UserInputActivity? = null
-
-    private var isCursorVisible = false
+    var contentObserver: WidgetContentObserver?             = null
+    var host: WidgetHost?                                   = null
+    var dataProvider: WidgetDataProvider?                   = null
+    var userInputActivity: UserInputActivity?               = null
+    private var isCursorVisible                             = false
     private var displayState: WakeSleepManager.DisplayState = WakeSleepManager.DisplayState.WAKE
 
     // Flag to suppress aggressive invalidation during display state transitions
-    private var isTransitioningDisplayState = false
-    private var isHostPaused = false
+    private var isTransitioningDisplayState                 = false
+    private var isHostPaused                                = false
 
     /**
      * True while a stored dashboard is known to exist but has not been applied yet.
@@ -691,9 +660,7 @@ class WidgetContainer @JvmOverloads constructor(
         unitSettings.onChanged = { applyEffectiveUnitSettings() } // Callers own the classified notification for unit changes; applying the derived widget presentation here must not emit a second transient callback.
         applyEffectiveUnitSettings()
     }
-
     override fun onDetachedFromWindow() {presenter.dismiss(); super.onDetachedFromWindow()}
-
     private fun registerWidgetLifecycles() {
         //multi-instance widget registration
         lifecycleController.register(browserModule.lifecycle)
@@ -705,7 +672,7 @@ class WidgetContainer @JvmOverloads constructor(
 
         //singleton widget registration
         lifecycleController.register(statusBarModule.lifecycle)
-        lifecycleController.register(locationWeatherBinding.lifecycle)
+        lifecycleController.register(weatherModule.lifecycle)
         lifecycleController.register(mapModule.lifecycle)
         lifecycleController.register(calendarModule.lifecycle)
         lifecycleController.register(financeFeatures.lifecycle)
@@ -720,7 +687,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Public State Queries ====================
 
-    fun hasFullscreenWidget(): Boolean = registry.fullscreenWidget != null
+    private fun hasFullscreenWidget(): Boolean = registry.fullscreenWidget != null
 
     fun setDisplayState(state: WakeSleepManager.DisplayState) {
         if (displayState != state) {
@@ -774,17 +741,14 @@ class WidgetContainer @JvmOverloads constructor(
     fun isDisplayAwake(): Boolean = displayState == WakeSleepManager.DisplayState.WAKE
 
     // Widget presentation by assistant
-    val activePresentationSession: PresentationSession? get() = presenter.activeSession
+    private val activePresentationSession: PresentationSession? get() = presenter.activeSession
     fun cancelPresentationForUserInput(): Boolean = presenter.cancelForUserInput()
     fun dismissPresentation(): Boolean = presenter.dismiss()
-    fun widgetStableId(widget: BaseWidget): String = stableWidgetId(widget) /** Stable ID used by assistant context and temporary presentation targeting. */
-
     /**
      * Returns the requested browser instance without falling back to another browser.
      * The Page Agent caller should invoke this at run start and retain the returned adapter.
      */
-    fun findBrowserWidgetByStableId(widgetId: String): BrowserWidget? =
-        browserWidgets.firstOrNull { stableWidgetId(it) == widgetId }
+    private fun findBrowserWidgetByStableId(widgetId: String): BrowserWidget? = browserWidgets.firstOrNull { stableWidgetId(it) == widgetId }
 
     /**
      * Atomically capture the browser occupying page/video fullscreen and bind its current tab
@@ -900,25 +864,25 @@ class WidgetContainer @JvmOverloads constructor(
         mapModule.applyLocationMetadata(town, countryCode)
         financeFeatures.updateCountryCode(countryCode)
         newsFeatures.updateCountryCode(countryCode)
-        locationWeatherBinding.applyLocationMetadata(town, countryCode)
+        weatherModule.applyLocationMetadata(town, countryCode)
     }
 
     //update features of the Weather and location widget
-    fun setLocationPermissionDenied()           = locationWeatherBinding.setLocationPermissionDenied()
-    fun applyWeatherData(weather: WeatherData?) = locationWeatherBinding.applyWeatherData(weather)
+    fun setLocationPermissionDenied()           = weatherModule.setLocationPermissionDenied()
+    fun applyWeatherData(weather: WeatherData?) = weatherModule.applyWeatherData(weather)
 
     //update features of the Finance widget
     fun applyFinanceSnapshot(snapshot: FinanceSnapshot, notify: Boolean = true)                          = financeFeatures.applySnapshot(snapshot, notify)
     fun applyFinanceError(message: String)                                                               = financeFeatures.applyError(message)
     fun currentFinanceVisibleConfigs(): List<FinanceDashboardTileConfig>                                 = financeFeatures.currentVisibleConfigs()
-    fun updateFinanceTile(request: FinanceTileUpdateRequest): CompletableFuture<FinanceTileUpdateResult> = financeFeatures.updateTile(request)
+    private fun updateFinanceTile(request: FinanceTileUpdateRequest): CompletableFuture<FinanceTileUpdateResult> = financeFeatures.updateTile(request)
 
     //update features of the News widget
     fun applyNewsSnapshot(snapshot: NewsSnapshot)                                            = newsFeatures.applySnapshot(snapshot)
     fun applyNewsError(message: String)                                                      = newsFeatures.applyError(message)
     fun currentNewsCountryCode(): String?                                                    = newsFeatures.currentCountryCode()
     fun currentNewsSourceSpec(): NewsSourceSpec?                                             = newsFeatures.currentSourceSpec()
-    fun setNewsSource(sourceSpec: NewsSourceSpec): CompletableFuture<NewsSourceUpdateResult> = newsFeatures.setSource(sourceSpec)
+    private fun setNewsSource(sourceSpec: NewsSourceSpec): CompletableFuture<NewsSourceUpdateResult> = newsFeatures.setSource(sourceSpec)
 
     //update features on speedometer and subtitle widgets
     fun updateSpeedData(state: SpeedState)                      = speedometerModule.updateSpeed(state)
@@ -958,7 +922,7 @@ class WidgetContainer @JvmOverloads constructor(
         speedometerWidget?.setUnit(speedUnit)
         settingsController.setSpeedUnit(speedUnit)
         settingsController.setUnitSystemMode(unitSettings.globalMode)
-        locationWeatherBinding.applyUnitSettings()
+        weatherModule.applyUnitSettings()
     }
 
     fun applyNotificationsSnapshot(snapshot: PhoneNotificationsSnapshot) = notificationsModule.applySnapshot(snapshot)
@@ -1044,9 +1008,7 @@ class WidgetContainer @JvmOverloads constructor(
         if (isVisibleKeyboardAt(cx, cy)) {hoverControlsLayer.cancelInteractions(); updateKeyboardHoverAt(cx, cy); notifyTransientContentChanged(); return}
         if (hoverControlsLayer.onCursorDown(cx, cy)) return
 
-        val scrollbarWidget = getScrollbarHoveredWidget(cx, cy)
-        if (scrollbarWidget != null) { isScrollbarDragActive = true; this.scrollbarDragWidget = scrollbarWidget }
-        else { isScrollbarDragActive = false; this.scrollbarDragWidget = null }
+        scrollbarDragWidget = scrollbarWidgetAt(cx, cy)
 
         // Menus are NOT transformed (they stay head-locked like cursor)
         textEditing.formattingMenu?.let { menu -> if (menu.isVisible && menu.shouldScheduleLongPress(x, y)) { pendingFormattingMenuDrag = true; scheduleLongPress(); return } }
@@ -1187,7 +1149,7 @@ class WidgetContainer @JvmOverloads constructor(
         endCapturedPress(x, y, cancel = false)
 
         cursorPressed = false; cancelLongPress()
-        if (isScrollbarDragActive) { isScrollbarDragActive = false; scrollbarDragWidget = null }
+        scrollbarDragWidget = null
         textEditing.formattingMenu?.let { if (it.isDragging()) it.onDragEnd() }
         if (isLongPressSelectionMode) { textEditing.endSelection(); isLongPressSelectionMode = false }
         var dragEnded = false
@@ -1301,16 +1263,8 @@ class WidgetContainer @JvmOverloads constructor(
         return Pair(x, y)
     }
 
-    /** Forward global cursor activity to any visible video player controls. */
-    fun onCursorActivity() {
-        videoWidgets.forEach { it.onCursorActivity() }
-    }
-
-    /** Keep video player controls aligned with the global cursor visibility state. */
-    fun onCursorVisibilityChanged(visible: Boolean) {
-        videoWidgets.forEach { it.onCursorVisibilityChanged(visible) }
-    }
-
+    fun onCursorActivity()                          = registry.forEachWidget { it.onCursorActivity() }
+    fun onCursorVisibilityChanged(visible: Boolean) = registry.forEachWidget { it.onCursorVisibilityChanged(visible) }
     private fun updateHover(x: Float, y: Float, isVisible: Boolean) {
         // The hover-controls editor handles its own cursor state and the dashboard widgets/
         // controls behind it are hidden, so suppress the regular hover pass.
@@ -1390,7 +1344,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     private fun handleDragOperations(x: Float, y: Float, dx: Float, dy: Float) {
-        if (isLongPressSelectionMode || internalDragWidget != null || activeWidget != null || isScrollbarDragActive) {userInputActivity?.onUserInput(UserInputKind.DRAG)}
+        if (isLongPressSelectionMode || internalDragWidget != null || activeWidget != null || scrollbarDragWidget != null) {userInputActivity?.onUserInput(UserInputKind.DRAG)}
         if (isLongPressSelectionMode && textEditing.isSelecting) {textEditing.extendSelection(x, y)} // For text selection, use content-space coordinates
         // Menus use screen-space (head-locked)
         textEditing.formattingMenu?.let { menu ->
@@ -1410,19 +1364,16 @@ class WidgetContainer @JvmOverloads constructor(
             return
         }
         if (activeWidget != null) { activeWidget?.onDrag(dx, dy, width.toFloat(), height.toFloat()); notifyTransientContentChanged(); return }
-        if (isScrollbarDragActive && scrollbarDragWidget != null) { scrollbarDragWidget?.onScrollbarDrag(dy); notifyTransientContentChanged(); return }
+        scrollbarDragWidget?.let { it.onScrollbarDrag(dy); notifyTransientContentChanged(); return }
     }
 
-    /** The text box whose scrollbar is under the content-space point ([cx], [cy]), if any. */
-    private fun getScrollbarHoveredWidget(cx: Float, cy: Float): TextBoxWidget? {
-        fullscreenAs<TextBoxWidget>()?.let { if (it.isOverScrollbar(cx, cy)) return it }
-        for (widget in widgets.reversed()) { if (widget.isOverScrollbar(cx, cy)) return widget }
-        return null
+    /** The widget whose scrollbar is under the content-space point ([cx], [cy]): the fullscreen one, or the top-most. */
+    private fun scrollbarWidgetAt(cx: Float, cy: Float): BaseWidget? {
+        registry.fullscreenWidget?.let { fullscreen -> return fullscreen.takeIf { it.isOverScrollbar(cx, cy) } }
+        return registry.getAllSortedByZOrder().lastOrNull { !it.isMinimized && it.isOverScrollbar(cx, cy) }
     }
-
-    fun isScrollbarDragActive(): Boolean = isScrollbarDragActive
-    fun getScrollbarDragWidget(): TextBoxWidget? = scrollbarDragWidget
-
+    fun isScrollbarDragActive(): Boolean = scrollbarDragWidget != null
+    fun getScrollbarDragWidget(): BaseWidget? = scrollbarDragWidget
     fun scrollWidgetAtCursor(cursorX: Float, cursorY: Float, dy: Float, userInitiated: Boolean = false) {
         if (userInitiated) userInputActivity?.onUserInput(UserInputKind.SCROLL)
         contextMenu?.let {
@@ -1446,10 +1397,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Tap Handling ====================
 
-    fun handleKeyEvent(keyCode: Int, event: KeyEvent): Boolean {
-        return fullscreenAs<VideoWidget>()?.handleKeyEvent(keyCode, event) == true
-    }
-
+    fun handleKeyEvent(keyCode: Int, event: KeyEvent): Boolean {return registry.fullscreenWidget?.handleKeyEvent(keyCode, event) == true}
     fun onTap(x: Float, y: Float): Boolean {
         if (pageAgentApprovalOverlay.isVisible()) {return pageAgentApprovalOverlay.onTap(x, y)} // Menus use screen-space coordinates (head-locked)
         textEditing.onMenuTap(x, y)?.let { return it } // The text edit and formatting menus sit above whichever surface owns the focused text zone.
@@ -1459,30 +1407,13 @@ class WidgetContainer @JvmOverloads constructor(
         settingsController.handleShortcutsSettingsMenuTap(x, y)?.let { return it }
         if (contextMenu?.isVisible == true) { return dispatchContextMenuAction { contextMenu?.onTap(x, y) ?: false }}
         settingsController.handleSpeedometerTap(x, y)?.let { return it }
-
-        // Transform to content space for widget hit testing
-        val (cx, cy) = toContentSpace(x, y)
+        val (cx, cy) = toContentSpace(x, y) // Transform to content space for widget hit testing
         if (consumeVisibleKeyboardTap(cx, cy)) return true
-
-        // Hover controls are above every widget, including fullscreen ones.
-        if (hoverControlsLayer.onTap(cx, cy)) return true
-
-        // Screen modals and open popups take taps anywhere, even over a fullscreen widget.
-        for (widget in widgetsTopDown()) {if (runWidgetInput(widget) { widget.onModalTap(cx, cy) }) return true}
-
-        // A fullscreen widget is the only possible target; outside its bounds the tap does nothing.
-        registry.fullscreenWidget?.let { fullscreen -> return fullscreen.containsPoint(cx, cy) && tapWidget(fullscreen, cx, cy)}
-
-        // Modal dashboard check
-        settingsController.handleDashboardTap(x, y)?.let { return it }
-
-        // Route the tap to the single top-most widget under the cursor — the same widget
-        // that owns hover — so an overlapping widget can't consume a tap meant for it.
-        interactionTargetAt(cx, cy)?.let { target ->
-            if (target.isMinimized) { target.toggleMinimize(); return true }
-            return tapWidget(target, cx, cy)
-        }
-
+        if (hoverControlsLayer.onTap(cx, cy)) return true // Hover controls are above every widget, including fullscreen ones.
+        for (widget in widgetsTopDown()) {if (runWidgetInput(widget) { widget.onModalTap(cx, cy) }) return true} // Screen modals and open popups take taps anywhere, even over a fullscreen widget.
+        registry.fullscreenWidget?.let { fullscreen -> return fullscreen.containsPoint(cx, cy) && tapWidget(fullscreen, cx, cy)} // A fullscreen widget is the only possible target; outside its bounds the tap does nothing.
+        settingsController.handleDashboardTap(x, y)?.let { return it } // Modal dashboard check
+        interactionTargetAt(cx, cy)?.let { target -> if (target.isMinimized) { target.toggleMinimize(); return true }; return tapWidget(target, cx, cy)} // Route the tap to the single top-most widget under the cursor — the same widget that owns hover — so an overlapping widget can't consume a tap meant for it.
         if (hasFocusedWidget()) { unfocusAll(); notifyTransientContentChanged(); return true }
         return false
     }
@@ -1589,29 +1520,9 @@ class WidgetContainer @JvmOverloads constructor(
         commandRegistry.find(item.id)?.let { executeCommand(commandRegistry.invocation(it)) }
     }
 
-    // ==================== Setters and Getters ====================
-
-
-
-    /** setters and getters for brightness and head-up */
-    fun setBrightness(value: Float) {settingsController.setBrightness(value)}
-    fun setAdaptiveBrightnessEnabled(enabled: Boolean) {settingsController.setAdaptiveBrightnessEnabled(enabled)}
-    fun setHeadUpTime(ms: Long) {settingsController.setHeadUpTime(ms)} /**Set the head-up time programmatically (used for restoring persisted state).*/
-    fun getHeadUpTime(): Long = settingsController.getHeadUpTime() /** Get the current head-up time (used for persistence).*/
-    fun setWakeDuration(ms: Long) {settingsController.setWakeDuration(ms)} /** Set the wake duration programmatically (used for restoring persisted state).*/
-    fun getWakeDuration(): Long = settingsController.getWakeDuration() /** Get the current wake duration (used for persistence). */
-    fun setAngleThreshold(degrees: Float) {settingsController.setAngleThreshold(degrees)} /** Set the angle threshold programmatically (used for restoring persisted state). */
-    fun getAngleThreshold(): Float = settingsController.getAngleThreshold() /** Get the current angle threshold (used for persistence). */
-    fun setHeadsUpEnabled(enabled: Boolean) {settingsController.setHeadsUpEnabled(enabled)} /** Set the heads-up enabled state programmatically (used for restoring persisted state). */
-    fun getHeadsUpEnabled(): Boolean = settingsController.getHeadsUpEnabled() /** Get the current heads-up enabled state (used for persistence). */
-
-    /** setter for Google authentication*/
-    fun setGoogleAuthState(state: GoogleAuthState) {settingsController.setGoogleAuthState(state)}
-
-    fun setSmartAlignmentEnabled(enabled: Boolean) {
-        smartAlignment.enabled = enabled
-    }
-    fun setWidgetLayoutLocked(locked: Boolean, persist: Boolean = true) {
+    // ==================== Setters ====================
+    fun setSmartAlignmentEnabled(enabled: Boolean) {smartAlignment.enabled = enabled}
+    private fun setWidgetLayoutLocked(locked: Boolean, persist: Boolean = true) {
         if (isWidgetLayoutLocked == locked) {contextMenu?.setLayoutLockState(isWidgetLayoutLocked); return}
         isWidgetLayoutLocked = locked
         contextMenu?.setLayoutLockState(isWidgetLayoutLocked)
@@ -1642,9 +1553,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun dismissMapPresentation() {
         val map = mapWidget ?: return
-        if (activePresentationSession?.targetId == widgetStableId(map)) {
-            dismissPresentation()
-        }
+        if (activePresentationSession?.targetId == stableWidgetId(map)) {dismissPresentation()}
     }
 
     //browser section
@@ -1697,13 +1606,13 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Public Accessors ====================
     fun setPhoneClipboard(content: String?)                                                                             = textEditing.setPhoneClipboard(content)
-    fun hasFocusedWidget():                                                                                     Boolean = textEditing.hasKeyFocus
+    private fun hasFocusedWidget():                                                                                     Boolean = textEditing.hasKeyFocus
     fun isMenuVisible():                                                                                        Boolean = contextMenu?.isVisible == true || textEditing.isMenuVisible || layoutManager.isNamePromptVisible
-    fun isClosePopupVisible():                                                                                  Boolean = closeConfirmationPopup?.isVisible == true || layoutManager.isDeleteConfirmationVisible
-    fun isAnyPopupVisible():                                                                                    Boolean = isMenuVisible() || isClosePopupVisible() || pageAgentApprovalOverlay.isVisible()
+    private fun isClosePopupVisible():                                                                                  Boolean = closeConfirmationPopup?.isVisible == true || layoutManager.isDeleteConfirmationVisible
+    private fun isAnyPopupVisible():                                                                                    Boolean = isMenuVisible() || isClosePopupVisible() || pageAgentApprovalOverlay.isVisible()
     fun showPageAgentApproval(runId: String, request: PageAgentConfirmationRequest, respond: (Boolean) -> Unit) {pageAgentApprovalOverlay.show(runId, request, respond); ensureDrawnAboveNativeOverlays()}
     fun dismissPageAgentApproval(runId: String)                                                                 {pageAgentApprovalOverlay.dismiss(runId)}
-    fun dismissMenu()                                                                                           { contextMenu?.dismiss(); textEditing.dismissMenus(); layoutManager.dismissNamePrompt() }
+    private fun dismissMenu()                                                                                           { contextMenu?.dismiss(); textEditing.dismissMenus(); layoutManager.dismissNamePrompt() }
     fun isDragging():                                                                                           Boolean = activeWidget != null || internalDragWidget != null || textEditing.formattingMenu?.isDragging() == true
 
     // ==================== 3DOF Mode ====================
@@ -1727,7 +1636,7 @@ class WidgetContainer @JvmOverloads constructor(
     fun set3DofTransitionProgress(progress: Float) {threeDofOverlay.setTransitionProgress(progress); notifyTransientContentChanged()}
     private fun shouldApplyThreeDofTransform(): Boolean = displayState == WakeSleepManager.DisplayState.WAKE && !hasFullscreenWidget() && (is3DofEnabled || threeDofOverlay.isVisible())
     private fun currentDashboardTransform(): DashboardTransform.Snapshot =  dashboardTransform.snapshot(viewportWidth = width.toFloat(), viewportHeight = height.toFloat(), applies = shouldApplyThreeDofTransform())
-    fun screenToContentCoordinates(screenX: Float, screenY: Float): Pair<Float, Float> = currentDashboardTransform().screenToContent(screenX, screenY) /** Convert the fixed screen cursor to the coordinate space in which widgets are drawn. */
+    private fun screenToContentCoordinates(screenX: Float, screenY: Float): Pair<Float, Float> = currentDashboardTransform().screenToContent(screenX, screenY) /** Convert the fixed screen cursor to the coordinate space in which widgets are drawn. */
 
     // ==================== Drawing ====================
 
@@ -1917,7 +1826,7 @@ class WidgetContainer @JvmOverloads constructor(
     /** Assistant navigation */
     fun startNavigation(request: StartNavigationRequest) = mapAssistantActions.startNavigation(request)
     fun stopNavigation() = mapAssistantActions.stopNavigation()
-    fun configureMapPois(request: ConfigureMapPoisRequest) = mapAssistantActions.configurePois(request)
+    private fun configureMapPois(request: ConfigureMapPoisRequest) = mapAssistantActions.configurePois(request)
 
     /**
      * Present assistant-authored text on the UI thread. The callback is asynchronous because
@@ -1948,10 +1857,6 @@ class WidgetContainer @JvmOverloads constructor(
             override fun onRemoveGeminiKey() = onRemoveKey()
             override fun onSelectGeminiModel(model: String?) = onSelectModel(model)
         }
-    }
-
-    fun setAssistantConfiguration(configuration: AssistantConfiguration?, models: List<AssistantModel>, detail: String) {
-        settingsController.setAssistantConfiguration(configuration, models, detail)
     }
 
     fun executeOpenUrlCommand(address: String): AppCommandResult = executeCommand(

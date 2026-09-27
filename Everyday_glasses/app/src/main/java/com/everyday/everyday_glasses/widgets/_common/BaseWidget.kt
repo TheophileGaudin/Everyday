@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.util.Log
+import android.view.KeyEvent
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneHost
 import com.everyday.everyday_glasses.runtime.WidgetChangeListener
 import com.everyday.everyday_glasses.runtime.WidgetLifecycle
@@ -1182,6 +1183,17 @@ abstract class BaseWidget(
      * Abstract method - subclasses must implement drawing.
      */
     abstract fun draw(canvas: Canvas)
+
+    // ==================== Cursor and keys ====================
+
+    /** The cursor moved or was used anywhere on the dashboard. */
+    open fun onCursorActivity() {}
+
+    /** The cursor was shown or hidden. */
+    open fun onCursorVisibilityChanged(visible: Boolean) {}
+
+    /** A hardware key while this widget is fullscreen; true when it used the key. */
+    open fun handleKeyEvent(keyCode: Int, event: KeyEvent): Boolean = false
 
     // ==================== Scrollbar Support ====================
 

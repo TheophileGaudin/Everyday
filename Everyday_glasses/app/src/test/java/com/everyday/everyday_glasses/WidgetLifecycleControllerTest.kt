@@ -207,6 +207,31 @@ class WidgetLifecycleControllerTest {
 
         val reopened = controller.show(WidgetTypeId.STATUS) as FakeWidget
         assertEquals("reopened from default", reopened.value)
+        assertTrue(controller.closedTemplateRecords().isEmpty())
+    }
+
+    @Test
+    fun `a closed text box's template is used up by one reopen`() {
+        val registry = WidgetRegistry()
+        val controller = controller(registry) {}
+        controller.register(
+            WidgetLifecycleRegistration(
+                descriptor = WidgetDescriptors[WidgetTypeId.TEXT],
+                widgetType = FakeWidget::class,
+                stateType = String::class,
+                stateCodec = StringCodec(WidgetTypeId.TEXT),
+                restore = { value -> FakeWidget(WidgetTypeId.TEXT, "reopened from $value") },
+                capture = FakeWidget::value
+            )
+        )
+        val first = controller.open(WidgetTypeId.TEXT) { FakeWidget(WidgetTypeId.TEXT, "notes") }!!
+        controller.close(first)
+
+        val reopened = controller.openClosedTemplate(WidgetTypeId.TEXT) as FakeWidget
+
+        assertEquals("reopened from notes", reopened.value)
+        assertNull(controller.openClosedTemplate(WidgetTypeId.TEXT))
+        assertTrue(controller.closedTemplateRecords().isEmpty())
     }
 
     @Test

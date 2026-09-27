@@ -66,7 +66,7 @@ import com.everyday.everyday_glasses.ui.components.KeyboardOverlayController
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets._common.PresentationSpec
 import com.everyday.everyday_glasses.widgets._common.WidgetTheme
-import com.everyday.everyday_glasses.widgets.weather_location.LocationWidget
+import com.everyday.everyday_glasses.widgets.weather_location.WeatherWidget
 import com.everyday.shared.routing.GeoPoint
 import com.everyday.shared.routing.GuidanceFixStatus
 import com.everyday.shared.routing.LiveGuidanceUpdate
@@ -1905,7 +1905,7 @@ class MapWidget(
 
         val flag = countryCode
             .takeIf { showCountry && it.length == 2 }
-            ?.let(LocationWidget.Companion::countryCodeToFlag)
+            ?.let(WeatherWidget.Companion::countryCodeToFlag)
             .orEmpty()
 
         // Existing town and nationality line
