@@ -40,7 +40,6 @@ import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.StopN
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.UpdateFinanceTileSemanticToolHandler
 import com.everyday.everyday_glasses.interaction.assistant.WebSearchSemanticToolHandler
 import com.everyday.everyday_glasses.runtime.DashboardChangeCoordinator
-import com.everyday.everyday_glasses.runtime.BrowserWidgetListener
 import com.everyday.everyday_glasses.settings.DisplaySettingsHandler
 import com.everyday.everyday_glasses.runtime.GeminiSettingsListener
 import com.everyday.everyday_glasses.auth_permissions.GoogleAccountHandler
@@ -62,7 +61,7 @@ import com.everyday.everyday_glasses.widgets.map.backend.StartNavigationRequest
 import com.everyday.everyday_glasses.runtime.WidgetDescriptors
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
-import com.everyday.everyday_glasses.widgets.browser.BrowserWidgetFactory
+import com.everyday.everyday_glasses.widgets.browser.BrowserModule
 import com.everyday.everyday_glasses.ui.components.CloseConfirmationHandler
 import com.everyday.everyday_glasses.ui.components.ContextMenuHandler
 import com.everyday.everyday_glasses.interaction.user_input.CursorStabilizer
@@ -79,7 +78,6 @@ import com.everyday.everyday_glasses.runtime.WakeSleepManager
 import com.everyday.everyday_glasses.persistence.WidgetLayoutManager
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
 import com.everyday.everyday_glasses.runtime.DashboardServices
-import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
@@ -254,11 +252,6 @@ class WidgetContainer @JvmOverloads constructor(
     )
     private val assistantUiDispatcher = UiThreadDispatcher { action -> if (Looper.myLooper() == Looper.getMainLooper()) {action(); true}
     else {post(Runnable(action))}}
-    private fun browserWidgetFactory(rootView: ViewGroup) = BrowserWidgetFactory(
-        context = context,
-        rootLayout = rootView,
-        containerView = this,
-    )
     private val locationWeatherBinding by lazy {
         LocationWeatherBinding(
             services = dashboardServices,
@@ -338,8 +331,8 @@ class WidgetContainer @JvmOverloads constructor(
         }
 
         override fun createTextWidget() {textModule.open(pendingCreateX, pendingCreateY)}
-        override fun createBrowserWidget() = createBrowserWidget(pendingCreateX, pendingCreateY)
-        override fun openYouTubeHistory() = createYouTubeBrowserWidget()
+        override fun createBrowserWidget() = browserModule.openFromMenu(pendingCreateX, pendingCreateY)
+        override fun openYouTubeHistory() = browserModule.openYouTubeHistory()
         override fun loadLayout(name: String): Boolean = loadCommandLayout(name)
         override fun toggleLayoutLock() = setWidgetLayoutLocked(!isWidgetLayoutLocked)
         override fun saveLayout() = layoutManager.saveCurrentLayout()
@@ -525,7 +518,14 @@ class WidgetContainer @JvmOverloads constructor(
     )
     private val pdfModule = PdfModule(dashboardServices, context)
     private val fileBrowserModule = FileBrowserModule(dashboardServices, context) { host?.requestCursorCenter() }
-
+    private val browserModule = BrowserModule(
+        dashboardServices,
+        context,
+        rootLayout = { parent as? ViewGroup },
+        containerView = this,
+        all = { browserWidgets },
+        requestKeyboard = { show -> host?.requestBrowserKeyboard(show) },
+    )
 
 
     // Settings overlays and persisted app-level settings
@@ -677,19 +677,6 @@ class WidgetContainer @JvmOverloads constructor(
     private var browserRoutingCoordinator: BrowserRoutingCoordinator? = null
     private val webSearchHandler = WebSearchSemanticToolHandler(DuckDuckGoWebSearchProvider())
 
-    private val browserLifecycle by lazy {
-        WidgetLifecycleRegistration(
-            descriptor = WidgetDescriptors[WidgetTypeId.BROWSER],
-            widgetType = BrowserWidget::class,
-            stateType = DashboardPersistence.BrowserWidgetState::class,
-            stateCodec = WidgetDocument.codecs[WidgetTypeId.BROWSER],
-            capture = widgetCaptureRestore::getBrowserWidgetState,
-            restore = ::restoreBrowserWidget,
-            configure = ::configureBrowserWidget,
-            beforeRemove = BrowserWidget::releaseKeyFocus,
-        )
-    }
-
     // ==================== Phone Clipboard to forward to relevant editors ====================
 
     private val phoneClipboard: String? get() = textEditing.phoneClipboard
@@ -755,7 +742,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     private fun registerWidgetLifecycles() {
         //multi-instance widget registration
-        lifecycleController.register(browserLifecycle)
+        lifecycleController.register(browserModule.lifecycle)
         lifecycleController.register(textModule.lifecycle)
         lifecycleController.register(imageModule.lifecycle)
         lifecycleController.register(videoModule.lifecycle)
@@ -897,9 +884,7 @@ class WidgetContainer @JvmOverloads constructor(
      * Hover updates are purely visual state changes on model objects drawn by this view.
      * They should repaint immediately without being treated as structural widget changes.
      */
-    private fun invalidateHoverVisuals() {
-        requestRepaint()
-    }
+    private fun invalidateHoverVisuals() {requestRepaint()}
 
     private fun notifyMediaFrame(sourceId: String) {
         if (displayState == WakeSleepManager.DisplayState.OFF) return
@@ -917,14 +902,7 @@ class WidgetContainer @JvmOverloads constructor(
         displaySettingsHandler?.applyBrowserMinimumBrightness(shouldApplyBrowserMinimumBrightness())
     }
 
-    private fun requestLayoutSwitchBrightness() {
-        displaySettingsHandler?.applyLayoutSwitchBrightness()
-    }
-
-    private fun configureBrowserWidget(widget: BrowserWidget) {
-        widget.listener = object : BrowserWidgetListener {override fun onKeyboardRequested(show: Boolean) {host?.requestBrowserKeyboard(show)}}
-        widget.refreshDisplayVisibility()
-    }
+    private fun requestLayoutSwitchBrightness() {displaySettingsHandler?.applyLayoutSwitchBrightness()}
 
     // ==================== Initialization ====================
 
@@ -1917,104 +1895,31 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     //browser section
-    fun createBrowserWidget(x: Float, y: Float) {
-        if (openClosedBrowserTemplate() != null) {
-            return
-        }
-        val boxWidth = width * 0.45f
-        val boxHeight = height * 0.5f
-        val adjustedX = x.coerceIn(0f, width - boxWidth)
-        val adjustedY = y.coerceIn(0f, height - boxHeight)
-        val rootView = parent as? ViewGroup ?: return
-        val widget = browserWidgetFactory(rootView).create(
-            adjustedX,
-            adjustedY,
-            boxWidth,
-            boxHeight,
-        )
-        runPersistentMutation {
-            lifecycleController.open(browserLifecycle) { widget }
-            widget.toggleFullscreen()
-            widget.setFocused(true)
-        }
-    }
-
-    /** Create a visible windowed browser for a normal assistant browser task. */
+    /** A windowed browser for a normal assistant browser task, bound to the Page Agent. */
     fun createPageAgentBrowser(): PageAgentBrowserAdapter? {
-        if (width <= 0 || height <= 0) return null
-        val rootView = parent as? ViewGroup ?: return null
-        val boxWidth = width * 0.45f
-        val boxHeight = height * 0.5f
-        val adjustedX = pendingCreateX.coerceIn(0f, width - boxWidth)
-        val adjustedY = pendingCreateY.coerceIn(0f, height - boxHeight)
-        val widget = browserWidgetFactory(rootView).create(
-            adjustedX,
-            adjustedY,
-            boxWidth,
-            boxHeight,
-        )
-        return runPersistentMutation(
-            action = {
-                lifecycleController.open(browserLifecycle) { widget }?.let { opened ->
-                    opened.setFocused(true)
-                    BrowserWidgetPageAgentAdapter.bind(stableWidgetId(opened), opened)
-                        ?: run {
-                            lifecycleController.close(opened)
-                            null
-                        }
-                }
-            },
-            changed = { true },
-        )
+        if (!isReady() || parent !is ViewGroup) return null
+        return runPersistentMutation(changed = { true }) {
+            browserModule.openForTask(pendingCreateX, pendingCreateY)?.let { opened ->
+                BrowserWidgetPageAgentAdapter.bind(stableWidgetId(opened), opened)
+                    ?: run {
+                        lifecycleController.close(opened)
+                        null
+                    }
+            }
+        }
     }
 
     private fun openBrowserAddress(address: String) {
         val widget = textEditing.focusedPage as? BrowserWidget
             ?: fullscreenAs<BrowserWidget>()
-            ?: createFullscreenBrowserWidget()
+            ?: browserModule.openFullscreen(focus = false)
             ?: return
 
         runPersistentMutation {
             if (widget.isMinimized) widget.toggleMinimize()
             bringWidgetToFront(widget)
             widget.setFocused(true)
-            textEditing.clearAllFocus()
             widget.navigateToAddress(address, autoFullscreenVideo = true)
-        }
-    }
-
-    private fun createFullscreenBrowserWidget(): BrowserWidget? {
-        val rootView = parent as? ViewGroup ?: return null
-        val widget = browserWidgetFactory(rootView).create(
-            0f,
-            0f,
-            width.toFloat(),
-            height.toFloat(),
-        )
-        return runPersistentMutation {
-            lifecycleController.open(browserLifecycle) { widget }
-            widget.toggleFullscreen()
-            widget
-        }
-    }
-
-    /**
-     * Create a fullscreen browser widget that opens YouTube history.
-     * Called when the YouTube button is tapped.
-     */
-    private fun createYouTubeBrowserWidget() {
-        val rootView = parent as? ViewGroup ?: return
-        val widget = browserWidgetFactory(rootView).create(
-            0f,
-            0f,
-            width.toFloat(),
-            height.toFloat(),
-        )
-        runPersistentMutation {
-            lifecycleController.open(browserLifecycle) { widget }
-            widget.getWebView()?.loadUrl("https://www.youtube.com/feed/history")
-            widget.toggleFullscreen()
-            widget.setFocused(true)
         }
     }
 
@@ -2069,9 +1974,8 @@ class WidgetContainer @JvmOverloads constructor(
     fun set3DofTransitionProgress(progress: Float) {threeDofOverlay.setTransitionProgress(progress); notifyTransientContentChanged()}
     private fun shouldApplyThreeDofTransform(): Boolean = displayState == WakeSleepManager.DisplayState.WAKE && !hasFullscreenWidget() && (is3DofEnabled || threeDofOverlay.isVisible())
     private fun currentDashboardTransform(): DashboardTransform.Snapshot =  dashboardTransform.snapshot(viewportWidth = width.toFloat(), viewportHeight = height.toFloat(), applies = shouldApplyThreeDofTransform())
+    fun screenToContentCoordinates(screenX: Float, screenY: Float): Pair<Float, Float> = currentDashboardTransform().screenToContent(screenX, screenY) /** Convert the fixed screen cursor to the coordinate space in which widgets are drawn. */
 
-    /** Convert the fixed screen cursor to the coordinate space in which widgets are drawn. */
-    fun screenToContentCoordinates(screenX: Float, screenY: Float): Pair<Float, Float> = currentDashboardTransform().screenToContent(screenX, screenY)
     // ==================== Drawing ====================
 
     override fun onDraw(canvas: Canvas) {
@@ -2160,11 +2064,7 @@ class WidgetContainer @JvmOverloads constructor(
         textEditing.drawMenus(canvas)
         pageAgentApprovalOverlay.draw(canvas)
     }
-
-    private fun drawHoverControls(canvas: Canvas) {
-        hoverControls.forEach { it.draw(canvas) }
-    }
-
+    private fun drawHoverControls(canvas: Canvas) {hoverControls.forEach { it.draw(canvas) }}
     private fun drawVisibleKeyboardOverlays(canvas: Canvas) {
         registry.fullscreenWidget?.let { fullscreen -> if (!fullscreen.drawsOwnKeyboard) fullscreen.visibleKeyboard?.draw(canvas); return}
         registry.getAllSortedByZOrder().forEach { widget -> if (!widget.isMinimized && !widget.drawsOwnKeyboard) widget.visibleKeyboard?.draw(canvas)}
@@ -2177,16 +2077,12 @@ class WidgetContainer @JvmOverloads constructor(
         registry.fullscreenWidget?.let { fullscreen -> return fullscreen.takeIf { it.visibleKeyboard?.containsPoint(cx, cy) == true }}
         return registry.getAllSortedByZOrder().asReversed().firstOrNull { widget -> !widget.isMinimized && widget.visibleKeyboard?.containsPoint(cx, cy) == true }
     }
-
-    private fun isVisibleKeyboardAt(cx: Float, cy: Float): Boolean =
-        visibleKeyboardHostAt(cx, cy) != null
-
+    private fun isVisibleKeyboardAt(cx: Float, cy: Float): Boolean = visibleKeyboardHostAt(cx, cy) != null
     private fun updateKeyboardHoverAt(cx: Float, cy: Float): Boolean {
         val host = visibleKeyboardHostAt(cx, cy) ?: return false
         host.updateHover(cx, cy)
         return true
     }
-
     private fun consumeVisibleKeyboardTap(cx: Float, cy: Float): Boolean {
         val host = visibleKeyboardHostAt(cx, cy) ?: return false
         // A batch, not runWidgetInput: the text editing controller classifies typed text itself,
@@ -2308,9 +2204,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Persistence ====================
 
-    fun capturePersistedDashboard(): WidgetDocument.PersistedDashboard =
-        layoutManager.capturePersistedDashboard()
-
+    fun capturePersistedDashboard(): WidgetDocument.PersistedDashboard = layoutManager.capturePersistedDashboard()
     private fun captureWidgetDashboardWithoutLayoutName(): WidgetDocument.PersistedDashboard =
         WidgetDocument.PersistedDashboard(
             widgets = registry.allWidgets().mapNotNull { widget ->
@@ -2343,11 +2237,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     fun executeCommand(invocation: AppCommandInvocation): AppCommandResult = commandExecutor.execute(invocation)
-
-    fun configureBrowserRouting(routing: BrowserRoutingCoordinator?) {
-        browserRoutingCoordinator = routing
-    }
-
+    fun configureBrowserRouting(routing: BrowserRoutingCoordinator?) {browserRoutingCoordinator = routing}
     fun assistantToolCatalog(): AssistantToolCatalog = AssistantToolCatalog(
         registry = commandRegistry,
         isAvailable = commandCapabilities::isAvailable,
@@ -2398,7 +2288,6 @@ class WidgetContainer @JvmOverloads constructor(
 
     /** Capture only runtime layout metadata for the next assistant request. */
     fun assistantUiContext(): AssistantUiContext = assistantUiContextCapture.capture()
-
     fun setAssistantStatus(status: AssistantStatus) {
         assistantVoiceHoverControl.configured = status.configured
         assistantVoiceHoverControl.state = status.state
@@ -2518,19 +2407,6 @@ class WidgetContainer @JvmOverloads constructor(
         activeWidget = null
     }
 
-    private fun restoreBrowserWidget(state: DashboardPersistence.BrowserWidgetState): BrowserWidget? {
-        val rootView = parent as? ViewGroup ?: return null
-        val widget = browserWidgetFactory(rootView).create(state.x, state.y, state.width, state.height)
-        widgetCaptureRestore.restoreBrowserWidgetState(widget, state, width, height)
-        return widget
-    }
-
-    private fun openClosedBrowserTemplate(): BrowserWidget? = runPersistentMutation(changed = { it != null }) {
-        (lifecycleController.openClosedTemplate(WidgetTypeId.BROWSER) as? BrowserWidget)?.also { widget ->
-            if (!widget.isMinimized) {widget.setFocused(true)}
-        }
-    }
-
     fun setMirroringEnabled(enabled: Boolean, phoneIp: String? = null) = mirrorModule.setMirroringEnabled(enabled, phoneIp) // ==================== Screen Mirroring ====================
 
     /**
@@ -2545,8 +2421,8 @@ class WidgetContainer @JvmOverloads constructor(
     fun shouldApplyBrowserMinimumBrightness()         : Boolean = registry.allWidgets().any { it.requestsBrowserMinimumBrightness }
     fun shouldApplyMediaBrightnessCap()               : Boolean = registry.allWidgets().any { it.requestsMediaBrightnessCap }
     fun isReady()                                     : Boolean = width > 0 && height > 0
-    fun onTrimMemory(level: Int)                      {browserWidgets.forEach { it.onTrimMemory(level) }}
-    fun onLowMemory()                                 {browserWidgets.forEach { it.onLowMemory() }}
-    fun clearDebugWebViewData(profileSummary: String) {browserWidgets.forEach { it.clearDebugWebViewData(profileSummary) }}
+    fun onTrimMemory(level: Int)                      = browserModule.onTrimMemory(level)
+    fun onLowMemory()                                 = browserModule.onLowMemory()
+    fun clearDebugWebViewData(profileSummary: String) = browserModule.clearDebugWebViewData(profileSummary)
     fun release()                                     {presenter.dismiss() ; lifecycleController.closeAll()}
 }

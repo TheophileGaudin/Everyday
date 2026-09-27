@@ -9,7 +9,7 @@ import com.everyday.everyday_glasses.widgets.system_status.StatusBarWidget
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets.text_editor.TextBoxModule
 import com.everyday.everyday_glasses.widgets.text_editor.TextBoxWidget
-import org.junit.Assert.assertSame
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -52,28 +52,22 @@ class WidgetModulesTest {
     }
 
     @Test
-    fun `a text box opened from the menu is focused and saved`() {
-        val focused = mutableListOf<TextBoxWidget>()
-        val texts = TextBoxModule(services, focus = { focused += it }, releaseFocus = {})
-
-        texts.open(100f, 100f)
+    fun `a text box opened from the menu is added and saved`() {
+        TextBoxModule(services).open(100f, 100f)
 
         assertEquals(1, services.opened.size)
-        assertSame(services.opened.single(), focused.single())
         assertEquals(1, services.persistentMutations)
     }
 
     @Test
     fun `the last closed text box is reopened instead of a new one`() {
-        val closed = TextBoxWidget(10f, 10f, 200f, 100f)
-        services.closedTemplate = closed
-        val focused = mutableListOf<TextBoxWidget>()
-        val texts = TextBoxModule(services, focus = { focused += it }, releaseFocus = {})
+        services.closedTemplate = TextBoxWidget(10f, 10f, 200f, 100f)
 
-        texts.open(100f, 100f)
+        TextBoxModule(services).open(100f, 100f)
 
         assertEquals(0, services.opened.size)
-        assertSame(closed, focused.single())
+        assertNull(services.closedTemplate)
+        assertEquals(1, services.persistentMutations)
     }
 
     private class FakeServices : DashboardServices {
