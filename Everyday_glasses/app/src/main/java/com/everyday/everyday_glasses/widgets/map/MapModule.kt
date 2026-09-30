@@ -5,6 +5,7 @@ import android.location.Location
 import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.MapWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
@@ -56,7 +57,11 @@ class MapModule(
         services.notifyTransientChange()
     }
 
-    fun applyLocationMetadata(label: String, countryCode: String) {
+    init {
+        services.appData.subscribe(AppChannels.place) { place -> applyLocationMetadata(place.town, place.countryCode) }
+    }
+
+    private fun applyLocationMetadata(label: String, countryCode: String) {
         latestLabel = label
         latestCountryCode = countryCode
         current()?.setLocationMetadata(label, countryCode)

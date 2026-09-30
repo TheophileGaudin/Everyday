@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses
 
-import com.everyday.everyday_glasses.widgets.system_status.delayUntilNextMinute
+import com.everyday.everyday_glasses.runtime.delayUntilNextMinute
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

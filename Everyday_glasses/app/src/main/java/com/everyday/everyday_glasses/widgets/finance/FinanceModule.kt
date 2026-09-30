@@ -5,6 +5,7 @@ import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.Finan
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.FinanceTileUpdateResult
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.FinanceWidgetListener
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
@@ -54,7 +55,11 @@ internal class FinanceModule(
         return widget
     }
 
-    fun updateCountryCode(countryCode: String) {
+    init {
+        services.appData.subscribe(AppChannels.place) { place -> updateCountryCode(place.countryCode) }
+    }
+
+    private fun updateCountryCode(countryCode: String) {
         pendingCountryCode = countryCode
         currentWidget()?.setCountryCode(countryCode)
     }

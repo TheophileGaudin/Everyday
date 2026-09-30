@@ -4,6 +4,7 @@ import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.stateOf
 import com.everyday.everyday_glasses.widgets.map.backend.MapViewMode
 import com.everyday.everyday_glasses.widgets.map.backend.MapZoom
 import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.runtime.AppData
 import com.everyday.everyday_glasses.persistence.LayoutLibrary
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
 import com.everyday.everyday_glasses.persistence.WidgetLayoutManager
@@ -316,6 +317,7 @@ class WidgetLayoutPersistenceTest {
         override val viewportHeight = 480
         override val isDisplayOff = false
         override val captureRestore = WidgetCaptureRestore()
+        override val appData = AppData()
         override fun notifyTransientChange() = Unit
         override fun <T> withTransientChanges(action: () -> T): T = action()
         override fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean) = action()

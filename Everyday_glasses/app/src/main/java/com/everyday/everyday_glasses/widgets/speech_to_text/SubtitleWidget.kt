@@ -14,6 +14,7 @@ import androidx.core.graphics.withClip
 import androidx.core.graphics.withTranslation
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.SubtitleWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
@@ -495,7 +496,7 @@ class SubtitleWidget(
 class SubtitleModule(
     private val services: DashboardServices,
     private val current: () -> SubtitleWidget?,
-    private val requestControl: (SubtitleControl) -> Unit,
+    private val requestControl: (SubtitleControl) -> Boolean,
 ) {
     val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.SUBTITLE, SubtitleWidget::class, DashboardPersistence.SubtitleWidgetState::class,
@@ -507,9 +508,11 @@ class SubtitleModule(
         reopen = { state -> restore(state).also { it.setCaptureEnabled(true) } },
     )
 
-    fun applyStatus(status: SubtitleStatus) = update { it.applyStatus(status) }
-    fun applyTranscript(transcript: SubtitleTranscript) = update { it.applyTranscript(transcript) }
-    fun onPhoneDisconnected() = update { it.onPhoneDisconnected() }
+    init {
+        services.appData.subscribe(AppChannels.subtitleStatus) { status -> update { it.applyStatus(status) } }
+        services.appData.subscribe(AppChannels.subtitleTranscript) { transcript -> update { it.applyTranscript(transcript) } }
+        services.appData.subscribe(AppChannels.phoneConnected) { connected -> if (!connected) update { it.onPhoneDisconnected() } }
+    }
 
     private fun update(action: (SubtitleWidget) -> Unit) {
         services.withTransientChanges {
@@ -543,7 +546,10 @@ class SubtitleModule(
     private fun build(x: Float, y: Float, width: Float, height: Float) =
         SubtitleWidget(x, y, width, height).apply {
             listener = object : SubtitleWidgetListener {
-                override fun onSubtitleControlRequested(control: SubtitleControl) = requestControl(control)
+                override fun onSubtitleControlRequested(control: SubtitleControl) {
+                    // The phone didn't take the request: it's no longer connected.
+                    if (!requestControl(control)) this@SubtitleModule.update { it.onPhoneDisconnected() }
+                }
             }
         }
 }

@@ -32,6 +32,9 @@ interface DashboardServices {
     /** Reads and restores the saved state of each widget type. */
     val captureRestore: WidgetCaptureRestore
 
+    /** The app's data (phone, GPS, status monitor): the latest values, and subscriptions to new ones. */
+    val appData: AppData
+
     /** A visible change that doesn't need saving. */
     fun notifyTransientChange()
 

@@ -10,9 +10,11 @@ import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets._common.WidgetInteractionState
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import androidx.core.graphics.toColorInt
+import com.everyday.everyday_glasses.runtime.StatusSnapshot
 
 /**
  * A movable status bar widget that displays:
@@ -68,7 +70,7 @@ class StatusBarWidget(
     var dateString: String = "-- --- ----"
 
     /** Shows the phone, battery and clock data of [state]. Returns true when anything changed. */
-    fun show(state: StatusBarDisplayState): Boolean {
+    fun show(state: StatusSnapshot): Boolean {
         val changed = isPhoneConnected != state.isPhoneConnected ||
                 phoneBattery != state.phoneBatteryPercent ||
                 glassesBattery != state.glassesBatteryPercent ||
@@ -613,7 +615,13 @@ class StatusBarModule(
     private val current: () -> StatusBarWidget?,
 ) {
     // The last data received, so that a status bar opened later shows it right away.
-    private var latest = StatusBarDisplayState()
+    private val latest: StatusSnapshot get() = services.appData.latest(AppChannels.status) ?: StatusSnapshot()
+
+    init {
+        services.appData.subscribe(AppChannels.status) { state ->
+            if (current()?.show(state) == true) services.notifyTransientChange()
+        }
+    }
 
     val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.STATUS, StatusBarWidget::class, DashboardPersistence.StatusBarState::class,
@@ -622,11 +630,6 @@ class StatusBarModule(
         restore = ::restore,
         capture = { services.captureRestore.getStatusBarState(it) },
     )
-
-    fun update(state: StatusBarDisplayState) {
-        latest = state
-        if (current()?.show(state) == true) services.notifyTransientChange()
-    }
 
     private fun create(): StatusBarWidget = StatusBarWidget(
         (services.viewportWidth - WIDTH) / 2f,

@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.widgets.system_status
+package com.everyday.everyday_glasses.runtime
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -13,7 +13,7 @@ import java.util.Date
 import java.util.Locale
 
 /** Complete data snapshot displayed by StatusBarWidget. */
-data class StatusBarDisplayState(
+data class StatusSnapshot(
     val isPhoneConnected: Boolean = false,
     val phoneBatteryPercent: Int = -1,
     val glassesBatteryPercent: Int = -1,
@@ -26,10 +26,10 @@ internal fun delayUntilNextMinute(nowMs: Long): Long {
     return if (remainder == 0L) 60_000L else 60_000L - remainder
 }
 
-/** Application reactions required by StatusBarController. */
-interface StatusBarControllerCallbacks {
+/** Application reactions required by StatusController. */
+interface StatusControllerCallbacks {
     /** Sends a complete presentation snapshot to WidgetContainer. */
-    fun applyStatusBarState(state: StatusBarDisplayState)
+    fun onStatusChanged(state: StatusSnapshot)
 
     /**
      * Reports charging state for brightness and binocular rendering behavior.
@@ -43,13 +43,13 @@ interface StatusBarControllerCallbacks {
  * Widget placement, drawing, persistence, and visibility options remain in
  * StatusBarWidget and WidgetContainer.
  */
-class StatusBarController(
+class StatusController(
     context: Context,
-    private val callbacks: StatusBarControllerCallbacks
+    private val callbacks: StatusControllerCallbacks
 ) {
 
     companion object {
-        private const val TAG = "StatusBarController"
+        private const val TAG = "StatusController"
     }
 
     // ---------------------------------------------------------------------
@@ -59,7 +59,7 @@ class StatusBarController(
     private val appContext = context.applicationContext
     private val handler = Handler(Looper.getMainLooper())
 
-    private var state = StatusBarDisplayState()
+    private var state = StatusSnapshot()
     private var batteryStateReceiver: BroadcastReceiver? = null
     private var timeUpdateRunnable: Runnable? = null
     private var lastChargingState: Boolean? = null
@@ -172,7 +172,7 @@ class StatusBarController(
 
     private fun publishState() {
         if (released) return
-        callbacks.applyStatusBarState(state)
+        callbacks.onStatusChanged(state)
     }
 
     // ---------------------------------------------------------------------

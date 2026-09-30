@@ -4,6 +4,7 @@ import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.NewsSourceUpdateResult
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.NewsWidgetListener
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
@@ -56,7 +57,11 @@ internal class NewsModule(
         )
     }
 
-    fun updateCountryCode(countryCode: String) {
+    init {
+        services.appData.subscribe(AppChannels.place) { place -> updateCountryCode(place.countryCode) }
+    }
+
+    private fun updateCountryCode(countryCode: String) {
         pendingCountryCode = countryCode
         currentWidget()?.setCountryCode(countryCode)
     }

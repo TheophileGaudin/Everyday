@@ -11,6 +11,7 @@ import androidx.core.graphics.withClip
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.shared.sync.PhoneNotificationItem
@@ -581,7 +582,18 @@ class NotificationsModule(
     private val current: () -> NotificationsWidget?,
 ) {
     // The last snapshot received, so that a widget opened later shows it right away.
-    private var latest = PhoneNotificationsSnapshot(items = emptyList(), listenerEnabled = false, capturedAtMs = 0L)
+    private val latest: PhoneNotificationsSnapshot
+        get() = services.appData.latest(AppChannels.notifications)
+            ?: PhoneNotificationsSnapshot(items = emptyList(), listenerEnabled = false, capturedAtMs = 0L)
+
+    init {
+        services.appData.subscribe(AppChannels.notifications) { snapshot ->
+            services.withTransientChanges {
+                current()?.setNotificationsSnapshot(snapshot)
+                services.notifyTransientChange()
+            }
+        }
+    }
 
     val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.NOTIFICATIONS, NotificationsWidget::class, DashboardPersistence.NotificationsWidgetState::class,
@@ -590,14 +602,6 @@ class NotificationsModule(
         restore = ::restore,
         capture = { services.captureRestore.getNotificationsWidgetState(it) },
     )
-
-    fun applySnapshot(snapshot: PhoneNotificationsSnapshot) {
-        latest = snapshot
-        services.withTransientChanges {
-            current()?.setNotificationsSnapshot(snapshot)
-            services.notifyTransientChange()
-        }
-    }
 
     private fun create(): NotificationsWidget {
         val x = (services.viewportWidth - NotificationsWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)

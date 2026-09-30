@@ -42,6 +42,7 @@ import com.everyday.everyday_glasses._binocular.DisplayConfig
 import com.everyday.everyday_glasses._binocular.BinocularUpdateType
 import com.everyday.everyday_glasses._binocular.BinocularView
 import com.everyday.everyday_glasses.runtime.BrightnessController
+import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.DisplayPowerCallbacks
 import com.everyday.everyday_glasses.runtime.DisplayPowerController
 import com.everyday.everyday_glasses.widgets.file_browser.FileImportCallbacks
@@ -53,14 +54,14 @@ import com.everyday.everyday_glasses.auth_permissions.GooglePhoneAuthStatus
 import com.everyday.everyday_glasses.auth_permissions.GooglePhoneFallbackBridge
 import com.everyday.everyday_glasses.headup_wake.HeadUpSessionController
 import com.everyday.everyday_glasses.interaction.user_input.InputCoordinator
-import com.everyday.everyday_glasses.widgets.speedometer.LocationSpeedController
+import com.everyday.everyday_glasses.runtime.LocationSpeedController
 import com.everyday.everyday_glasses.auth_permissions.PermissionCoordinator
 import com.everyday.everyday_glasses.auth_permissions.PermissionCoordinatorCallbacks
 import com.everyday.everyday_glasses.connectivity.PhoneConnectionCallbacks
 import com.everyday.everyday_glasses.connectivity.PhoneConnectionCoordinator
-import com.everyday.everyday_glasses.widgets.system_status.StatusBarController
-import com.everyday.everyday_glasses.widgets.system_status.StatusBarControllerCallbacks
-import com.everyday.everyday_glasses.widgets.system_status.StatusBarDisplayState
+import com.everyday.everyday_glasses.runtime.StatusController
+import com.everyday.everyday_glasses.runtime.StatusControllerCallbacks
+import com.everyday.everyday_glasses.runtime.StatusSnapshot
 import com.everyday.everyday_glasses.interaction.user_input.UserInputActivity
 import com.everyday.everyday_glasses.interaction.user_input.UserInputKind
 import com.everyday.everyday_glasses.auth_permissions.GoogleAccountSummary
@@ -155,7 +156,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var displayPowerController: DisplayPowerController
 
     // Time / date / battery display management
-    private lateinit var statusBarController: StatusBarController
+    private lateinit var statusController: StatusController
 
     private val handler = android.os.Handler(Looper.getMainLooper())
 
@@ -240,8 +241,8 @@ class MainActivity : AppCompatActivity() {
         locationSpeedController = LocationSpeedController(
             activity = this,
 
-            onSpeedChanged = { state -> widgetContainer.updateSpeedData(state) },
-            onSpeedUnavailable = { widgetContainer.setSpeedPermissionDenied() },
+            onSpeedChanged = { state -> widgetContainer.appData.publish(AppChannels.speed, state) },
+            onSpeedUnavailable = { widgetContainer.appData.publish(AppChannels.speed, null) },
             onLocationUpdated = { location ->
                 widgetContainer.updateMapLocation(location)
 
@@ -251,8 +252,8 @@ class MainActivity : AppCompatActivity() {
             },
             onLocationUnavailable = {
                 widgetContainer.withTransientChangeBatch {
-                    widgetContainer.setLocationPermissionDenied()
-                    widgetContainer.setSpeedPermissionDenied()
+                    widgetContainer.appData.publish(AppChannels.locationDenied, Unit)
+                    widgetContainer.appData.publish(AppChannels.speed, null)
                 }
             }
         )
@@ -305,7 +306,7 @@ class MainActivity : AppCompatActivity() {
         )
         updateCursorRedrawMode()
         setupStatusBarController()
-        statusBarController.start()
+        statusController.start()
 
         // Initialize Google auth after the mirrored UI is ready.
         setupGoogleAuth()
@@ -503,7 +504,7 @@ class MainActivity : AppCompatActivity() {
             override fun onDashboardRestored() {
                 refreshBinocularRenderingStrategy()
                 notifyStructuralBinocularChange(contentClass = BinocularContentClass.INTERACTIVE)
-                if (::statusBarController.isInitialized) {statusBarController.refreshNow()}
+                if (::statusController.isInitialized) {statusController.refreshNow()}
             }
 
             override fun onMediaFrame(sourceId: String) {
@@ -542,11 +543,9 @@ class MainActivity : AppCompatActivity() {
                 phoneConnectionOrNull()?.sendMirrorRequest(start)
             }
 
-            override fun requestSubtitleControl(control: SubtitleControl) {
+            override fun requestSubtitleControl(control: SubtitleControl): Boolean {
                 Log.d(TAG, "Subtitle control from widget: action=${control.action.wireName}")
-                if (phoneConnectionOrNull()?.sendSubtitleControl(control) != true) {
-                    widgetContainer.onSubtitlePhoneDisconnected()
-                }
+                return phoneConnectionOrNull()?.sendSubtitleControl(control) == true
             }
 
             override fun requestBrowserKeyboard(show: Boolean) {
@@ -640,10 +639,10 @@ class MainActivity : AppCompatActivity() {
         }
 
     private fun setupStatusBarController() {
-        statusBarController = StatusBarController(
+        statusController = StatusController(
             context = this,
-            callbacks = object : StatusBarControllerCallbacks {
-                override fun applyStatusBarState(state: StatusBarDisplayState) { widgetContainer.updateStatusBar(state) }
+            callbacks = object : StatusControllerCallbacks {
+                override fun onStatusChanged(state: StatusSnapshot) { widgetContainer.appData.publish(AppChannels.status, state) }
                 override fun onChargingChanged(charging: Boolean) {
                     binocularView.setChargingState(charging)
                     val changed = brightnessController.setCharging(charging)
@@ -764,16 +763,16 @@ class MainActivity : AppCompatActivity() {
                         dataSyncCoordinator.onPhoneConnectionChanged(connected)
                     }
 
+                    widgetContainer.appData.publish(AppChannels.phoneConnected, connected)
                     if (!connected) {
-                        statusBarController.onPhoneConnectionChanged(
+                        statusController.onPhoneConnectionChanged(
                             connected = false,
                             phoneBatteryPercent = -1
                         )
                         widgetContainer.unfocusAll()
                         widgetContainer.setMirroringEnabled(false)
-                        widgetContainer.onSubtitlePhoneDisconnected()
                     } else {
-                        statusBarController.onPhoneConnectionChanged(
+                        statusController.onPhoneConnectionChanged(
                             connected = true,
                             phoneBatteryPercent = phoneBatteryPercent
                         )
@@ -781,7 +780,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 override fun onPhoneBatteryChanged(phoneBatteryPercent: Int) {
-                    statusBarController.onPhoneBatteryChanged(phoneBatteryPercent)
+                    statusController.onPhoneBatteryChanged(phoneBatteryPercent)
                 }
 
                 override fun onPointerReceived(pointer: TransportMessage.Pointer) {
@@ -860,13 +859,13 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 override fun onSubtitleStatusReceived(status: SubtitleStatus) {
-                    widgetContainer.applySubtitleStatus(status)
+                    widgetContainer.appData.publish(AppChannels.subtitleStatus, status)
                 }
 
                 override fun onSubtitleTranscriptReceived(
                     transcript: SubtitleTranscript
                 ) {
-                    widgetContainer.applySubtitleTranscript(transcript)
+                    widgetContainer.appData.publish(AppChannels.subtitleTranscript, transcript)
                 }
 
                 override fun onAssistantControlReceived(control: AssistantControl) {
@@ -928,7 +927,7 @@ class MainActivity : AppCompatActivity() {
                 if (::dataSyncCoordinator.isInitialized) {
                     dataSyncCoordinator.clearCalendarSnapshot()
                 } else {
-                    widgetContainer.setCalendarSnapshot(null)
+                    widgetContainer.appData.publish(AppChannels.calendar, null)
                 }
                 googleAuthCoordinator.disconnect()
             }
@@ -1431,7 +1430,7 @@ class MainActivity : AppCompatActivity() {
         if (::inputCoordinator.isInitialized) {inputCoordinator.release()} // Clean up input coordinator callbacks
         if (::dataSyncCoordinator.isInitialized) {dataSyncCoordinator.release()}
         if (::permissionCoordinator.isInitialized) {permissionCoordinator.release()}
-        if (::statusBarController.isInitialized) {statusBarController.release()} // Stop status bar monitoring
+        if (::statusController.isInitialized) {statusController.release()} // Stop status bar monitoring
         if (::fileImportCoordinator.isInitialized) {fileImportCoordinator.release()}
 
         widgetContainer.release() // Clean up widget container resources

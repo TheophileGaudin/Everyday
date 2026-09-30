@@ -72,6 +72,7 @@ import com.everyday.everyday_glasses.runtime.WakeSleepManager
 import com.everyday.everyday_glasses.persistence.WidgetLayoutManager
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
 import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.AppData
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.LayoutLibrary
@@ -96,10 +97,8 @@ import com.everyday.everyday_glasses.widgets.file_browser.PdfModule
 import com.everyday.everyday_glasses.widgets.phone_screen_mirror.MirrorModule
 import com.everyday.everyday_glasses.widgets.phone_screen_mirror.ScreenMirrorWidget
 import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidget
-import com.everyday.everyday_glasses.widgets.speedometer.SpeedState
 import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerModule
 import com.everyday.everyday_glasses.widgets.system_status.StatusBarWidget
-import com.everyday.everyday_glasses.widgets.system_status.StatusBarDisplayState
 import com.everyday.everyday_glasses.widgets.system_status.StatusBarModule
 import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleWidget
 import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleModule
@@ -118,11 +117,7 @@ import com.everyday.shared.sync.FinanceSnapshot
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.NewsSnapshot
 import com.everyday.shared.sync.NewsSourceSpec
-import com.everyday.shared.sync.PhoneNotificationsSnapshot
 import com.everyday.shared.sync.SubtitleControl
-import com.everyday.shared.sync.SubtitleStatus
-import com.everyday.shared.sync.SubtitleTranscript
-import com.everyday.shared.sync.WeatherData
 import com.everyday.shared.command.AppCommandArguments
 import com.everyday.shared.command.AppCommandInvocation
 import com.everyday.shared.command.CommandScrollDirection
@@ -175,7 +170,8 @@ interface WidgetHost {
     fun requestFilePicker()
     fun requestStoragePermission()
     fun requestCursorCenter()
-    fun requestSubtitleControl(control: SubtitleControl)
+    /** False when the phone didn't take the request. */
+    fun requestSubtitleControl(control: SubtitleControl): Boolean
     fun toggleAssistantVoice()
 }
 class WidgetContainer @JvmOverloads constructor(
@@ -332,12 +328,16 @@ class WidgetContainer @JvmOverloads constructor(
     private var pendingCreateX      = 0f //Location of widget creation
     private var pendingCreateY      = 0f //Location of widget creation
 
+    /** The app's data for the widget modules. The activity and the phone sync publish into it. */
+    val appData = AppData()
+
     /** What every widget module gets from the dashboard. */
     private val dashboardServices   = object : DashboardServices {
         override val viewportWidth: Int                                                       get()  = width
         override val viewportHeight: Int                                                      get()  = height
         override val isDisplayOff: Boolean                                                    get()  = displayState == WakeSleepManager.DisplayState.OFF
         override val captureRestore: WidgetCaptureRestore                                     get()  = widgetCaptureRestore
+        override val appData: AppData                                                         get()  = this@WidgetContainer.appData
         override fun notifyTransientChange()                                                         = notifyTransientContentChanged()
         override fun <T> withTransientChanges(action: () -> T): T                                    = withTransientChangeBatch(action)
         override fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean): Boolean      = this@WidgetContainer.runClassifiedInput(action, changed)
@@ -358,7 +358,7 @@ class WidgetContainer @JvmOverloads constructor(
         dismissSettings      = { settingsController.dismissSpeedometerSettingsMenu() },
         forceVisibleWhenIdle = { settingsController.getSpeedVisibilityThreshold() <= 0f },
     )
-    private val subtitleModule      = SubtitleModule(dashboardServices, { subtitleWidget }) { control -> host?.requestSubtitleControl(control)}
+    private val subtitleModule      = SubtitleModule(dashboardServices, { subtitleWidget }) { control -> host?.requestSubtitleControl(control) ?: true }
     private val mapModule           = MapModule(
         dashboardServices,
         context,
@@ -891,13 +891,6 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Location and units ====================
 
-    // distribute location updates to widgets that are location dependent
-    fun applyLocationMetadata(town: String, countryCode: String) {
-        mapModule.applyLocationMetadata(town, countryCode)
-        financeModule.updateCountryCode(countryCode)
-        newsModule.updateCountryCode(countryCode)
-        weatherModule.applyLocationMetadata(town, countryCode)
-    }
     fun observeLiveLocationCountry(countryCode: String): Boolean = UnitSettings.normalizeCountryCode(countryCode)?.let {
         unitSettings.observeLiveCountry(it)
         true
@@ -956,10 +949,6 @@ class WidgetContainer @JvmOverloads constructor(
         }
     }
 
-    //weather
-    fun setLocationPermissionDenied()           = weatherModule.setLocationPermissionDenied()
-    fun applyWeatherData(weather: WeatherData?) = weatherModule.applyWeatherData(weather)
-
     //finance
     fun applyFinanceSnapshot(snapshot: FinanceSnapshot, notify: Boolean = true)                                  = financeModule.applySnapshot(snapshot, notify)
     fun applyFinanceError(message: String)                                                                       = financeModule.applyError(message)
@@ -974,26 +963,10 @@ class WidgetContainer @JvmOverloads constructor(
     private fun setNewsSource(sourceSpec: NewsSourceSpec): CompletableFuture<NewsSourceUpdateResult> = newsModule.setSource(sourceSpec)
 
     //speedometer
-    fun updateSpeedData(state: SpeedState)                      = speedometerModule.updateSpeed(state)
-    fun setSpeedPermissionDenied()                              = speedometerModule.onSpeedUnavailable()
     fun setSpeedVisibilityThreshold(thresholdKmh: Float) {
         val forceVisibleChanged = settingsController.setSpeedVisibilityThreshold(thresholdKmh)
         if (forceVisibleChanged && displayState != WakeSleepManager.DisplayState.OFF) {notifyTransientContentChanged()}
     }
-
-    //subtitle
-    fun applySubtitleStatus(status: SubtitleStatus)             = subtitleModule.applyStatus(status)
-    fun applySubtitleTranscript(transcript: SubtitleTranscript) = subtitleModule.applyTranscript(transcript)
-    fun onSubtitlePhoneDisconnected()                           = subtitleModule.onPhoneDisconnected()
-
-    //system status
-    fun updateStatusBar(state: StatusBarDisplayState)                             = statusBarModule.update(state)
-
-    //calendar
-    fun setCalendarSnapshot(snapshot: com.everyday.shared.sync.CalendarSnapshot?) = calendarModule.setSnapshot(snapshot)
-
-    //notifications
-    fun applyNotificationsSnapshot(snapshot: PhoneNotificationsSnapshot)          = notificationsModule.applySnapshot(snapshot)
 
     // ==================== Cursor state ====================
 

@@ -6,6 +6,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.everyday.everyday_glasses.WidgetContainer
+import com.everyday.everyday_glasses.runtime.AppChannels
+import com.everyday.everyday_glasses.runtime.Place
 import com.everyday.everyday_glasses.auth_permissions.GoogleAuthCoordinator
 import com.everyday.everyday_glasses.auth_permissions.GoogleAuthState
 import com.everyday.everyday_glasses.widgets.calendar.GoogleCalendarClient
@@ -93,7 +95,7 @@ class GlassesDataSyncCoordinator(
     fun clearCalendarSnapshot() {
         snapshotStore.clearCalendar()
         postUi {
-            widgetContainer.setCalendarSnapshot(null)
+            widgetContainer.appData.publish(AppChannels.calendar, null)
         }
     }
 
@@ -165,7 +167,7 @@ class GlassesDataSyncCoordinator(
                             if (widgetContainer.observeLiveLocationCountry(locationName.countryCode)) {
                                 hasSessionLocationCountry = true
                             }
-                            widgetContainer.applyLocationMetadata(locationName.town, locationName.countryCode)
+                            widgetContainer.appData.publish(AppChannels.place, Place(locationName.town, locationName.countryCode))
                         }
                     }
                     .onFailure { error -> Log.w(TAG, "Local location context refresh failed", error) }
@@ -584,7 +586,7 @@ class GlassesDataSyncCoordinator(
                 snapshot.calendar?.let(::applyCalendar)
                 snapshot.news?.let(::applyNews)
                 snapshot.finance?.let { applyFinance(it, notify = notify) }
-                snapshot.notifications?.let(widgetContainer::applyNotificationsSnapshot)
+                snapshot.notifications?.let {widgetContainer.appData.publish(AppChannels.notifications, it) }
                 snapshot.map?.let {
                     Log.d(TAG, "Applying phone map snapshot: roads=${it.roads.size} pois=${it.pois.size}")
                     widgetContainer.applyMapSnapshot(it)
@@ -630,7 +632,7 @@ class GlassesDataSyncCoordinator(
 
     private fun applyCalendar(snapshot: CalendarSnapshot) {
         postUi {
-            widgetContainer.setCalendarSnapshot(snapshot)
+            widgetContainer.appData.publish(AppChannels.calendar, snapshot)
             if (snapshot.sourceMode == GoogleAuthState.AuthMode.PHONE_FALLBACK.name) {
                 googleAuthCoordinatorProvider()?.onPhoneCalendarSnapshotReceived(snapshot)
             }
@@ -651,8 +653,8 @@ class GlassesDataSyncCoordinator(
             if (updateUnitCountry && widgetContainer.observeLiveLocationCountry(snapshot.countryCode)) {
                 hasSessionLocationCountry = true
             }
-            widgetContainer.applyLocationMetadata(snapshot.town, snapshot.countryCode)
-            widgetContainer.applyWeatherData(snapshot.weather)
+            widgetContainer.appData.publish(AppChannels.place, Place(snapshot.town,snapshot.countryCode))
+            widgetContainer.appData.publish(AppChannels.weather, snapshot.weather)
         }
     }
 

@@ -2,12 +2,11 @@ package com.everyday.everyday_glasses.widgets.weather_location
 import android.content.Context
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.settings.TemperatureUnit
 import com.everyday.everyday_glasses.settings.UnitDisplayFormatter
-import com.everyday.shared.sync.WeatherData
-
 
 /** Puts the location and weather widget on the dashboard and feeds it place and weather data. */
 internal class WeatherModule(
@@ -17,9 +16,6 @@ internal class WeatherModule(
     private val temperatureUnit: () -> TemperatureUnit,
     private val toggleTemperatureUnit: () -> Unit,
 ) {
-    private var town: String? = null
-    private var countryCode: String? = null
-    private var weatherData: WeatherData? = null
     private var address: String? = null
     private var weatherText: String? = null
     private var sunriseEpochMs: Long? = null
@@ -32,6 +28,12 @@ internal class WeatherModule(
         restore = ::restore,
         capture = { services.captureRestore.getLocationWidgetState(it) },
     )
+
+    init {
+        services.appData.subscribe(AppChannels.place) { renderLocationWeather() }
+        services.appData.subscribe(AppChannels.weather) { renderLocationWeather() }
+        services.appData.subscribe(AppChannels.locationDenied) { setLocationPermissionDenied() }
+    }
 
     private fun create(): WeatherWidget {
         val widget = WeatherWidget(context, 20f, services.viewportHeight - HEIGHT - 20f, WIDTH, HEIGHT)
@@ -64,7 +66,7 @@ internal class WeatherModule(
         services.notifyTransientChange()
     }
 
-    fun setLocationPermissionDenied() {
+    private fun setLocationPermissionDenied() {
         address = "-----"
         weatherText = "-"
         sunriseEpochMs = null
@@ -74,24 +76,11 @@ internal class WeatherModule(
         services.notifyTransientChange()
     }
 
-    fun applyLocationMetadata(
-        town: String,
-        countryCode: String
-    ) {
-        this.town = town
-        this.countryCode = countryCode
-        renderLocationWeather()
-    }
-
-    fun applyWeatherData(weather: WeatherData?) {
-        weatherData = weather
-        renderLocationWeather()
-    }
-
     private fun renderLocationWeather() {
-        val currentTown = town ?: return
-        val currentCountryCode = countryCode.orEmpty()
-        val weather = weatherData
+        val place = services.appData.latest(AppChannels.place) ?: return
+        val currentTown = place.town
+        val currentCountryCode = place.countryCode
+        val weather = services.appData.latest(AppChannels.weather)
 
         val addressText =
             if (currentCountryCode.isNotEmpty()) {

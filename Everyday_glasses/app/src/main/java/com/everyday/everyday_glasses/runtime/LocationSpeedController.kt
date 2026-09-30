@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.widgets.speedometer
+package com.everyday.everyday_glasses.runtime
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -26,7 +26,6 @@ data class SpeedState(
     val qualityOk: Boolean,
     val isMoving: Boolean
 )
-//This class owns speed data.
 
 class LocationSpeedController(
     private val activity: Activity,

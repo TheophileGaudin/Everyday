@@ -1,9 +1,12 @@
 package com.everyday.everyday_glasses
 
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
+import com.everyday.everyday_glasses.runtime.AppChannels
+import com.everyday.everyday_glasses.runtime.AppData
 import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.Place
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
-import com.everyday.everyday_glasses.widgets.system_status.StatusBarDisplayState
+import com.everyday.everyday_glasses.runtime.StatusSnapshot
 import com.everyday.everyday_glasses.widgets.system_status.StatusBarModule
 import com.everyday.everyday_glasses.widgets.system_status.StatusBarWidget
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
@@ -17,7 +20,7 @@ class WidgetModulesTest {
     private val services = FakeServices()
     private var statusBar: StatusBarWidget? = null
     private val module = StatusBarModule(services) { statusBar }
-    private val data = StatusBarDisplayState(
+    private val data = StatusSnapshot(
         isPhoneConnected = true,
         phoneBatteryPercent = 80,
         glassesBatteryPercent = 55,
@@ -27,7 +30,7 @@ class WidgetModulesTest {
 
     @Test
     fun `a status bar opened after its data arrived shows it right away`() {
-        module.update(data)
+        services.appData.publish(AppChannels.status, data)
         assertEquals(0, services.transientChanges)
 
         val widget = module.lifecycle.createDefault!!()!!
@@ -40,10 +43,24 @@ class WidgetModulesTest {
     fun `status data asks for a redraw only when it changes what is shown`() {
         statusBar = module.lifecycle.createDefault!!()
 
-        module.update(data)
-        module.update(data)
+        services.appData.publish(AppChannels.status, data)
+        services.appData.publish(AppChannels.status, data)
 
         assertEquals(1, services.transientChanges)
+    }
+
+    @Test
+    fun `app data keeps the latest value and tells subscribers in the order they subscribed`() {
+        val appData = AppData()
+        val heard = mutableListOf<String>()
+        appData.subscribe(AppChannels.place) { heard += "first ${it.town}" }
+        appData.subscribe(AppChannels.place) { heard += "second ${it.town}" }
+
+        appData.publish(AppChannels.place, Place("Leeds", "GB"))
+
+        assertEquals(listOf("first Leeds", "second Leeds"), heard)
+        assertEquals(Place("Leeds", "GB"), appData.latest(AppChannels.place))
+        assertNull(appData.latest(AppChannels.weather))
     }
 
     @Test
@@ -79,6 +96,7 @@ class WidgetModulesTest {
         override val viewportHeight = 480
         override val isDisplayOff = false
         override val captureRestore = WidgetCaptureRestore()
+        override val appData = AppData()
         override fun notifyTransientChange() {
             transientChanges++
         }

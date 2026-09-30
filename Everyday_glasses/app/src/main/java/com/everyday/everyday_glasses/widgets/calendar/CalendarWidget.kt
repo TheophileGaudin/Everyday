@@ -11,6 +11,7 @@ import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
@@ -944,7 +945,16 @@ class CalendarModule(
     private val current: () -> CalendarWidget?,
 ) {
     // The last snapshot received, so that a calendar opened later shows it right away.
-    private var latest: CalendarSnapshot? = null
+    private val latest: CalendarSnapshot? get() = services.appData.latest(AppChannels.calendar)
+
+    init {
+        services.appData.subscribe(AppChannels.calendar) { snapshot ->
+            services.withTransientChanges {
+                current()?.setSnapshot(snapshot)
+                services.notifyTransientChange()
+            }
+        }
+    }
 
     val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.CALENDAR, CalendarWidget::class, DashboardPersistence.CalendarWidgetState::class,
@@ -953,14 +963,6 @@ class CalendarModule(
         restore = ::restore,
         capture = { services.captureRestore.getCalendarWidgetState(it) },
     )
-
-    fun setSnapshot(snapshot: CalendarSnapshot?) {
-        latest = snapshot
-        services.withTransientChanges {
-            current()?.setSnapshot(snapshot)
-            services.notifyTransientChange()
-        }
-    }
 
     private fun create(): CalendarWidget {
         val x = (services.viewportWidth - CalendarWidget.DEFAULT_WIDTH - 20f).coerceAtLeast(20f)
