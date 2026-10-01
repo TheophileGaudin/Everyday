@@ -1,18 +1,17 @@
 package com.everyday.everyday_glasses.widgets.finance
 
-import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.FinanceTileUpdateRequest
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.FinanceTileUpdateResult
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.runtime.DashboardServices
 import com.everyday.everyday_glasses.runtime.AppChannels
+import com.everyday.everyday_glasses.runtime.AppQueries
 import com.everyday.everyday_glasses.runtime.FinanceWidgetListener
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.shared.sync.FinanceDashboardTileConfig
-import com.everyday.shared.sync.FinanceSnapshot
 import java.util.concurrent.CompletableFuture
 
 /** Puts the finance widget on the dashboard and connects it to the phone's market data. */
@@ -20,13 +19,9 @@ internal class FinanceModule(
     private val services: DashboardServices,
     private val ui: UiThreadDispatcher,
     private val currentWidget: () -> FinanceWidget?,
-    private val currentProvider: () -> WidgetDataProvider?,
     private val runPersistentUpdate: ((() -> Result<FinanceDashboardTileConfig>) -> Result<FinanceDashboardTileConfig>),
     private val stableWidgetId: (BaseWidget) -> String,
 ) {
-    // Pending country code for finance widget
-    private var pendingCountryCode: String? = null
-
     val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.FINANCE, FinanceWidget::class, DashboardPersistence.FinanceWidgetState::class,
         current = currentWidget,
@@ -56,30 +51,21 @@ internal class FinanceModule(
     }
 
     init {
-        services.appData.subscribe(AppChannels.place) { place -> updateCountryCode(place.countryCode) }
-    }
-
-    private fun updateCountryCode(countryCode: String) {
-        pendingCountryCode = countryCode
-        currentWidget()?.setCountryCode(countryCode)
-    }
-
-    fun applySnapshot(snapshot: FinanceSnapshot, notify: Boolean = true) {
-        currentWidget()?.let {
-            it.applySnapshot(snapshot)
-            if (notify) services.notifyTransientChange()
+        services.appData.subscribe(AppChannels.place) { place -> currentWidget()?.setCountryCode(place.countryCode) }
+        services.appData.subscribe(AppChannels.finance) { snapshot ->
+            currentWidget()?.let {
+                it.applySnapshot(snapshot)
+                services.notifyTransientChange()
+            }
         }
-    }
-
-    fun applyError(message: String) {
-        currentWidget()?.let {
-            it.applyError(message)
-            services.notifyTransientChange()
+        services.appData.subscribe(AppChannels.financeError) { message ->
+            currentWidget()?.let {
+                it.applyError(message)
+                services.notifyTransientChange()
+            }
         }
+        services.appData.answer(AppQueries.financeTilesShown) { currentWidget()?.getVisibleTileConfigs().orEmpty() }
     }
-
-    fun currentVisibleConfigs(): List<FinanceDashboardTileConfig> =
-        currentWidget()?.getVisibleTileConfigs().orEmpty()
 
     /** Update an existing finance tile on the UI thread and keep the widget instance intact. */
     fun updateTile(
@@ -182,7 +168,7 @@ internal class FinanceModule(
                 force: Boolean,
                 reason: String
             ) {
-                currentProvider()?.requestFinanceData(
+                services.appData.requests?.requestFinanceData(
                     visibleConfigs,
                     refreshTileIds,
                     force,
@@ -191,14 +177,14 @@ internal class FinanceModule(
             }
         }
 
-        pendingCountryCode?.let(widget::setCountryCode)
+        services.appData.latest(AppChannels.place)?.let { widget.setCountryCode(it.countryCode) }
     }
 
     private fun onMinimizeChanged(
             widget: FinanceWidget,
             minimized: Boolean
         ) {
-            currentProvider()?.onFinanceVisibilityChanged(!minimized)
+            services.appData.requests?.onFinanceVisibilityChanged(!minimized)
 
             if (!minimized) {
                 widget.requestData(
@@ -210,16 +196,16 @@ internal class FinanceModule(
 
     private fun onOpened(widget: FinanceWidget, reason: String) {
             if (widget.isMinimized) {
-                currentProvider()?.onFinanceVisibilityChanged(false)
+                services.appData.requests?.onFinanceVisibilityChanged(false)
                 return
             }
 
             widget.requestData(force = true, reason = reason)
-            currentProvider()?.onFinanceVisibilityChanged(true)
+            services.appData.requests?.onFinanceVisibilityChanged(true)
         }
 
     private fun onDestroyed() {
-            currentProvider()?.onFinanceVisibilityChanged(false)
+            services.appData.requests?.onFinanceVisibilityChanged(false)
         }
 
 }

@@ -1,10 +1,10 @@
 package com.everyday.everyday_glasses.widgets.news
 
-import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.NewsSourceUpdateResult
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.runtime.DashboardServices
 import com.everyday.everyday_glasses.runtime.AppChannels
+import com.everyday.everyday_glasses.runtime.AppQueries
 import com.everyday.everyday_glasses.runtime.NewsWidgetListener
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
@@ -18,11 +18,7 @@ internal class NewsModule(
     private val services: DashboardServices,
     private val ui: UiThreadDispatcher,
     private val currentWidget: () -> NewsWidget?,
-    private val currentProvider: () -> WidgetDataProvider?,
 ) {
-    // Pending country code for news widget
-    private var pendingCountryCode: String? = null
-
     val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.NEWS, NewsWidget::class, DashboardPersistence.NewsWidgetState::class,
         current = currentWidget,
@@ -58,15 +54,22 @@ internal class NewsModule(
     }
 
     init {
-        services.appData.subscribe(AppChannels.place) { place -> updateCountryCode(place.countryCode) }
+        services.appData.subscribe(AppChannels.place) { place -> currentWidget()?.setCountryCode(place.countryCode) }
+        services.appData.subscribe(AppChannels.news, ::applySnapshot)
+        services.appData.subscribe(AppChannels.newsError) { message ->
+            services.withTransientChanges {
+                currentWidget()?.applyError(message)
+                services.notifyTransientChange()
+            }
+        }
+        services.appData.answer(AppQueries.newsCountry) {
+            currentWidget()?.getCountryCode() ?: services.appData.latest(AppChannels.place)?.countryCode
+        }
+        services.appData.answer(AppQueries.newsSource) { currentWidget()?.getSourceSpec() }
     }
 
-    private fun updateCountryCode(countryCode: String) {
-        pendingCountryCode = countryCode
-        currentWidget()?.setCountryCode(countryCode)
-    }
-
-    fun applySnapshot(snapshot: NewsSnapshot) {
+    /** Only the snapshot for the source and country the widget shows is applied. */
+    private fun applySnapshot(snapshot: NewsSnapshot) {
         val widget = currentWidget() ?: return
 
         if (
@@ -81,16 +84,6 @@ internal class NewsModule(
             services.notifyTransientChange()
         }
     }
-
-    fun applyError(message: String) {
-        services.withTransientChanges {
-            currentWidget()?.applyError(message)
-            services.notifyTransientChange()
-        }
-    }
-
-    fun currentCountryCode(): String? = currentWidget()?.getCountryCode() ?: pendingCountryCode
-    fun currentSourceSpec(): NewsSourceSpec? = currentWidget()?.getSourceSpec()
 
     /** Update the existing singleton News widget from an assistant request. */
     fun setSource(sourceSpec: NewsSourceSpec): CompletableFuture<NewsSourceUpdateResult> {
@@ -145,7 +138,7 @@ internal class NewsModule(
                 force: Boolean,
                 reason: String
             ) {
-                currentProvider()?.requestNewsData(
+                services.appData.requests?.requestNewsData(
                     countryCode,
                     force,
                     reason
@@ -159,7 +152,7 @@ internal class NewsModule(
                 reason: String,
                 completion: (Result<NewsSnapshot>) -> Unit
             ) {
-                currentProvider()?.requestNewsSourceData(
+                services.appData.requests?.requestNewsSourceData(
                     sourceSpec,
                     countryCode,
                     force,
@@ -175,7 +168,7 @@ internal class NewsModule(
             }
         }
 
-        pendingCountryCode?.let(widget::setCountryCode)
+        services.appData.latest(AppChannels.place)?.let { widget.setCountryCode(it.countryCode) }
     }
 
     private fun onOpened(widget: NewsWidget, reason: String) {

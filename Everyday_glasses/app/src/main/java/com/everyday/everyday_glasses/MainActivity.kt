@@ -957,7 +957,7 @@ class MainActivity : AppCompatActivity() {
             localLocationProvider = { locationSpeedController.latestLocalLocation },
             onPhoneLocationFix = locationSpeedController::applyPhoneLocationFix
         )
-        widgetContainer.dataProvider = object : WidgetDataProvider {
+        widgetContainer.appData.requests = object : WidgetDataProvider {
             override fun requestFinanceData(
                 visibleConfigs: List<FinanceDashboardTileConfig>,
                 refreshTileIds: List<String>,

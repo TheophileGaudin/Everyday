@@ -3,6 +3,7 @@ package com.everyday.everyday_glasses
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.AppData
+import com.everyday.everyday_glasses.runtime.AppQueries
 import com.everyday.everyday_glasses.runtime.DashboardServices
 import com.everyday.everyday_glasses.runtime.Place
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
@@ -66,6 +67,18 @@ class WidgetModulesTest {
     @Test
     fun `a module registration takes its descriptor from the widget type`() {
         assertEquals(WidgetTypeId.STATUS, module.lifecycle.descriptor.type)
+    }
+
+    @Test
+    fun `a question gets the current answer of whoever answers it`() {
+        val appData = AppData()
+        assertNull(appData.ask(AppQueries.newsCountry))
+
+        var country = "GB"
+        appData.answer(AppQueries.newsCountry) { country }
+        country = "FR"
+
+        assertEquals("FR", appData.ask(AppQueries.newsCountry))
     }
 
     @Test

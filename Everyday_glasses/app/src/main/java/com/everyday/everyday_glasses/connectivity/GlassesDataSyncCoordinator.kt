@@ -7,6 +7,7 @@ import android.os.Looper
 import android.util.Log
 import com.everyday.everyday_glasses.WidgetContainer
 import com.everyday.everyday_glasses.runtime.AppChannels
+import com.everyday.everyday_glasses.runtime.AppQueries
 import com.everyday.everyday_glasses.runtime.Place
 import com.everyday.everyday_glasses.auth_permissions.GoogleAuthCoordinator
 import com.everyday.everyday_glasses.auth_permissions.GoogleAuthState
@@ -64,7 +65,7 @@ class GlassesDataSyncCoordinator(
     private val syncOrchestrator = SyncOrchestrator(
         snapshotCache = snapshotStore,
         requestDispatcher = ::dispatchSyncRequest,
-        snapshotApplier = ::applySnapshot
+        snapshotApplier = { snapshot, _ -> applySnapshot(snapshot) }
     )
     private val localWeatherInFlight = AtomicBoolean(false)
     private val localLocationContextInFlight = AtomicBoolean(false)
@@ -194,7 +195,7 @@ class GlassesDataSyncCoordinator(
     }
 
     fun onFinanceVisibilityChanged(visible: Boolean) {
-        val visibleConfigs = if (visible) widgetContainer.currentFinanceVisibleConfigs() else emptyList()
+        val visibleConfigs = if (visible) widgetContainer.appData.ask(AppQueries.financeTilesShown).orEmpty() else emptyList()
         syncOrchestrator.refresh(
             channels = setOf(SyncChannel.FINANCE),
             force = false,
@@ -210,7 +211,7 @@ class GlassesDataSyncCoordinator(
             force = force,
             reason = reason,
             countryCode = countryCode,
-            newsSource = widgetContainer.currentNewsSourceSpec()
+            newsSource = widgetContainer.appData.ask(AppQueries.newsSource)
         )
     }
 
@@ -319,10 +320,10 @@ class GlassesDataSyncCoordinator(
         postUi {
             when (error.channel) {
                 SyncChannel.NEWS -> {
-                    widgetContainer.applyNewsError(error.message)
+                    widgetContainer.appData.publish(AppChannels.newsError, error.message)
                     completePendingNewsSourceRequest(Result.failure(IllegalStateException(error.message)))
                 }
-                SyncChannel.FINANCE -> widgetContainer.applyFinanceError(error.message)
+                SyncChannel.FINANCE -> widgetContainer.appData.publish(AppChannels.financeError, error.message)
                 else -> Log.w(TAG, "Sync error ${error.channel}: ${error.message}")
             }
         }
@@ -347,7 +348,7 @@ class GlassesDataSyncCoordinator(
         val financeSelection = visibleFinanceConfigs.firstOrNull()
         val requestCountry = request.countryCode
             ?: snapshotStore.loadWeather()?.countryCode
-            ?: widgetContainer.currentNewsCountryCode()
+            ?: widgetContainer.appData.ask(AppQueries.newsCountry)
             ?: snapshotStore.loadNews()?.countryCode
         val financeLiveEnabled = if (SyncChannel.FINANCE in request.channels) {
             request.financeLiveEnabled ?: visibleFinanceConfigs.isNotEmpty()
@@ -357,7 +358,7 @@ class GlassesDataSyncCoordinator(
         return syncMessengerProvider()?.sendSyncRequest(
             request.copy(
                 countryCode = requestCountry,
-                newsSource = request.newsSource ?: widgetContainer.currentNewsSourceSpec()
+                newsSource = request.newsSource ?: widgetContainer.appData.ask(AppQueries.newsSource)
                     ?: snapshotStore.loadNews()?.sourceSpec,
                 financeTiles = visibleFinanceConfigs,
                 financeSymbol = request.financeSymbol ?: financeSelection?.symbol,
@@ -372,7 +373,7 @@ class GlassesDataSyncCoordinator(
 
     private fun refreshLocally(request: SyncRequest) {
         if (!networkStatusProvider.isConnected()) {
-            applySnapshot(snapshotStore.loadAll(), notify = true)
+            applySnapshot(snapshotStore.loadAll())
             return
         }
         if (request.financeLiveEnabled == false && SyncChannel.FINANCE in request.channels) {
@@ -441,7 +442,7 @@ class GlassesDataSyncCoordinator(
         )
         val cached = snapshotStore.loadNews()
         val resolvedSource = sourceSpec
-            ?: widgetContainer.currentNewsSourceSpec()
+            ?: widgetContainer.appData.ask(AppQueries.newsSource)
             ?: cached?.sourceSpec
             ?: NewsSourceSpec.DEFAULT_LOCATION
         if (!force && cached != null && !cached.isStale() &&
@@ -472,7 +473,7 @@ class GlassesDataSyncCoordinator(
             } catch (error: Throwable) {
                 Log.w(TAG, "Local news refresh failed", error)
                 postUi {
-                    widgetContainer.applyNewsError("No news available")
+                    widgetContainer.appData.publish(AppChannels.newsError, "No news available")
                 }
                 completion?.invoke(Result.failure(error))
             } finally {
@@ -514,7 +515,7 @@ class GlassesDataSyncCoordinator(
             } catch (error: Throwable) {
                 Log.w(TAG, "Local finance refresh failed", error)
                 postUi {
-                    widgetContainer.applyFinanceError("No data")
+                    widgetContainer.appData.publish(AppChannels.financeError, "No data")
                 }
             }
         }
@@ -523,7 +524,7 @@ class GlassesDataSyncCoordinator(
     private fun resolveVisibleFinanceConfigs(request: SyncRequest): List<FinanceDashboardTileConfig> {
         if (request.financeLiveEnabled == false) return emptyList()
         request.financeTiles.takeIf { it.isNotEmpty() }?.let { return it }
-        widgetContainer.currentFinanceVisibleConfigs().takeIf { it.isNotEmpty() }?.let { return it }
+        widgetContainer.appData.ask(AppQueries.financeTilesShown).orEmpty().takeIf { it.isNotEmpty() }?.let { return it }
         val symbol = request.financeSymbol
         if (symbol != null) {
             val range = FinanceTimeRange.fromRange(request.financeRange)
@@ -578,14 +579,14 @@ class GlassesDataSyncCoordinator(
         }
     }
 
-    private fun applySnapshot(snapshot: SyncSnapshot, notify: Boolean) {
+    private fun applySnapshot(snapshot: SyncSnapshot) {
         postUi {
             widgetContainer.withTransientChangeBatch {
                 snapshot.location?.let(::applyLocation)
                 snapshot.weather?.let { applyWeather(it, updateUnitCountry = false) }
                 snapshot.calendar?.let(::applyCalendar)
                 snapshot.news?.let(::applyNews)
-                snapshot.finance?.let { applyFinance(it, notify = notify) }
+                snapshot.finance?.let(::applyFinance)
                 snapshot.notifications?.let {widgetContainer.appData.publish(AppChannels.notifications, it) }
                 snapshot.map?.let {
                     Log.d(TAG, "Applying phone map snapshot: roads=${it.roads.size} pois=${it.pois.size}")
@@ -623,11 +624,11 @@ class GlassesDataSyncCoordinator(
     }
 
     private fun applyNews(snapshot: NewsSnapshot) {
-        postUi { widgetContainer.applyNewsSnapshot(snapshot) }
+        postUi { widgetContainer.appData.publish(AppChannels.news, snapshot) }
     }
 
-    private fun applyFinance(snapshot: FinanceSnapshot, notify: Boolean = true) {
-        postUi { widgetContainer.applyFinanceSnapshot(snapshot, notify = notify) }
+    private fun applyFinance(snapshot: FinanceSnapshot) {
+        postUi { widgetContainer.appData.publish(AppChannels.finance, snapshot) }
     }
 
     private fun applyCalendar(snapshot: CalendarSnapshot) {

@@ -40,7 +40,6 @@ import com.everyday.everyday_glasses.runtime.DashboardChangeCoordinator
 import com.everyday.everyday_glasses.settings.DisplaySettingsHandler
 import com.everyday.everyday_glasses.runtime.GeminiSettingsListener
 import com.everyday.everyday_glasses.auth_permissions.GoogleAccountHandler
-import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
 import com.everyday.everyday_glasses.runtime.WidgetChangeListener
 import com.everyday.everyday_glasses._binocular.BinocularContentClass
 import com.everyday.everyday_glasses.interaction.commands.AppCommandCapabilities
@@ -113,9 +112,6 @@ import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
 import com.everyday.everyday_glasses.widgets.finance.FinanceModule
 import com.everyday.everyday_glasses.widgets.news.NewsModule
 import com.everyday.everyday_glasses.widgets.weather_location.WeatherModule
-import com.everyday.shared.sync.FinanceSnapshot
-import com.everyday.shared.sync.FinanceDashboardTileConfig
-import com.everyday.shared.sync.NewsSnapshot
 import com.everyday.shared.sync.NewsSourceSpec
 import com.everyday.shared.sync.SubtitleControl
 import com.everyday.shared.command.AppCommandArguments
@@ -195,7 +191,6 @@ class WidgetContainer @JvmOverloads constructor(
      ************************/
     // ==================== Inputs and outputs ====================
 
-    var dataProvider: WidgetDataProvider?                   = null         // Inputs: where WidgetContainer requests data
     var host: WidgetHost?                                   = null         // Outputs: where WidgetContainer requests changes outside the dashboard
     private val phoneClipboard: String?               get() = textEditing.phoneClipboard // Phone clipboard is a special thing, it's the way to paste things from the phone
 
@@ -363,7 +358,7 @@ class WidgetContainer @JvmOverloads constructor(
         dashboardServices,
         context,
         current             = { mapWidget },
-        currentProvider     = { dataProvider },
+        currentProvider     = { appData.requests },
         requestRepaint      = ::requestRepaint,
         addressFocusChanged = ::onMapAddressFocusChanged,
         dismissPresentation = ::dismissMapPresentation,
@@ -406,12 +401,11 @@ class WidgetContainer @JvmOverloads constructor(
             toggleTemperatureUnit = { unitSettings.toggleTemperatureOverride() },
         )
     }
-    private val newsModule by lazy {
+    private val newsModule    by lazy {
         NewsModule(
             services              = dashboardServices,
             ui                    = assistantUiDispatcher,
             currentWidget         = { newsWidget },
-            currentProvider       = { dataProvider },
         )
     }
     private val financeModule by lazy {
@@ -419,7 +413,6 @@ class WidgetContainer @JvmOverloads constructor(
             services              = dashboardServices,
             ui                    = assistantUiDispatcher,
             currentWidget         = { financeWidget },
-            currentProvider       = { dataProvider },
             runPersistentUpdate   = { action -> runPersistentMutation( action = action, changed = { result -> result.isSuccess } ) },
             stableWidgetId        = ::stableWidgetId,
         )
@@ -950,16 +943,9 @@ class WidgetContainer @JvmOverloads constructor(
     }
 
     //finance
-    fun applyFinanceSnapshot(snapshot: FinanceSnapshot, notify: Boolean = true)                                  = financeModule.applySnapshot(snapshot, notify)
-    fun applyFinanceError(message: String)                                                                       = financeModule.applyError(message)
-    fun currentFinanceVisibleConfigs(): List<FinanceDashboardTileConfig>                                         = financeModule.currentVisibleConfigs()
     private fun updateFinanceTile(request: FinanceTileUpdateRequest): CompletableFuture<FinanceTileUpdateResult> = financeModule.updateTile(request)
 
     //news
-    fun applyNewsSnapshot(snapshot: NewsSnapshot)                                                    = newsModule.applySnapshot(snapshot)
-    fun applyNewsError(message: String)                                                              = newsModule.applyError(message)
-    fun currentNewsCountryCode(): String?                                                            = newsModule.currentCountryCode()
-    fun currentNewsSourceSpec(): NewsSourceSpec?                                                     = newsModule.currentSourceSpec()
     private fun setNewsSource(sourceSpec: NewsSourceSpec): CompletableFuture<NewsSourceUpdateResult> = newsModule.setSource(sourceSpec)
 
     //speedometer
