@@ -244,7 +244,7 @@ class MainActivity : AppCompatActivity() {
             onSpeedChanged = { state -> widgetContainer.appData.publish(AppChannels.speed, state) },
             onSpeedUnavailable = { widgetContainer.appData.publish(AppChannels.speed, null) },
             onLocationUpdated = { location ->
-                widgetContainer.updateMapLocation(location)
+                widgetContainer.appData.publish(AppChannels.location, location)
 
                 if (::dataSyncCoordinator.isInitialized) {
                     dataSyncCoordinator.onLocalLocationChanged()
@@ -739,15 +739,12 @@ class MainActivity : AppCompatActivity() {
         phoneConnectionCoordinator = PhoneConnectionCoordinator(
             context = this,
             callbacks = object : PhoneConnectionCallbacks {
-                override fun onConnectionStatusChanged(status: String) {
-                    Log.d(TAG, "Connection status: $status")
-                }
-
+                override fun onConnectionStatusChanged(status: String) {Log.d(TAG, "Connection status: $status")}
                 override fun onConnectionChanged(
                     connected: Boolean,
                     phoneBatteryPercent: Int
                 ) {
-                    widgetContainer.onPhoneRouteConnectionChanged(connected)
+                    widgetContainer.appData.publish(AppChannels.phoneConnected, connected)
 
                     if (::voiceAssistantCoordinator.isInitialized) {
                         if (connected) {
@@ -763,7 +760,6 @@ class MainActivity : AppCompatActivity() {
                         dataSyncCoordinator.onPhoneConnectionChanged(connected)
                     }
 
-                    widgetContainer.appData.publish(AppChannels.phoneConnected, connected)
                     if (!connected) {
                         statusController.onPhoneConnectionChanged(
                             connected = false,
@@ -779,110 +775,40 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                override fun onPhoneBatteryChanged(phoneBatteryPercent: Int) {
-                    statusController.onPhoneBatteryChanged(phoneBatteryPercent)
-                }
-
-                override fun onPointerReceived(pointer: TransportMessage.Pointer) {
-                    handlePhonePointer(pointer)
-                }
-
-                override fun onKeyReceived(key: String) {
-                    handleKeyFromPhone(key)
-                }
-
-                override fun onLongPressWithClipboard(clipboardContent: String?) {
+                override fun onPhoneBatteryChanged(phoneBatteryPercent: Int)                    {statusController.onPhoneBatteryChanged(phoneBatteryPercent)}
+                override fun onPointerReceived(pointer: TransportMessage.Pointer)               {handlePhonePointer(pointer)}
+                override fun onKeyReceived(key: String)                                         {handleKeyFromPhone(key)}
+                override fun onLongPressWithClipboard(clipboardContent: String?)                {
                     userInputActivity.onUserInput(UserInputKind.LONG_PRESS)
-                    Log.d(
-                        TAG,
-                        "Phone clipboard received: available=${clipboardContent != null}"
-                    )
+                    Log.d(TAG, "Phone clipboard received: available=${clipboardContent != null}")
                     widgetContainer.setPhoneClipboard(clipboardContent)
                 }
-
-                override fun onClipboardReceived(clipboardContent: String) {
-                    Log.d(TAG, "Phone clipboard updated: chars=${clipboardContent.length}")
-                    widgetContainer.setPhoneClipboard(clipboardContent)
-                }
-
-                override fun onImageReceived(imageData: ByteArray, fileName: String) {
-                    Log.d(TAG, "Image received from phone: $fileName (${imageData.size} bytes)")
-                    fileImportCoordinator.importReceivedImage(imageData, fileName)
-                }
-
-                override fun onOpenBrowserRequested(address: String) {
-                    Log.d(TAG, "Open browser requested from phone: ${address.take(80)}")
-                    widgetContainer.executeOpenUrlCommand(address)
-                }
-
-                override fun onMirroringChanged(enabled: Boolean, ip: String?) {
-                    widgetContainer.setMirroringEnabled(enabled, ip)
-                }
-
+                override fun onClipboardReceived(clipboardContent: String)                      {Log.d(TAG, "Phone clipboard updated: chars=${clipboardContent.length}"); widgetContainer.setPhoneClipboard(clipboardContent)}
+                override fun onImageReceived(imageData: ByteArray, fileName: String)            {Log.d(TAG, "Image received from phone: $fileName (${imageData.size} bytes)"); fileImportCoordinator.importReceivedImage(imageData, fileName)}
+                override fun onOpenBrowserRequested(address: String)                            {Log.d(TAG, "Open browser requested from phone: ${address.take(80)}") ; widgetContainer.executeOpenUrlCommand(address)}
+                override fun onMirroringChanged(enabled: Boolean, ip: String?)                  {widgetContainer.setMirroringEnabled(enabled, ip)}
                 override fun onGoogleAuthStateReceived(
                     status: GooglePhoneAuthStatus,
                     account: GoogleAccountSummary?,
                     detail: String?
                 ) {
-                    if (status == GooglePhoneAuthStatus.SIGNED_OUT) {
-                        dataSyncCoordinator.clearCalendarSnapshot()
-                    }
+                    if (status == GooglePhoneAuthStatus.SIGNED_OUT) {dataSyncCoordinator.clearCalendarSnapshot()}
                     googleAuthCoordinator.onPhoneAuthStateChanged(status, account, detail)
                 }
-
-                override fun onSyncSnapshotReceived(snapshot: SyncSnapshot) {
-                    dataSyncCoordinator.onSyncSnapshotReceived(snapshot)
-                }
-
-                override fun onSyncErrorReceived(error: SyncError) {
-                    dataSyncCoordinator.onSyncErrorReceived(error)
-                }
-
-                override fun onRouteResultReceived(result: RouteTransportResult) {
-                    widgetContainer.onPhoneRouteResult(result)
-                }
-
-                override fun onRouteErrorReceived(error: RouteTransportError) {
-                    widgetContainer.onPhoneRouteError(error)
-                }
-
-                override fun onDestinationSearchResultReceived(
-                    result: DestinationSearchResult
-                ) {
-                    widgetContainer.onPhoneDestinationSearchResult(result)
-                }
-
-                override fun onDestinationSearchErrorReceived(
-                    error: DestinationSearchError
-                ) {
-                    widgetContainer.onPhoneDestinationSearchError(error)
-                }
-
-                override fun onSubtitleStatusReceived(status: SubtitleStatus) {
-                    widgetContainer.appData.publish(AppChannels.subtitleStatus, status)
-                }
-
-                override fun onSubtitleTranscriptReceived(
-                    transcript: SubtitleTranscript
-                ) {
-                    widgetContainer.appData.publish(AppChannels.subtitleTranscript, transcript)
-                }
-
-                override fun onAssistantControlReceived(control: AssistantControl) {
-                    if (::voiceAssistantCoordinator.isInitialized) {
-                        voiceAssistantCoordinator.handleControl(control)
-                    }
-                }
-
-                override fun onWifiDirectPermissionRequired() {
-                    permissionCoordinator.requestWifiDirectPermission()
-                }
-
+                override fun onSyncSnapshotReceived(snapshot: SyncSnapshot)                     {dataSyncCoordinator.onSyncSnapshotReceived(snapshot)}
+                override fun onSyncErrorReceived(error: SyncError)                              {dataSyncCoordinator.onSyncErrorReceived(error)}
+                override fun onRouteResultReceived(result: RouteTransportResult)                {widgetContainer.appData.publish(AppChannels.routeResult, result)}
+                override fun onRouteErrorReceived(error: RouteTransportError)                   {widgetContainer.appData.publish(AppChannels.routeError, error)}
+                override fun onDestinationSearchResultReceived(result: DestinationSearchResult) {widgetContainer.appData.publish(AppChannels.destinationResult, result)}
+                override fun onDestinationSearchErrorReceived(error: DestinationSearchError)    {widgetContainer.appData.publish(AppChannels.destinationError, error)}
+                override fun onSubtitleStatusReceived(status: SubtitleStatus)                   {widgetContainer.appData.publish(AppChannels.subtitleStatus, status)}
+                override fun onSubtitleTranscriptReceived(transcript: SubtitleTranscript)       {widgetContainer.appData.publish(AppChannels.subtitleTranscript, transcript)}
+                override fun onAssistantControlReceived(control: AssistantControl)              {if (::voiceAssistantCoordinator.isInitialized) {voiceAssistantCoordinator.handleControl(control)}}
+                override fun onWifiDirectPermissionRequired()                                   {permissionCoordinator.requestWifiDirectPermission()}
             }
         )
-
         phoneConnectionCoordinator.initialize()
-        widgetContainer.configurePhoneRouteTransport(phoneConnectionCoordinator)
+        widgetContainer.appData.publish(AppChannels.phoneRoutes, phoneConnectionCoordinator)
     }
     private fun setupGoogleAuth() {
         googleAuthCoordinator = GoogleAuthCoordinator(

@@ -103,9 +103,6 @@ class GlassesDataSyncCoordinator(
     fun onPhoneConnectionChanged(connected: Boolean) {
         phoneConnected = connected
         if (connected) {
-            // The map can have been created before RFCOMM completed.  Retry its
-            // latest location now that the phone proxy is actually reachable.
-            widgetContainer.requestPhoneMapRefresh()
             syncOrchestrator.refresh(
                 channels = SyncChannel.ALL,
                 force = false,
@@ -590,7 +587,7 @@ class GlassesDataSyncCoordinator(
                 snapshot.notifications?.let {widgetContainer.appData.publish(AppChannels.notifications, it) }
                 snapshot.map?.let {
                     Log.d(TAG, "Applying phone map snapshot: roads=${it.roads.size} pois=${it.pois.size}")
-                    widgetContainer.applyMapSnapshot(it)
+                    widgetContainer.appData.publish(AppChannels.mapSnapshot, it)
                 }
             }
         }
@@ -618,7 +615,7 @@ class GlassesDataSyncCoordinator(
                     snapshot.speedMps?.let { speed = it }
                 }
                 Log.d(TAG, "Forwarding phone location to map: $lat,$lon accuracy=${snapshot.accuracyM}")
-                widgetContainer.updateMapLocation(phoneFix)
+                widgetContainer.appData.publish(AppChannels.location, phoneFix)
             }
         }
     }

@@ -2,22 +2,15 @@ package com.everyday.everyday_glasses.widgets.map
 
 import android.content.Context
 import android.location.Location
-import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.runtime.DashboardServices
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.MapWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
-import com.everyday.everyday_glasses.widgets.map.backend.GlassesRouteTransport
 import com.everyday.everyday_glasses.widgets.map.backend.MapGeoPoint
 import com.everyday.everyday_glasses.widgets.map.backend.NavigationOperationResult
 import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
-import com.everyday.shared.sync.MapSnapshot
-import com.everyday.shared.transport.DestinationSearchError
-import com.everyday.shared.transport.DestinationSearchResult
-import com.everyday.shared.transport.RouteTransportError
-import com.everyday.shared.transport.RouteTransportResult
 
 /**
  * Puts the map on the dashboard and connects it to the location sources and to the phone's
@@ -27,20 +20,10 @@ class MapModule(
     private val services: DashboardServices,
     private val context: Context,
     private val current: () -> MapWidget?,
-    private val currentProvider: () -> WidgetDataProvider?,
     private val requestRepaint: () -> Unit,
     private val addressFocusChanged: (MapWidget, Boolean) -> Unit,
     private val dismissPresentation: () -> Unit,
 ) {
-    // The phone route connection, so that a map opened later can route through the phone.
-    private var routeTransport: GlassesRouteTransport? = null
-    private var routeConnected = false
-
-    // The last location and place received, so that a map opened later shows them right away.
-    private var latestLocation: Location? = null
-    private var latestLabel = ""
-    private var latestCountryCode = ""
-
     val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.MAP, MapWidget::class, DashboardPersistence.MapWidgetState::class,
         current = current,
@@ -51,55 +34,29 @@ class MapModule(
         onFullscreenChanged = { widget, fullscreen -> if (!fullscreen) widget.enforceWindowedMode() },
     )
 
-    fun updateLocation(location: Location) {
-        latestLocation = Location(location)
-        current()?.setLocation(location)
-        services.notifyTransientChange()
-    }
-
     init {
-        services.appData.subscribe(AppChannels.place) { place -> applyLocationMetadata(place.town, place.countryCode) }
-    }
-
-    private fun applyLocationMetadata(label: String, countryCode: String) {
-        latestLabel = label
-        latestCountryCode = countryCode
-        current()?.setLocationMetadata(label, countryCode)
-    }
-
-    fun requestPhoneMapRefresh() {
-        current()?.requestPhoneMapRefresh()
-    }
-
-    fun applySnapshot(snapshot: MapSnapshot) {
-        current()?.applyProxyMap(snapshot)
-        services.notifyTransientChange()
-    }
-
-    fun configureRouteTransport(transport: GlassesRouteTransport?) {
-        routeTransport = transport
-        current()?.configurePhoneRouteTransport(transport)
-    }
-
-    fun onRouteConnectionChanged(connected: Boolean) {
-        routeConnected = connected
-        current()?.onPhoneRouteConnectionChanged(connected)
-    }
-
-    fun onRouteResult(result: RouteTransportResult) {
-        current()?.onPhoneRouteResult(result)
-    }
-
-    fun onRouteError(error: RouteTransportError) {
-        current()?.onPhoneRouteError(error)
-    }
-
-    fun onDestinationSearchResult(result: DestinationSearchResult) {
-        current()?.onPhoneDestinationSearchResult(result)
-    }
-
-    fun onDestinationSearchError(error: DestinationSearchError) {
-        current()?.onPhoneDestinationSearchError(error)
+        val data = services.appData
+        data.subscribe(AppChannels.place) { place -> current()?.setLocationMetadata(place.town, place.countryCode) }
+        data.subscribe(AppChannels.location) { location ->
+            current()?.setLocation(location)
+            services.notifyTransientChange()
+        }
+        data.subscribe(AppChannels.mapSnapshot) { snapshot ->
+            current()?.applyProxyMap(snapshot)
+            services.notifyTransientChange()
+        }
+        data.subscribe(AppChannels.phoneRoutes) { transport -> current()?.configurePhoneRouteTransport(transport) }
+        data.subscribe(AppChannels.phoneConnected) { connected ->
+            current()?.let { map ->
+                map.onPhoneRouteConnectionChanged(connected)
+                // A map created before the phone link came up asks again now that the phone is reachable.
+                if (connected) map.requestPhoneMapRefresh()
+            }
+        }
+        data.subscribe(AppChannels.routeResult) { result -> current()?.onPhoneRouteResult(result) }
+        data.subscribe(AppChannels.routeError) { error -> current()?.onPhoneRouteError(error) }
+        data.subscribe(AppChannels.destinationResult) { result -> current()?.onPhoneDestinationSearchResult(result) }
+        data.subscribe(AppChannels.destinationError) { error -> current()?.onPhoneDestinationSearchError(error) }
     }
 
     /**
@@ -125,19 +82,23 @@ class MapModule(
     private fun build(x: Float, y: Float, width: Float, height: Float): MapWidget =
         MapWidget(context, x, y, width, height).apply {
             invalidate = requestRepaint
-            configurePhoneRouteTransport(routeTransport)
-            onPhoneRouteConnectionChanged(routeConnected)
+            // A map opened later starts from the latest phone link, location and place.
+            val data = this@MapModule.services.appData
+            configurePhoneRouteTransport(data.latest(AppChannels.phoneRoutes))
+            onPhoneRouteConnectionChanged(data.latest(AppChannels.phoneConnected) == true)
+
             val map = this
             listener = object : MapWidgetListener {
                 override fun onMapDataRequested(point: MapGeoPoint, config: PoiDisplayConfig) {
-                    currentProvider()?.requestMapData(point, config)
+                    data.requests?.requestMapData(point, config)
                 }
                 override fun onAddressFocusChanged(focused: Boolean) = addressFocusChanged(map, focused)
                 override fun onNavigationResult(result: NavigationOperationResult) = services.notifyTransientChange()
                 override fun onStopNavigationRequested() = this@MapModule.stopNavigation()
             }
-            latestLocation?.let(::setLocation)
-            setLocationMetadata(latestLabel, latestCountryCode)
+            data.latest(AppChannels.location)?.let { setLocation(Location(it)) }
+            val place = data.latest(AppChannels.place)
+            setLocationMetadata(place?.town.orEmpty(), place?.countryCode.orEmpty())
         }
 
     private companion object {

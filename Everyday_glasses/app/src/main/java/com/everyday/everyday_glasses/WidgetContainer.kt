@@ -45,7 +45,6 @@ import com.everyday.everyday_glasses._binocular.BinocularContentClass
 import com.everyday.everyday_glasses.interaction.commands.AppCommandCapabilities
 import com.everyday.everyday_glasses.interaction.commands.AppCommandExecutor
 import com.everyday.everyday_glasses.interaction.commands.AppCommandResult
-import com.everyday.everyday_glasses.widgets.map.backend.GlassesRouteTransport
 import com.everyday.everyday_glasses.widgets._common.HandlerPresentationScheduler
 import com.everyday.everyday_glasses.widgets._common.PresentationSession
 import com.everyday.everyday_glasses.widgets._common.WidgetPresenter
@@ -358,7 +357,6 @@ class WidgetContainer @JvmOverloads constructor(
         dashboardServices,
         context,
         current             = { mapWidget },
-        currentProvider     = { appData.requests },
         requestRepaint      = ::requestRepaint,
         addressFocusChanged = ::onMapAddressFocusChanged,
         dismissPresentation = ::dismissMapPresentation,
@@ -898,20 +896,11 @@ class WidgetContainer @JvmOverloads constructor(
 
     //======================= Widget wiring ==============================
     //map
-    fun updateMapLocation(location: android.location.Location)                                        = mapModule.updateLocation(location)
-    fun requestPhoneMapRefresh()                                                                      = mapModule.requestPhoneMapRefresh()
-    fun applyMapSnapshot(snapshot: com.everyday.shared.sync.MapSnapshot)                              = mapModule.applySnapshot(snapshot)
     private fun onMapAddressFocusChanged(map: MapWidget, focused: Boolean)                            {
         val beforeZOrder = map.zOrder
         if (focused) bringWidgetToFront(map)
         notifyFocusChanged(persistent = focused && map.zOrder != beforeZOrder)
     } /** The map's address search took or gave up the keyboard focus. */
-    fun configurePhoneRouteTransport(transport: GlassesRouteTransport?)                               = mapModule.configureRouteTransport(transport)
-    fun onPhoneRouteConnectionChanged(connected: Boolean)                                             = mapModule.onRouteConnectionChanged(connected)
-    fun onPhoneRouteResult(result: com.everyday.shared.transport.RouteTransportResult)                = mapModule.onRouteResult(result)
-    fun onPhoneRouteError(error: com.everyday.shared.transport.RouteTransportError)                   = mapModule.onRouteError(error)
-    fun onPhoneDestinationSearchResult(result: com.everyday.shared.transport.DestinationSearchResult) = mapModule.onDestinationSearchResult(result)
-    fun onPhoneDestinationSearchError(error: com.everyday.shared.transport.DestinationSearchError)    = mapModule.onDestinationSearchError(error)
     private fun dismissMapPresentation() {val map = mapWidget ?: return; if (activePresentationSession?.targetId == stableWidgetId(map)) {dismissPresentation()}}
 
     //file widgets

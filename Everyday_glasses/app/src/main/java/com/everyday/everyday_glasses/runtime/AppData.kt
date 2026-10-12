@@ -1,15 +1,22 @@
 package com.everyday.everyday_glasses.runtime
 
+import android.location.Location
 import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
+import com.everyday.everyday_glasses.widgets.map.backend.GlassesRouteTransport
 import com.everyday.shared.sync.CalendarSnapshot
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.FinanceSnapshot
+import com.everyday.shared.sync.MapSnapshot
 import com.everyday.shared.sync.NewsSnapshot
 import com.everyday.shared.sync.NewsSourceSpec
 import com.everyday.shared.sync.PhoneNotificationsSnapshot
 import com.everyday.shared.sync.SubtitleStatus
 import com.everyday.shared.sync.SubtitleTranscript
 import com.everyday.shared.sync.WeatherData
+import com.everyday.shared.transport.DestinationSearchError
+import com.everyday.shared.transport.DestinationSearchResult
+import com.everyday.shared.transport.RouteTransportError
+import com.everyday.shared.transport.RouteTransportResult
 
 /** One kind of app data, such as the weather or the calendar. The kinds are listed in [AppChannels]. */
 class AppChannel<T>(val name: String) {
@@ -84,6 +91,13 @@ object AppChannels {
     val financeError       = AppChannel<String>("finance error")                     /** A finance fetch failed; the text says why. */
     val news               = AppChannel<NewsSnapshot>("news")
     val newsError          = AppChannel<String>("news error")                        /** A news fetch failed; the text says why. */
+    val location           = AppChannel<Location>("location")                        /** Where the glasses are: their own GPS fix, or the phone's. */
+    val mapSnapshot        = AppChannel<MapSnapshot>("map snapshot")                 /** Roads and points of interest around the user, from the phone. */
+    val phoneRoutes        = AppChannel<GlassesRouteTransport?>("phone routes")      /** The phone's route and destination search service. */
+    val routeResult        = AppChannel<RouteTransportResult>("route result")
+    val routeError         = AppChannel<RouteTransportError>("route error")
+    val destinationResult  = AppChannel<DestinationSearchResult>("destination result")
+    val destinationError   = AppChannel<DestinationSearchError>("destination error")
 }
 
 /** The questions the app's data sources can ask the widgets. */
