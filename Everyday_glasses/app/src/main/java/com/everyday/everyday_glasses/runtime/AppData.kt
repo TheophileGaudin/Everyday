@@ -43,6 +43,12 @@ class AppData {
     /** Where widgets send their requests for data: the phone sync, plugged in by the activity. */
     var requests: WidgetDataProvider? = null
 
+    /**
+     * How the dashboard groups its reactions to several publishes into one screen update. The dashboard
+     * sets it; until then, publishes are simply run.
+     */
+    var grouping: (() -> Unit) -> Unit = { publishes -> publishes() }
+
     /** Stores [value] as the latest on [channel], then tells its subscribers, in the order they subscribed. */
     fun <T> publish(channel: AppChannel<T>, value: T) {
         latestValues[channel] = value
@@ -59,6 +65,9 @@ class AppData {
         subscribers.getOrPut(channel) { mutableListOf() }.add { value -> onValue(value as T) }
     }
 
+    /** Publishes several values as one change: the dashboard redraws once, after all of them. */
+    fun publishTogether(publishes: () -> Unit) = grouping(publishes)
+
     /** Makes [answer] the way to answer [query]. The module that knows the answer registers it. */
     fun <T> answer(query: AppQuery<T>, answer: () -> T) {
         answerers[query] = answer
@@ -71,6 +80,9 @@ class AppData {
 
 /** Where the user is. */
 data class Place(val town: String, val countryCode: String)
+
+/** The phone's screen-mirroring state: whether it's on, and where to receive the stream. */
+data class PhoneMirror(val enabled: Boolean, val phoneIp: String?)
 
 /**
  * The kinds of app data widgets can listen to. A new kind of data is added here, together with the
@@ -98,6 +110,9 @@ object AppChannels {
     val routeError         = AppChannel<RouteTransportError>("route error")
     val destinationResult  = AppChannel<DestinationSearchResult>("destination result")
     val destinationError   = AppChannel<DestinationSearchError>("destination error")
+    val liveCountry        = AppChannel<String>("live country")                      /** The country from a live location (not from saved data); it sets the automatic units. */
+    val unitsChanged       = AppChannel<Unit>("units changed")                       /** km/h or mph, °C or °F changed; read them from the widget context's units. */
+    val mirroring          = AppChannel<PhoneMirror>("mirroring")                    /** The phone started or stopped mirroring its screen. */
 }
 
 /** The questions the app's data sources can ask the widgets. */

@@ -1,10 +1,13 @@
 package com.everyday.everyday_glasses
 
+import android.graphics.PointF
+import com.everyday.everyday_glasses.runtime.WidgetHost
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.AppData
 import com.everyday.everyday_glasses.runtime.AppQueries
 import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.settings.UnitSettings
 import com.everyday.everyday_glasses.runtime.Place
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.runtime.StatusSnapshot
@@ -65,6 +68,21 @@ class WidgetModulesTest {
     }
 
     @Test
+    fun `values published together go through the dashboard's grouping once`() {
+        val appData = AppData()
+        val events = mutableListOf<String>()
+        appData.grouping = { publishes -> events += "start"; publishes(); events += "end" }
+        appData.subscribe(AppChannels.place) { events += it.town }
+
+        appData.publishTogether {
+            appData.publish(AppChannels.place, Place("Leeds", "GB"))
+            appData.publish(AppChannels.place, Place("York", "GB"))
+        }
+
+        assertEquals(listOf("start", "Leeds", "York", "end"), events)
+    }
+
+    @Test
     fun `a module registration takes its descriptor from the widget type`() {
         assertEquals(WidgetTypeId.STATUS, module.lifecycle.descriptor.type)
     }
@@ -83,7 +101,7 @@ class WidgetModulesTest {
 
     @Test
     fun `a text box opened from the menu is added and saved`() {
-        TextBoxModule(services).open(100f, 100f)
+        TextBoxModule(services).open()
 
         assertEquals(1, services.opened.size)
         assertEquals(1, services.persistentMutations)
@@ -93,7 +111,7 @@ class WidgetModulesTest {
     fun `the last closed text box is reopened instead of a new one`() {
         services.closedTemplate = TextBoxWidget(10f, 10f, 200f, 100f)
 
-        TextBoxModule(services).open(100f, 100f)
+        TextBoxModule(services).open()
 
         assertEquals(0, services.opened.size)
         assertNull(services.closedTemplate)
@@ -110,6 +128,11 @@ class WidgetModulesTest {
         override val isDisplayOff = false
         override val captureRestore = WidgetCaptureRestore()
         override val appData = AppData()
+        override val units: UnitSettings get() = error("No unit settings in this test")
+        override val host: WidgetHost? = null
+        override val creationPosition: PointF? = null
+        override fun dismissPresentationOf(widget: BaseWidget) = Unit
+        override fun onKeyFocusChanged(widget: BaseWidget, focused: Boolean) = Unit
         override fun notifyTransientChange() {
             transientChanges++
         }

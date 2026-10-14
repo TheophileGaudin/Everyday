@@ -224,8 +224,6 @@ class SpeedometerWidget(
 class SpeedometerModule(
     private val services: DashboardServices,
     private val current: () -> SpeedometerWidget?,
-    private val speedUnit: () -> SpeedometerWidget.SpeedUnit,
-    private val toggleSpeedUnit: () -> Unit,
     private val showSettings: () -> Unit,
     private val dismissSettings: () -> Unit,
     private val forceVisibleWhenIdle: () -> Boolean,
@@ -243,6 +241,7 @@ class SpeedometerModule(
                 if (changed && !services.isDisplayOff) services.notifyTransientChange()
             }
         }
+        services.appData.subscribe(AppChannels.unitsChanged) { current()?.setUnit(services.units.effectiveSpeedUnit()) }
     }
 
     val lifecycle = WidgetLifecycleRegistration.singleton(
@@ -268,9 +267,10 @@ class SpeedometerModule(
 
     private fun build(x: Float, y: Float, width: Float, height: Float) =
         SpeedometerWidget(x, y, width, height).apply {
-            onUnitChanged = { toggleSpeedUnit() }
+            val units = this@SpeedometerModule.services.units
+            onUnitChanged = { units.toggleSpeedOverride() }
             onSettingsRequested = showSettings
-            setUnit(speedUnit())
+            setUnit(units.effectiveSpeedUnit())
             setForceVisibleWhenIdle(forceVisibleWhenIdle())
             setSpeedData(latest.speedKmh, latest.qualityOk, latest.isMoving)
         }

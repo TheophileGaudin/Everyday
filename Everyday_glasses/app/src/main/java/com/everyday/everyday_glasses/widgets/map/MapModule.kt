@@ -21,8 +21,6 @@ class MapModule(
     private val context: Context,
     private val current: () -> MapWidget?,
     private val requestRepaint: () -> Unit,
-    private val addressFocusChanged: (MapWidget, Boolean) -> Unit,
-    private val dismissPresentation: () -> Unit,
 ) {
     val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.MAP, MapWidget::class, DashboardPersistence.MapWidgetState::class,
@@ -65,8 +63,10 @@ class MapModule(
      */
     fun stopNavigation() {
         services.withTransientChanges {
-            dismissPresentation()
-            current()?.stopNavigation()
+            current()?.let { map ->
+                services.dismissPresentationOf(map)
+                map.stopNavigation()
+            }
             services.notifyTransientChange()
         }
     }
@@ -92,7 +92,7 @@ class MapModule(
                 override fun onMapDataRequested(point: MapGeoPoint, config: PoiDisplayConfig) {
                     data.requests?.requestMapData(point, config)
                 }
-                override fun onAddressFocusChanged(focused: Boolean) = addressFocusChanged(map, focused)
+                override fun onAddressFocusChanged(focused: Boolean) = this@MapModule.services.onKeyFocusChanged(map, focused)
                 override fun onNavigationResult(result: NavigationOperationResult) = services.notifyTransientChange()
                 override fun onStopNavigationRequested() = this@MapModule.stopNavigation()
             }

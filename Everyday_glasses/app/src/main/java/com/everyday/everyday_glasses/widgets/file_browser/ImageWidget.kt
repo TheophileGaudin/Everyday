@@ -128,8 +128,10 @@ class ImageModule(
         beforeRemove = ::deleteFileIfUnused,
     )
 
-    fun open(path: String, x: Float, y: Float) {
-        services.open(WidgetTypeId.IMAGE) { ImageWidget(x, y, path) }
+    /** Opens the image at [path] where the user asked (top left otherwise). */
+    fun open(path: String) {
+        val position = services.creationPosition
+        services.open(WidgetTypeId.IMAGE) { ImageWidget(position?.x ?: 0f, position?.y ?: 0f, path) }
     }
 
     private fun deleteFileIfUnused(widget: ImageWidget) {

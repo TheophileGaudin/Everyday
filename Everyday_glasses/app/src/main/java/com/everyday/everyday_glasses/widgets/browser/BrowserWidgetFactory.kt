@@ -52,7 +52,6 @@ class BrowserModule(
     private val rootLayout: () -> ViewGroup?,
     private val containerView: View,
     private val all: () -> List<BrowserWidget>,
-    private val requestKeyboard: (show: Boolean) -> Unit,
 ) {
     val lifecycle = WidgetLifecycleRegistration.multiple(
         WidgetTypeId.BROWSER, BrowserWidget::class, DashboardPersistence.BrowserWidgetState::class,
@@ -62,14 +61,14 @@ class BrowserModule(
         beforeRemove = BrowserWidget::releaseKeyFocus,
     )
 
-    /** From the menu: reopens the last closed browser, or opens a new one at ([x], [y]) that goes fullscreen. */
-    fun openFromMenu(x: Float, y: Float) {
+    /** From the menu: reopens the last closed browser, or opens a new one that goes fullscreen. */
+    fun openFromMenu() {
         if (reopenClosed() != null) return
-        services.runPersistentMutation(changed = { it != null }) { openWindowed(x, y, fullscreen = true) }
+        services.runPersistentMutation(changed = { it != null }) { openWindowed(fullscreen = true) }
     }
 
-    /** A windowed browser at ([x], [y]) that takes the keyboard, for an assistant browser task. */
-    fun openForTask(x: Float, y: Float): BrowserWidget? = openWindowed(x, y, fullscreen = false)
+    /** A windowed browser that takes the keyboard, for an assistant browser task. */
+    fun openForTask(): BrowserWidget? = openWindowed(fullscreen = false)
 
     /** A new fullscreen browser; [focus] gives it the keyboard. */
     fun openFullscreen(focus: Boolean, url: String? = null): BrowserWidget? =
@@ -85,10 +84,12 @@ class BrowserModule(
     fun onLowMemory() = all().forEach { it.onLowMemory() }
     fun clearDebugWebViewData(profileSummary: String) = all().forEach { it.clearDebugWebViewData(profileSummary) }
 
-    /** The default windowed size (45% by 50% of the dashboard), kept on screen. */
-    private fun openWindowed(x: Float, y: Float, fullscreen: Boolean): BrowserWidget? {
+    /** The default windowed size (45% by 50% of the dashboard), where the user asked (top left otherwise), kept on screen. */
+    private fun openWindowed(fullscreen: Boolean): BrowserWidget? {
         val width = services.viewportWidth * 0.45f
         val height = services.viewportHeight * 0.5f
+        val x = services.creationPosition?.x ?: 0f
+        val y = services.creationPosition?.y ?: 0f
         return open(
             x.coerceIn(0f, services.viewportWidth - width),
             y.coerceIn(0f, services.viewportHeight - height),
@@ -131,7 +132,9 @@ class BrowserModule(
 
     private fun configure(widget: BrowserWidget) {
         widget.listener = object : BrowserWidgetListener {
-            override fun onKeyboardRequested(show: Boolean) = requestKeyboard(show)
+            override fun onKeyboardRequested(show: Boolean) {
+                services.host?.requestBrowserKeyboard(show)
+            }
         }
         widget.refreshDisplayVisibility()
     }

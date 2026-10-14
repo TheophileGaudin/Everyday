@@ -31,3 +31,5 @@ Behaviors to investigate before full release:
 
 Questions: 
 => how to re order the content of WidgetContainer in a way making it easier to read without impacting functionality
+
+=> Shouldn't setSpeedometerForceVisibleWhenIdle be secluded in the speedometer widget rather than part of the generic settings controller?

@@ -5,7 +5,6 @@ import com.everyday.everyday_glasses.runtime.DashboardServices
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
-import com.everyday.everyday_glasses.settings.TemperatureUnit
 import com.everyday.everyday_glasses.settings.UnitDisplayFormatter
 
 /** Puts the location and weather widget on the dashboard and feeds it place and weather data. */
@@ -13,8 +12,6 @@ internal class WeatherModule(
     private val services: DashboardServices,
     private val context: Context,
     private val currentWidget: () -> WeatherWidget?,
-    private val temperatureUnit: () -> TemperatureUnit,
-    private val toggleTemperatureUnit: () -> Unit,
 ) {
     private var address: String? = null
     private var weatherText: String? = null
@@ -33,6 +30,7 @@ internal class WeatherModule(
         services.appData.subscribe(AppChannels.place) { renderLocationWeather() }
         services.appData.subscribe(AppChannels.weather) { renderLocationWeather() }
         services.appData.subscribe(AppChannels.locationDenied) { setLocationPermissionDenied() }
+        services.appData.subscribe(AppChannels.unitsChanged) { applyUnitSettings() }
     }
 
     private fun create(): WeatherWidget {
@@ -99,7 +97,7 @@ internal class WeatherModule(
 
         val temperatureText = UnitDisplayFormatter.formatTemperature(
             weather.tempCurrent,
-            temperatureUnit()
+            services.units.effectiveTemperatureUnit()
         )
 
         val displayWeatherText =
@@ -118,16 +116,16 @@ internal class WeatherModule(
     }
 
     private fun configure(widget: WeatherWidget) {
-        widget.onTemperatureUnitChanged = toggleTemperatureUnit
-        widget.setTemperatureUnit(temperatureUnit())
+        widget.onTemperatureUnitChanged = { services.units.toggleTemperatureOverride() }
+        widget.setTemperatureUnit(services.units.effectiveTemperatureUnit())
         if (address != null || weatherText != null) {
             widget.setLocationData(address ?: "Loading...", weatherText ?: "Checking weather...")
         }
         widget.setSunTimes(sunriseEpochMs, sunsetEpochMs)
     }
 
-    fun applyUnitSettings() {
-        currentWidget()?.setTemperatureUnit(temperatureUnit())
+    private fun applyUnitSettings() {
+        currentWidget()?.setTemperatureUnit(services.units.effectiveTemperatureUnit())
         renderLocationWeather()
     }
 

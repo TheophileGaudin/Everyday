@@ -5,14 +5,15 @@ import android.location.Location
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.everyday.everyday_glasses.WidgetContainer
 import com.everyday.everyday_glasses.runtime.AppChannels
+import com.everyday.everyday_glasses.runtime.AppData
 import com.everyday.everyday_glasses.runtime.AppQueries
 import com.everyday.everyday_glasses.runtime.Place
 import com.everyday.everyday_glasses.auth_permissions.GoogleAuthCoordinator
 import com.everyday.everyday_glasses.auth_permissions.GoogleAuthState
 import com.everyday.everyday_glasses.widgets.calendar.GoogleCalendarClient
 import com.everyday.everyday_glasses.auth_permissions.NetworkStatusProvider
+import com.everyday.everyday_glasses.settings.UnitSettings
 import com.everyday.everyday_glasses.widgets.map.backend.MapGeoPoint
 import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
 import com.everyday.shared.sync.CalendarAccount
@@ -47,7 +48,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class GlassesDataSyncCoordinator(
     context: Context,
-    private val widgetContainer: WidgetContainer,
+    private val appData: AppData,
     private val syncMessengerProvider: () -> SyncMessenger?,
     private val networkStatusProvider: NetworkStatusProvider,
     private val googleAuthCoordinatorProvider: () -> GoogleAuthCoordinator?,
@@ -96,7 +97,7 @@ class GlassesDataSyncCoordinator(
     fun clearCalendarSnapshot() {
         snapshotStore.clearCalendar()
         postUi {
-            widgetContainer.appData.publish(AppChannels.calendar, null)
+            appData.publish(AppChannels.calendar, null)
         }
     }
 
@@ -162,10 +163,10 @@ class GlassesDataSyncCoordinator(
                     .resolveLocationName(location.latitude, location.longitude, GEOCODE_MAPS_CO_API_KEY)
                     .onSuccess { locationName ->
                         postUi {
-                            if (widgetContainer.observeLiveLocationCountry(locationName.countryCode)) {
+                            if (observeLiveCountry(locationName.countryCode)) {
                                 hasSessionLocationCountry = true
                             }
-                            widgetContainer.appData.publish(AppChannels.place, Place(locationName.town, locationName.countryCode))
+                            appData.publish(AppChannels.place, Place(locationName.town, locationName.countryCode))
                         }
                     }
                     .onFailure { error -> Log.w(TAG, "Local location context refresh failed", error) }
@@ -192,7 +193,7 @@ class GlassesDataSyncCoordinator(
     }
 
     fun onFinanceVisibilityChanged(visible: Boolean) {
-        val visibleConfigs = if (visible) widgetContainer.appData.ask(AppQueries.financeTilesShown).orEmpty() else emptyList()
+        val visibleConfigs = if (visible) appData.ask(AppQueries.financeTilesShown).orEmpty() else emptyList()
         syncOrchestrator.refresh(
             channels = setOf(SyncChannel.FINANCE),
             force = false,
@@ -208,7 +209,7 @@ class GlassesDataSyncCoordinator(
             force = force,
             reason = reason,
             countryCode = countryCode,
-            newsSource = widgetContainer.appData.ask(AppQueries.newsSource)
+            newsSource = appData.ask(AppQueries.newsSource)
         )
     }
 
@@ -298,7 +299,7 @@ class GlassesDataSyncCoordinator(
     fun onSyncSnapshotReceived(snapshot: SyncSnapshot) {
         snapshot.weather?.let { weather ->
             postUi {
-                if (widgetContainer.observeLiveLocationCountry(weather.countryCode)) {
+                if (observeLiveCountry(weather.countryCode)) {
                     hasSessionLocationCountry = true
                 }
             }
@@ -317,10 +318,10 @@ class GlassesDataSyncCoordinator(
         postUi {
             when (error.channel) {
                 SyncChannel.NEWS -> {
-                    widgetContainer.appData.publish(AppChannels.newsError, error.message)
+                    appData.publish(AppChannels.newsError, error.message)
                     completePendingNewsSourceRequest(Result.failure(IllegalStateException(error.message)))
                 }
-                SyncChannel.FINANCE -> widgetContainer.appData.publish(AppChannels.financeError, error.message)
+                SyncChannel.FINANCE -> appData.publish(AppChannels.financeError, error.message)
                 else -> Log.w(TAG, "Sync error ${error.channel}: ${error.message}")
             }
         }
@@ -345,7 +346,7 @@ class GlassesDataSyncCoordinator(
         val financeSelection = visibleFinanceConfigs.firstOrNull()
         val requestCountry = request.countryCode
             ?: snapshotStore.loadWeather()?.countryCode
-            ?: widgetContainer.appData.ask(AppQueries.newsCountry)
+            ?: appData.ask(AppQueries.newsCountry)
             ?: snapshotStore.loadNews()?.countryCode
         val financeLiveEnabled = if (SyncChannel.FINANCE in request.channels) {
             request.financeLiveEnabled ?: visibleFinanceConfigs.isNotEmpty()
@@ -355,7 +356,7 @@ class GlassesDataSyncCoordinator(
         return syncMessengerProvider()?.sendSyncRequest(
             request.copy(
                 countryCode = requestCountry,
-                newsSource = request.newsSource ?: widgetContainer.appData.ask(AppQueries.newsSource)
+                newsSource = request.newsSource ?: appData.ask(AppQueries.newsSource)
                     ?: snapshotStore.loadNews()?.sourceSpec,
                 financeTiles = visibleFinanceConfigs,
                 financeSymbol = request.financeSymbol ?: financeSelection?.symbol,
@@ -439,7 +440,7 @@ class GlassesDataSyncCoordinator(
         )
         val cached = snapshotStore.loadNews()
         val resolvedSource = sourceSpec
-            ?: widgetContainer.appData.ask(AppQueries.newsSource)
+            ?: appData.ask(AppQueries.newsSource)
             ?: cached?.sourceSpec
             ?: NewsSourceSpec.DEFAULT_LOCATION
         if (!force && cached != null && !cached.isStale() &&
@@ -470,7 +471,7 @@ class GlassesDataSyncCoordinator(
             } catch (error: Throwable) {
                 Log.w(TAG, "Local news refresh failed", error)
                 postUi {
-                    widgetContainer.appData.publish(AppChannels.newsError, "No news available")
+                    appData.publish(AppChannels.newsError, "No news available")
                 }
                 completion?.invoke(Result.failure(error))
             } finally {
@@ -512,7 +513,7 @@ class GlassesDataSyncCoordinator(
             } catch (error: Throwable) {
                 Log.w(TAG, "Local finance refresh failed", error)
                 postUi {
-                    widgetContainer.appData.publish(AppChannels.financeError, "No data")
+                    appData.publish(AppChannels.financeError, "No data")
                 }
             }
         }
@@ -521,7 +522,7 @@ class GlassesDataSyncCoordinator(
     private fun resolveVisibleFinanceConfigs(request: SyncRequest): List<FinanceDashboardTileConfig> {
         if (request.financeLiveEnabled == false) return emptyList()
         request.financeTiles.takeIf { it.isNotEmpty() }?.let { return it }
-        widgetContainer.appData.ask(AppQueries.financeTilesShown).orEmpty().takeIf { it.isNotEmpty() }?.let { return it }
+        appData.ask(AppQueries.financeTilesShown).orEmpty().takeIf { it.isNotEmpty() }?.let { return it }
         val symbol = request.financeSymbol
         if (symbol != null) {
             val range = FinanceTimeRange.fromRange(request.financeRange)
@@ -578,16 +579,16 @@ class GlassesDataSyncCoordinator(
 
     private fun applySnapshot(snapshot: SyncSnapshot) {
         postUi {
-            widgetContainer.withTransientChangeBatch {
+            appData.publishTogether {
                 snapshot.location?.let(::applyLocation)
                 snapshot.weather?.let { applyWeather(it, updateUnitCountry = false) }
                 snapshot.calendar?.let(::applyCalendar)
                 snapshot.news?.let(::applyNews)
                 snapshot.finance?.let(::applyFinance)
-                snapshot.notifications?.let {widgetContainer.appData.publish(AppChannels.notifications, it) }
+                snapshot.notifications?.let {appData.publish(AppChannels.notifications, it) }
                 snapshot.map?.let {
                     Log.d(TAG, "Applying phone map snapshot: roads=${it.roads.size} pois=${it.pois.size}")
-                    widgetContainer.appData.publish(AppChannels.mapSnapshot, it)
+                    appData.publish(AppChannels.mapSnapshot, it)
                 }
             }
         }
@@ -615,26 +616,32 @@ class GlassesDataSyncCoordinator(
                     snapshot.speedMps?.let { speed = it }
                 }
                 Log.d(TAG, "Forwarding phone location to map: $lat,$lon accuracy=${snapshot.accuracyM}")
-                widgetContainer.appData.publish(AppChannels.location, phoneFix)
+                appData.publish(AppChannels.location, phoneFix)
             }
         }
     }
 
     private fun applyNews(snapshot: NewsSnapshot) {
-        postUi { widgetContainer.appData.publish(AppChannels.news, snapshot) }
+        postUi { appData.publish(AppChannels.news, snapshot) }
     }
 
     private fun applyFinance(snapshot: FinanceSnapshot) {
-        postUi { widgetContainer.appData.publish(AppChannels.finance, snapshot) }
+        postUi { appData.publish(AppChannels.finance, snapshot) }
     }
 
     private fun applyCalendar(snapshot: CalendarSnapshot) {
         postUi {
-            widgetContainer.appData.publish(AppChannels.calendar, snapshot)
+            appData.publish(AppChannels.calendar, snapshot)
             if (snapshot.sourceMode == GoogleAuthState.AuthMode.PHONE_FALLBACK.name) {
                 googleAuthCoordinatorProvider()?.onPhoneCalendarSnapshotReceived(snapshot)
             }
         }
+    }
+
+    /** Tells the app the country the user is in right now; true when it's a real country code. */
+    private fun observeLiveCountry(countryCode: String): Boolean {
+        appData.publish(AppChannels.liveCountry, countryCode)
+        return UnitSettings.normalizeCountryCode(countryCode) != null
     }
 
     private fun postUi(action: () -> Unit) {
@@ -648,11 +655,11 @@ class GlassesDataSyncCoordinator(
 
     private fun applyWeather(snapshot: WeatherSnapshot, updateUnitCountry: Boolean) {
         postUi {
-            if (updateUnitCountry && widgetContainer.observeLiveLocationCountry(snapshot.countryCode)) {
+            if (updateUnitCountry && observeLiveCountry(snapshot.countryCode)) {
                 hasSessionLocationCountry = true
             }
-            widgetContainer.appData.publish(AppChannels.place, Place(snapshot.town,snapshot.countryCode))
-            widgetContainer.appData.publish(AppChannels.weather, snapshot.weather)
+            appData.publish(AppChannels.place, Place(snapshot.town,snapshot.countryCode))
+            appData.publish(AppChannels.weather, snapshot.weather)
         }
     }
 

@@ -43,6 +43,8 @@ import com.everyday.everyday_glasses._binocular.BinocularUpdateType
 import com.everyday.everyday_glasses._binocular.BinocularView
 import com.everyday.everyday_glasses.runtime.BrightnessController
 import com.everyday.everyday_glasses.runtime.AppChannels
+import com.everyday.everyday_glasses.runtime.PhoneMirror
+import com.everyday.everyday_glasses.runtime.WidgetHost
 import com.everyday.everyday_glasses.runtime.DisplayPowerCallbacks
 import com.everyday.everyday_glasses.runtime.DisplayPowerController
 import com.everyday.everyday_glasses.widgets.file_browser.FileImportCallbacks
@@ -251,7 +253,7 @@ class MainActivity : AppCompatActivity() {
                 }
             },
             onLocationUnavailable = {
-                widgetContainer.withTransientChangeBatch {
+                widgetContainer.appData.publishTogether {
                     widgetContainer.appData.publish(AppChannels.locationDenied, Unit)
                     widgetContainer.appData.publish(AppChannels.speed, null)
                 }
@@ -766,7 +768,6 @@ class MainActivity : AppCompatActivity() {
                             phoneBatteryPercent = -1
                         )
                         widgetContainer.unfocusAll()
-                        widgetContainer.setMirroringEnabled(false)
                     } else {
                         statusController.onPhoneConnectionChanged(
                             connected = true,
@@ -786,7 +787,7 @@ class MainActivity : AppCompatActivity() {
                 override fun onClipboardReceived(clipboardContent: String)                      {Log.d(TAG, "Phone clipboard updated: chars=${clipboardContent.length}"); widgetContainer.setPhoneClipboard(clipboardContent)}
                 override fun onImageReceived(imageData: ByteArray, fileName: String)            {Log.d(TAG, "Image received from phone: $fileName (${imageData.size} bytes)"); fileImportCoordinator.importReceivedImage(imageData, fileName)}
                 override fun onOpenBrowserRequested(address: String)                            {Log.d(TAG, "Open browser requested from phone: ${address.take(80)}") ; widgetContainer.executeOpenUrlCommand(address)}
-                override fun onMirroringChanged(enabled: Boolean, ip: String?)                  {widgetContainer.setMirroringEnabled(enabled, ip)}
+                override fun onMirroringChanged(enabled: Boolean, ip: String?)                  {widgetContainer.appData.publish(AppChannels.mirroring, PhoneMirror(enabled, ip))}
                 override fun onGoogleAuthStateReceived(
                     status: GooglePhoneAuthStatus,
                     account: GoogleAccountSummary?,
@@ -871,7 +872,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupDataSyncCoordinator() {
         dataSyncCoordinator = GlassesDataSyncCoordinator(
             context = this,
-            widgetContainer = widgetContainer,
+            appData = widgetContainer.appData,
             syncMessengerProvider = { phoneConnectionOrNull() },
             networkStatusProvider = DefaultNetworkStatusProvider(this),
             googleAuthCoordinatorProvider = {

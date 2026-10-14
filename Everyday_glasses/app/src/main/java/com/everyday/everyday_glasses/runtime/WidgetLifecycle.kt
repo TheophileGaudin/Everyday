@@ -1,7 +1,10 @@
 package com.everyday.everyday_glasses.runtime
 
+import android.graphics.PointF
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
+import com.everyday.everyday_glasses.settings.UnitSettings
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import com.everyday.shared.sync.SubtitleControl
 
 interface WidgetLifecycle {
     fun onResume() {}
@@ -35,6 +38,21 @@ interface DashboardServices {
     /** The app's data (phone, GPS, status monitor): the latest values, and subscriptions to new ones. */
     val appData: AppData
 
+    /** The app's unit choices: read them, or toggle one from a widget. */
+    val units: UnitSettings
+
+    /** What the activity does for widgets (phone keyboard, mirroring, subtitles, cursor); null until it's plugged in. */
+    val host: WidgetHost?
+
+    /** Where the user asked for a new widget (the context menu's spot); null when there's none, so the module picks its default place. */
+    val creationPosition: PointF?
+
+    /** Ends the assistant's presentation of [widget], if that widget is the one being presented. */
+    fun dismissPresentationOf(widget: BaseWidget)
+
+    /** [widget] took or gave up the keyboard by itself (the map's address search): bring it forward and tell the phone. */
+    fun onKeyFocusChanged(widget: BaseWidget, focused: Boolean)
+
     /** A visible change that doesn't need saving. */
     fun notifyTransientChange()
 
@@ -61,4 +79,18 @@ interface DashboardServices {
 
     /** Closes [widget], with its type's cleanup. */
     fun close(widget: BaseWidget)
+}
+
+/** Capabilities the activity supplies to [com.everyday.everyday_glasses.WidgetContainer]. */
+interface WidgetHost {
+    fun requestClose()
+    fun requestMirror(start: Boolean)
+    fun requestBrowserKeyboard(show: Boolean)
+    fun requestClipboard()
+    fun requestFilePicker()
+    fun requestStoragePermission()
+    fun requestCursorCenter()
+    /** False when the phone didn't take the request. */
+    fun requestSubtitleControl(control: SubtitleControl): Boolean
+    fun toggleAssistantVoice()
 }

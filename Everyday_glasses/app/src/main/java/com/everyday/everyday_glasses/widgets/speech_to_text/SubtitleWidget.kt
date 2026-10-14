@@ -496,7 +496,6 @@ class SubtitleWidget(
 class SubtitleModule(
     private val services: DashboardServices,
     private val current: () -> SubtitleWidget?,
-    private val requestControl: (SubtitleControl) -> Boolean,
 ) {
     val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.SUBTITLE, SubtitleWidget::class, DashboardPersistence.SubtitleWidgetState::class,
@@ -548,7 +547,9 @@ class SubtitleModule(
             listener = object : SubtitleWidgetListener {
                 override fun onSubtitleControlRequested(control: SubtitleControl) {
                     // The phone didn't take the request: it's no longer connected.
-                    if (!requestControl(control)) this@SubtitleModule.update { it.onPhoneDisconnected() }
+                    if (this@SubtitleModule.services.host?.requestSubtitleControl(control) == false) {
+                        this@SubtitleModule.update { it.onPhoneDisconnected() }
+                    }
                 }
             }
         }

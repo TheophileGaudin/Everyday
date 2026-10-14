@@ -1,5 +1,7 @@
 package com.everyday.everyday_glasses
 
+import android.graphics.PointF
+import com.everyday.everyday_glasses.runtime.WidgetHost
 import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.stateOf
 import com.everyday.everyday_glasses.widgets.map.backend.MapViewMode
 import com.everyday.everyday_glasses.widgets.map.backend.MapZoom
@@ -9,6 +11,7 @@ import com.everyday.everyday_glasses.persistence.LayoutLibrary
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
 import com.everyday.everyday_glasses.persistence.WidgetLayoutManager
 import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.settings.UnitSettings
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
@@ -318,6 +321,11 @@ class WidgetLayoutPersistenceTest {
         override val isDisplayOff = false
         override val captureRestore = WidgetCaptureRestore()
         override val appData = AppData()
+        override val units: UnitSettings get() = error("No unit settings in this test")
+        override val host: WidgetHost? = null
+        override val creationPosition: PointF? = null
+        override fun dismissPresentationOf(widget: BaseWidget) = Unit
+        override fun onKeyFocusChanged(widget: BaseWidget, focused: Boolean) = Unit
         override fun notifyTransientChange() = Unit
         override fun <T> withTransientChanges(action: () -> T): T = action()
         override fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean) = action()

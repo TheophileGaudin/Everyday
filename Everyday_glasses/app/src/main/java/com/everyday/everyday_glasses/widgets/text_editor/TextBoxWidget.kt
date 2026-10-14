@@ -576,11 +576,13 @@ class TextBoxModule(
         beforeRemove = TextBoxWidget::releaseKeyFocus,
     )
 
-    /** Opens a text box at ([x], [y]), or reopens the last closed one, and focuses it. */
-    fun open(x: Float, y: Float) {
+    /** Opens a text box where the user asked (centered otherwise), or reopens the last closed one, and focuses it. */
+    fun open() {
         if (reopenClosed() != null) return
         val width = services.viewportWidth * DEFAULT_WIDTH_PERCENT
         val height = services.viewportHeight * DEFAULT_HEIGHT_PERCENT
+        val x = services.creationPosition?.x ?: ((services.viewportWidth - width) / 2f)
+        val y = services.creationPosition?.y ?: ((services.viewportHeight - height) / 2f)
         val box = TextBoxWidget(
             x.coerceIn(0f, services.viewportWidth - width),
             y.coerceIn(0f, services.viewportHeight - height),

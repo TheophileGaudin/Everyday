@@ -1015,7 +1015,6 @@ class FileBrowserWidget(
 class FileBrowserModule(
     private val services: DashboardServices,
     private val context: Context,
-    private val centerCursor: () -> Unit,
 ) {
     val lifecycle = WidgetLifecycleRegistration.multiple(WidgetTypeId.FILES, FileBrowserWidget::class, Unit::class)
 
@@ -1036,6 +1035,6 @@ class FileBrowserModule(
         // Opening the picker may complete asynchronously after a runtime/all-files permission
         // screen. Re-center after the widget actually exists so hover chrome is visible at once
         // and two-finger scrolling is routed to the new browser without a priming drag.
-        centerCursor()
+        services.host?.requestCursorCenter()
     }
 }

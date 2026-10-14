@@ -46,7 +46,6 @@ import com.everyday.everyday_glasses.interaction.commands.AppCommandCapabilities
 import com.everyday.everyday_glasses.interaction.commands.AppCommandExecutor
 import com.everyday.everyday_glasses.interaction.commands.AppCommandResult
 import com.everyday.everyday_glasses.widgets._common.HandlerPresentationScheduler
-import com.everyday.everyday_glasses.widgets._common.PresentationSession
 import com.everyday.everyday_glasses.widgets._common.WidgetPresenter
 import com.everyday.everyday_glasses.settings.SettingsController
 import com.everyday.everyday_glasses.interaction.user_input.UserInputActivity
@@ -71,6 +70,8 @@ import com.everyday.everyday_glasses.persistence.WidgetLayoutManager
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
 import com.everyday.everyday_glasses.runtime.DashboardServices
 import com.everyday.everyday_glasses.runtime.AppData
+import com.everyday.everyday_glasses.runtime.WidgetHost
+import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.LayoutLibrary
@@ -112,7 +113,6 @@ import com.everyday.everyday_glasses.widgets.finance.FinanceModule
 import com.everyday.everyday_glasses.widgets.news.NewsModule
 import com.everyday.everyday_glasses.widgets.weather_location.WeatherModule
 import com.everyday.shared.sync.NewsSourceSpec
-import com.everyday.shared.sync.SubtitleControl
 import com.everyday.shared.command.AppCommandArguments
 import com.everyday.shared.command.AppCommandInvocation
 import com.everyday.shared.command.CommandScrollDirection
@@ -156,19 +156,6 @@ interface WidgetContentObserver {
     )
 }
 
-/** Capabilities the activity supplies to [com.everyday.everyday_glasses.WidgetContainer]. */
-interface WidgetHost {
-    fun requestClose()
-    fun requestMirror(start: Boolean)
-    fun requestBrowserKeyboard(show: Boolean)
-    fun requestClipboard()
-    fun requestFilePicker()
-    fun requestStoragePermission()
-    fun requestCursorCenter()
-    /** False when the phone didn't take the request. */
-    fun requestSubtitleControl(control: SubtitleControl): Boolean
-    fun toggleAssistantVoice()
-}
 class WidgetContainer @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -262,8 +249,8 @@ class WidgetContainer @JvmOverloads constructor(
             val type = WidgetDescriptors.forCommand(widgetId).type
             if (visible) lifecycleController.show(type) else lifecycleController.hide(type)
         }
-        override fun createTextWidget()                                       {textModule.open(pendingCreateX, pendingCreateY)}
-        override fun createBrowserWidget()                                    = browserModule.openFromMenu(pendingCreateX, pendingCreateY)
+        override fun createTextWidget()                                       = textModule.open()
+        override fun createBrowserWidget()                                    = browserModule.openFromMenu()
         override fun openUrl(url: String)                                     = openBrowserAddress(url)
         override fun openFilePicker()                                         { host?.requestFilePicker() }
         override fun openYouTubeHistory()                                     = browserModule.openYouTubeHistory()
@@ -291,10 +278,7 @@ class WidgetContainer @JvmOverloads constructor(
         toggleAssistantVoice  = { host?.toggleAssistantVoice() },
         runShortcut           = { invocation ->
             userInputActivity?.onUserInput(UserInputKind.SHORTCUT)
-            if (invocation.commandId == commandRegistry.createText.id) {
-                pendingCreateX = (width * 0.5f) - (width * TextBoxModule.DEFAULT_WIDTH_PERCENT) / 2f
-                pendingCreateY = (height * 0.5f) - (height * TextBoxModule.DEFAULT_HEIGHT_PERCENT) / 2f
-            } else if (invocation.commandId == commandRegistry.createBrowser.id) {pendingCreateX = 0f; pendingCreateY = 0f}
+            creationPosition = null // A shortcut has no place on the dashboard: new widgets go to their default place.
             executeCommand(invocation)
             host?.requestCursorCenter()
         },
@@ -319,8 +303,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Widget modules ====================
 
-    private var pendingCreateX      = 0f //Location of widget creation
-    private var pendingCreateY      = 0f //Location of widget creation
+    private var creationPosition: PointF? = null // Where the user last asked for a new widget (the context menu's spot)
 
     /** The app's data for the widget modules. The activity and the phone sync publish into it. */
     val appData = AppData()
@@ -332,6 +315,17 @@ class WidgetContainer @JvmOverloads constructor(
         override val isDisplayOff: Boolean                                                    get()  = displayState == WakeSleepManager.DisplayState.OFF
         override val captureRestore: WidgetCaptureRestore                                     get()  = widgetCaptureRestore
         override val appData: AppData                                                         get()  = this@WidgetContainer.appData
+        override val units: UnitSettings                                                      get()  = unitSettings
+        override val host: WidgetHost?                                                        get()  = this@WidgetContainer.host
+        override val creationPosition: PointF?                                                get()  = this@WidgetContainer.creationPosition
+        override fun dismissPresentationOf(widget: BaseWidget) {
+            if (presenter.activeSession?.targetId == stableWidgetId(widget)) presenter.dismiss()
+        }
+        override fun onKeyFocusChanged(widget: BaseWidget, focused: Boolean) {
+            val beforeZOrder = widget.zOrder
+            if (focused) bringWidgetToFront(widget)
+            notifyFocusChanged(persistent = focused && widget.zOrder != beforeZOrder)
+        }
         override fun notifyTransientChange()                                                         = notifyTransientContentChanged()
         override fun <T> withTransientChanges(action: () -> T): T                                    = withTransientChangeBatch(action)
         override fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean): Boolean      = this@WidgetContainer.runClassifiedInput(action, changed)
@@ -346,20 +340,16 @@ class WidgetContainer @JvmOverloads constructor(
     private val speedometerModule   = SpeedometerModule(
         dashboardServices,
         current              = { speedometerWidget },
-        speedUnit            = { unitSettings.effectiveSpeedUnit() },
-        toggleSpeedUnit      = { unitSettings.toggleSpeedOverride() },
         showSettings         = { settingsController.showSpeedometerSettingsMenu() },
         dismissSettings      = { settingsController.dismissSpeedometerSettingsMenu() },
         forceVisibleWhenIdle = { settingsController.getSpeedVisibilityThreshold() <= 0f },
     )
-    private val subtitleModule      = SubtitleModule(dashboardServices, { subtitleWidget }) { control -> host?.requestSubtitleControl(control) ?: true }
+    private val subtitleModule      = SubtitleModule(dashboardServices) { subtitleWidget }
     private val mapModule           = MapModule(
         dashboardServices,
         context,
         current             = { mapWidget },
         requestRepaint      = ::requestRepaint,
-        addressFocusChanged = ::onMapAddressFocusChanged,
-        dismissPresentation = ::dismissMapPresentation,
     )
     private val mirrorModule        = MirrorModule(
         dashboardServices,
@@ -368,7 +358,6 @@ class WidgetContainer @JvmOverloads constructor(
         onMediaFrame           = ::notifyMediaFrame,
         setMediaSourceActive   = ::setBinocularMediaSourceActive,
         refreshBrightnessRules = ::refreshBrightnessRules,
-        sendMirrorRequest      = { start -> host?.requestMirror(start) },
     )
     private val textModule          = TextBoxModule(dashboardServices)
     private val imageModule         = ImageModule(dashboardServices, context) { registry.imageWidgets }
@@ -380,7 +369,7 @@ class WidgetContainer @JvmOverloads constructor(
         setMediaSourceActive = ::setBinocularMediaSourceActive,
     )
     private val pdfModule           = PdfModule(dashboardServices, context)
-    private val fileBrowserModule   = FileBrowserModule(dashboardServices, context) { host?.requestCursorCenter() }
+    private val fileBrowserModule   = FileBrowserModule(dashboardServices, context)
     private val browserWidgets: List<BrowserWidget> get() = registry.browserWidgets // Access to browser widget list for browser module via registry
     private val browserModule       = BrowserModule(
         dashboardServices,
@@ -388,15 +377,12 @@ class WidgetContainer @JvmOverloads constructor(
         rootLayout      = { parent as? ViewGroup },
         containerView   = this,
         all             = { browserWidgets },
-        requestKeyboard = { show -> host?.requestBrowserKeyboard(show) },
     )
     private val weatherModule by lazy {
         WeatherModule(
             services              = dashboardServices,
             context               = context,
             currentWidget         = { weatherWidget },
-            temperatureUnit       = { unitSettings.effectiveTemperatureUnit() },
-            toggleTemperatureUnit = { unitSettings.toggleTemperatureOverride() },
         )
     }
     private val newsModule    by lazy {
@@ -525,7 +511,6 @@ class WidgetContainer @JvmOverloads constructor(
         withNotificationsSuppressed = { action -> withContentChangeSuppressed(action) },
         notifyTransientChange       = ::notifyTransientContentChanged,
     )
-    private val activePresentationSession: PresentationSession? get() = presenter.activeSession
     private var browserRoutingCoordinator: BrowserRoutingCoordinator? = null
     private val webSearchHandler                                      = WebSearchSemanticToolHandler(DuckDuckGoWebSearchProvider())
     private val assistantUiDispatcher                                 = UiThreadDispatcher { action -> if (Looper.myLooper() == Looper.getMainLooper()) {action(); true} else {post(Runnable(action))}}
@@ -547,7 +532,7 @@ class WidgetContainer @JvmOverloads constructor(
             showMap                = {lifecycleController.show(WidgetTypeId.MAP); mapWidget},
             currentMap             = { mapWidget },
             present                = { widget, spec -> presenter.present(widget, spec) },
-            dismissPresentation    = ::dismissMapPresentation,
+            dismissPresentation    = { mapWidget?.let(dashboardServices::dismissPresentationOf) },
             withTransientChanges   = { action -> withTransientChangeBatch(action) },
             notifyTransientChange  = ::notifyTransientContentChanged,
             notifyPersistentChange = ::notifyPersistentContentChanged,
@@ -576,6 +561,8 @@ class WidgetContainer @JvmOverloads constructor(
     init {
         setWillNotDraw(false)
         registerWidgetLifecycles()
+        appData.grouping = { publishes -> withTransientChangeBatch(publishes) }
+        appData.subscribe(AppChannels.liveCountry) { country -> unitSettings.observeLiveCountry(country) }
         unitSettings.onChanged = { applyEffectiveUnitSettings() } // Callers own the classified notification for unit changes; applying the derived widget presentation here must not emit a second transient callback.
         applyEffectiveUnitSettings()
     }
@@ -759,7 +746,7 @@ class WidgetContainer @JvmOverloads constructor(
     } /** Reports focus to the host and emits the one classified visual change for that mutation. */
     private fun notifyTransientContentChanged()                                                   = contentChanges.notifyTransient() /** Emits a visible runtime change without scheduling persistence. */
     fun contentNotificationGeneration(): Long                                                     = contentChanges.notificationGeneration /** Used by input routing to avoid adding a second notification after a widget callback. */
-    fun <T> withTransientChangeBatch(action: () -> T): T                                          = contentChanges.batch(action) /** Coalesces related updates; if one is persistent, that strongest classification wins. */
+    private fun <T> withTransientChangeBatch(action: () -> T): T                                  = contentChanges.batch(action) /** Coalesces related updates; if one is persistent, that strongest classification wins. */
     private fun <T> runPersistentMutation(changed: (T) -> Boolean = { true }, action: () -> T): T = contentChanges.runPersistentMutation(action = action, changed = changed) /** Perform an action that may change the dashboard, and tell the rest of the app if that change should be saved. */
     private fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean): Boolean        = contentChanges.runClassifiedInput(action, changed) /** Classifies handled input as either persistent or transient, never both. */
     private fun notifyPersistentContentChanged()                                                  = contentChanges.notifyPersistent() /** Emits a dashboard mutation; the host owns structural refresh and debounced persistence. */
@@ -861,8 +848,7 @@ class WidgetContainer @JvmOverloads constructor(
         return handled
     }
     private fun showAppContextMenu(screenX: Float, screenY: Float, contentX: Float, contentY: Float) {
-        pendingCreateX = contentX
-        pendingCreateY = contentY
+        creationPosition = PointF(contentX, contentY)
         contextMenu?.setLayoutLockState(isWidgetLayoutLocked)
         contextMenu?.show(screenX, screenY)
         notifyTransientContentChanged()
@@ -882,35 +868,18 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Location and units ====================
 
-    fun observeLiveLocationCountry(countryCode: String): Boolean = UnitSettings.normalizeCountryCode(countryCode)?.let {
-        unitSettings.observeLiveCountry(it)
-        true
-    } ?: false
     private fun applyEffectiveUnitSettings() {
-        val speedUnit = unitSettings.effectiveSpeedUnit()
-        speedometerWidget?.setUnit(speedUnit)
-        settingsController.setSpeedUnit(speedUnit)
+        settingsController.setSpeedUnit(unitSettings.effectiveSpeedUnit())
         settingsController.setUnitSystemMode(unitSettings.globalMode)
-        weatherModule.applyUnitSettings()
+        appData.publish(AppChannels.unitsChanged, Unit)
     }
 
     //======================= Widget wiring ==============================
-    //map
-    private fun onMapAddressFocusChanged(map: MapWidget, focused: Boolean)                            {
-        val beforeZOrder = map.zOrder
-        if (focused) bringWidgetToFront(map)
-        notifyFocusChanged(persistent = focused && map.zOrder != beforeZOrder)
-    } /** The map's address search took or gave up the keyboard focus. */
-    private fun dismissMapPresentation() {val map = mapWidget ?: return; if (activePresentationSession?.targetId == stableWidgetId(map)) {dismissPresentation()}}
-
     //file widgets
-    fun createImageWidget(path: String)                                                               = imageModule.open(path, pendingCreateX, pendingCreateY)
+    fun createImageWidget(path: String)                                                               = imageModule.open(path)
     fun createVideoWidget(uri: android.net.Uri, displayName: String)                                  = videoModule.open(uri, displayName)
     fun createPdfWidget(uri: android.net.Uri, displayName: String)                                    = pdfModule.open(uri, displayName)
     fun createFileBrowserWidget(filter: FileBrowserWidget.FileFilter, onFileSelected: (FileBrowserWidget.FileEntry) -> Unit) = fileBrowserModule.open(filter, onFileSelected)
-
-    //mirror
-    fun setMirroringEnabled(enabled: Boolean, phoneIp: String? = null) = mirrorModule.setMirroringEnabled(enabled, phoneIp)
 
     //browser
     fun shouldApplyBrowserMinimumBrightness()         : Boolean = registry.allWidgets().any { it.requestsBrowserMinimumBrightness }
@@ -1492,7 +1461,6 @@ class WidgetContainer @JvmOverloads constructor(
     // Widget presentation by assistant
     override fun onDetachedFromWindow() {presenter.dismiss(); super.onDetachedFromWindow()}
     fun cancelPresentationForUserInput(): Boolean = presenter.cancelForUserInput()
-    fun dismissPresentation(): Boolean = presenter.dismiss()
     /**
      * Returns the requested browser instance without falling back to another browser.
      * The Page Agent caller should invoke this at run start and retain the returned adapter.
@@ -1528,7 +1496,7 @@ class WidgetContainer @JvmOverloads constructor(
     fun createPageAgentBrowser(): PageAgentBrowserAdapter? {
         if (!isReady() || parent !is ViewGroup) return null
         return runPersistentMutation(changed = { true }) {
-            browserModule.openForTask(pendingCreateX, pendingCreateY)?.let { opened ->
+            browserModule.openForTask()?.let { opened ->
                 BrowserWidgetPageAgentAdapter.bind(stableWidgetId(opened), opened)
                     ?: run {
                         lifecycleController.close(opened)

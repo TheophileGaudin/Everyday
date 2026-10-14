@@ -27,6 +27,7 @@ import androidx.core.graphics.createBitmap
 import androidx.core.graphics.get
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
@@ -1132,7 +1133,6 @@ class MirrorModule(
     private val onMediaFrame: (sourceId: String) -> Unit,
     private val setMediaSourceActive: (sourceId: String, active: Boolean) -> Unit,
     private val refreshBrightnessRules: () -> Unit,
-    private val sendMirrorRequest: (start: Boolean) -> Unit,
 ) {
     val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.MIRROR, ScreenMirrorWidget::class, DashboardPersistence.MirrorWidgetState::class,
@@ -1147,7 +1147,12 @@ class MirrorModule(
         },
     )
 
-    fun setMirroringEnabled(enabled: Boolean, phoneIp: String?) {
+    init {
+        services.appData.subscribe(AppChannels.mirroring) { mirror -> setMirroringEnabled(mirror.enabled, mirror.phoneIp) }
+        services.appData.subscribe(AppChannels.phoneConnected) { connected -> if (!connected) setMirroringEnabled(false, null) }
+    }
+
+    private fun setMirroringEnabled(enabled: Boolean, phoneIp: String?) {
         services.withTransientChanges {
             current()?.setMirroringEnabled(enabled, phoneIp)
             current()?.refreshDisplayVisibility()
@@ -1172,7 +1177,9 @@ class MirrorModule(
                 // The mirror's media brightness cap follows its live media state.
                 refreshBrightnessRules()
             }
-            override fun requestMirror(start: Boolean) = sendMirrorRequest(start)
+            override fun requestMirror(start: Boolean) {
+                services.host?.requestMirror(start)
+            }
         }
         widget.refreshDisplayVisibility()
     }
