@@ -1,6 +1,5 @@
 package com.everyday.everyday_glasses.interaction.assistant.page_agent
 
-import com.everyday.everyday_glasses.WidgetContainer
 import com.everyday.everyday_glasses.interaction.assistant.AssistantDiagnostics
 import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticToolHandler
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolDefinition
@@ -288,18 +287,4 @@ class RunBrowserTaskSemanticToolHandler(
         task = arguments.getString("task"),
         targetWidgetId = arguments.optString("target_widget_id").trim().takeIf { it.isNotBlank() }
     )
-}
-
-/** Concrete host adapter for the Android widget container. */
-class WidgetContainerBrowserRoutingHost(
-    private val widgetContainer: WidgetContainer
-) : BrowserRoutingHost {
-    override fun bindFullscreenBrowser(): PageAgentBrowserAdapter? =
-        widgetContainer.bindFullscreenPageAgentBrowser()
-
-    override fun bindBrowser(widgetId: String?): PageAgentBrowserAdapter? =
-        widgetContainer.bindPageAgentBrowserForTask(widgetId)
-
-    override fun createBrowser(): PageAgentBrowserAdapter? =
-        widgetContainer.createPageAgentBrowser()
 }

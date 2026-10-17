@@ -13,32 +13,8 @@ import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import com.everyday.everyday_glasses.interaction.commands.AwaitingCommandUiDispatcher
 import com.everyday.everyday_glasses.interaction.user_input.TextEditingController
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.AssistantTextPresentationRequest
-import com.everyday.everyday_glasses.interaction.assistant.AssistantToolCatalog
-import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContext
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserRoutingCoordinator
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserWidgetPageAgentAdapter
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.ConfigureMapPoisRequest
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.ConfigureMapPoisSemanticToolHandler
-import com.everyday.everyday_glasses.interaction.assistant.DuckDuckGoWebSearchProvider
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.FinanceTileUpdateRequest
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.FinanceTileUpdateResult
-import com.everyday.everyday_glasses.interaction.assistant.InspectUiSemanticToolHandler
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.NewsSourceUpdateResult
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentApprovalOverlay
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentBrowserAdapter
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentConfirmationRequest
-import com.everyday.everyday_glasses.interaction.assistant.PresentTextSemanticToolHandler
-import com.everyday.everyday_glasses.interaction.assistant.RequestScreenshotSemanticToolHandler
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.RunBrowserTaskSemanticToolHandler
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.SetNewsSourceSemanticToolHandler
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.StartNavigationSemanticToolHandler
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.StopNavigationSemanticToolHandler
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.UpdateFinanceTileSemanticToolHandler
-import com.everyday.everyday_glasses.interaction.assistant.WebSearchSemanticToolHandler
 import com.everyday.everyday_glasses.runtime.DashboardChangeCoordinator
 import com.everyday.everyday_glasses.settings.DisplaySettingsHandler
-import com.everyday.everyday_glasses.runtime.GeminiSettingsListener
 import com.everyday.everyday_glasses.auth_permissions.GoogleAccountHandler
 import com.everyday.everyday_glasses.runtime.WidgetChangeListener
 import com.everyday.everyday_glasses._binocular.BinocularContentClass
@@ -50,7 +26,6 @@ import com.everyday.everyday_glasses.widgets._common.WidgetPresenter
 import com.everyday.everyday_glasses.settings.SettingsController
 import com.everyday.everyday_glasses.interaction.user_input.UserInputActivity
 import com.everyday.everyday_glasses.interaction.user_input.UserInputKind
-import com.everyday.everyday_glasses.widgets.map.backend.StartNavigationRequest
 import com.everyday.everyday_glasses.runtime.WidgetDescriptors
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
@@ -102,23 +77,18 @@ import com.everyday.everyday_glasses.widgets.system_status.StatusBarModule
 import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleWidget
 import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleModule
 import com.everyday.everyday_glasses.widgets.text_editor.TextBoxModule
-import com.everyday.everyday_glasses.widgets.text_editor.TextBoxWidget
 import com.everyday.everyday_glasses._threedof.ThreeDofOverlay
+import com.everyday.everyday_glasses.interaction.assistant.AssistantDashboardAccess
 import com.everyday.everyday_glasses.widgets.file_browser.VideoModule
-import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContextCapture
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.MapAssistantActions
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.TextAssistantActions
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
 import com.everyday.everyday_glasses.widgets.finance.FinanceModule
 import com.everyday.everyday_glasses.widgets.news.NewsModule
 import com.everyday.everyday_glasses.widgets.weather_location.WeatherModule
-import com.everyday.shared.sync.NewsSourceSpec
 import com.everyday.shared.command.AppCommandArguments
 import com.everyday.shared.command.AppCommandInvocation
 import com.everyday.shared.command.CommandScrollDirection
 import com.everyday.shared.command.CommandWidgetId
 import com.everyday.shared.transport.AssistantStatus
-import java.util.concurrent.CompletableFuture
 
 /**
  * The dashboard view. It dispatches input, drawing and app data to the widgets and to the layers
@@ -177,8 +147,8 @@ class WidgetContainer @JvmOverloads constructor(
      ************************/
     // ==================== Inputs and outputs ====================
 
-    var host: WidgetHost?                                   = null         // Outputs: where WidgetContainer requests changes outside the dashboard
-    private val phoneClipboard: String?               get() = textEditing.phoneClipboard // Phone clipboard is a special thing, it's the way to paste things from the phone
+    var host: WidgetHost?             = null                       // Outputs: where WidgetContainer requests changes outside the dashboard
+    val phoneClipboard: String? get() = textEditing.phoneClipboard // Phone clipboard is a special thing, it's the way to paste things from the phone
 
     // ==================== Text Editing ====================
     /** Every text field and text area of the app is edited through this controller. */
@@ -265,6 +235,8 @@ class WidgetContainer @JvmOverloads constructor(
         override fun enterText(text: String)                                  = onKeyPress(text)
         override fun commandFinished()                                        = Unit // Each mutation owns its classified notification; a generic command completion hook would duplicate lifecycle, widget, and transient signals.
     }
+    fun          executeOpenUrlCommand(address: String): AppCommandResult = executeCommand(AppCommandInvocation(commandRegistry.openUrl.id, AppCommandArguments.Url(address)))
+
 
     // ==================== Menus, popups and hover controls ====================
 
@@ -511,34 +483,28 @@ class WidgetContainer @JvmOverloads constructor(
         withNotificationsSuppressed = { action -> withContentChangeSuppressed(action) },
         notifyTransientChange       = ::notifyTransientContentChanged,
     )
-    private var browserRoutingCoordinator: BrowserRoutingCoordinator? = null
-    private val webSearchHandler                                      = WebSearchSemanticToolHandler(DuckDuckGoWebSearchProvider())
     private val assistantUiDispatcher                                 = UiThreadDispatcher { action -> if (Looper.myLooper() == Looper.getMainLooper()) {action(); true} else {post(Runnable(action))}}
-    private val assistantUiContextCapture                             by lazy {AssistantUiContextCapture(registry = registry, screenSize = {width to height}, activeLayoutName = {layoutManager.activeLayoutName}, focusedWidget = ::keyFocusWidget)}
-    private val pageAgentApprovalOverlay                        = PageAgentApprovalOverlay(::notifyPersistentContentChanged)
-    private val textAssistantActions                                  by lazy {
-        TextAssistantActions(
-            ui                       = assistantUiDispatcher,
-            findTextWidget           = { id -> findWidgetByStableId(id) as? TextBoxWidget },
-            createTextWidget         = textModule::openForAssistant,
-            clearEditing             = { widget -> widget.hideKeyboard(); textEditing.clearAllFocus(); hideAssistantIme()},
-            presentWidget            = { widget, spec, created -> presenter.present(widget, spec, created) },
-            removePresentationTarget = presenter::remove,
+    internal val assistant by lazy { /** What the voice assistant can read and do on the dashboard. */
+        AssistantDashboardAccess(
+            services                = dashboardServices,
+            registry                = registry,
+            lifecycle               = lifecycleController,
+            presenter               = presenter,
+            textEditing             = textEditing,
+            ui                      = assistantUiDispatcher,
+            commands                = commandRegistry,
+            isCommandAvailable      = commandCapabilities::isAvailable,
+            executeCommand          = ::executeCommand,
+            activeLayoutName        = { layoutManager.activeLayoutName },
+            openTextForAssistant    = textModule::openForAssistant,
+            openBrowserForTask      = browserModule::openForTask,
+            updateFinanceTile       = financeModule::updateTile,
+            setNewsSource           = newsModule::setSource,
+            drawAboveNativeViews    = ::ensureDrawnAboveNativeOverlays,
+            hideIme                 = ::hideAssistantIme,
+            notifyPersistentChange  = ::notifyPersistentContentChanged,
         )
     }
-    private val mapAssistantActions                                   by lazy {
-        MapAssistantActions(
-            ui                     = assistantUiDispatcher,
-            showMap                = {lifecycleController.show(WidgetTypeId.MAP); mapWidget},
-            currentMap             = { mapWidget },
-            present                = { widget, spec -> presenter.present(widget, spec) },
-            dismissPresentation    = { mapWidget?.let(dashboardServices::dismissPresentationOf) },
-            withTransientChanges   = { action -> withTransientChangeBatch(action) },
-            notifyTransientChange  = ::notifyTransientContentChanged,
-            notifyPersistentChange = ::notifyPersistentContentChanged,
-        )
-    }
-
     // ==================== Fullscreen ====================
 
     private inline fun <reified T : BaseWidget> fullscreenAs(): T?    = registry.fullscreenWidget as? T /** The fullscreen widget when it is a T, otherwise null. WidgetRegistry is the single fullscreen owner; use this only where the widget type genuinely matters. */
@@ -688,7 +654,7 @@ class WidgetContainer @JvmOverloads constructor(
         settingsController.draw(canvas)
         layoutManager.drawNamePrompt(canvas)
         textEditing.drawMenus(canvas)
-        pageAgentApprovalOverlay.draw(canvas)
+        assistant.approvalOverlay.draw(canvas)
     }
     private fun ensureDrawnAboveNativeOverlays() {
         val rootView = parent as? ViewGroup ?: return
@@ -803,6 +769,7 @@ class WidgetContainer @JvmOverloads constructor(
             isFirstRun = false,
             isLayoutLocked = isWidgetLayoutLocked
         )
+    fun applyPersistedDashboardReplacingCurrent(dashboard: WidgetDocument.PersistedDashboard) = layoutManager.replaceDashboard(dashboard)
     fun setIsReturningUser()                          = layoutManager.expectSavedDashboard()
     /**
      * Runs one input on [widget] and classifies it once: saved when it removed the widget or
@@ -835,7 +802,7 @@ class WidgetContainer @JvmOverloads constructor(
     }
     fun isMenuVisible(): Boolean                     = contextMenu?.isVisible == true || textEditing.isMenuVisible || layoutManager.isNamePromptVisible
     private fun isClosePopupVisible(): Boolean       = closeConfirmationPopup?.isVisible == true || layoutManager.isDeleteConfirmationVisible
-    private fun isAnyPopupVisible(): Boolean         = isMenuVisible() || isClosePopupVisible() || pageAgentApprovalOverlay.isVisible()
+    private fun isAnyPopupVisible(): Boolean         = isMenuVisible() || isClosePopupVisible() || assistant.approvalOverlay.isVisible()
     private fun dismissMenu()                        { contextMenu?.dismiss(); textEditing.dismissMenus(); layoutManager.dismissNamePrompt() }
 
     //======================= Context menu =======================
@@ -899,12 +866,6 @@ class WidgetContainer @JvmOverloads constructor(
             widget.navigateToAddress(address, autoFullscreenVideo = true)
         }
     }
-
-    //finance
-    private fun updateFinanceTile(request: FinanceTileUpdateRequest): CompletableFuture<FinanceTileUpdateResult> = financeModule.updateTile(request)
-
-    //news
-    private fun setNewsSource(sourceSpec: NewsSourceSpec): CompletableFuture<NewsSourceUpdateResult> = newsModule.setSource(sourceSpec)
 
     //speedometer
     fun setSpeedVisibilityThreshold(thresholdKmh: Float) {
@@ -1186,7 +1147,7 @@ class WidgetContainer @JvmOverloads constructor(
     // ==================== Taps and double taps ====================
 
     fun onTap(x: Float, y: Float): Boolean {
-        if (pageAgentApprovalOverlay.isVisible()) {return pageAgentApprovalOverlay.onTap(x, y)} // Menus use screen-space coordinates (head-locked)
+        if (assistant.approvalOverlay.isVisible()) {return assistant.approvalOverlay.onTap(x, y)} // Menus use screen-space coordinates (head-locked)
         textEditing.onMenuTap(x, y)?.let { return it } // The text edit and formatting menus sit above whichever surface owns the focused text zone.
         layoutManager.onOverlayTap(x, y)?.let { return it }
         if (closeConfirmationPopup?.isVisible == true) return closeConfirmationPopup?.onTap(x, y) ?: false
@@ -1458,111 +1419,21 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Assistant ====================
 
-    // Widget presentation by assistant
-    override fun onDetachedFromWindow() {presenter.dismiss(); super.onDetachedFromWindow()}
-    fun cancelPresentationForUserInput(): Boolean = presenter.cancelForUserInput()
-    /**
-     * Returns the requested browser instance without falling back to another browser.
-     * The Page Agent caller should invoke this at run start and retain the returned adapter.
-     */
-    private fun findBrowserWidgetByStableId(widgetId: String): BrowserWidget? = browserWidgets.firstOrNull { stableWidgetId(it) == widgetId }
-    /**
-     * Atomically capture the browser occupying page/video fullscreen and bind its current tab
-     * and WebView. This method is called on the UI thread at voice-audio submission time.
-     */
-    fun bindFullscreenPageAgentBrowser(): PageAgentBrowserAdapter? {
-        val widget = fullscreenAs<BrowserWidget>()
-            ?: browserWidgets.firstOrNull { it.isInVideoFullscreen() }
-            ?: return null
-        val widgetId = stableWidgetId(widget)
-        return BrowserWidgetPageAgentAdapter.bind(widgetId, widget)
-    }
-    /** Bind an existing browser for a normal assistant browser task. */
-    fun bindPageAgentBrowserForTask(widgetId: String?): PageAgentBrowserAdapter? {
-        val normalizedId = widgetId?.trim()?.takeIf { it.isNotBlank() }
-        val widget = if (normalizedId != null) {
-            findBrowserWidgetByStableId(normalizedId)
-        } else {
-            (textEditing.focusedPage as? BrowserWidget)?.takeIf { !it.isMinimized }
-                ?: browserWidgets.firstOrNull { !it.isMinimized }
-        } ?: return null
-        val stableId = stableWidgetId(widget)
-        return BrowserWidgetPageAgentAdapter.bind(stableId, widget)
-    }
-    private fun stableWidgetId(widget: BaseWidget): String          = registry.stableId(widget)
-    private fun findWidgetByStableId(targetId: String): BaseWidget? = registry.findByStableId(targetId)
-    fun showPageAgentApproval(runId: String, request: PageAgentConfirmationRequest, respond: (Boolean) -> Unit) {pageAgentApprovalOverlay.show(runId, request, respond); ensureDrawnAboveNativeOverlays()}
-    fun dismissPageAgentApproval(runId: String)                                                                 {pageAgentApprovalOverlay.dismiss(runId)}
-    fun createPageAgentBrowser(): PageAgentBrowserAdapter? {
-        if (!isReady() || parent !is ViewGroup) return null
-        return runPersistentMutation(changed = { true }) {
-            browserModule.openForTask()?.let { opened ->
-                BrowserWidgetPageAgentAdapter.bind(stableWidgetId(opened), opened)
-                    ?: run {
-                        lifecycleController.close(opened)
-                        null
-                    }
-            }
-        }
-    } /** A windowed browser for a normal assistant browser task, bound to the Page Agent. */
-    fun configureBrowserRouting(routing: BrowserRoutingCoordinator?) {browserRoutingCoordinator = routing}
-    fun assistantToolCatalog(): AssistantToolCatalog = AssistantToolCatalog(
-        registry = commandRegistry,
-        isAvailable = commandCapabilities::isAvailable,
-        executeCommand = this::executeCommand,
-        extraHandlers = listOfNotNull(
-            PresentTextSemanticToolHandler(),
-            webSearchHandler,
-            InspectUiSemanticToolHandler(),
-            RequestScreenshotSemanticToolHandler(),
-            ConfigureMapPoisSemanticToolHandler(
-                applyConfiguration = ::configureMapPois,
-                isAvailable = ::isReady
-            ),
-            StartNavigationSemanticToolHandler(startNavigation = ::startNavigation, isAvailable = ::isReady),
-            StopNavigationSemanticToolHandler(stopNavigation = ::stopNavigation, isAvailable = { isReady() && mapWidget?.hasActiveNavigation() == true }),
-            SetNewsSourceSemanticToolHandler(::setNewsSource),
-            UpdateFinanceTileSemanticToolHandler(updateTile = ::updateFinanceTile, isAvailable = { financeWidget != null }),
-            browserRoutingCoordinator?.let(::RunBrowserTaskSemanticToolHandler)
-        )
-    )
-    private fun onWidgetRemoving(widget: BaseWidget) {presenter.onWidgetRemoving(widget) ; if (activeWidget === widget) activeWidget = null} /** Shared cleanup for every closed widget, run while it still has its stable ID. */
-    fun release()                                    {presenter.dismiss() ; lifecycleController.closeAll()}
+    // Widget presentation and removal by assistant
+    override fun onDetachedFromWindow()                       {presenter.dismiss(); super.onDetachedFromWindow()}
+    fun          cancelPresentationForUserInput(): Boolean  = presenter.cancelForUserInput()
+    private fun  stableWidgetId(widget: BaseWidget): String = registry.stableId(widget)
+    private fun  onWidgetRemoving(widget: BaseWidget)         {presenter.onWidgetRemoving(widget) ; if (activeWidget === widget) activeWidget = null} /** Shared cleanup for every closed widget, run while it still has its stable ID. */
+    fun          release()                                    {presenter.dismiss() ; lifecycleController.closeAll()}
 
-    /** Assistant navigation */
-    fun startNavigation(request: StartNavigationRequest) = mapAssistantActions.startNavigation(request)
-    fun stopNavigation() = mapAssistantActions.stopNavigation()
-    private fun configureMapPois(request: ConfigureMapPoisRequest) = mapAssistantActions.configurePois(request)
-
-    /**
-     * Present assistant-authored text on the UI thread. The callback is asynchronous because
-     * semantic handlers run inside the provider worker and widget mutations are main-thread-only.
-     */
-    fun presentAssistantText(request: AssistantTextPresentationRequest) =  textAssistantActions.present(request)
-    private fun hideAssistantIme() {
+    // Assistant status and dashboard interaction
+    fun          setAssistantStatus(status: AssistantStatus)  {hoverControlsLayer.setAssistantStatus(status); notifyTransientContentChanged()}
+    private fun  hideAssistantIme()                           { // IME is Input Method Editor. This hides the system keyboard if an assistant action causes it to show up.
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager ?: return
         val token = windowToken ?: return
         imm.hideSoftInputFromWindow(token, 0)
         imm.hideSoftInputFromWindow(token, InputMethodManager.HIDE_NOT_ALWAYS)
     }
-
-    /** Capture only runtime layout metadata for the next assistant request. */
-    fun assistantUiContext(): AssistantUiContext = assistantUiContextCapture.capture()
-    fun setAssistantStatus(status: AssistantStatus) {hoverControlsLayer.setAssistantStatus(status); notifyTransientContentChanged()}
-    fun configureAssistantSettings(onPasteKey: (String) -> Unit, onRemoveKey: () -> Unit, onSelectModel: (String?) -> Unit) {
-        settingsController.geminiListener = object : GeminiSettingsListener {
-            override fun onPasteGeminiKey() {
-                val clipboard = phoneClipboard
-                if (!clipboard.isNullOrBlank()) onPasteKey(clipboard) else host?.requestClipboard()
-            }
-            override fun onRemoveGeminiKey() = onRemoveKey()
-            override fun onSelectGeminiModel(model: String?) = onSelectModel(model)
-        }
-    }
-    fun executeOpenUrlCommand(address: String): AppCommandResult = executeCommand(
-        AppCommandInvocation(commandRegistry.openUrl.id, AppCommandArguments.Url(address))
-    )
-    fun applyPersistedDashboardReplacingCurrent(dashboard: WidgetDocument.PersistedDashboard) = layoutManager.replaceDashboard(dashboard)
 
     // ==================== 3DOF Mode ====================
 

@@ -34,3 +34,11 @@ Questions:
 
 => Shouldn't setSpeedometerForceVisibleWhenIdle be secluded in the speedometer widget rather than part of the generic settings controller?
 
+______
+
+Map performance improvements
+
+Optimize Everyday_glasses/app/src/main/java/com/everyday/everyday_glasses/widgets/map/MapWidget.kt, particularly drawTopDown(), drawRoad(), and mapPoint(). These rebuild road paths and repeat geographic distance/bearing calculations on each redraw. Cache projected geometry or a rendered map layer, updating only when location, heading, zoom, map data, or widget size changes.
+Also inspect WidgetContainer.onDraw() and binocular rendering: cursor/hover updates redraw the dashboard, including the map. Aim to redraw the cursor independently and avoid map invalidations while minimized.
+ADB profiling implicated map drawing and path/texture churn; minimizing the map noticeably improved responsiveness. Validate with cursor movement before and after map data loads.
+

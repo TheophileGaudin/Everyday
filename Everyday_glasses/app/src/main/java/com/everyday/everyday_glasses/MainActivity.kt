@@ -29,7 +29,6 @@ import com.everyday.everyday_glasses.interaction.assistant.page_agent.GeminiPage
 import com.everyday.everyday_glasses.interaction.assistant.GeminiVoiceAssistantProvider
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentCoordinator
 import com.everyday.everyday_glasses.interaction.assistant.VoiceAssistantCoordinator
-import com.everyday.everyday_glasses.interaction.assistant.page_agent.WidgetContainerBrowserRoutingHost
 import com.everyday.everyday_glasses.ui.components.CursorActivityObserver
 import com.everyday.everyday_glasses.settings.DisplaySettingsHandler
 import com.everyday.everyday_glasses.auth_permissions.GoogleAccountHandler
@@ -82,6 +81,7 @@ import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.GlassesSettingsStore
 import com.everyday.everyday_glasses.auth_permissions.GoogleAuthPreferencesStore
 import com.everyday.everyday_glasses.persistence.HeadUpSettings
+import com.everyday.everyday_glasses.runtime.GeminiSettingsListener
 import com.everyday.everyday_glasses.ui.components.CursorView
 import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidget
 import com.everyday.shared.sync.FinanceDashboardTileConfig
@@ -331,19 +331,19 @@ class MainActivity : AppCompatActivity() {
                 preferences = assistantPreferences,
                 provider = GeminiPageAgentProvider()
             ),
-            host = WidgetContainerBrowserRoutingHost(widgetContainer),
-            showApproval = widgetContainer::showPageAgentApproval,
-            dismissApproval = widgetContainer::dismissPageAgentApproval
+            host = widgetContainer.assistant,
+            showApproval = widgetContainer.assistant::showApproval,
+            dismissApproval = widgetContainer.assistant::dismissApproval
         )
-        widgetContainer.configureBrowserRouting(browserRoutingCoordinator)
+        widgetContainer.assistant.configureBrowserRouting(browserRoutingCoordinator)
         voiceAssistantCoordinator = VoiceAssistantCoordinator(
             preferences = assistantPreferences,
             provider = GeminiVoiceAssistantProvider(),
             recorder = AssistantAudioRecorder(this),
             hasMicrophonePermission = permissionCoordinator::hasMicrophonePermission,
             requestMicrophonePermission = permissionCoordinator::requestMicrophonePermission,
-            toolCatalog = widgetContainer::assistantToolCatalog,
-            captureUiContext = widgetContainer::assistantUiContext,
+            toolCatalog = widgetContainer.assistant::toolCatalog,
+            captureUiContext = widgetContainer.assistant::uiContext,
             stateObserver = object : AssistantStateObserver {
                 override fun onAssistantStatusChanged(status: AssistantStatus) {
                     runOnUiThread {
@@ -365,18 +365,23 @@ class MainActivity : AppCompatActivity() {
             },
             captureUiContextOnDemand = ::captureAssistantUiContextOnDemand,
             requestScreenshot = binocularView::captureAssistantScreenshot,
-            presentText = widgetContainer::presentAssistantText,
+            presentText = widgetContainer.assistant::presentText,
             browserRouting = browserRoutingCoordinator
         )
 
         // On-demand inspection is marshaled to the UI thread; ordinary context capture
         // remains the small snapshot taken when the voice request is submitted.
 
-        widgetContainer.configureAssistantSettings(
-            voiceAssistantCoordinator::configureApiKey,
-            voiceAssistantCoordinator::removeApiKey,
-            voiceAssistantCoordinator::selectModel
-        )
+        // The assistant section of Settings: the Gemini key (pasted from the phone's clipboard) and the model.
+        widgetContainer.settingsController.geminiListener = object : GeminiSettingsListener {
+            override fun onPasteGeminiKey() {
+                val clipboard = widgetContainer.phoneClipboard
+                if (!clipboard.isNullOrBlank()) voiceAssistantCoordinator.configureApiKey(clipboard)
+                else phoneConnectionOrNull()?.requestClipboard()
+            }
+            override fun onRemoveGeminiKey() { voiceAssistantCoordinator.removeApiKey() }
+            override fun onSelectGeminiModel(model: String?) { voiceAssistantCoordinator.selectModel(model) }
+        }
         voiceAssistantCoordinator.initialize()
         setupPhoneConnectionCoordinator()
         googleAuthCoordinator.refreshStateSilently(this)
@@ -1238,7 +1243,7 @@ class MainActivity : AppCompatActivity() {
     private fun captureAssistantUiContextOnDemand(): CompletableFuture<AssistantUiContext> {
         val result = CompletableFuture<AssistantUiContext>()
         val capture = Runnable {
-            runCatching { widgetContainer.assistantUiContext() }
+            runCatching { widgetContainer.assistant.uiContext() }
                 .onSuccess(result::complete)
                 .onFailure(result::completeExceptionally)
         }
