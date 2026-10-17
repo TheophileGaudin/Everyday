@@ -30,6 +30,7 @@ Behaviors to investigate before full release:
 => investigate performance in general
 
 Questions: 
-=> how to re order the content of WidgetContainer in a way making it easier to read without impacting functionality
+=> Screen mirror appears to be depending on the connection to the main RayNeo app. It shouldn't be necessary to connect on the phone's app from RayNeo. Going through my app should work. If I do it and RayNeo app is disconnected I get "reconnecting...".
 
 => Shouldn't setSpeedometerForceVisibleWhenIdle be secluded in the speedometer widget rather than part of the generic settings controller?
+
