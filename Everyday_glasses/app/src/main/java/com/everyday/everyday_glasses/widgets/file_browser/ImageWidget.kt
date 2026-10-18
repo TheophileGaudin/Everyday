@@ -8,7 +8,8 @@ import android.graphics.RectF
 import android.util.Log
 import android.content.Context
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
@@ -112,12 +113,12 @@ class ImageWidget(
     fun getImagePath(): String = imagePath
 }
 /** Puts images on the dashboard, and deletes an imported image file once no widget shows it. */
-class ImageModule(
-    private val services: DashboardServices,
-    private val context: Context,
-    private val all: () -> List<ImageWidget>,
-) {
-    val lifecycle = WidgetLifecycleRegistration.multiple(
+class ImagePlugin(
+    private val services: WidgetContext,
+) : WidgetPlugin {
+    private val context: Context get() = services.androidContext
+    private val all: () -> List<ImageWidget> = { services.widgets(WidgetTypeId.IMAGE).filterIsInstance<ImageWidget>() }
+    override val lifecycle = WidgetLifecycleRegistration.multiple(
         WidgetTypeId.IMAGE, ImageWidget::class, DashboardPersistence.ImageWidgetState::class,
         capture = { services.captureRestore.getImageWidgetState(it) },
         restore = { state ->

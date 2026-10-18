@@ -3,7 +3,8 @@ package com.everyday.everyday_glasses.widgets.map
 import android.content.Context
 import android.location.Location
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.MapWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
@@ -16,13 +17,13 @@ import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
  * Puts the map on the dashboard and connects it to the location sources and to the phone's
  * routing and destination search.
  */
-class MapModule(
-    private val services: DashboardServices,
-    private val context: Context,
-    private val current: () -> MapWidget?,
-    private val requestRepaint: () -> Unit,
-) {
-    val lifecycle = WidgetLifecycleRegistration.singleton(
+class MapPlugin(
+    private val services: WidgetContext,
+) : WidgetPlugin {
+    private val context: Context get() = services.androidContext
+    private val current: () -> MapWidget? = { services.singleton(WidgetTypeId.MAP) as? MapWidget }
+    private val requestRepaint: () -> Unit = { services.requestRepaint() }
+    override val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.MAP, MapWidget::class, DashboardPersistence.MapWidgetState::class,
         current = current,
         create = ::create,
@@ -83,7 +84,7 @@ class MapModule(
         MapWidget(context, x, y, width, height).apply {
             invalidate = requestRepaint
             // A map opened later starts from the latest phone link, location and place.
-            val data = this@MapModule.services.appData
+            val data = this@MapPlugin.services.appData
             configurePhoneRouteTransport(data.latest(AppChannels.phoneRoutes))
             onPhoneRouteConnectionChanged(data.latest(AppChannels.phoneConnected) == true)
 
@@ -92,9 +93,9 @@ class MapModule(
                 override fun onMapDataRequested(point: MapGeoPoint, config: PoiDisplayConfig) {
                     data.requests?.requestMapData(point, config)
                 }
-                override fun onAddressFocusChanged(focused: Boolean) = this@MapModule.services.onKeyFocusChanged(map, focused)
+                override fun onAddressFocusChanged(focused: Boolean) = this@MapPlugin.services.onKeyFocusChanged(map, focused)
                 override fun onNavigationResult(result: NavigationOperationResult) = services.notifyTransientChange()
-                override fun onStopNavigationRequested() = this@MapModule.stopNavigation()
+                override fun onStopNavigationRequested() = this@MapPlugin.stopNavigation()
             }
             data.latest(AppChannels.location)?.let { setLocation(Location(it)) }
             val place = data.latest(AppChannels.place)

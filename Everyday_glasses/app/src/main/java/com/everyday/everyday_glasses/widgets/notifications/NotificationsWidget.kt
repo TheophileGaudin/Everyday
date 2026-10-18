@@ -10,7 +10,8 @@ import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
@@ -577,10 +578,10 @@ class NotificationsWidget(
 }
 
 /** Puts the phone's notifications on the dashboard and feeds it the latest snapshot. */
-class NotificationsModule(
-    private val services: DashboardServices,
-    private val current: () -> NotificationsWidget?,
-) {
+class NotificationsPlugin(
+    private val services: WidgetContext,
+): WidgetPlugin {
+    private val current: () -> NotificationsWidget? = { services.singleton(WidgetTypeId.NOTIFICATIONS) as? NotificationsWidget }
     // The last snapshot received, so that a widget opened later shows it right away.
     private val latest: PhoneNotificationsSnapshot
         get() = services.appData.latest(AppChannels.notifications)
@@ -595,7 +596,7 @@ class NotificationsModule(
         }
     }
 
-    val lifecycle = WidgetLifecycleRegistration.singleton(
+    override val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.NOTIFICATIONS, NotificationsWidget::class, DashboardPersistence.NotificationsWidgetState::class,
         current = current,
         create = ::create,

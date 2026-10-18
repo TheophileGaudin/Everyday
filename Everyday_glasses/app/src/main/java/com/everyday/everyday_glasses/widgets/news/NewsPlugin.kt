@@ -2,7 +2,8 @@ package com.everyday.everyday_glasses.widgets.news
 
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.NewsSourceUpdateResult
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.AppQueries
 import com.everyday.everyday_glasses.runtime.NewsWidgetListener
@@ -14,12 +15,12 @@ import com.everyday.shared.sync.NewsSourceSpec
 import java.util.concurrent.CompletableFuture
 
 /** Puts the news widget on the dashboard and connects it to the phone's news feeds. */
-internal class NewsModule(
-    private val services: DashboardServices,
-    private val ui: UiThreadDispatcher,
-    private val currentWidget: () -> NewsWidget?,
-) {
-    val lifecycle = WidgetLifecycleRegistration.singleton(
+internal class NewsPlugin(
+    private val services: WidgetContext,
+) : WidgetPlugin {
+    private val ui: UiThreadDispatcher get() = services.ui
+    private val currentWidget: () -> NewsWidget? = { services.singleton(WidgetTypeId.NEWS) as? NewsWidget }
+    override val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.NEWS, NewsWidget::class, DashboardPersistence.NewsWidgetState::class,
         current = currentWidget,
         create = ::create,

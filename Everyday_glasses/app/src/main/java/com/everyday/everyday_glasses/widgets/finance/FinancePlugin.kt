@@ -3,7 +3,8 @@ package com.everyday.everyday_glasses.widgets.finance
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.FinanceTileUpdateRequest
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.FinanceTileUpdateResult
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.AppQueries
 import com.everyday.everyday_glasses.runtime.FinanceWidgetListener
@@ -15,14 +16,15 @@ import com.everyday.shared.sync.FinanceDashboardTileConfig
 import java.util.concurrent.CompletableFuture
 
 /** Puts the finance widget on the dashboard and connects it to the phone's market data. */
-internal class FinanceModule(
-    private val services: DashboardServices,
-    private val ui: UiThreadDispatcher,
-    private val currentWidget: () -> FinanceWidget?,
-    private val runPersistentUpdate: ((() -> Result<FinanceDashboardTileConfig>) -> Result<FinanceDashboardTileConfig>),
-    private val stableWidgetId: (BaseWidget) -> String,
-) {
-    val lifecycle = WidgetLifecycleRegistration.singleton(
+internal class FinancePlugin(
+    private val services: WidgetContext,
+) : WidgetPlugin {
+    private val ui: UiThreadDispatcher get() = services.ui
+    private val currentWidget: () -> FinanceWidget? = { services.singleton(WidgetTypeId.FINANCE) as? FinanceWidget }
+    private val runPersistentUpdate: ((() -> Result<FinanceDashboardTileConfig>) -> Result<FinanceDashboardTileConfig>) =
+        { action -> services.runPersistentMutation(changed = { result -> result.isSuccess }, action = action) }
+    private val stableWidgetId: (BaseWidget) -> String = { widget -> services.stableId(widget) }
+    override val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.FINANCE, FinanceWidget::class, DashboardPersistence.FinanceWidgetState::class,
         current = currentWidget,
         create = ::create,

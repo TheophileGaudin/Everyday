@@ -10,7 +10,8 @@ import android.text.TextUtils
 import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
@@ -940,10 +941,10 @@ class CalendarWidget(
 }
 
 /** Puts the calendar on the dashboard and feeds it the phone's calendar snapshot. */
-class CalendarModule(
-    private val services: DashboardServices,
-    private val current: () -> CalendarWidget?,
-) {
+class CalendarPlugin(
+    private val services: WidgetContext,
+) : WidgetPlugin {
+    private val current: () -> CalendarWidget? = { services.singleton(WidgetTypeId.CALENDAR) as? CalendarWidget }
     // The last snapshot received, so that a calendar opened later shows it right away.
     private val latest: CalendarSnapshot? get() = services.appData.latest(AppChannels.calendar)
 
@@ -956,7 +957,7 @@ class CalendarModule(
         }
     }
 
-    val lifecycle = WidgetLifecycleRegistration.singleton(
+    override val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.CALENDAR, CalendarWidget::class, DashboardPersistence.CalendarWidgetState::class,
         current = current,
         create = ::create,

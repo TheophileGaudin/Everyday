@@ -15,7 +15,8 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.content.ContextCompat
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.FileBrowserWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.widgets._common.WidgetInteractionState
@@ -1012,11 +1013,11 @@ class FileBrowserWidget(
 
 }
 /** Opens the file picker. Picking a file hands it over and closes the picker; pickers aren't saved. */
-class FileBrowserModule(
-    private val services: DashboardServices,
-    private val context: Context,
-) {
-    val lifecycle = WidgetLifecycleRegistration.multiple(WidgetTypeId.FILES, FileBrowserWidget::class, Unit::class)
+class FileBrowserPlugin(
+    private val services: WidgetContext,
+) : WidgetPlugin {
+    private val context: Context get() = services.androidContext
+    override val lifecycle = WidgetLifecycleRegistration.multiple(WidgetTypeId.FILES, FileBrowserWidget::class, Unit::class)
 
     fun open(filter: FileBrowserWidget.FileFilter, onPicked: (FileBrowserWidget.FileEntry) -> Unit) {
         // Half the dashboard's width and 70% of its height, within limits, centered.

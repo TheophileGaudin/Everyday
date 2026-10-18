@@ -22,7 +22,8 @@ import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
 import com.everyday.everyday_glasses.interaction.commands.AppCommandResult
 import com.everyday.everyday_glasses.interaction.commands.CommandAvailability
 import com.everyday.everyday_glasses.interaction.user_input.TextEditingController
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
@@ -39,11 +40,11 @@ import java.util.concurrent.CompletableFuture
  * the tools it can call, the text and map it presents, and the browsers the Page Agent drives, with
  * the popup that asks you before a sensitive action.
  *
- * Widgets have their own access to the dashboard in [DashboardServices]. The dashboard holds one of
+ * Widgets have their own access to the dashboard in [WidgetContext]. The dashboard holds one of
  * these; the activity hands it to the assistant's coordinators.
  */
 internal class AssistantDashboardAccess(
-    private val services: DashboardServices,
+    private val services: WidgetContext,
     private val registry: WidgetRegistry,
     private val lifecycle: WidgetLifecycleController,
     private val presenter: WidgetPresenter,

@@ -3,7 +3,8 @@ package com.everyday.everyday_glasses.persistence
 import android.graphics.Canvas
 import android.util.Log
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneHost
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
 import com.everyday.everyday_glasses.ui.components.LayoutDeletionHandler
@@ -18,7 +19,7 @@ import com.everyday.everyday_glasses.ui.components.WidgetLayoutNamePrompt
  */
 class WidgetLayoutManager(
     private val layouts: LayoutLibrary,
-    private val services: DashboardServices,
+    private val services: WidgetContext,
     private val lifecycle: WidgetLifecycleController,
     private val host: Host,
 ) {

@@ -23,7 +23,8 @@ import kotlin.math.sqrt
 import androidx.core.graphics.createBitmap
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 
@@ -342,11 +343,11 @@ class PdfWidget(
     private fun nearestZoom(value: Float): Float = ZOOM_LEVELS.minByOrNull { abs(it - value) } ?: 1f
 }
 /** Puts PDF documents on the dashboard; a new one opens fullscreen. */
-class PdfModule(
-    private val services: DashboardServices,
-    private val context: Context,
-) {
-    val lifecycle = WidgetLifecycleRegistration.multiple(
+class PdfPlugin(
+    private val services: WidgetContext,
+) : WidgetPlugin {
+    private val context: Context get() = services.androidContext
+    override val lifecycle = WidgetLifecycleRegistration.multiple(
         WidgetTypeId.PDF, PdfWidget::class, DashboardPersistence.PdfWidgetState::class,
         capture = { services.captureRestore.getPdfWidgetState(it) },
         restore = ::restore,

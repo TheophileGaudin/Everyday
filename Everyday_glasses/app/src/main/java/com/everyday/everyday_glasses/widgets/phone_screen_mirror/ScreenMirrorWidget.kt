@@ -26,7 +26,8 @@ import android.util.Log
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.get
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
@@ -1126,15 +1127,16 @@ interface MirrorWidgetListener {
 }
 
 /** Puts the phone screen mirror on the dashboard and connects its frames to the glasses output. */
-class MirrorModule(
-    private val services: DashboardServices,
-    private val context: Context,
-    private val current: () -> ScreenMirrorWidget?,
-    private val onMediaFrame: (sourceId: String) -> Unit,
-    private val setMediaSourceActive: (sourceId: String, active: Boolean) -> Unit,
-    private val refreshBrightnessRules: () -> Unit,
-) {
-    val lifecycle = WidgetLifecycleRegistration.singleton(
+class MirrorPlugin(
+    private val services: WidgetContext,
+) : WidgetPlugin {
+    private val context: Context get() = services.androidContext
+    private val current: () -> ScreenMirrorWidget? = { services.singleton(WidgetTypeId.MIRROR) as? ScreenMirrorWidget }
+    private val onMediaFrame: (sourceId: String) -> Unit = { sourceId -> services.notifyMediaFrame(sourceId) }
+    private val setMediaSourceActive: (sourceId: String, active: Boolean) -> Unit = { sourceId, active -> services.setMediaSourceActive(sourceId, active) }
+    private val refreshBrightnessRules: () -> Unit = { services.refreshBrightnessRules() }
+
+    override val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.MIRROR, ScreenMirrorWidget::class, DashboardPersistence.MirrorWidgetState::class,
         current = current,
         create = { ScreenMirrorWidget(context, 20f, 20f, 180f, 320f) },

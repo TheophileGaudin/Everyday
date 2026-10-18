@@ -29,7 +29,7 @@ import com.everyday.everyday_glasses.interaction.user_input.UserInputKind
 import com.everyday.everyday_glasses.runtime.WidgetDescriptors
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
-import com.everyday.everyday_glasses.widgets.browser.BrowserModule
+import com.everyday.everyday_glasses.widgets.browser.BrowserPlugin
 import com.everyday.everyday_glasses.ui.components.CloseConfirmationHandler
 import com.everyday.everyday_glasses.ui.components.ContextMenuHandler
 import com.everyday.everyday_glasses.interaction.user_input.CursorStabilizer
@@ -43,8 +43,10 @@ import com.everyday.everyday_glasses.settings.UnitSettings
 import com.everyday.everyday_glasses.runtime.WakeSleepManager
 import com.everyday.everyday_glasses.persistence.WidgetLayoutManager
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppData
+import com.everyday.everyday_glasses.widgets.WidgetPlugins
 import com.everyday.everyday_glasses.runtime.WidgetHost
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
@@ -53,37 +55,20 @@ import com.everyday.everyday_glasses.persistence.LayoutLibrary
 import com.everyday.everyday_glasses.ui.hover_controls.HoverControlsLayer
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
-import com.everyday.everyday_glasses.widgets.calendar.CalendarModule
-import com.everyday.everyday_glasses.widgets.calendar.CalendarWidget
 import com.everyday.everyday_glasses.ui.components.CloseConfirmationPopup
 import com.everyday.everyday_glasses.ui.components.ContextMenu
-import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserModule
+import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserPlugin
 import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidget
-import com.everyday.everyday_glasses.widgets.finance.FinanceWidget
-import com.everyday.everyday_glasses.widgets.file_browser.ImageModule
-import com.everyday.everyday_glasses.widgets.weather_location.WeatherWidget
-import com.everyday.everyday_glasses.widgets.map.MapModule
-import com.everyday.everyday_glasses.widgets.map.MapWidget
-import com.everyday.everyday_glasses.widgets.news.NewsWidget
-import com.everyday.everyday_glasses.widgets.notifications.NotificationsWidget
-import com.everyday.everyday_glasses.widgets.notifications.NotificationsModule
-import com.everyday.everyday_glasses.widgets.file_browser.PdfModule
-import com.everyday.everyday_glasses.widgets.phone_screen_mirror.MirrorModule
-import com.everyday.everyday_glasses.widgets.phone_screen_mirror.ScreenMirrorWidget
+import com.everyday.everyday_glasses.widgets.file_browser.ImagePlugin
+import com.everyday.everyday_glasses.widgets.file_browser.PdfPlugin
 import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidget
-import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerModule
-import com.everyday.everyday_glasses.widgets.system_status.StatusBarWidget
-import com.everyday.everyday_glasses.widgets.system_status.StatusBarModule
-import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleWidget
-import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleModule
-import com.everyday.everyday_glasses.widgets.text_editor.TextBoxModule
+import com.everyday.everyday_glasses.widgets.text_editor.TextBoxPlugin
 import com.everyday.everyday_glasses._threedof.ThreeDofOverlay
 import com.everyday.everyday_glasses.interaction.assistant.AssistantDashboardAccess
-import com.everyday.everyday_glasses.widgets.file_browser.VideoModule
+import com.everyday.everyday_glasses.widgets.file_browser.VideoPlugin
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
-import com.everyday.everyday_glasses.widgets.finance.FinanceModule
-import com.everyday.everyday_glasses.widgets.news.NewsModule
-import com.everyday.everyday_glasses.widgets.weather_location.WeatherModule
+import com.everyday.everyday_glasses.widgets.finance.FinancePlugin
+import com.everyday.everyday_glasses.widgets.news.NewsPlugin
 import com.everyday.shared.command.AppCommandArguments
 import com.everyday.shared.command.AppCommandInvocation
 import com.everyday.shared.command.CommandScrollDirection
@@ -101,7 +86,7 @@ import com.everyday.shared.transport.AssistantStatus
  * - Drawing: the widgets in z-order (moved as one layer in 3DOF), then the hover controls,
  *   the keyboards, the presentation and the head-locked menus.
  * - Data: the public `apply…` / `update…` / `set…` methods pass through to each widget type's
- *   module (`StatusBarModule`, `MapModule`, `BrowserModule`, …), which owns that type's creation,
+ *   plugin (`StatusBarPlugin`, `MapPlugin`, `BrowserPlugin`, …), which owns that type's creation,
  *   restore, listeners and latest data.
  * - Changes: each mutation is reported once, as transient or persistent, through
  *   [DashboardChangeCoordinator] to [WidgetContentObserver].
@@ -219,11 +204,11 @@ class WidgetContainer @JvmOverloads constructor(
             val type = WidgetDescriptors.forCommand(widgetId).type
             if (visible) lifecycleController.show(type) else lifecycleController.hide(type)
         }
-        override fun createTextWidget()                                       = textModule.open()
-        override fun createBrowserWidget()                                    = browserModule.openFromMenu()
+        override fun createTextWidget()                                       = textPlugin.open()
+        override fun createBrowserWidget()                                    = browserPlugin.openFromMenu()
         override fun openUrl(url: String)                                     = openBrowserAddress(url)
         override fun openFilePicker()                                         { host?.requestFilePicker() }
-        override fun openYouTubeHistory()                                     = browserModule.openYouTubeHistory()
+        override fun openYouTubeHistory()                                     = browserPlugin.openYouTubeHistory()
         override fun loadLayout(name: String): Boolean                        = layoutManager.loadLayout(name)
         override fun toggleLayoutLock()                                       = setWidgetLayoutLocked(!isWidgetLayoutLocked)
         override fun saveLayout()                                             = layoutManager.saveCurrentLayout()
@@ -262,32 +247,35 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Widget References ====================
 
-    private val statusBarWidget: StatusBarWidget?         get() = registry.statusBarWidget
-    private val weatherWidget: WeatherWidget?             get() = registry.weatherWidget
-    private val mapWidget: MapWidget?                     get() = registry.mapWidget
-    private val calendarWidget: CalendarWidget?           get() = registry.calendarWidget
-    private val financeWidget: FinanceWidget?             get() = registry.financeWidget
-    private val newsWidget: NewsWidget?                   get() = registry.newsWidget
-    private val notificationsWidget: NotificationsWidget? get() = registry.notificationsWidget
     private val speedometerWidget: SpeedometerWidget?     get() = registry.speedometerWidget
-    private val subtitleWidget: SubtitleWidget?           get() = registry.subtitleWidget
-    private val screenMirrorWidget: ScreenMirrorWidget?   get() = registry.screenMirrorWidget
 
-    // ==================== Widget modules ====================
+    // ==================== Widget plugins ====================
 
     private var creationPosition: PointF? = null // Where the user last asked for a new widget (the context menu's spot)
 
-    /** The app's data for the widget modules. The activity and the phone sync publish into it. */
+    /** The app's data for the widget plugins. The activity and the phone sync publish into it. */
     val appData = AppData()
 
-    /** What every widget module gets from the dashboard. */
-    private val dashboardServices   = object : DashboardServices {
+    /** What every widget plugin gets from the dashboard. */
+    private val widgetContext   = object : WidgetContext {
         override val viewportWidth: Int                                                       get()  = width
         override val viewportHeight: Int                                                      get()  = height
         override val isDisplayOff: Boolean                                                    get()  = displayState == WakeSleepManager.DisplayState.OFF
         override val captureRestore: WidgetCaptureRestore                                     get()  = widgetCaptureRestore
         override val appData: AppData                                                         get()  = this@WidgetContainer.appData
         override val units: UnitSettings                                                      get()  = unitSettings
+        override val androidContext: Context                                                  get()  = context
+        override val rootLayout: ViewGroup?                                                   get()  = parent as? ViewGroup
+        override val dashboardView: View                                                      get()  = this@WidgetContainer
+        override val ui: UiThreadDispatcher                                                   get()  = assistantUiDispatcher
+        override val settings: SettingsController                                             get()  = settingsController
+        override fun singleton(type: WidgetTypeId): BaseWidget?                                      = registry.singleton(type)
+        override fun widgets(type: WidgetTypeId): List<BaseWidget>                                   = registry.widgets(type)
+        override fun stableId(widget: BaseWidget): String                                            = registry.stableId(widget)
+        override fun requestRepaint()                                                                = this@WidgetContainer.requestRepaint()
+        override fun notifyMediaFrame(sourceId: String)                                              = this@WidgetContainer.notifyMediaFrame(sourceId)
+        override fun setMediaSourceActive(sourceId: String, active: Boolean)                         = setBinocularMediaSourceActive(sourceId, active)
+        override fun refreshBrightnessRules()                                                        = this@WidgetContainer.refreshBrightnessRules()
         override val host: WidgetHost?                                                        get()  = this@WidgetContainer.host
         override val creationPosition: PointF?                                                get()  = this@WidgetContainer.creationPosition
         override fun dismissPresentationOf(widget: BaseWidget) {
@@ -306,73 +294,19 @@ class WidgetContainer @JvmOverloads constructor(
         override fun openClosedTemplate(type: WidgetTypeId): BaseWidget?                             = lifecycleController.openClosedTemplate(type)
         override fun close(widget: BaseWidget) = lifecycleController.close(widget)
     }
-    private val statusBarModule     = StatusBarModule(dashboardServices) { statusBarWidget }
-    private val calendarModule      = CalendarModule(dashboardServices) { calendarWidget }
-    private val notificationsModule = NotificationsModule(dashboardServices) { notificationsWidget }
-    private val speedometerModule   = SpeedometerModule(
-        dashboardServices,
-        current              = { speedometerWidget },
-        showSettings         = { settingsController.showSpeedometerSettingsMenu() },
-        dismissSettings      = { settingsController.dismissSpeedometerSettingsMenu() },
-        forceVisibleWhenIdle = { settingsController.getSpeedVisibilityThreshold() <= 0f },
-    )
-    private val subtitleModule      = SubtitleModule(dashboardServices) { subtitleWidget }
-    private val mapModule           = MapModule(
-        dashboardServices,
-        context,
-        current             = { mapWidget },
-        requestRepaint      = ::requestRepaint,
-    )
-    private val mirrorModule        = MirrorModule(
-        dashboardServices,
-        context,
-        current                = { screenMirrorWidget },
-        onMediaFrame           = ::notifyMediaFrame,
-        setMediaSourceActive   = ::setBinocularMediaSourceActive,
-        refreshBrightnessRules = ::refreshBrightnessRules,
-    )
-    private val textModule          = TextBoxModule(dashboardServices)
-    private val imageModule         = ImageModule(dashboardServices, context) { registry.imageWidgets }
-    private val videoModule         = VideoModule(
-        dashboardServices,
-        context,
-        rootLayout           = { parent as? ViewGroup },
-        containerView        = this,
-        setMediaSourceActive = ::setBinocularMediaSourceActive,
-    )
-    private val pdfModule           = PdfModule(dashboardServices, context)
-    private val fileBrowserModule   = FileBrowserModule(dashboardServices, context)
-    private val browserWidgets: List<BrowserWidget> get() = registry.browserWidgets // Access to browser widget list for browser module via registry
-    private val browserModule       = BrowserModule(
-        dashboardServices,
-        context,
-        rootLayout      = { parent as? ViewGroup },
-        containerView   = this,
-        all             = { browserWidgets },
-    )
-    private val weatherModule by lazy {
-        WeatherModule(
-            services              = dashboardServices,
-            context               = context,
-            currentWidget         = { weatherWidget },
-        )
-    }
-    private val newsModule    by lazy {
-        NewsModule(
-            services              = dashboardServices,
-            ui                    = assistantUiDispatcher,
-            currentWidget         = { newsWidget },
-        )
-    }
-    private val financeModule by lazy {
-        FinanceModule(
-            services              = dashboardServices,
-            ui                    = assistantUiDispatcher,
-            currentWidget         = { financeWidget },
-            runPersistentUpdate   = { action -> runPersistentMutation( action = action, changed = { result -> result.isSuccess } ) },
-            stableWidgetId        = ::stableWidgetId,
-        )
-    }
+    /** One plugin per widget type, built from the single list in [WidgetPlugins]. */
+    private val plugins: List<WidgetPlugin> by lazy { WidgetPlugins.all.map { create -> create(widgetContext) } }
+    private inline fun <reified P : WidgetPlugin> plugin(): P = plugins.filterIsInstance<P>().single()
+
+    // The plugins the dashboard still calls by name, for commands, the activity and the assistant.
+    private val textPlugin        by lazy { plugin<TextBoxPlugin>() }
+    private val browserPlugin     by lazy { plugin<BrowserPlugin>() }
+    private val imagePlugin       by lazy { plugin<ImagePlugin>() }
+    private val videoPlugin       by lazy { plugin<VideoPlugin>() }
+    private val pdfPlugin         by lazy { plugin<PdfPlugin>() }
+    private val fileBrowserPlugin by lazy { plugin<FileBrowserPlugin>() }
+    private val newsPlugin        by lazy { plugin<NewsPlugin>() }
+    private val financePlugin     by lazy { plugin<FinancePlugin>() }
 
     // ==================== Widgets drag (resize, move, scroll) and hover ====================
 
@@ -428,7 +362,7 @@ class WidgetContainer @JvmOverloads constructor(
     private val layoutLibrary                 = LayoutLibrary(context)
     private val layoutManager                 = WidgetLayoutManager(
         layouts   = layoutLibrary,
-        services  = dashboardServices,
+        services  = widgetContext,
         lifecycle = lifecycleController,
         host      = object : WidgetLayoutManager.Host {
             override fun captureDashboard()                         = captureWidgetDashboardWithoutLayoutName()
@@ -486,7 +420,7 @@ class WidgetContainer @JvmOverloads constructor(
     private val assistantUiDispatcher                                 = UiThreadDispatcher { action -> if (Looper.myLooper() == Looper.getMainLooper()) {action(); true} else {post(Runnable(action))}}
     internal val assistant by lazy { /** What the voice assistant can read and do on the dashboard. */
         AssistantDashboardAccess(
-            services                = dashboardServices,
+            services                = widgetContext,
             registry                = registry,
             lifecycle               = lifecycleController,
             presenter               = presenter,
@@ -496,10 +430,10 @@ class WidgetContainer @JvmOverloads constructor(
             isCommandAvailable      = commandCapabilities::isAvailable,
             executeCommand          = ::executeCommand,
             activeLayoutName        = { layoutManager.activeLayoutName },
-            openTextForAssistant    = textModule::openForAssistant,
-            openBrowserForTask      = browserModule::openForTask,
-            updateFinanceTile       = financeModule::updateTile,
-            setNewsSource           = newsModule::setSource,
+            openTextForAssistant    = textPlugin::openForAssistant,
+            openBrowserForTask      = browserPlugin::openForTask,
+            updateFinanceTile       = financePlugin::updateTile,
+            setNewsSource           = newsPlugin::setSource,
             drawAboveNativeViews    = ::ensureDrawnAboveNativeOverlays,
             hideIme                 = ::hideAssistantIme,
             notifyPersistentChange  = ::notifyPersistentContentChanged,
@@ -737,25 +671,7 @@ class WidgetContainer @JvmOverloads constructor(
     // ==================== Persistence ====================
 
     private fun registerWidgetLifecycles() {
-        //multi-instance widget registration
-        lifecycleController.register(browserModule.lifecycle)
-        lifecycleController.register(textModule.lifecycle)
-        lifecycleController.register(imageModule.lifecycle)
-        lifecycleController.register(videoModule.lifecycle)
-        lifecycleController.register(pdfModule.lifecycle)
-        lifecycleController.register(fileBrowserModule.lifecycle)
-
-        //singleton widget registration
-        lifecycleController.register(statusBarModule.lifecycle)
-        lifecycleController.register(weatherModule.lifecycle)
-        lifecycleController.register(mapModule.lifecycle)
-        lifecycleController.register(calendarModule.lifecycle)
-        lifecycleController.register(financeModule.lifecycle)
-        lifecycleController.register(newsModule.lifecycle)
-        lifecycleController.register(notificationsModule.lifecycle)
-        lifecycleController.register(speedometerModule.lifecycle)
-        lifecycleController.register(subtitleModule.lifecycle)
-        lifecycleController.register(mirrorModule.lifecycle)
+        plugins.forEach { plugin -> lifecycleController.register(plugin.lifecycle) }
         lifecycleController.verifyComplete()
     }
     fun capturePersistedDashboard(): WidgetDocument.PersistedDashboard = layoutManager.capturePersistedDashboard()
@@ -843,20 +759,20 @@ class WidgetContainer @JvmOverloads constructor(
 
     //======================= Widget wiring ==============================
     //file widgets
-    fun createImageWidget(path: String)                                                               = imageModule.open(path)
-    fun createVideoWidget(uri: android.net.Uri, displayName: String)                                  = videoModule.open(uri, displayName)
-    fun createPdfWidget(uri: android.net.Uri, displayName: String)                                    = pdfModule.open(uri, displayName)
-    fun createFileBrowserWidget(filter: FileBrowserWidget.FileFilter, onFileSelected: (FileBrowserWidget.FileEntry) -> Unit) = fileBrowserModule.open(filter, onFileSelected)
+    fun createImageWidget(path: String)                                                               = imagePlugin.open(path)
+    fun createVideoWidget(uri: android.net.Uri, displayName: String)                                  = videoPlugin.open(uri, displayName)
+    fun createPdfWidget(uri: android.net.Uri, displayName: String)                                    = pdfPlugin.open(uri, displayName)
+    fun createFileBrowserWidget(filter: FileBrowserWidget.FileFilter, onFileSelected: (FileBrowserWidget.FileEntry) -> Unit) = fileBrowserPlugin.open(filter, onFileSelected)
 
     //browser
     fun shouldApplyBrowserMinimumBrightness()         : Boolean = registry.allWidgets().any { it.requestsBrowserMinimumBrightness }
-    fun onTrimMemory(level: Int)                      = browserModule.onTrimMemory(level)
-    fun onLowMemory()                                 = browserModule.onLowMemory()
-    fun clearDebugWebViewData(profileSummary: String) = browserModule.clearDebugWebViewData(profileSummary)
+    fun onTrimMemory(level: Int)                      = browserPlugin.onTrimMemory(level)
+    fun onLowMemory()                                 = browserPlugin.onLowMemory()
+    fun clearDebugWebViewData(profileSummary: String) = browserPlugin.clearDebugWebViewData(profileSummary)
     private fun openBrowserAddress(address: String) {
         val widget = textEditing.focusedPage as? BrowserWidget
             ?: fullscreenAs<BrowserWidget>()
-            ?: browserModule.openFullscreen(focus = false)
+            ?: browserPlugin.openFullscreen(focus = false)
             ?: return
 
         runPersistentMutation {
@@ -1481,7 +1397,7 @@ class WidgetContainer @JvmOverloads constructor(
             registry.forEachWidget { it.onResume() }
         }
     }
-    fun onHeadUpWake()              {newsModule.onHeadUpWake(); Log.d(TAG, "Head-up wake -> advance news item")}
+    fun onHeadUpWake()              {newsPlugin.onHeadUpWake(); Log.d(TAG, "Head-up wake -> advance news item")}
     fun hasPinnedWidgets(): Boolean = registry.hasPinnedWidgets()
     fun isDisplayAwake():   Boolean = displayState == WakeSleepManager.DisplayState.WAKE
     private fun <T> withContentChangeSuppressed(action: () -> T): T = contentChanges.withNotificationsSuppressed(action) /** Discards callbacks produced by a temporary or restorative compound mutation. */

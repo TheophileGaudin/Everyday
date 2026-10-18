@@ -6,15 +6,19 @@ import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.AppData
 import com.everyday.everyday_glasses.runtime.AppQueries
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
+import com.everyday.everyday_glasses.settings.SettingsController
+import android.content.Context
+import android.view.View
+import android.view.ViewGroup
 import com.everyday.everyday_glasses.settings.UnitSettings
 import com.everyday.everyday_glasses.runtime.Place
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.runtime.StatusSnapshot
-import com.everyday.everyday_glasses.widgets.system_status.StatusBarModule
-import com.everyday.everyday_glasses.widgets.system_status.StatusBarWidget
+import com.everyday.everyday_glasses.widgets.system_status.StatusBarPlugin
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
-import com.everyday.everyday_glasses.widgets.text_editor.TextBoxModule
+import com.everyday.everyday_glasses.widgets.text_editor.TextBoxPlugin
 import com.everyday.everyday_glasses.widgets.text_editor.TextBoxWidget
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertEquals
@@ -22,8 +26,7 @@ import org.junit.Test
 
 class WidgetModulesTest {
     private val services = FakeServices()
-    private var statusBar: StatusBarWidget? = null
-    private val module = StatusBarModule(services) { statusBar }
+    private val module = StatusBarPlugin(services)
     private val data = StatusSnapshot(
         isPhoneConnected = true,
         phoneBatteryPercent = 80,
@@ -45,7 +48,7 @@ class WidgetModulesTest {
 
     @Test
     fun `status data asks for a redraw only when it changes what is shown`() {
-        statusBar = module.lifecycle.createDefault!!()
+        services.singletonWidget = module.lifecycle.createDefault!!()
 
         services.appData.publish(AppChannels.status, data)
         services.appData.publish(AppChannels.status, data)
@@ -101,7 +104,7 @@ class WidgetModulesTest {
 
     @Test
     fun `a text box opened from the menu is added and saved`() {
-        TextBoxModule(services).open()
+        TextBoxPlugin(services).open()
 
         assertEquals(1, services.opened.size)
         assertEquals(1, services.persistentMutations)
@@ -111,14 +114,14 @@ class WidgetModulesTest {
     fun `the last closed text box is reopened instead of a new one`() {
         services.closedTemplate = TextBoxWidget(10f, 10f, 200f, 100f)
 
-        TextBoxModule(services).open()
+        TextBoxPlugin(services).open()
 
         assertEquals(0, services.opened.size)
         assertNull(services.closedTemplate)
         assertEquals(1, services.persistentMutations)
     }
 
-    private class FakeServices : DashboardServices {
+    private class FakeServices : WidgetContext {
         var transientChanges = 0
         var persistentMutations = 0
         var closedTemplate: BaseWidget? = null
@@ -133,6 +136,19 @@ class WidgetModulesTest {
         override val creationPosition: PointF? = null
         override fun dismissPresentationOf(widget: BaseWidget) = Unit
         override fun onKeyFocusChanged(widget: BaseWidget, focused: Boolean) = Unit
+        override val androidContext: Context get() = error("No Android context in this test")
+        override val rootLayout: ViewGroup? = null
+        override val dashboardView: View get() = error("No dashboard view in this test")
+        override val ui = UiThreadDispatcher { action -> action(); true }
+        override val settings: SettingsController get() = error("No settings in this test")
+        var singletonWidget: BaseWidget? = null
+        override fun singleton(type: WidgetTypeId): BaseWidget? = singletonWidget
+        override fun widgets(type: WidgetTypeId): List<BaseWidget> = emptyList()
+        override fun stableId(widget: BaseWidget): String = "test"
+        override fun requestRepaint() = Unit
+        override fun notifyMediaFrame(sourceId: String) = Unit
+        override fun setMediaSourceActive(sourceId: String, active: Boolean) = Unit
+        override fun refreshBrightnessRules() = Unit
         override fun notifyTransientChange() {
             transientChanges++
         }

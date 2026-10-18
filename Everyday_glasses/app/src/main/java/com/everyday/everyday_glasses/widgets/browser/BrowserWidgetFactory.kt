@@ -5,7 +5,8 @@ import android.view.View
 import android.view.ViewGroup
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.runtime.BrowserWidgetListener
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 
@@ -46,14 +47,14 @@ internal class BrowserWidgetFactory(
  * fullscreen for an address or the YouTube history, for an assistant browser task, and from the
  * saved dashboard.
  */
-class BrowserModule(
-    private val services: DashboardServices,
-    private val context: Context,
-    private val rootLayout: () -> ViewGroup?,
-    private val containerView: View,
-    private val all: () -> List<BrowserWidget>,
-) {
-    val lifecycle = WidgetLifecycleRegistration.multiple(
+class BrowserPlugin(
+    private val services: WidgetContext,
+) : WidgetPlugin {
+    private val context: Context get() = services.androidContext
+    private val rootLayout: () -> ViewGroup? = { services.rootLayout }
+    private val containerView: View get() = services.dashboardView
+    private val all: () -> List<BrowserWidget> = { services.widgets(WidgetTypeId.BROWSER).filterIsInstance<BrowserWidget>() }
+    override val lifecycle = WidgetLifecycleRegistration.multiple(
         WidgetTypeId.BROWSER, BrowserWidget::class, DashboardPersistence.BrowserWidgetState::class,
         capture = { services.captureRestore.getBrowserWidgetState(it) },
         restore = ::restore,

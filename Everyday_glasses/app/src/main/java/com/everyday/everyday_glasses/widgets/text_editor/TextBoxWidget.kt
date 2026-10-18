@@ -16,7 +16,8 @@ import com.everyday.everyday_glasses.interaction.user_input.TextZone
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneLayout
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
@@ -562,10 +563,10 @@ class TextBoxWidget(
  * Puts text boxes on the dashboard: from the menu (reopening the last closed one first), for the
  * assistant, and from the saved dashboard.
  */
-class TextBoxModule(
-    private val services: DashboardServices,
-) {
-    val lifecycle = WidgetLifecycleRegistration.multiple(
+class TextBoxPlugin(
+    private val services: WidgetContext,
+) : WidgetPlugin {
+    override val lifecycle = WidgetLifecycleRegistration.multiple(
         WidgetTypeId.TEXT, TextBoxWidget::class, DashboardPersistence.TextWidgetState::class,
         capture = { services.captureRestore.getTextWidgetState(it) },
         restore = { state ->

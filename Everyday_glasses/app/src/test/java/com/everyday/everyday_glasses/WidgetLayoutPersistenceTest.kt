@@ -10,7 +10,12 @@ import com.everyday.everyday_glasses.runtime.AppData
 import com.everyday.everyday_glasses.persistence.LayoutLibrary
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
 import com.everyday.everyday_glasses.persistence.WidgetLayoutManager
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
+import com.everyday.everyday_glasses.settings.SettingsController
+import android.content.Context
+import android.view.View
+import android.view.ViewGroup
 import com.everyday.everyday_glasses.settings.UnitSettings
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
@@ -315,7 +320,7 @@ class WidgetLayoutPersistenceTest {
         override fun onLayoutSwitch() = Unit
     }
 
-    private class FakeServices : DashboardServices {
+    private class FakeServices : WidgetContext {
         override val viewportWidth = 640
         override val viewportHeight = 480
         override val isDisplayOff = false
@@ -326,6 +331,19 @@ class WidgetLayoutPersistenceTest {
         override val creationPosition: PointF? = null
         override fun dismissPresentationOf(widget: BaseWidget) = Unit
         override fun onKeyFocusChanged(widget: BaseWidget, focused: Boolean) = Unit
+        override val androidContext: Context get() = error("No Android context in this test")
+        override val rootLayout: ViewGroup? = null
+        override val dashboardView: View get() = error("No dashboard view in this test")
+        override val ui = UiThreadDispatcher { action -> action(); true }
+        override val settings: SettingsController get() = error("No settings in this test")
+        var singletonWidget: BaseWidget? = null
+        override fun singleton(type: WidgetTypeId): BaseWidget? = singletonWidget
+        override fun widgets(type: WidgetTypeId): List<BaseWidget> = emptyList()
+        override fun stableId(widget: BaseWidget): String = "test"
+        override fun requestRepaint() = Unit
+        override fun notifyMediaFrame(sourceId: String) = Unit
+        override fun setMediaSourceActive(sourceId: String, active: Boolean) = Unit
+        override fun refreshBrightnessRules() = Unit
         override fun notifyTransientChange() = Unit
         override fun <T> withTransientChanges(action: () -> T): T = action()
         override fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean) = action()

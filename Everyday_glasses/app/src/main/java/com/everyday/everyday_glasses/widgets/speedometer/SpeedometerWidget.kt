@@ -6,7 +6,8 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.text.TextPaint
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
@@ -221,13 +222,13 @@ class SpeedometerWidget(
     }
 }
 /** Puts the speedometer on the dashboard and feeds it the speed from the location sources. */
-class SpeedometerModule(
-    private val services: DashboardServices,
-    private val current: () -> SpeedometerWidget?,
-    private val showSettings: () -> Unit,
-    private val dismissSettings: () -> Unit,
-    private val forceVisibleWhenIdle: () -> Boolean,
-) {
+class SpeedometerPlugin(
+    private val services: WidgetContext,
+) : WidgetPlugin {
+    private val current: () -> SpeedometerWidget? = { services.singleton(WidgetTypeId.SPEEDOMETER) as? SpeedometerWidget }
+    private val showSettings: () -> Unit = { services.settings.showSpeedometerSettingsMenu() }
+    private val dismissSettings: () -> Unit = { services.settings.dismissSpeedometerSettingsMenu() }
+    private val forceVisibleWhenIdle: () -> Boolean = { services.settings.getSpeedVisibilityThreshold() <= 0f }
     // The last speed received, so that a speedometer opened later shows it right away.
     private val latest: SpeedState get() = services.appData.latest(AppChannels.speed) ?: NO_SPEED
 
@@ -244,7 +245,7 @@ class SpeedometerModule(
         services.appData.subscribe(AppChannels.unitsChanged) { current()?.setUnit(services.units.effectiveSpeedUnit()) }
     }
 
-    val lifecycle = WidgetLifecycleRegistration.singleton(
+    override val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.SPEEDOMETER, SpeedometerWidget::class, DashboardPersistence.SpeedometerWidgetState::class,
         current = current,
         create = ::create,
@@ -267,7 +268,7 @@ class SpeedometerModule(
 
     private fun build(x: Float, y: Float, width: Float, height: Float) =
         SpeedometerWidget(x, y, width, height).apply {
-            val units = this@SpeedometerModule.services.units
+            val units = this@SpeedometerPlugin.services.units
             onUnitChanged = { units.toggleSpeedOverride() }
             onSettingsRequested = showSettings
             setUnit(units.effectiveSpeedUnit())

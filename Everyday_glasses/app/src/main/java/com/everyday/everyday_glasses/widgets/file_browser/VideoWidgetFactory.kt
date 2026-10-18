@@ -6,7 +6,8 @@ import android.view.View
 import android.view.ViewGroup
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.VideoWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
@@ -46,16 +47,16 @@ internal class VideoWidgetFactory(
     }
 }
 /** Puts local videos on the dashboard; a new one opens fullscreen and plays. */
-class VideoModule(
-    private val services: DashboardServices,
-    private val context: Context,
-    private val rootLayout: () -> ViewGroup?,
-    private val containerView: View,
-    private val setMediaSourceActive: (sourceId: String, active: Boolean) -> Unit,
-) {
+class VideoPlugin(
+    private val services: WidgetContext,
+) : WidgetPlugin {
+    private val context: Context get() = services.androidContext
+    private val rootLayout: () -> ViewGroup? = { services.rootLayout }
+    private val containerView: View get() = services.dashboardView
+    private val setMediaSourceActive: (sourceId: String, active: Boolean) -> Unit = { sourceId, active -> services.setMediaSourceActive(sourceId, active) }
     private val queueRepository = VideoQueueRepository(context)
 
-    val lifecycle = WidgetLifecycleRegistration.multiple(
+    override val lifecycle = WidgetLifecycleRegistration.multiple(
         WidgetTypeId.VIDEO, VideoWidget::class, DashboardPersistence.VideoWidgetState::class,
         capture = { services.captureRestore.getVideoWidgetState(it) },
         restore = ::restore,

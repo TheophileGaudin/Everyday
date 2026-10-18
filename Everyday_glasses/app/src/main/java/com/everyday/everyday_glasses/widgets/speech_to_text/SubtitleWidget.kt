@@ -13,7 +13,8 @@ import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
 import androidx.core.graphics.withTranslation
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.SubtitleWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
@@ -493,11 +494,11 @@ class SubtitleWidget(
     }
 }
 /** Puts live subtitles on the dashboard and feeds them the phone's transcripts. */
-class SubtitleModule(
-    private val services: DashboardServices,
-    private val current: () -> SubtitleWidget?,
-) {
-    val lifecycle = WidgetLifecycleRegistration.singleton(
+class SubtitlePlugin(
+    private val services: WidgetContext,
+) : WidgetPlugin {
+    private val current: () -> SubtitleWidget? = { services.singleton(WidgetTypeId.SUBTITLE) as? SubtitleWidget }
+    override val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.SUBTITLE, SubtitleWidget::class, DashboardPersistence.SubtitleWidgetState::class,
         current = current,
         create = ::create,
@@ -547,8 +548,8 @@ class SubtitleModule(
             listener = object : SubtitleWidgetListener {
                 override fun onSubtitleControlRequested(control: SubtitleControl) {
                     // The phone didn't take the request: it's no longer connected.
-                    if (this@SubtitleModule.services.host?.requestSubtitleControl(control) == false) {
-                        this@SubtitleModule.update { it.onPhoneDisconnected() }
+                    if (this@SubtitlePlugin.services.host?.requestSubtitleControl(control) == false) {
+                        this@SubtitlePlugin.update { it.onPhoneDisconnected() }
                     }
                 }
             }

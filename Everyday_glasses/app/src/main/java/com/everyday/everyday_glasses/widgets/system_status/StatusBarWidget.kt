@@ -9,7 +9,8 @@ import android.util.Log
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets._common.WidgetInteractionState
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
@@ -610,10 +611,10 @@ class StatusBarWidget(
 }
 
 /** Puts the status bar on the dashboard and feeds it the phone, battery and clock data. */
-class StatusBarModule(
-    private val services: DashboardServices,
-    private val current: () -> StatusBarWidget?,
-) {
+class StatusBarPlugin(
+    private val services: WidgetContext,
+) : WidgetPlugin {
+    private val current: () -> StatusBarWidget? = { services.singleton(WidgetTypeId.STATUS) as? StatusBarWidget }
     // The last data received, so that a status bar opened later shows it right away.
     private val latest: StatusSnapshot get() = services.appData.latest(AppChannels.status) ?: StatusSnapshot()
 
@@ -623,7 +624,7 @@ class StatusBarModule(
         }
     }
 
-    val lifecycle = WidgetLifecycleRegistration.singleton(
+    override val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.STATUS, StatusBarWidget::class, DashboardPersistence.StatusBarState::class,
         current = current,
         create = ::create,

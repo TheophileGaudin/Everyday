@@ -1,24 +1,25 @@
 package com.everyday.everyday_glasses.widgets.weather_location
 import android.content.Context
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
-import com.everyday.everyday_glasses.runtime.DashboardServices
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.settings.UnitDisplayFormatter
 
 /** Puts the location and weather widget on the dashboard and feeds it place and weather data. */
-internal class WeatherModule(
-    private val services: DashboardServices,
-    private val context: Context,
-    private val currentWidget: () -> WeatherWidget?,
-) {
+internal class WeatherPlugin(
+    private val services: WidgetContext,
+) : WidgetPlugin {
+    private val context: Context get() = services.androidContext
+    private val currentWidget: () -> WeatherWidget? = { services.singleton(WidgetTypeId.LOCATION) as? WeatherWidget }
     private var address: String? = null
     private var weatherText: String? = null
     private var sunriseEpochMs: Long? = null
     private var sunsetEpochMs: Long? = null
 
-    val lifecycle = WidgetLifecycleRegistration.singleton(
+    override val lifecycle = WidgetLifecycleRegistration.singleton(
         WidgetTypeId.LOCATION, WeatherWidget::class, DashboardPersistence.LocationWidgetState::class,
         current = currentWidget,
         create = ::create,
