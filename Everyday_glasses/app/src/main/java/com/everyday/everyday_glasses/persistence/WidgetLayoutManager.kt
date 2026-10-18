@@ -4,7 +4,6 @@ import android.graphics.Canvas
 import android.util.Log
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneHost
 import com.everyday.everyday_glasses.runtime.WidgetContext
-import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
 import com.everyday.everyday_glasses.ui.components.LayoutDeletionHandler

@@ -23,7 +23,6 @@ import com.everyday.everyday_glasses.interaction.commands.AppCommandResult
 import com.everyday.everyday_glasses.interaction.commands.CommandAvailability
 import com.everyday.everyday_glasses.interaction.user_input.TextEditingController
 import com.everyday.everyday_glasses.runtime.WidgetContext
-import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
