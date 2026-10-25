@@ -14,6 +14,20 @@ import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
 import com.everyday.everyday_glasses.widgets._common.PresentationSpec
 import com.everyday.shared.command.AppCommandArguments
 
+/**
+ * Cumulative change notifications emitted by widgets.
+ *
+ * Every widget reports through one instance of this interface, installed on
+ * [BaseWidget.changeListener] by [WidgetLifecycleController] when the widget joins the
+ * dashboard. Transient is visible runtime state that must be redrawn and mirrored; persistent
+ * includes the transient work plus a debounced dashboard save.
+ */
+interface WidgetChangeListener {
+    fun onTransientStateChanged() = Unit
+    fun onPersistentStateChanged() = Unit
+}
+
+/** What every widget hears of the app's own lifecycle (the activity resuming, pausing, ending; the display). */
 interface WidgetLifecycle {
     fun onResume() {}
     fun onPause() {}
@@ -145,7 +159,7 @@ interface WidgetContext {
     /** What the activity does for widgets (phone keyboard, mirroring, subtitles, cursor); null until it's plugged in. */
     val host: WidgetHost?
 
-    /** Where the user asked for a new widget (the context menu's spot); null when there's none, so the module picks its default place. */
+    /** Where the user asked for a new widget (the context menu's spot); null when there's none, so the plugin picks its default place. */
     val creationPosition: PointF?
 
     /** Ends the assistant's presentation of [widget], if that widget is the one being presented. */

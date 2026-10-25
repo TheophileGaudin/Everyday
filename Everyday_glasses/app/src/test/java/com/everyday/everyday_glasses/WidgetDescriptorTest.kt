@@ -17,10 +17,10 @@ import org.junit.Test
 
 class WidgetDescriptorTest {
     @Test
-    fun `catalog contains every widget type exactly once, in order`() {
+    fun `catalog contains every widget type exactly once, each with its own order`() {
         assertEquals(WidgetPlugins.all.size, WidgetDescriptors.all.map { it.type }.toSet().size)
-        assertEquals(WidgetDescriptors.all.indices.toList(), WidgetDescriptors.all.map { it.order })
-        assertFalse(WidgetDescriptors.all.any { it.label.isBlank() || it.category.isBlank() || it.type.persistedId.isBlank() })
+        assertEquals(WidgetPlugins.all.size, WidgetDescriptors.all.map { it.order }.toSet().size)
+        assertFalse(WidgetDescriptors.all.any { it.label.isBlank() || it.type.persistedId.isBlank() })
     }
 
     @Test

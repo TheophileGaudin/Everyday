@@ -681,7 +681,13 @@ class StatusBarPlugin(
     /** The status bar as a widget type: its id, its descriptor, how it is saved, and its plugin. */
     companion object : WidgetType {
         val TYPE = WidgetTypeId("status")
-        override val descriptor = WidgetDescriptor(TYPE, "Status", WidgetInstancePolicy.SINGLETON, order = 0, category = "information", storesClosedTemplate = true)
+        override val descriptor = WidgetDescriptor(
+            TYPE,
+            "Status",
+            WidgetInstancePolicy.SINGLETON,
+            order = 0,
+            storesClosedTemplate = true
+        )
         override val codec get() = StatusBarState.Codec
         override fun create(context: WidgetContext) = StatusBarPlugin(context)
         override val commands = listOf(

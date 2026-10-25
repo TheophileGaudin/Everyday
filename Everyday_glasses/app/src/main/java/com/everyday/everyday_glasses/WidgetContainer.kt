@@ -74,9 +74,9 @@ import com.everyday.shared.transport.AssistantStatus
  *   drag state lives here because it is that dispatch.
  * - Drawing: the widgets in z-order (moved as one layer in 3DOF), then the hover controls,
  *   the keyboards, the presentation and the head-locked menus.
- * - Data: the public `apply…` / `update…` / `set…` methods pass through to each widget type's
- *   plugin (`StatusBarPlugin`, `MapPlugin`, `BrowserPlugin`, …), which owns that type's creation,
- *   restore, listeners and latest data.
+ * - Widget types: each one's plugin, from [WidgetPlugins], owns that type's creation, restore,
+ *   saving, commands and data. The app's data reaches the plugins through [AppData], never
+ *   through the container.
  * - Changes: each mutation is reported once, as transient or persistent, through
  *   [DashboardChangeCoordinator] to [WidgetContentObserver].
  *

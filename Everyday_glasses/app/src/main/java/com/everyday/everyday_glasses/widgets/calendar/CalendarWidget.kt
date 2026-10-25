@@ -1013,7 +1013,6 @@ class CalendarPlugin(
             "Calendar",
             WidgetInstancePolicy.SINGLETON,
             order = 3,
-            category = "information",
             storesClosedTemplate = true
         )
         override val codec get() = CalendarWidgetState.Codec

@@ -681,7 +681,6 @@ class TextBoxPlugin(
             "Text",
             WidgetInstancePolicy.MULTIPLE,
             order = 11,
-            category = "content",
             storesClosedTemplate = true
         )
         override val codec get() = TextWidgetState.Codec

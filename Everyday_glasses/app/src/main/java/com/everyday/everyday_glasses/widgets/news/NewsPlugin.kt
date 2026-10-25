@@ -230,7 +230,6 @@ internal class NewsPlugin(
             "News",
             WidgetInstancePolicy.SINGLETON,
             order = 5,
-            category = "information",
             storesClosedTemplate = true,
             menuOrder = 6
         )

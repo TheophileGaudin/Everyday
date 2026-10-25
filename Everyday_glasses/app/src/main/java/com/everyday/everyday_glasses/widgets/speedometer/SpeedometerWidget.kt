@@ -323,7 +323,6 @@ class SpeedometerPlugin(
             "Speedometer",
             WidgetInstancePolicy.SINGLETON,
             order = 7,
-            category = "information",
             storesClosedTemplate = true,
             menuOrder = 4
         )

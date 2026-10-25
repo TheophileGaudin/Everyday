@@ -28,12 +28,12 @@ class LayoutLibrary(private val context: Context) {
         DashboardPersistence.loadDashboardLayout(context, name)
 
     /**
-     * Deleting a layout can orphan the images it referenced, so this is one of the two
-     * moments image storage is collected. The other is startup.
+     * Deleting a layout can orphan the files (images) it referenced, so this is one of the
+     * two moments stored files are collected. The other is startup.
      */
     fun delete(name: String): Boolean {
         if (!DashboardPersistence.deleteLayout(context, name)) return false
-        DashboardPersistence.pruneUnreferencedImages(context)
+        DashboardPersistence.pruneUnreferencedFiles(context)
         return true
     }
 }

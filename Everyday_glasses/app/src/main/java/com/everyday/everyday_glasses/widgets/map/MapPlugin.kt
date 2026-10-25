@@ -187,7 +187,6 @@ class MapPlugin(
             "Map",
             WidgetInstancePolicy.SINGLETON,
             order = 2,
-            category = "information",
             storesClosedTemplate = true
         )
         override val codec get() = MapWidgetState.Codec

@@ -1216,7 +1216,6 @@ class MirrorPlugin(
             "Screen mirror",
             WidgetInstancePolicy.SINGLETON,
             order = 9,
-            category = "media",
             storesClosedTemplate = true
         )
         override val codec get() = MirrorWidgetState.Codec

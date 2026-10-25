@@ -179,8 +179,7 @@ class ImagePlugin(
             TYPE,
             "Image",
             WidgetInstancePolicy.MULTIPLE,
-            order = 12,
-            category = "content"
+            order = 12
         )
         override val codec get() = ImageWidgetState.Codec
         override fun create(context: WidgetContext) = ImagePlugin(context)
@@ -209,6 +208,12 @@ data class ImageWidgetState(
             putCommonFields(state)
             put("imagePath", state.imagePath)
         }
+
+        /** The image file is kept in the app's storage, outside the documents. */
+        override fun storedFiles(payload: JSONObject): List<String> = listOfNotNull(fromJson(payload)?.imagePath)
+
+        override fun pruneStoredFiles(context: Context, referenced: Collection<String>) =
+            ImageWidgetStorage.pruneUnreferenced(context, referenced)
 
         override fun fromJson(payload: JSONObject): ImageWidgetState? = runCatching {
             val c = parseCommonFields(payload)

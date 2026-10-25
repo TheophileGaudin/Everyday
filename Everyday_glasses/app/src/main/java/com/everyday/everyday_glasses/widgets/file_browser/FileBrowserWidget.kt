@@ -1120,8 +1120,7 @@ class FileBrowserPlugin(
             TYPE,
             "Files",
             WidgetInstancePolicy.MULTIPLE,
-            order = 15,
-            category = "content"
+            order = 15
         )
         override val codec get() = FileBrowserWidgetState.Codec
         override fun create(context: WidgetContext) = FileBrowserPlugin(context)

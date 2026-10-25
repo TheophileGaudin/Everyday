@@ -247,7 +247,6 @@ class BrowserPlugin(
             "Browser",
             WidgetInstancePolicy.MULTIPLE,
             order = 10,
-            category = "content",
             storesClosedTemplate = true,
             menuOrder = 12, // In the Create menu and among the shortcuts, after the text box.
         )

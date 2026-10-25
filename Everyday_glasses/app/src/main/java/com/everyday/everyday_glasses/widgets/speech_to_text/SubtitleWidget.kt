@@ -587,7 +587,6 @@ class SubtitlePlugin(
             "Subtitles",
             WidgetInstancePolicy.SINGLETON,
             order = 8,
-            category = "media",
             storesClosedTemplate = true
         )
         override val codec get() = SubtitleWidgetState.Codec

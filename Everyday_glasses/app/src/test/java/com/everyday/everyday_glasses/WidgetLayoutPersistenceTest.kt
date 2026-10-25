@@ -12,7 +12,8 @@ import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
 import com.everyday.everyday_glasses.persistence.WidgetLayoutManager
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
-import com.everyday.everyday_glasses.settings.SettingsController
+import com.everyday.everyday_glasses.runtime.DashboardOverlay
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import android.content.Context
 import android.view.View
 import android.view.ViewGroup
@@ -367,12 +368,13 @@ class WidgetLayoutPersistenceTest {
         override fun bringToFront(widget: BaseWidget) = Unit
         override fun clearKeyFocus() = Unit
         override fun notifyPersistentChange() = Unit
+        override fun addOverlay(overlay: DashboardOverlay) = Unit
+        override fun plugin(type: WidgetTypeId): WidgetPlugin = error("No plugins in this test")
         override fun onKeyFocusChanged(widget: BaseWidget, focused: Boolean) = Unit
         override val androidContext: Context get() = error("No Android context in this test")
         override val rootLayout: ViewGroup? = null
         override val dashboardView: View get() = error("No dashboard view in this test")
         override val ui = UiThreadDispatcher { action -> action(); true }
-        override val settings: SettingsController get() = error("No settings in this test")
         var singletonWidget: BaseWidget? = null
         override fun singleton(type: WidgetTypeId): BaseWidget? = singletonWidget
         override fun widgets(type: WidgetTypeId): List<BaseWidget> = emptyList()

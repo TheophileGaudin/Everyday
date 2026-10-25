@@ -166,7 +166,13 @@ internal class WeatherPlugin(
     /** The location and weather widget as a widget type: its id, its descriptor, how it is saved, and its plugin. */
     companion object : WidgetType {
         val TYPE = WidgetTypeId("location")
-        override val descriptor = WidgetDescriptor(TYPE, "Location", WidgetInstancePolicy.SINGLETON, order = 1, category = "information", storesClosedTemplate = true)
+        override val descriptor = WidgetDescriptor(
+            TYPE,
+            "Location",
+            WidgetInstancePolicy.SINGLETON,
+            order = 1,
+            storesClosedTemplate = true
+        )
         override val codec get() = LocationWidgetState.Codec
         override fun create(context: WidgetContext) = WeatherPlugin(context)
         override val commands = listOf(

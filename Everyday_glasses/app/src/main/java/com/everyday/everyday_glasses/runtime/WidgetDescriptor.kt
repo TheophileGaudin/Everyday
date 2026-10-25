@@ -13,13 +13,23 @@ value class WidgetTypeId(val persistedId: String) {
 
 enum class WidgetInstancePolicy { SINGLETON, MULTIPLE }
 
-/** Stable, UI-independent metadata for one widget type. Each plugin's companion object declares its own. */
+/**
+ * Stable, UI-independent metadata for one widget type. Each plugin's companion object declares its own.
+ *
+ * @property label The type's name on the *Widgets* page and for the assistant ("Show: Map").
+ * @property policy One widget at most, or several.
+ * @property order Sorts the types ([WidgetDescriptors.all]) and the dashboard's widgets by type. Each
+ * type has its own; a new type takes the next free number.
+ * @property storesClosedTemplate A closed widget's state is kept, so showing it again brings it back
+ * as it was. Every single-instance type keeps one.
+ * @property menuOrder Sorts the *Widgets* page and the *Create* and *Files* commands, when that differs
+ * from [order].
+ */
 data class WidgetDescriptor(
     val type: WidgetTypeId,
     val label: String,
     val policy: WidgetInstancePolicy,
     val order: Int,
-    val category: String,
     val storesClosedTemplate: Boolean = false,
     val menuOrder: Int = order
 )

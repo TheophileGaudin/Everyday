@@ -149,14 +149,9 @@ object FinanceAssistantPolicy {
     const val DEFAULT_VISIBLE_TARGET = "TOP_LEFT_VISIBLE"
 
     fun defaultTarget(): FinanceTileTarget = FinanceTileTarget.topLeftVisible()
-
-    const val PROMPT_INSTRUCTION: String =
-        "For finance requests, use update_finance_tile. When the user says the visible finance " +
-            "widget or chart without a more precise target, set target to TOP_LEFT_VISIBLE. " +
-            "Use tile_id only for a named stable tile and preserve omitted tile settings."
 }
 
-/** Exposes finance state through the Work Package 01 extensible semantic-fact channel. */
+/** The finance widget's state, as facts the assistant reads with the dashboard snapshot. */
 fun FinanceWidgetSemanticState.toAssistantSemanticFacts(): List<AssistantSemanticFact> = buildList {
     add(AssistantSemanticFact("finance_widget_id", widgetId))
     add(AssistantSemanticFact("finance_visible", visible.toString()))
@@ -186,8 +181,10 @@ class UpdateFinanceTileSemanticToolHandler(
     override val definition = AssistantToolDefinition(
         name = "update_finance_tile",
         description =
-            "Update the instrument on an existing Finance dashboard tile and refresh its data; " +
-                    "target defaults to TOP_LEFT_VISIBLE when no target is specified",
+            "Update the instrument on an existing Finance dashboard tile and refresh its data. " +
+                    "Use it for finance requests. When the user says the visible finance widget or chart " +
+                    "without a more precise target, set target to TOP_LEFT_VISIBLE (the default). " +
+                    "Use tile_id only for a named stable tile, and preserve omitted tile settings.",
         parameters = JSONObject()
             .put("type", "object")
             .put(

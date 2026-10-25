@@ -1,5 +1,6 @@
 package com.everyday.everyday_glasses.persistence
 
+import android.content.Context
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets.WidgetPlugins
 import org.json.JSONArray
@@ -65,6 +66,12 @@ object WidgetDocument {
         val stateClass: KClass<out Any>
         fun encode(state: Any): JSONObject
         fun decode(payload: JSONObject): Any?
+
+        /** The files a saved widget of this type keeps outside the documents (an image), named in its [payload]. */
+        fun storedFiles(payload: JSONObject): List<String> = emptyList()
+
+        /** Deletes this type's stored files except [referenced], the ones a saved dashboard still names. */
+        fun pruneStoredFiles(context: Context, referenced: Collection<String>) = Unit
     }
 
     /**

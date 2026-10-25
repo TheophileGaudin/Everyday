@@ -277,9 +277,9 @@ class MainActivity : AppCompatActivity() {
             captureDashboard = { widgetContainer.capturePersistedDashboard() },
             canSave = { !widgetContainer.isAwaitingDashboardRestore }
         )
-        // Startup is one of the two moments an image can become unreachable; the other
-        // is deleting a layout. See DashboardPersistence.pruneUnreferencedImages.
-        DashboardPersistence.pruneUnreferencedImages(this)
+        // Startup is one of the two moments a stored file (an image) can become unreachable;
+        // the other is deleting a layout. See DashboardPersistence.pruneUnreferencedFiles.
+        DashboardPersistence.pruneUnreferencedFiles(this)
         inputCoordinator = InputCoordinator(
             cursorView = cursorView,
             widgetContainer = widgetContainer,

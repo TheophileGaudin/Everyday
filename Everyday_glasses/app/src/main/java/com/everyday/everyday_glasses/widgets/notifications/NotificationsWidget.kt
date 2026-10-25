@@ -657,7 +657,6 @@ class NotificationsPlugin(
             "Notifications",
             WidgetInstancePolicy.SINGLETON,
             order = 6,
-            category = "information",
             storesClosedTemplate = true,
             menuOrder = 7
         )

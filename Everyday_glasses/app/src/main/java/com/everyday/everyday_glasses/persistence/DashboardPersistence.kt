@@ -4,13 +4,10 @@ import android.content.Context
 import android.os.Environment
 import android.util.AtomicFile
 import android.util.Log
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseCommonFields
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
-import com.everyday.everyday_glasses.widgets.file_browser.ImagePlugin
-import com.everyday.everyday_glasses.widgets.file_browser.ImageWidgetStorage
-import com.everyday.everyday_glasses.widgets.file_browser.ImageWidgetState
 import org.json.JSONObject
 import java.io.File
-import kotlin.collections.forEach
 
 /**
  * Stores the active dashboard and the named layouts in durable app storage, and handles storage
@@ -191,38 +188,32 @@ object DashboardPersistence {
     }
 
     /**
-     * Deletes image files no stored dashboard still references.
+     * Deletes the files widgets keep outside the documents (images, say) that no stored
+     * dashboard still names. Each widget type's codec says which files a saved widget keeps
+     * ([WidgetDocument.WidgetStateCodec.storedFiles]) and deletes the others.
      *
-     * Images are the only widget payload kept outside the documents, so they are the
-     * only thing that can be orphaned. Reachability spans everything stored — the
-     * active dashboard and every named layout — which is why this lives here rather
-     * than with either caller.
+     * Reachability spans everything stored — the active dashboard and every named layout —
+     * which is why this lives here rather than with either caller.
      *
      * Called at startup and after deleting a layout: the two moments a reference can
      * disappear. It is deliberately not run on every dashboard save, which would scan
      * storage every time the user finishes dragging a widget.
      */
-    fun pruneUnreferencedImages(context: Context) {
+    fun pruneUnreferencedFiles(context: Context) {
         val active = loadDashboard(context)
         if (active.isFirstRun) {
             // Nothing readable was stored, so reachability cannot be established. An
-            // ignored document still names the images it used, and unlike widget
+            // ignored document still names the files it used, and unlike widget
             // geometry those cannot be recreated by saving a new layout, so leave them.
-            Log.d(TAG, "Skipping image prune: no readable active dashboard")
+            Log.d(TAG, "Skipping file prune: no readable active dashboard")
             return
         }
-        val referenced = buildList {
-            addAll(imagePaths(active))
-            listDashboardLayouts(context).forEach { addAll(imagePaths(it.dashboard)) }
+        val records = active.widgets + listDashboardLayouts(context).flatMap { it.dashboard.widgets }
+        WidgetDocument.codecs.values.forEach { codec ->
+            val referenced = records.filter { it.type == codec.type }.flatMap { codec.storedFiles(it.state) }
+            codec.pruneStoredFiles(context, referenced)
         }
-        ImageWidgetStorage.pruneUnreferenced(context, referenced)
     }
-
-    private fun imagePaths(dashboard: WidgetDocument.PersistedDashboard): List<String> =
-        dashboard.widgets.mapNotNull { record ->
-            if (record.type != ImagePlugin.TYPE) return@mapNotNull null
-            ImageWidgetState.decode(record.state)?.imagePath
-        }
 
     fun listDashboardLayouts(context: Context): List<WidgetDocument.PersistedDashboardLayoutRecord> {
         val file = getLayoutsStorageFile(context)

@@ -119,8 +119,7 @@ class VideoPlugin(
             TYPE,
             "Video",
             WidgetInstancePolicy.MULTIPLE,
-            order = 13,
-            category = "media"
+            order = 13
         )
         override val codec get() = VideoWidgetState.Codec
         override fun create(context: WidgetContext) = VideoPlugin(context)

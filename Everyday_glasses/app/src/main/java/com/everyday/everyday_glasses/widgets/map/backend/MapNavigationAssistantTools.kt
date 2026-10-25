@@ -24,7 +24,7 @@ class StartNavigationSemanticToolHandler(
 
     override val definition = AssistantToolDefinition(
         name = "start_navigation",
-        description = "Search for the best matching destination and start turn-by-turn walking navigation on the Everyday glasses map. Use for commands such as search, find, directions to, go to, or navigate to a place or address.",
+        description = "Search for the best matching destination and start turn-by-turn walking navigation on the Everyday glasses map. Use for commands such as search, find, directions to, go to, or navigate to a place or address, rather than web search.",
         parameters = JSONObject()
             .put("type", "object")
             .put(
@@ -146,7 +146,8 @@ class StopNavigationSemanticToolHandler(
 
     override val definition = AssistantToolDefinition(
         name = "stop_navigation",
-        description = "Cancel or stop the active turn-by-turn navigation and remove its route guidance from the map",
+        description = "Cancel or stop the active turn-by-turn navigation and remove its route guidance from the map. " +
+                "Use it when navigation is active and the user says stop or cancel navigation.",
         parameters = JSONObject()
             .put("type", "object")
             .put("properties", JSONObject())

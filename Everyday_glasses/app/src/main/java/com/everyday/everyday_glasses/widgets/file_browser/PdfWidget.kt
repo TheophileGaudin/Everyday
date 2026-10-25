@@ -411,8 +411,7 @@ class PdfPlugin(
             TYPE,
             "PDF",
             WidgetInstancePolicy.MULTIPLE,
-            order = 14,
-            category = "content"
+            order = 14
         )
         override val codec get() = PdfWidgetState.Codec
         override fun create(context: WidgetContext) = PdfPlugin(context)

@@ -260,7 +260,6 @@ internal class FinancePlugin(
             "Finance",
             WidgetInstancePolicy.SINGLETON,
             order = 4,
-            category = "information",
             storesClosedTemplate = true,
             menuOrder = 5
         )

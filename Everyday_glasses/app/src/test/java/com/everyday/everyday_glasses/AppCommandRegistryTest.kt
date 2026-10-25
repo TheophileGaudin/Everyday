@@ -18,7 +18,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.security.MessageDigest
 
 class AppCommandRegistryTest {
     private val registry = AppCommandRegistry { listOf("Work") }
@@ -27,14 +26,8 @@ class AppCommandRegistryTest {
     fun `registry IDs are unique and retains durable shortcut IDs`() {
         val ids = registry.definitions().map { it.id }
         assertEquals(ids.size, ids.toSet().size)
-        // Sorted: the ids must not change (shortcuts are saved by id); their order may.
-        val stableDigest = MessageDigest.getInstance("SHA-256")
-            .digest(ids.sorted().joinToString("\n").toByteArray())
-            .joinToString("") { "%02x".format(it) }
-        assertEquals(
-            "5e371697f75874c6921b77f457049cc9bda93bb1e718ec13cb20458e71b7c84b",
-            stableDigest
-        )
+        // Shortcuts are saved by id, so these must stay. A new widget type only adds ids.
+        assertEquals(emptyList<String>(), SAVED_IDS - ids.toSet())
     }
 
     @Test
@@ -196,5 +189,39 @@ class AppCommandRegistryTest {
         override fun scroll(direction: CommandScrollDirection, amount: Float) { calls++ }
         override fun enterText(text: String) { calls++ }
         override fun commandFinished() { finishedCalls++ }
+    }
+
+    private companion object {
+        /** Every command id of version 1.0, sorted. */
+        val SAVED_IDS = listOf(
+            "app:close",
+            "browser:open_url",
+            "create:browser",
+            "create:text",
+            "display:set_brightness",
+            "file:open",
+            "layout:Groceries",
+            "layout:Mirror",
+            "layout:Standard",
+            "layout:Subtitles",
+            "layout:Work",
+            "layout:save",
+            "layout:save_as",
+            "layout:toggle_lock",
+            "open:youtube",
+            "settings:open",
+            "text:enter",
+            "toggle:calendar",
+            "toggle:finance",
+            "toggle:location",
+            "toggle:map",
+            "toggle:mirror",
+            "toggle:news",
+            "toggle:notifications",
+            "toggle:speedometer",
+            "toggle:status",
+            "toggle:subtitle",
+            "ui:scroll",
+        )
     }
 }

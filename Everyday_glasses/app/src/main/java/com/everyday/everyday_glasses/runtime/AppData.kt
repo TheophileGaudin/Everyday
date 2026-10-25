@@ -31,8 +31,8 @@ class AppQuery<T>(val name: String) {
 /**
  * The latest value of each kind of app data, and who wants to hear about it.
  *
- * Sources (the phone link, the glasses' GPS and status monitor) publish; widget modules subscribe.
- * A module that needs a value later, for a widget opened after the data arrived, reads [latest].
+ * Sources (the phone link, the glasses' GPS and status monitor) publish; widget plugins subscribe.
+ * A plugin that needs a value later, for a widget opened after the data arrived, reads [latest].
  * Everything runs on the main thread, like the widgets it feeds.
  */
 class AppData {
@@ -68,7 +68,7 @@ class AppData {
     /** Publishes several values as one change: the dashboard redraws once, after all of them. */
     fun publishTogether(publishes: () -> Unit) = grouping(publishes)
 
-    /** Makes [answer] the way to answer [query]. The module that knows the answer registers it. */
+    /** Makes [answer] the way to answer [query]. The plugin that knows the answer registers it. */
     fun <T> answer(query: AppQuery<T>, answer: () -> T) {
         answerers[query] = answer
     }
