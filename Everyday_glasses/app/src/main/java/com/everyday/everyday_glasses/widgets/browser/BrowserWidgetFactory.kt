@@ -266,7 +266,6 @@ class BrowserPlugin(
         private val YOUTUBE_HISTORY = WidgetCommand(
             AppCommandDefinition("open:youtube", "Open: YouTube history", "YouTube", "Open YouTube history", shortcutEligible = true),
         )
-        /** Also how the phone's "open this address" requests reach the browser ([com.everyday.everyday_glasses.WidgetContainer.executeOpenUrlCommand]). */
         private val OPEN_URL = WidgetCommand(
             AppCommandDefinition("browser:open_url", "Open URL", "URL", "Open an HTTP or HTTPS URL", CommandArgumentKind.URL),
         )
