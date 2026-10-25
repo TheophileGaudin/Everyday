@@ -85,6 +85,8 @@ class PhoneDataSyncCoordinator(
     @Volatile private var isGlassesConnected = false
     @Volatile private var released = false
     @Volatile private var visibleFinanceConfigs: List<FinanceDashboardTileConfig> = emptyList()
+    /** The glasses' last map request, so a manual refresh fetches the same area and points of interest. */
+    @Volatile private var lastMapRequest: SyncRequest? = null
 
     init {
         LocationWeatherService.observer = locationWeatherObserver
@@ -107,6 +109,7 @@ class PhoneDataSyncCoordinator(
         if (!connected) {
             LocationWeatherService.stop(appContext)
             visibleFinanceConfigs = emptyList()
+            lastMapRequest = null
             binanceStreamManager.stopAll()
             return
         }
@@ -171,7 +174,8 @@ class PhoneDataSyncCoordinator(
             "Location/weather refresh" to { done -> refreshWeatherForManual { done(it.exceptionOrNull()) } },
             "Calendar refresh" to { done -> refreshCalendarForManual { done(it.exceptionOrNull()) } },
             "News refresh" to { done -> refreshNewsForManual { done(it.exceptionOrNull()) } },
-            "Finance refresh" to { done -> refreshFinanceForManual { done(it.exceptionOrNull()) } }
+            "Finance refresh" to { done -> refreshFinanceForManual { done(it.exceptionOrNull()) } },
+            "Map refresh" to { done -> refreshMapForManual { done(it.exceptionOrNull()) } }
         )
         val remaining = AtomicInteger(operations.size)
 
@@ -264,35 +268,54 @@ class PhoneDataSyncCoordinator(
             send(SyncSnapshot(notifications = PhoneNotificationRepository.current(appContext)))
         }
         if (SyncChannel.MAP in request.channels) {
-            val lat = request.mapLat
-            val lon = request.mapLon
-            if (lat != null && lon != null) {
+            if (request.mapLat != null && request.mapLon != null) {
+                lastMapRequest = request
                 executeRefresh("map", {
                     sendError(SyncChannel.MAP, "Map fetch skipped: refresh queue is full")
-                }) {
-                    fileLog("Fetching phone map proxy for $lat,$lon")
-                    runCatching {
-                        MapDataProvider.fetch(
-                            lat = lat,
-                            lon = lon,
-                            poiMode = request.mapPoiMode,
-                            poiCategories = request.mapPoiCategories.toSet(),
-                            poiRadiusM = request.mapPoiRadiusM,
-                            importantCategories = request.mapPoiImportantCategories.toSet(),
-                            importantRadiiM = request.mapPoiImportantRadiiM,
-                            normalCategories = request.mapPoiNormalCategories.toSet()
-                        )
-                    }
-                        .onSuccess {
-                            fileLog("Phone map proxy ready: roads=${it.roads.size} pois=${it.pois.size}")
-                            send(SyncSnapshot(map = it))
-                        }
-                        .onFailure {
-                            fileLog("Phone map proxy failed: ${it.message}")
-                            sendError(SyncChannel.MAP, "Map fetch failed: ${it.message}")
-                        }
-                }
+                }) { fetchAndSendMap(request) }
             }
+        }
+    }
+
+    /** Fetches the map area of [request] and sends it to the glasses; a failure is reported to them too. */
+    private fun fetchAndSendMap(request: SyncRequest): Result<Unit> {
+        val lat = request.mapLat ?: return Result.success(Unit)
+        val lon = request.mapLon ?: return Result.success(Unit)
+        fileLog("Fetching phone map proxy for $lat,$lon")
+        return runCatching {
+            MapDataProvider.fetch(
+                lat = lat,
+                lon = lon,
+                poiMode = request.mapPoiMode,
+                poiCategories = request.mapPoiCategories.toSet(),
+                poiRadiusM = request.mapPoiRadiusM,
+                importantCategories = request.mapPoiImportantCategories.toSet(),
+                importantRadiiM = request.mapPoiImportantRadiiM,
+                normalCategories = request.mapPoiNormalCategories.toSet()
+            )
+        }
+            .onSuccess {
+                fileLog("Phone map proxy ready: roads=${it.roads.size} pois=${it.pois.size}")
+                send(SyncSnapshot(map = it))
+            }
+            .onFailure {
+                fileLog("Phone map proxy failed: ${it.message}")
+                sendError(SyncChannel.MAP, "Map fetch failed: ${it.message}")
+            }
+            .map { }
+    }
+
+    /** Fetches again the map area the glasses last asked for. Nothing to do when they haven't asked for one. */
+    private fun refreshMapForManual(callback: (Result<Unit>) -> Unit) {
+        val request = lastMapRequest
+        if (request == null) {
+            callback(Result.success(Unit))
+            return
+        }
+        executeRefresh("manual map", {
+            callback(Result.failure(RejectedExecutionException("Refresh queue is full")))
+        }) {
+            callback(fetchAndSendMap(request))
         }
     }
 
