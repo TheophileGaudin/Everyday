@@ -41,6 +41,7 @@ import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.ui.hover_controls.CloseAppHoverControl
 import com.everyday.everyday_glasses.ui.hover_controls.YouTubeHistoryHoverControl
+import com.everyday.everyday_glasses.widgets._common.PresentationSpec
 import com.everyday.everyday_glasses.widgets.browser.BrowserPlugin
 import com.everyday.everyday_glasses.widgets.calendar.CalendarPlugin
 import com.everyday.everyday_glasses.widgets.file_browser.ImagePlugin
@@ -360,6 +361,12 @@ class WidgetLayoutPersistenceTest {
         override val host: WidgetHost? = null
         override val creationPosition: PointF? = null
         override fun dismissPresentationOf(widget: BaseWidget) = Unit
+        override fun present(widget: BaseWidget, spec: PresentationSpec, createdByPresentation: Boolean) = false
+        override fun closeUnreported(widget: BaseWidget) = Unit
+        override fun show(type: WidgetTypeId): BaseWidget? = null
+        override fun bringToFront(widget: BaseWidget) = Unit
+        override fun clearKeyFocus() = Unit
+        override fun notifyPersistentChange() = Unit
         override fun onKeyFocusChanged(widget: BaseWidget, focused: Boolean) = Unit
         override val androidContext: Context get() = error("No Android context in this test")
         override val rootLayout: ViewGroup? = null

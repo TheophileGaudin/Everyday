@@ -18,9 +18,12 @@ import com.everyday.everyday_glasses.settings.UnitDisplayFormatter
 import java.util.Locale
 import kotlin.math.abs
 import androidx.core.graphics.toColorInt
+import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
 import com.everyday.everyday_glasses.runtime.SpeedState
+import com.everyday.everyday_glasses.runtime.WidgetCommand
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetMenu
 import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import org.json.JSONObject
@@ -309,6 +312,17 @@ class SpeedometerPlugin(
         )
         override val codec get() = SpeedometerWidgetState.Codec
         override fun create(context: WidgetContext) = SpeedometerPlugin(context)
+        override val commands = listOf(
+            WidgetCommand(
+                AppCommandDefinition(
+                    "toggle:speedometer",
+                    "Toggle: Speedometer",
+                    "Speed",
+                    "Show or hide the speedometer",
+                    shortcutEligible = true
+                ), WidgetMenu.TOGGLE
+            ),
+        )
         private const val WIDTH = 220f
         private const val HEIGHT = 110f
         private val NO_SPEED = SpeedState(speedKmh = 0f, qualityOk = false, isMoving = false)

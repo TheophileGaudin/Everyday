@@ -11,6 +11,10 @@ import android.util.Log
 import androidx.core.graphics.withSave
 import androidx.core.text.HtmlCompat
 import androidx.core.text.toHtml
+import com.everyday.everyday_glasses.interaction.assistant.AssistantTextPresentationRequest
+import com.everyday.everyday_glasses.interaction.assistant.AssistantTextPresenter
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecution
+import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
 import com.everyday.everyday_glasses.interaction.user_input.TextEditAction
 import com.everyday.everyday_glasses.interaction.user_input.TextZone
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
@@ -19,11 +23,13 @@ import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseCommonFields
 import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.runtime.WidgetCommand
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetMenu
 import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
@@ -31,7 +37,9 @@ import com.everyday.everyday_glasses.ui.components.KeyboardOverlayController
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets._common.WidgetInteractionState
 import com.everyday.everyday_glasses.widgets._common.WidgetTheme
+import com.everyday.shared.command.AppCommandArguments
 import org.json.JSONObject
+import java.util.concurrent.CompletableFuture
 
 /**
  * A dynamic text box widget that can be moved, resized, deleted, and toggled fullscreen.
@@ -572,7 +580,7 @@ class TextBoxWidget(
  */
 class TextBoxPlugin(
     private val services: WidgetContext,
-) : WidgetPlugin {
+) : WidgetPlugin, AssistantTextPresenter {
     override val lifecycle = WidgetLifecycleRegistration.multiple(
         TextBoxWidget::class, TextWidgetState.Codec,
         capture = ::capture,
@@ -644,6 +652,26 @@ class TextBoxPlugin(
         }
     }
 
+    override fun runCommand(commandId: String, arguments: AppCommandArguments): Boolean = when (commandId) {
+        CREATE.definition.id -> true.also { open() }
+        else -> false
+    }
+
+    // ==================== The assistant's text ====================
+
+    private val assistantText by lazy {
+        TextAssistantActions(
+            ui = services.ui,
+            findTextWidget = { id -> services.widgets(TYPE).firstOrNull { services.stableId(it) == id } as? TextBoxWidget },
+            createTextWidget = ::openForAssistant,
+            clearEditing = { widget -> widget.hideKeyboard(); services.clearKeyFocus() },
+            presentWidget = { widget, spec, created -> services.present(widget, spec, created) },
+            removePresentationTarget = services::closeUnreported,
+        )
+    }
+
+    override fun presentAssistantText(request: AssistantTextPresentationRequest): CompletableFuture<AssistantToolExecution> =
+        assistantText.present(request)
 
     /** The text box as a widget type: its id, its descriptor, how it is saved, and its plugin. */
     companion object : WidgetType {
@@ -658,6 +686,17 @@ class TextBoxPlugin(
         )
         override val codec get() = TextWidgetState.Codec
         override fun create(context: WidgetContext) = TextBoxPlugin(context)
+        private val CREATE = WidgetCommand(
+            AppCommandDefinition(
+                "create:text",
+                "Create: Text widget",
+                "Text",
+                "Create a text widget",
+                shortcutEligible = true
+            ),
+            WidgetMenu.CREATE, "Text Box",
+        )
+        override val commands = listOf(CREATE)
         /** Size of a new text box, as a fraction of the dashboard. */
         const val DEFAULT_WIDTH_PERCENT = 0.30f
         const val DEFAULT_HEIGHT_PERCENT = 0.15f

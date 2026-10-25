@@ -29,9 +29,13 @@ import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import java.io.File
 import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
+import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
+import com.everyday.everyday_glasses.runtime.WidgetCommand
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetMenu
 import com.everyday.everyday_glasses.runtime.WidgetType
+import com.everyday.shared.command.AppCommandArguments
 import org.json.JSONObject
 
 /**
@@ -1085,6 +1089,11 @@ class FileBrowserPlugin(
         )
     }
 
+    override fun runCommand(commandId: String, arguments: AppCommandArguments): Boolean = when (commandId) {
+        OPEN.definition.id -> true.also { services.host?.requestFilePicker() }
+        else -> false
+    }
+
     /** The file picker as a widget type: its id, its descriptor, how it is saved, and its plugin. */
     companion object : WidgetType {
         val TYPE = WidgetTypeId("files")
@@ -1097,6 +1106,11 @@ class FileBrowserPlugin(
         )
         override val codec get() = FileBrowserWidgetState.Codec
         override fun create(context: WidgetContext) = FileBrowserPlugin(context)
+        private val OPEN = WidgetCommand(
+            AppCommandDefinition("file:open", "Open...", "Open", "Open the file picker"),
+            WidgetMenu.FILES, "Open...",
+        )
+        override val commands = listOf(OPEN)
     }
 }
 

@@ -9,6 +9,7 @@ import android.text.TextPaint
 import android.text.TextUtils
 import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
+import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
@@ -19,8 +20,10 @@ import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
 import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.runtime.WidgetCommand
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetMenu
 import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.shared.sync.CalendarEventSnapshot
 import com.everyday.shared.sync.CalendarSnapshot
@@ -1015,6 +1018,17 @@ class CalendarPlugin(
         )
         override val codec get() = CalendarWidgetState.Codec
         override fun create(context: WidgetContext) = CalendarPlugin(context)
+        override val commands = listOf(
+            WidgetCommand(
+                AppCommandDefinition(
+                    "toggle:calendar",
+                    "Toggle: Calendar",
+                    "Calendar",
+                    "Show or hide Calendar",
+                    shortcutEligible = true
+                ), WidgetMenu.TOGGLE
+            ),
+        )
     }
 }
 

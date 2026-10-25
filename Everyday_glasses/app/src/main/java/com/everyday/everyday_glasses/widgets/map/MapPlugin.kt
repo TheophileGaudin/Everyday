@@ -2,6 +2,10 @@ package com.everyday.everyday_glasses.widgets.map
 
 import android.content.Context
 import android.location.Location
+import com.everyday.everyday_glasses.interaction.assistant.AssistantContribution
+import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticFact
+import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticToolHandler
+import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
@@ -15,13 +19,21 @@ import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
 import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.runtime.WidgetCommand
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetMenu
 import com.everyday.everyday_glasses.runtime.WidgetType
+import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import com.everyday.everyday_glasses.widgets.map.backend.MapAssistantActions
 import com.everyday.everyday_glasses.widgets.map.backend.MapViewMode
 import com.everyday.everyday_glasses.widgets.map.backend.MapZoom
 import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfigState
 import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayMode
+import com.everyday.everyday_glasses.widgets.map.backend.ConfigureMapPoisSemanticToolHandler
+import com.everyday.everyday_glasses.widgets.map.backend.StartNavigationSemanticToolHandler
+import com.everyday.everyday_glasses.widgets.map.backend.StopNavigationSemanticToolHandler
+import com.everyday.everyday_glasses.widgets.map.backend.toAssistantSemanticFacts
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -31,7 +43,7 @@ import org.json.JSONObject
  */
 class MapPlugin(
     private val services: WidgetContext,
-) : WidgetPlugin {
+) : WidgetPlugin, AssistantContribution {
     private val context: Context get() = services.androidContext
     private val current: () -> MapWidget? = { services.singleton(TYPE) as? MapWidget }
     private val requestRepaint: () -> Unit = { services.requestRepaint() }
@@ -136,6 +148,37 @@ class MapPlugin(
             setLocationMetadata(place?.town.orEmpty(), place?.countryCode.orEmpty())
         }
 
+    // ==================== What the assistant can do and read ====================
+
+    private val assistantActions by lazy {
+        MapAssistantActions(
+            ui = services.ui,
+            showMap = { services.show(TYPE) as? MapWidget },
+            currentMap = current,
+            present = { widget, spec -> services.present(widget, spec) },
+            dismissPresentation = { current()?.let(services::dismissPresentationOf) },
+            withTransientChanges = { action -> services.withTransientChanges(action) },
+            notifyTransientChange = services::notifyTransientChange,
+            notifyPersistentChange = services::notifyPersistentChange,
+        )
+    }
+
+    override fun assistantTools(): List<AssistantSemanticToolHandler> = listOf(
+        ConfigureMapPoisSemanticToolHandler(applyConfiguration = assistantActions::configurePois, isAvailable = ::isReady),
+        StartNavigationSemanticToolHandler(startNavigation = assistantActions::startNavigation, isAvailable = ::isReady),
+        StopNavigationSemanticToolHandler(
+            stopNavigation = assistantActions::stopNavigation,
+            isAvailable = { isReady() && current()?.hasActiveNavigation() == true },
+        ),
+    )
+
+    override fun assistantFacts(widget: BaseWidget, stableId: String): List<AssistantSemanticFact> {
+        val map = widget as? MapWidget ?: return emptyList()
+        return map.poiDisplayConfig.toAssistantSemanticFacts() + map.navigationState.toAssistantSemanticFacts()
+    }
+
+    private fun isReady(): Boolean = services.viewportWidth > 0 && services.viewportHeight > 0
+
     /** The map as a widget type: its id, its descriptor, how it is saved, and its plugin. */
     companion object : WidgetType {
         val TYPE = WidgetTypeId("map")
@@ -149,6 +192,16 @@ class MapPlugin(
         )
         override val codec get() = MapWidgetState.Codec
         override fun create(context: WidgetContext) = MapPlugin(context)
+        override val commands = listOf(
+            WidgetCommand(
+                AppCommandDefinition(
+                    "toggle:map",
+                    "Toggle: Map",
+                    "Map",
+                    "Show or hide the map"
+                ), WidgetMenu.TOGGLE
+            ),
+        )
         private const val SIZE = 210f
     }
 }

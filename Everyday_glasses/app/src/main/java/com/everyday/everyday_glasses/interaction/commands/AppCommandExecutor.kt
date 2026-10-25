@@ -9,19 +9,15 @@ interface AppCommandCapabilities {
     fun isAvailable(requirement: CommandAvailability): Boolean
     fun toggleWidget(type: WidgetTypeId)
     fun setWidgetVisible(type: WidgetTypeId, visible: Boolean)
-    fun createTextWidget()
-    fun createBrowserWidget()
-    fun openYouTubeHistory()
+    fun runWidgetCommand(type: WidgetTypeId, commandId: String, arguments: AppCommandArguments): Boolean /** Runs a widget type's own command (create a text box, open a URL, …) through its plugin. */
     fun loadLayout(name: String): Boolean
     fun toggleLayoutLock()
     fun saveLayout()
     fun saveLayoutAs()
-    fun openFilePicker()
     fun openSettings()
     fun requestClose()
     fun setBrightness(value: Float)
     fun scroll(direction: CommandScrollDirection, amount: Float)
-    fun openUrl(url: String)
     fun enterText(text: String)
     fun commandFinished()
 }
@@ -78,23 +74,19 @@ class AppCommandExecutor(
             capabilities.toggleWidget(widget)
             return true
         }
+        registry.widgetCommandType(definition)?.let { type ->
+            return capabilities.runWidgetCommand(type, definition.id, arguments)
+        }
         return when (definition) {
-            registry.createText -> true.also { capabilities.createTextWidget() }
-            registry.createBrowser -> true.also { capabilities.createBrowserWidget() }
-            registry.openYouTubeHistory -> true.also { capabilities.openYouTubeHistory() }
             registry.toggleLayoutLock -> true.also { capabilities.toggleLayoutLock() }
-            registry.saveLayout -> true.also { capabilities.saveLayout() }
-            registry.saveLayoutAs -> true.also { capabilities.saveLayoutAs() }
-            registry.openFile -> true.also { capabilities.openFilePicker() }
-            registry.openSettings -> true.also { capabilities.openSettings() }
-            registry.closeApp -> true.also { capabilities.requestClose() }
-            registry.setBrightness -> true.also { capabilities.setBrightness((arguments as AppCommandArguments.Brightness).value) }
-            registry.scroll -> true.also {
-                (arguments as AppCommandArguments.Scroll).let { capabilities.scroll(it.direction, it.amount) }
-            }
-            registry.openUrl -> true.also { capabilities.openUrl((arguments as AppCommandArguments.Url).url) }
-            registry.enterText -> true.also { capabilities.enterText((arguments as AppCommandArguments.Text).text) }
-            else -> registry.layoutName(definition)?.let(capabilities::loadLayout) ?: false
+            registry.saveLayout       -> true.also { capabilities.saveLayout() }
+            registry.saveLayoutAs     -> true.also { capabilities.saveLayoutAs() }
+            registry.openSettings     -> true.also { capabilities.openSettings() }
+            registry.closeApp         -> true.also { capabilities.requestClose() }
+            registry.setBrightness    -> true.also { capabilities.setBrightness((arguments as AppCommandArguments.Brightness).value) }
+            registry.scroll           -> true.also { (arguments as AppCommandArguments.Scroll).let { capabilities.scroll(it.direction, it.amount) }}
+            registry.enterText        -> true.also { capabilities.enterText((arguments as AppCommandArguments.Text).text) }
+            else                      -> registry.layoutName(definition)?.let(capabilities::loadLayout) ?: false
         }
     }
 }

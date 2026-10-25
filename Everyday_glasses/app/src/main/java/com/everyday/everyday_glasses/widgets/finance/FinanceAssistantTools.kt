@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.interaction.assistant.widget_adapters
+package com.everyday.everyday_glasses.widgets.finance
 
 import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticFact
 import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticToolHandler
@@ -7,7 +7,6 @@ import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutio
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionCodes
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionContext
 import com.everyday.everyday_glasses.interaction.assistant.assistantCompletedFuture
-import com.everyday.everyday_glasses.widgets.finance.FinanceWidget
 import com.everyday.shared.sync.FinanceAssetType
 import com.everyday.shared.sync.FinanceChartType
 import com.everyday.shared.sync.FinanceDataProvider

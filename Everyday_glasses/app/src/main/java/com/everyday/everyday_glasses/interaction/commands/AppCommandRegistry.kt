@@ -1,9 +1,13 @@
 package com.everyday.everyday_glasses.interaction.commands
 
+import com.everyday.everyday_glasses.runtime.WidgetCommand
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetDescriptors
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetMenu
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
+import com.everyday.everyday_glasses.widgets.WidgetPlugins
 import com.everyday.shared.command.AppCommandArguments
 import com.everyday.shared.command.AppCommandInvocation
 import java.net.URI
@@ -40,23 +44,9 @@ data class CommandToolDeclaration(
 
 /** The sole owner of stable command identity and declarative metadata. */
 class AppCommandRegistry(private val savedLayoutNames: () -> List<String> = { emptyList() }) {
-    val toggleStatus = definition("toggle:status", "Toggle: System", "System", "Show or hide the system widget", shortcut = true)
-    val toggleLocation = definition("toggle:location", "Toggle: Location/Weather", "Weather", "Show or hide location and weather", shortcut = true)
-    val toggleMap = definition("toggle:map", "Toggle: Map", "Map", "Show or hide the map")
-    val toggleCalendar = definition("toggle:calendar", "Toggle: Calendar", "Calendar", "Show or hide Calendar", shortcut = true)
-    val toggleFinance = definition("toggle:finance", "Toggle: Finance", "Finance", "Show or hide Finance", shortcut = true)
-    val toggleNews = definition("toggle:news", "Toggle: News", "News", "Show or hide News", shortcut = true)
-    val toggleNotifications = definition("toggle:notifications", "Toggle: Notifications", "Alerts", "Show or hide phone notifications", shortcut = true)
-    val toggleSpeedometer = definition("toggle:speedometer", "Toggle: Speedometer", "Speed", "Show or hide the speedometer", shortcut = true)
-    val toggleSubtitle = definition("toggle:subtitle", "Toggle: Subtitles", "Subs", "Show or hide live subtitles", shortcut = true)
-    val toggleMirror = definition("toggle:mirror", "Toggle: Screen Mirror", "Mirror", "Show or hide phone screen mirroring", shortcut = true)
-    val createText = definition("create:text", "Create: Text widget", "Text", "Create a text widget", shortcut = true)
-    val createBrowser = definition("create:browser", "Open: Browser", "Browser", "Create a browser widget", shortcut = true)
-    val openYouTubeHistory = definition("open:youtube", "Open: YouTube history", "YouTube", "Open YouTube history", shortcut = true)
     val toggleLayoutLock = definition("layout:toggle_lock", "Lock", "Lock", "Toggle widget layout locking")
     val saveLayout = definition("layout:save", "Save", "Save", "Save the active layout")
     val saveLayoutAs = definition("layout:save_as", "Save As...", "Save As", "Save the active layout with a new name")
-    val openFile = definition("file:open", "Open...", "Open", "Open the file picker")
     val openSettings = definition("settings:open", "Settings", "Settings", "Open dashboard settings")
     val closeApp = definition("app:close", "Close", "Close", "Request application close")
     val setBrightness = definition(
@@ -64,23 +54,33 @@ class AppCommandRegistry(private val savedLayoutNames: () -> List<String> = { em
         CommandArgumentKind.BRIGHTNESS
     )
     val scroll = definition("ui:scroll", "Scroll", "Scroll", "Scroll the active UI", CommandArgumentKind.SCROLL)
-    val openUrl = definition("browser:open_url", "Open URL", "URL", "Open an HTTP or HTTPS URL", CommandArgumentKind.URL)
     val enterText = definition(
         "text:enter", "Enter text", "Text", "Enter text into the focused field", CommandArgumentKind.TEXT,
         CommandAvailability.TEXT_FOCUSED
     )
 
-    private val fixed = listOf(
-        toggleStatus, toggleLocation, toggleMap, toggleCalendar, toggleFinance, toggleNews,
-        toggleNotifications, toggleSpeedometer, toggleSubtitle, toggleMirror, createText, createBrowser,
-        openYouTubeHistory, toggleLayoutLock, saveLayout, saveLayoutAs, openFile, openSettings, closeApp, setBrightness, scroll,
-        openUrl, enterText
+    /** The dashboard's own commands. The widget types add theirs, below. */
+    private val appCommands = listOf(
+        toggleLayoutLock, saveLayout, saveLayoutAs, openSettings, closeApp, setBrightness, scroll, enterText
     )
-    /** Each widget toggle, by the type it toggles: "toggle:map" toggles the "map" widget type. */
-    private val widgetCommands = listOf(
-        toggleStatus, toggleLocation, toggleMap, toggleCalendar, toggleFinance, toggleNews,
-        toggleNotifications, toggleSpeedometer, toggleSubtitle, toggleMirror
-    ).associateBy { command -> WidgetTypeId(command.id.removePrefix("toggle:")) }
+
+    /** Every widget type's commands, each with the type's descriptor. */
+    private val typeCommands: List<Pair<WidgetDescriptor, WidgetCommand>> =
+        WidgetPlugins.all.flatMap { type -> type.commands.map { command -> type.descriptor to command } }
+
+    /** The single-instance toggles, in descriptor order. */
+    private val toggles = typeCommands.filter { it.second.menu == WidgetMenu.TOGGLE }.sortedBy { it.first.order }
+
+    /** The types' other commands, in menu order (each type's in its own order). */
+    private val otherWidgetCommands = typeCommands.filter { it.second.menu != WidgetMenu.TOGGLE }.sortedBy { it.first.menuOrder }
+
+    private val fixed = toggles.map { it.second.definition } + otherWidgetCommands.map { it.second.definition } + appCommands
+
+    /** Each toggle, by the type it shows or hides. */
+    private val widgetCommands = toggles.associate { (descriptor, command) -> descriptor.type to command.definition }
+
+    /** The type that runs each of the other widget commands. */
+    private val commandTypes = otherWidgetCommands.associate { (descriptor, command) -> command.definition to descriptor.type }
     private val commandWidgets = widgetCommands.entries.associate { (widget, command) -> command to widget }
     private data class AssistantVisibilityCommand(
         val definition: AppCommandDefinition,
@@ -117,7 +117,7 @@ class AppCommandRegistry(private val savedLayoutNames: () -> List<String> = { em
 
     val defaultShortcutInvocations: List<AppCommandInvocation>
         get() = BuiltInLayouts.NAMES.map { invocation(layoutCommandId(it)) } +
-            listOf(invocation(createText), invocation(createBrowser))
+            widgetMenuCommands(WidgetMenu.CREATE).map { invocation(it.definition) }
 
     fun definitions(): List<AppCommandDefinition> = fixed + layoutDefinitions().sortedBy { it.id }
 
@@ -141,6 +141,13 @@ class AppCommandRegistry(private val savedLayoutNames: () -> List<String> = { em
         requireNotNull(widgetCommands[widgetId]) { "No toggle command for widget type $widgetId" }
 
     fun widgetId(definition: AppCommandDefinition): WidgetTypeId? = commandWidgets[definition]
+
+    /** The widget type that runs [definition], for a widget command other than a toggle. */
+    fun widgetCommandType(definition: AppCommandDefinition): WidgetTypeId? = commandTypes[definition]
+
+    /** The widget commands listed on [menu]'s page, in menu order. */
+    fun widgetMenuCommands(menu: WidgetMenu): List<WidgetCommand> =
+        (toggles + otherWidgetCommands).map { it.second }.filter { it.menu == menu }
 
     fun widgetVisibility(definition: AppCommandDefinition): WidgetVisibilityTarget? =
         assistantVisibilityById[definition.id]?.target

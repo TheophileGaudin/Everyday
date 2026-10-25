@@ -12,6 +12,7 @@ import android.text.TextPaint
 import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
 import androidx.core.graphics.withTranslation
+import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
@@ -20,9 +21,11 @@ import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.SubtitleWidgetListener
+import com.everyday.everyday_glasses.runtime.WidgetCommand
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetMenu
 import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
@@ -590,6 +593,17 @@ class SubtitlePlugin(
         )
         override val codec get() = SubtitleWidgetState.Codec
         override fun create(context: WidgetContext) = SubtitlePlugin(context)
+        override val commands = listOf(
+            WidgetCommand(
+                AppCommandDefinition(
+                    "toggle:subtitle",
+                    "Toggle: Subtitles",
+                    "Subs",
+                    "Show or hide live subtitles",
+                    shortcutEligible = true
+                ), WidgetMenu.TOGGLE
+            ),
+        )
     }
 }
 

@@ -21,7 +21,10 @@ import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 import com.everyday.everyday_glasses.runtime.WidgetType
 import androidx.core.graphics.toColorInt
+import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
 import com.everyday.everyday_glasses.runtime.StatusSnapshot
+import com.everyday.everyday_glasses.runtime.WidgetCommand
+import com.everyday.everyday_glasses.runtime.WidgetMenu
 import org.json.JSONObject
 
 /**
@@ -681,6 +684,17 @@ class StatusBarPlugin(
         override val descriptor = WidgetDescriptor(TYPE, "Status", WidgetInstancePolicy.SINGLETON, order = 0, category = "information", storesClosedTemplate = true)
         override val codec get() = StatusBarState.Codec
         override fun create(context: WidgetContext) = StatusBarPlugin(context)
+        override val commands = listOf(
+            WidgetCommand(
+                AppCommandDefinition(
+                    "toggle:status",
+                    "Toggle: System",
+                    "System",
+                    "Show or hide the system widget",
+                    shortcutEligible = true
+                ), WidgetMenu.TOGGLE
+            ),
+        )
         private const val WIDTH = 220f
         private const val HEIGHT = 110f
     }

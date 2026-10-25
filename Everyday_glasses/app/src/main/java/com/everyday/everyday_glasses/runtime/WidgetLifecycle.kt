@@ -10,6 +10,9 @@ import com.everyday.everyday_glasses.settings.SettingsController
 import com.everyday.everyday_glasses.settings.UnitSettings
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.shared.sync.SubtitleControl
+import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
+import com.everyday.everyday_glasses.widgets._common.PresentationSpec
+import com.everyday.shared.command.AppCommandArguments
 
 interface WidgetLifecycle {
     fun onResume() {}
@@ -32,6 +35,9 @@ interface WidgetLifecycleListener {
 interface WidgetPlugin {
     /** How the dashboard opens, restores, saves and closes this type's widgets. */
     val lifecycle: WidgetLifecycleRegistration<out BaseWidget, out Any>
+
+    /** Runs one of this type's [WidgetType.commands]; false when [commandId] isn't one of them, or it failed. */
+    fun runCommand(commandId: String, arguments: AppCommandArguments): Boolean = false
 }
 
 /**
@@ -43,7 +49,27 @@ interface WidgetType {
     val descriptor: WidgetDescriptor
     val codec: WidgetDocument.WidgetStateCodec
     fun create(context: WidgetContext): WidgetPlugin
+
+    /** The app commands this type adds: its menu entries, shortcuts and assistant commands. Its plugin runs them. */
+    val commands: List<WidgetCommand> get() = emptyList()
 }
+
+/** Where a widget command is listed in the context menu. */
+enum class WidgetMenu {
+    /** *Widgets*: shows or hides a single-instance type's widget. The dashboard runs these itself. */
+    TOGGLE,
+    /** *Create*: opens a new widget. */
+    CREATE,
+    /** *Files*. */
+    FILES,
+}
+
+/** An app command a widget type adds; [menu] lists it in the context menu, under [menuLabel]. */
+data class WidgetCommand(
+    val definition: AppCommandDefinition,
+    val menu: WidgetMenu? = null,
+    val menuLabel: String = definition.shortLabel,
+)
 
 /**
  * What the dashboard offers every widget plugin, named by capability, never by widget: its size and
@@ -111,6 +137,28 @@ interface WidgetContext {
 
     /** Ends the assistant's presentation of [widget], if that widget is the one being presented. */
     fun dismissPresentationOf(widget: BaseWidget)
+
+    /**
+     * Presents [widget] for the assistant, as [spec] says (where, for how long, what comes after);
+     * false when it can't start. [createdByPresentation]: the widget was opened for this
+     * presentation, so the presentation's end may close it.
+     */
+    fun present(widget: BaseWidget, spec: PresentationSpec, createdByPresentation: Boolean = false): Boolean
+
+    /** Closes [widget] without reporting it as a dashboard change (a presentation that couldn't start). */
+    fun closeUnreported(widget: BaseWidget)
+
+    /** Shows the single-instance [type]'s widget, reopening or creating it; the widget, or null. */
+    fun show(type: WidgetTypeId): BaseWidget?
+
+    /** Brings [widget] in front of the others, its native view (a web page) included. */
+    fun bringToFront(widget: BaseWidget)
+
+    /** Takes the keyboard from whatever has it, the phone's keyboard included. */
+    fun clearKeyFocus()
+
+    /** A change that is saved: the dashboard is written soon after. */
+    fun notifyPersistentChange()
 
     /** [widget] took or gave up the keyboard by itself (the map's address search): bring it forward and tell the phone. */
     fun onKeyFocusChanged(widget: BaseWidget, focused: Boolean)

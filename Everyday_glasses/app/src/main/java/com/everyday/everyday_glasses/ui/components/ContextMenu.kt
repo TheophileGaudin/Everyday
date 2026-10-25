@@ -12,6 +12,7 @@ import kotlin.math.max
 import kotlin.math.min
 import androidx.core.graphics.toColorInt
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetMenu
 
 /**
  * Head-locked context menu optimized for the 640x480 glasses display.
@@ -160,10 +161,7 @@ class ContextMenu(
                 "create",
                 "Create",
                 "+",
-                submenu = listOf(
-                    SubMenuItem(commandRegistry.createText.id, "Text Box"),
-                    SubMenuItem(commandRegistry.createBrowser.id, "Browser")
-                )
+                submenu = widgetMenuItems(WidgetMenu.CREATE)
             )
         )
         addItem(
@@ -171,16 +169,7 @@ class ContextMenu(
                 "toggle_widgets",
                 "Widgets",
                 null,
-                submenu = listOf(
-                    SubMenuItem(commandRegistry.toggleStatus.id, "System", false),
-                    SubMenuItem(commandRegistry.toggleLocation.id, "Location/Weather", false),
-                    SubMenuItem(commandRegistry.toggleCalendar.id, "Calendar", false),
-                    SubMenuItem(commandRegistry.toggleSpeedometer.id, "Speedometer", false),
-                    SubMenuItem(commandRegistry.toggleFinance.id, "Finance", false),
-                    SubMenuItem(commandRegistry.toggleNews.id, "News", false),
-                    SubMenuItem(commandRegistry.toggleSubtitle.id, "Subtitles", false),
-                    SubMenuItem(commandRegistry.toggleMirror.id, "Screen Mirror", false)
-                )
+                submenu = widgetToggleItems(isShown = { false }) // Rebuilt with the real states when the page opens.
             )
         )
         addItem(
@@ -199,7 +188,7 @@ class ContextMenu(
                 "files",
                 "Files",
                 null,
-                submenu = listOf(SubMenuItem(commandRegistry.openFile.id, "Open..."))
+                submenu = widgetMenuItems(WidgetMenu.FILES)
             )
         )
         addItem(MenuItem(commandRegistry.openSettings.id, "Settings", null))
@@ -424,15 +413,22 @@ class ContextMenu(
         dismiss()
     }
 
+    /** The *Widgets* page: one toggle per single-instance type, in menu order, checked when [isShown]. */
+    private fun widgetToggleItems(isShown: (WidgetTypeId) -> Boolean): List<SubMenuItem> = WidgetDescriptors.all
+        .filter { it.policy == WidgetInstancePolicy.SINGLETON }
+        .sortedBy { it.menuOrder }
+        .map { descriptor ->
+            val definition = commandRegistry.widgetDefinition(descriptor.type)
+            SubMenuItem(definition.id, descriptor.label, isShown(descriptor.type))
+        }
+
+    /** The widget types' commands listed on [menu]'s page (*Create*, *Files*). */
+    private fun widgetMenuItems(menu: WidgetMenu): List<SubMenuItem> =
+        commandRegistry.widgetMenuCommands(menu).map { SubMenuItem(it.definition.id, it.menuLabel) }
+
     /** [item]'s page as it is now: which widgets are shown, and which layouts are saved. */
     private fun currentSubmenu(item: MenuItem): List<SubMenuItem> = when (item.id) {
-        "toggle_widgets" -> WidgetDescriptors.all
-            .filter { it.policy == WidgetInstancePolicy.SINGLETON }
-            .sortedBy { it.menuOrder }
-            .map { descriptor ->
-                val definition = commandRegistry.widgetDefinition(descriptor.type)
-                SubMenuItem(definition.id, descriptor.label, isWidgetShown(descriptor.type))
-            }
+        "toggle_widgets" -> widgetToggleItems(isShown = isWidgetShown)
         "layouts" -> {
             val loadItems = commandRegistry.shortcutDefinitions().mapNotNull { definition ->
                 commandRegistry.layoutName(definition)?.let { SubMenuItem(definition.id, it) }

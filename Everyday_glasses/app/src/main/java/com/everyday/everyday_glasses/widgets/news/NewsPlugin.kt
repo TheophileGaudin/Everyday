@@ -1,6 +1,9 @@
 package com.everyday.everyday_glasses.widgets.news
 
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.NewsSourceUpdateResult
+import com.everyday.everyday_glasses.interaction.assistant.AssistantContribution
+import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticFact
+import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticToolHandler
+import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
@@ -11,11 +14,14 @@ import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.AppQueries
 import com.everyday.everyday_glasses.runtime.NewsWidgetListener
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
+import com.everyday.everyday_glasses.runtime.WidgetCommand
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetMenu
 import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.shared.sync.NewsSnapshot
 import com.everyday.shared.sync.NewsSourceSpec
 import java.util.concurrent.CompletableFuture
@@ -24,7 +30,7 @@ import org.json.JSONObject
 /** Puts the news widget on the dashboard and connects it to the phone's news feeds. */
 internal class NewsPlugin(
     private val services: WidgetContext,
-) : WidgetPlugin {
+) : WidgetPlugin, AssistantContribution {
     private val ui: UiThreadDispatcher get() = services.ui
     private val currentWidget: () -> NewsWidget? = { services.singleton(TYPE) as? NewsWidget }
     override val lifecycle = WidgetLifecycleRegistration.singleton(
@@ -204,6 +210,18 @@ internal class NewsPlugin(
         widget.requestData(force = true, reason = reason)
     }
 
+    // ==================== What the assistant can do and read ====================
+
+    override fun assistantTools(): List<AssistantSemanticToolHandler> = listOf(SetNewsSourceSemanticToolHandler(::setSource))
+
+    override fun assistantFacts(widget: BaseWidget, stableId: String): List<AssistantSemanticFact> {
+        val news = widget as? NewsWidget ?: return emptyList()
+        return listOf(
+            AssistantSemanticFact("source_kind", news.getSourceSpec().kind.name),
+            AssistantSemanticFact("source_description", news.getSourceDescription()),
+        )
+    }
+
     /** The news widget as a widget type: its id, its descriptor, how it is saved, and its plugin. */
     companion object : WidgetType {
         val TYPE = WidgetTypeId("news")
@@ -218,6 +236,17 @@ internal class NewsPlugin(
         )
         override val codec get() = NewsWidgetState.Codec
         override fun create(context: WidgetContext) = NewsPlugin(context)
+        override val commands = listOf(
+            WidgetCommand(
+                AppCommandDefinition(
+                    "toggle:news",
+                    "Toggle: News",
+                    "News",
+                    "Show or hide News",
+                    shortcutEligible = true
+                ), WidgetMenu.TOGGLE
+            ),
+        )
     }
 
 }

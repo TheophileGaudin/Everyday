@@ -6,8 +6,8 @@ import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutio
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionContext
 import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContext
 import com.everyday.everyday_glasses.interaction.assistant.AssistantWidgetContext
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.NewsSourceUpdateResult
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.SetNewsSourceSemanticToolHandler
+import com.everyday.everyday_glasses.widgets.news.NewsSourceUpdateResult
+import com.everyday.everyday_glasses.widgets.news.SetNewsSourceSemanticToolHandler
 import com.everyday.shared.sync.NewsSourceSpec
 import org.json.JSONObject
 import org.junit.Assert.assertEquals

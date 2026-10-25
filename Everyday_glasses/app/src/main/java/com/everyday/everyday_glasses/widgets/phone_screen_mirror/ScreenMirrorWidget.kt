@@ -25,6 +25,7 @@ import android.renderscript.Type
 import android.util.Log
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.get
+import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
@@ -32,9 +33,11 @@ import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
+import com.everyday.everyday_glasses.runtime.WidgetCommand
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetMenu
 import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
@@ -1218,6 +1221,17 @@ class MirrorPlugin(
         )
         override val codec get() = MirrorWidgetState.Codec
         override fun create(context: WidgetContext) = MirrorPlugin(context)
+        override val commands = listOf(
+            WidgetCommand(
+                AppCommandDefinition(
+                    "toggle:mirror",
+                    "Toggle: Screen Mirror",
+                    "Mirror",
+                    "Show or hide phone screen mirroring",
+                    shortcutEligible = true
+                ), WidgetMenu.TOGGLE
+            ),
+        )
     }
 }
 

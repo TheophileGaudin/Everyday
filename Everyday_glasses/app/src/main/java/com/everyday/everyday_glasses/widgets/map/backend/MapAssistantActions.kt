@@ -1,14 +1,10 @@
-package com.everyday.everyday_glasses.interaction.assistant.widget_adapters
+package com.everyday.everyday_glasses.widgets.map.backend
 
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecution
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionCodes
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
 import com.everyday.everyday_glasses.widgets._common.PresentationSpec
 import com.everyday.everyday_glasses.widgets.map.MapWidget
-import com.everyday.everyday_glasses.widgets.map.backend.NavigationOperationResult
-import com.everyday.everyday_glasses.widgets.map.backend.NavigationPresentationDefaults
-import com.everyday.everyday_glasses.widgets.map.backend.StartNavigationRequest
-import com.everyday.everyday_glasses.widgets.map.backend.formatWalkingEta
 import java.util.concurrent.CompletableFuture
 
 internal class MapAssistantActions(

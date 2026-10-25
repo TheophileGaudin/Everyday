@@ -8,6 +8,7 @@ import android.text.TextPaint
 import android.text.TextUtils
 import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
+import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
@@ -17,9 +18,11 @@ import org.json.JSONObject
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
+import com.everyday.everyday_glasses.runtime.WidgetCommand
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetMenu
 import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.shared.sync.PhoneNotificationItem
@@ -660,6 +663,17 @@ class NotificationsPlugin(
         )
         override val codec get() = NotificationsWidgetState.Codec
         override fun create(context: WidgetContext) = NotificationsPlugin(context)
+        override val commands = listOf(
+            WidgetCommand(
+                AppCommandDefinition(
+                    "toggle:notifications",
+                    "Toggle: Notifications",
+                    "Alerts",
+                    "Show or hide phone notifications",
+                    shortcutEligible = true
+                ), WidgetMenu.TOGGLE
+            ),
+        )
     }
 }
 

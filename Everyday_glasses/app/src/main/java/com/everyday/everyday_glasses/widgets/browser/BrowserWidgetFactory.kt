@@ -3,18 +3,25 @@ package com.everyday.everyday_glasses.widgets.browser
 import android.content.Context
 import android.view.View
 import android.view.ViewGroup
+import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserRoutingHost
+import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentBrowserAdapter
+import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
+import com.everyday.everyday_glasses.interaction.commands.CommandArgumentKind
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseCommonFields
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.BrowserWidgetListener
+import com.everyday.everyday_glasses.runtime.WidgetCommand
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetMenu
 import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import com.everyday.shared.command.AppCommandArguments
 import org.json.JSONObject
 
 /** Constructs BrowserWidget instances and places their native WebView below the canvas layer. */
@@ -56,7 +63,7 @@ internal class BrowserWidgetFactory(
  */
 class BrowserPlugin(
     private val services: WidgetContext,
-) : WidgetPlugin {
+) : WidgetPlugin, BrowserRoutingHost {
     private val context: Context get() = services.androidContext
     private val rootLayout: () -> ViewGroup? = { services.rootLayout }
     private val containerView: View get() = services.dashboardView
@@ -167,6 +174,61 @@ class BrowserPlugin(
     private fun build(x: Float, y: Float, width: Float, height: Float): BrowserWidget? =
         rootLayout()?.let { root -> BrowserWidgetFactory(context, root, containerView).create(x, y, width, height) }
 
+    override fun runCommand(commandId: String, arguments: AppCommandArguments): Boolean = when (commandId) {
+        CREATE.definition.id -> true.also { openFromMenu() }
+        YOUTUBE_HISTORY.definition.id -> true.also { openYouTubeHistory() }
+        OPEN_URL.definition.id -> true.also { openAddress((arguments as AppCommandArguments.Url).url) }
+        else -> false
+    }
+
+    /** Opens [address] in the browser that has the keyboard, else in the fullscreen one, else in a new fullscreen one. */
+    fun openAddress(address: String) {
+        val widget = all().firstOrNull { it.hasKeyFocus }
+            ?: all().firstOrNull { it.isFullscreen }
+            ?: openFullscreen(focus = false)
+            ?: return
+
+        services.runPersistentMutation {
+            if (widget.isMinimized) widget.toggleMinimize()
+            services.bringToFront(widget)
+            widget.setFocused(true)
+            widget.navigateToAddress(address, autoFullscreenVideo = true)
+        }
+    }
+
+    // ==================== The browsers the assistant's Page Agent drives ====================
+
+    override fun bindFullscreenBrowser(): PageAgentBrowserAdapter? {
+        val widget = all().firstOrNull { it.isFullscreen }
+            ?: all().firstOrNull { it.isInVideoFullscreen() }
+            ?: return null
+        return BrowserWidgetPageAgentAdapter.bind(services.stableId(widget), widget)
+    }
+
+    override fun bindBrowser(widgetId: String?): PageAgentBrowserAdapter? {
+        val normalizedId = widgetId?.trim()?.takeIf { it.isNotBlank() }
+        val widget = if (normalizedId != null) {
+            all().firstOrNull { services.stableId(it) == normalizedId }
+        } else {
+            all().firstOrNull { it.hasKeyFocus && !it.isMinimized }
+                ?: all().firstOrNull { !it.isMinimized }
+        } ?: return null
+        return BrowserWidgetPageAgentAdapter.bind(services.stableId(widget), widget)
+    }
+
+    override fun createBrowser(): PageAgentBrowserAdapter? {
+        if (services.viewportWidth <= 0 || services.viewportHeight <= 0) return null
+        return services.runPersistentMutation(changed = { true }) {
+            openForTask()?.let { opened ->
+                BrowserWidgetPageAgentAdapter.bind(services.stableId(opened), opened)
+                    ?: run {
+                        services.close(opened)
+                        null
+                    }
+            }
+        }
+    }
+
     /** The web browser as a widget type: its id, its descriptor, how it is saved, and its plugin. */
     companion object : WidgetType {
         val TYPE = WidgetTypeId("browser")
@@ -176,10 +238,29 @@ class BrowserPlugin(
             WidgetInstancePolicy.MULTIPLE,
             order = 10,
             category = "content",
-            storesClosedTemplate = true
+            storesClosedTemplate = true,
+            menuOrder = 12, // In the Create menu and among the shortcuts, after the text box.
         )
         override val codec get() = BrowserWidgetState.Codec
         override fun create(context: WidgetContext) = BrowserPlugin(context)
+        private val CREATE = WidgetCommand(
+            AppCommandDefinition(
+                "create:browser",
+                "Open: Browser",
+                "Browser",
+                "Create a browser widget",
+                shortcutEligible = true
+            ),
+            WidgetMenu.CREATE, "Browser",
+        )
+        private val YOUTUBE_HISTORY = WidgetCommand(
+            AppCommandDefinition("open:youtube", "Open: YouTube history", "YouTube", "Open YouTube history", shortcutEligible = true),
+        )
+        /** Also how the phone's "open this address" requests reach the browser ([com.everyday.everyday_glasses.WidgetContainer.executeOpenUrlCommand]). */
+        val OPEN_URL = WidgetCommand(
+            AppCommandDefinition("browser:open_url", "Open URL", "URL", "Open an HTTP or HTTPS URL", CommandArgumentKind.URL),
+        )
+        override val commands = listOf(CREATE, YOUTUBE_HISTORY, OPEN_URL)
         private const val YOUTUBE_HISTORY_URL = "https://www.youtube.com/feed/history"
     }
 }

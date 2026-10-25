@@ -27,10 +27,14 @@ class AppCommandRegistryTest {
     fun `registry IDs are unique and retains durable shortcut IDs`() {
         val ids = registry.definitions().map { it.id }
         assertEquals(ids.size, ids.toSet().size)
+        // Sorted: the ids must not change (shortcuts are saved by id); their order may.
         val stableDigest = MessageDigest.getInstance("SHA-256")
-            .digest(ids.joinToString("\n").toByteArray())
+            .digest(ids.sorted().joinToString("\n").toByteArray())
             .joinToString("") { "%02x".format(it) }
-        assertEquals("0330aacddf7f8ee06af6f05ba665e8fb089bdaf94cf3fabb2d81c874aa224fbe", stableDigest)
+        assertEquals(
+            "5e371697f75874c6921b77f457049cc9bda93bb1e718ec13cb20458e71b7c84b",
+            stableDigest
+        )
     }
 
     @Test
@@ -48,17 +52,17 @@ class AppCommandRegistryTest {
             registry.scroll.id, AppCommandArguments.Scroll(CommandScrollDirection.DOWN, 0f)
         )) is CommandValidationResult.Invalid)
         assertTrue(registry.validate(AppCommandInvocation(
-            registry.openUrl.id, AppCommandArguments.Url("https://example.com/path")
+            "browser:open_url", AppCommandArguments.Url("https://example.com/path")
         )) is CommandValidationResult.Valid)
         assertTrue(registry.validate(AppCommandInvocation(
-            registry.openUrl.id, AppCommandArguments.Url("file:///etc/passwd")
+            "browser:open_url", AppCommandArguments.Url("file:///etc/passwd")
         )) is CommandValidationResult.Invalid)
         assertTrue(registry.validate(AppCommandInvocation("does:not_exist")) is CommandValidationResult.Invalid)
     }
 
     @Test
     fun `shortcut persistence resolves the same commands after restart`() {
-        val before = listOf(registry.invocation(registry.toggleStatus), registry.invocation("layout:Work"))
+        val before = listOf(registry.invocation(registry.find("toggle:status")!!), registry.invocation("layout:Work"))
         val after = ShortcutsStore.decode(
             ShortcutsStore.encode(before),
             AppCommandRegistry { listOf("Work") })
@@ -67,10 +71,10 @@ class AppCommandRegistryTest {
 
     @Test
     fun `menu and shortcut routes produce the same invocation`() {
-        val menuInvocation = registry.invocation(registry.toggleStatus)
+        val menuInvocation = registry.invocation(registry.find("toggle:status")!!)
         val shortcutInvocation = registry.defaultShortcutInvocations
-            .firstOrNull { it.commandId == registry.toggleStatus.id }
-            ?: registry.invocation(registry.toggleStatus)
+            .firstOrNull { it.commandId == registry.find("toggle:status")!!.id }
+            ?: registry.invocation(registry.find("toggle:status")!!)
         assertEquals(menuInvocation, shortcutInvocation)
     }
 
@@ -79,10 +83,10 @@ class AppCommandRegistryTest {
         val declarations = registry.toolDeclarations()
         assertEquals(registry.definitions().map { it.id }, declarations.map { it.name })
         val invocations = listOf(
-            registry.invocation(registry.toggleStatus),
+            registry.invocation(registry.find("toggle:status")!!),
             AppCommandInvocation(registry.setBrightness.id, AppCommandArguments.Brightness(0.4f)),
             AppCommandInvocation(registry.scroll.id, AppCommandArguments.Scroll(CommandScrollDirection.UP, 25f)),
-            AppCommandInvocation(registry.openUrl.id, AppCommandArguments.Url("https://example.com")),
+            AppCommandInvocation("browser:open_url", AppCommandArguments.Url("https://example.com")),
             AppCommandInvocation(registry.enterText.id, AppCommandArguments.Text("hello")),
             AppCommandInvocation("metadata-only", AppCommandArguments.Widget("map")),
             AppCommandInvocation("metadata-only", AppCommandArguments.Layout("Standard"))
@@ -101,7 +105,7 @@ class AppCommandRegistryTest {
             action()
         }
 
-        val result = executor.execute(registry.invocation(registry.toggleStatus))
+        val result = executor.execute(registry.invocation(registry.find("toggle:status")!!))
         assertTrue(result is AppCommandResult.Success)
         assertEquals(1, dispatchCalls)
         assertEquals(1, capabilities.calls)
@@ -118,7 +122,7 @@ class AppCommandRegistryTest {
         assertEquals(NewsPlugin.TYPE, capabilities.widget)
 
         capabilities.available = false
-        val unavailable = executor.execute(registry.invocation(registry.toggleNews))
+        val unavailable = executor.execute(registry.invocation(registry.find("toggle:news")!!))
         assertTrue(unavailable is AppCommandResult.Failure)
         assertEquals(2, dispatchCalls)
         assertEquals(2, capabilities.calls)
@@ -152,7 +156,7 @@ class AppCommandRegistryTest {
         val capabilities = FakeCapabilities()
         val executor = AppCommandExecutor(registry, capabilities) { null }
 
-        val result = executor.execute(registry.invocation(registry.toggleStatus))
+        val result = executor.execute(registry.invocation(registry.find("toggle:status")!!))
 
         assertTrue(result is AppCommandResult.Failure)
         assertEquals(
@@ -177,19 +181,19 @@ class AppCommandRegistryTest {
             widget = type
             this.visible = visible
         }
-        override fun createTextWidget() { calls++ }
-        override fun createBrowserWidget() { calls++ }
-        override fun openYouTubeHistory() { calls++ }
+        override fun runWidgetCommand(type: WidgetTypeId, commandId: String, arguments: AppCommandArguments): Boolean {
+            calls++
+            widget = type
+            return true
+        }
         override fun loadLayout(name: String): Boolean {calls++; return loadLayoutSucceeds}
         override fun toggleLayoutLock() { calls++ }
         override fun saveLayout() { calls++ }
         override fun saveLayoutAs() { calls++ }
-        override fun openFilePicker() { calls++ }
         override fun openSettings() { calls++ }
         override fun requestClose() { calls++ }
         override fun setBrightness(value: Float) { calls++ }
         override fun scroll(direction: CommandScrollDirection, amount: Float) { calls++ }
-        override fun openUrl(url: String) { calls++ }
         override fun enterText(text: String) { calls++ }
         override fun commandFinished() { finishedCalls++ }
     }

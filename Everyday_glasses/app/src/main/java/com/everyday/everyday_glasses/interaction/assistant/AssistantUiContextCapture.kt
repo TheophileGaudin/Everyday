@@ -1,14 +1,9 @@
 package com.everyday.everyday_glasses.interaction.assistant
 
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.toAssistantSemanticFacts
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetDescriptors
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
-import com.everyday.everyday_glasses.widgets.finance.FinanceWidget
-import com.everyday.everyday_glasses.widgets.map.MapWidget
-import com.everyday.everyday_glasses.widgets.map.backend.toAssistantSemanticFacts
-import com.everyday.everyday_glasses.widgets.news.NewsWidget
 import kotlin.math.roundToInt
 
 internal class AssistantUiContextCapture(
@@ -16,6 +11,7 @@ internal class AssistantUiContextCapture(
     private val screenSize: () -> Pair<Int, Int>,
     private val activeLayoutName: () -> String?,
     private val focusedWidget: () -> BaseWidget?,
+    private val factsOf: (BaseWidget, String) -> List<AssistantSemanticFact>, /** What the widget's plugin says about it ([AssistantContribution.assistantFacts]). */
 ) {
     /** Capture only runtime layout metadata for the next assistant request. */
     fun capture(): AssistantUiContext {
@@ -35,17 +31,7 @@ internal class AssistantUiContextCapture(
                 AssistantSemanticFact("widget_type", descriptor.type.persistedId),
                 AssistantSemanticFact("widget_label", descriptor.label)
             )
-            if (widget is NewsWidget) {
-                facts += AssistantSemanticFact("source_kind", widget.getSourceSpec().kind.name)
-                facts += AssistantSemanticFact("source_description", widget.getSourceDescription())
-            }
-            if (widget is FinanceWidget) {
-                facts += widget.semanticState(id).toAssistantSemanticFacts()
-            }
-            if (widget is MapWidget) {
-                facts += widget.poiDisplayConfig.toAssistantSemanticFacts()
-                facts += widget.navigationState.toAssistantSemanticFacts()
-            }
+            facts += factsOf(widget, id)
             AssistantWidgetContext(
                 id = id,
                 left = bounds.left.roundToInt(),

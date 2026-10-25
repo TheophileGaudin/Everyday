@@ -1,10 +1,11 @@
-package com.everyday.everyday_glasses.interaction.assistant.widget_adapters
+package com.everyday.everyday_glasses.widgets.text_editor
 
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecution
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.interaction.assistant.AssistantTextContentFormatter
+import com.everyday.everyday_glasses.interaction.assistant.AssistantTextPresentationRequest
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
 import com.everyday.everyday_glasses.widgets._common.PresentationSpec
-import com.everyday.everyday_glasses.widgets.text_editor.TextBoxWidget
 import java.util.concurrent.CompletableFuture
 
 internal class TextAssistantActions(

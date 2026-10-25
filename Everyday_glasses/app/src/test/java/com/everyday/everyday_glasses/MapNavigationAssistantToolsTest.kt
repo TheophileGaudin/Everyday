@@ -4,8 +4,8 @@ import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutio
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionCodes
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionContext
 import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContext
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.StartNavigationSemanticToolHandler
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.StopNavigationSemanticToolHandler
+import com.everyday.everyday_glasses.widgets.map.backend.StartNavigationSemanticToolHandler
+import com.everyday.everyday_glasses.widgets.map.backend.StopNavigationSemanticToolHandler
 import com.everyday.everyday_glasses.interaction.assistant.assistantCompletedFuture
 import com.everyday.everyday_glasses.widgets._common.PresentationExpiryPolicy
 import com.everyday.everyday_glasses.widgets._common.PresentationMode

@@ -1,35 +1,39 @@
 package com.everyday.everyday_glasses.widgets.finance
 
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.FinanceTileUpdateRequest
-import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.FinanceTileUpdateResult
+import com.everyday.everyday_glasses.interaction.assistant.AssistantContribution
+import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticFact
+import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticToolHandler
+import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
-import com.everyday.everyday_glasses.runtime.WidgetContext
-import com.everyday.everyday_glasses.runtime.WidgetPlugin
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.AppQueries
 import com.everyday.everyday_glasses.runtime.FinanceWidgetListener
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
-import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
-import com.everyday.everyday_glasses.widgets._common.BaseWidget
-import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
-import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
-import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.runtime.WidgetCommand
+import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetMenu
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.WidgetType
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.shared.sync.FinanceAssetType
 import com.everyday.shared.sync.FinanceChartType
-import com.everyday.shared.sync.FinanceTimeRange
 import com.everyday.shared.sync.FinanceDashboardTileConfig
-import java.util.concurrent.CompletableFuture
+import com.everyday.shared.sync.FinanceTimeRange
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.CompletableFuture
 
 /** Puts the finance widget on the dashboard and connects it to the phone's market data. */
 internal class FinancePlugin(
     private val services: WidgetContext,
-) : WidgetPlugin {
+) : WidgetPlugin, AssistantContribution {
     private val ui: UiThreadDispatcher get() = services.ui
     private val currentWidget: () -> FinanceWidget? = { services.singleton(TYPE) as? FinanceWidget }
     private val runPersistentUpdate: ((() -> Result<FinanceDashboardTileConfig>) -> Result<FinanceDashboardTileConfig>) =
@@ -239,6 +243,16 @@ internal class FinancePlugin(
     private fun onDestroyed() {
             services.appData.requests?.onFinanceVisibilityChanged(false)
         }
+
+    // ==================== What the assistant can do and read ====================
+
+    override fun assistantTools(): List<AssistantSemanticToolHandler> = listOf(
+        UpdateFinanceTileSemanticToolHandler(updateTile = ::updateTile, isAvailable = { currentWidget() != null }),
+    )
+
+    override fun assistantFacts(widget: BaseWidget, stableId: String): List<AssistantSemanticFact> =
+        (widget as? FinanceWidget)?.semanticState(stableId)?.toAssistantSemanticFacts().orEmpty()
+
     /** The finance widget as a widget type: its id, its descriptor, how it is saved, and its plugin. */
     companion object : WidgetType {
         val TYPE = WidgetTypeId("finance")
@@ -253,6 +267,17 @@ internal class FinancePlugin(
         )
         override val codec get() = FinanceWidgetState.Codec
         override fun create(context: WidgetContext) = FinancePlugin(context)
+        override val commands = listOf(
+            WidgetCommand(
+                AppCommandDefinition(
+                    "toggle:finance",
+                    "Toggle: Finance",
+                    "Finance",
+                    "Show or hide Finance",
+                    shortcutEligible = true
+                ), WidgetMenu.TOGGLE
+            ),
+        )
     }
 
 }

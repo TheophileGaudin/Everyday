@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.interaction.assistant.widget_adapters
+package com.everyday.everyday_glasses.widgets.news
 
 import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticToolHandler
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolDefinition

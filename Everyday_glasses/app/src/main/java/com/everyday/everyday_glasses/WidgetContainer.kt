@@ -53,7 +53,6 @@ import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.LayoutLibrary
 import com.everyday.everyday_glasses.ui.hover_controls.HoverControlsLayer
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
-import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
 import com.everyday.everyday_glasses.ui.components.CloseConfirmationPopup
 import com.everyday.everyday_glasses.ui.components.ContextMenu
 import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserPlugin
@@ -61,12 +60,11 @@ import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidget
 import com.everyday.everyday_glasses.widgets.file_browser.ImagePlugin
 import com.everyday.everyday_glasses.widgets.file_browser.PdfPlugin
 import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidget
-import com.everyday.everyday_glasses.widgets.text_editor.TextBoxPlugin
 import com.everyday.everyday_glasses._threedof.ThreeDofOverlay
 import com.everyday.everyday_glasses.interaction.assistant.AssistantDashboardAccess
 import com.everyday.everyday_glasses.widgets.file_browser.VideoPlugin
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
-import com.everyday.everyday_glasses.widgets.finance.FinancePlugin
+import com.everyday.everyday_glasses.widgets._common.PresentationSpec
 import com.everyday.everyday_glasses.widgets.news.NewsPlugin
 import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerPlugin
 import com.everyday.shared.command.AppCommandArguments
@@ -196,30 +194,23 @@ class WidgetContainer @JvmOverloads constructor(
             CommandAvailability.ALWAYS            -> true
             CommandAvailability.APP_READY         -> isReady()
             CommandAvailability.TEXT_FOCUSED      -> textEditing.hasKeyFocus
-            CommandAvailability.BROWSER_AVAILABLE -> textEditing.focusedPage != null || fullscreenAs<BrowserWidget>() != null || isReady()
+            CommandAvailability.BROWSER_AVAILABLE -> textEditing.focusedPage != null || isReady()
         }
-        override fun toggleWidget(type: WidgetTypeId) = lifecycleController.toggle(type)
-        override fun setWidgetVisible(type: WidgetTypeId, visible: Boolean) {
-            if (visible) lifecycleController.show(type) else lifecycleController.hide(type)
-        }
-        override fun createTextWidget()                                       = textPlugin.open()
-        override fun createBrowserWidget()                                    = browserPlugin.openFromMenu()
-        override fun openUrl(url: String)                                     = openBrowserAddress(url)
-        override fun openFilePicker()                                         { host?.requestFilePicker() }
-        override fun openYouTubeHistory()                                     = browserPlugin.openYouTubeHistory()
-        override fun loadLayout(name: String): Boolean                        = layoutManager.loadLayout(name)
-        override fun toggleLayoutLock()                                       = setWidgetLayoutLocked(!isWidgetLayoutLocked)
-        override fun saveLayout()                                             = layoutManager.saveCurrentLayout()
-        override fun saveLayoutAs()                                           = layoutManager.showSaveLayoutAsPrompt()
-        override fun openSettings()                                           = settingsController.toggleDashboardSettings(width.toFloat(), height.toFloat())
-        override fun requestClose()                                           = triggerCloseAppConfirmation()
-        override fun setBrightness(value: Float)                              {settingsController.setBrightness(value); notifyTransientContentChanged()}
-        override fun scroll(direction: CommandScrollDirection, amount: Float) = scrollWidgetAtCursor(cursorX, cursorY, if (direction == CommandScrollDirection.UP) -amount else amount)
-        override fun enterText(text: String)                                  = onKeyPress(text)
-        override fun commandFinished()                                        = Unit // Each mutation owns its classified notification; a generic command completion hook would duplicate lifecycle, widget, and transient signals.
+        override fun toggleWidget(type: WidgetTypeId)                                                        = lifecycleController.toggle(type)
+        override fun setWidgetVisible(type: WidgetTypeId, visible: Boolean)                                  {if (visible) lifecycleController.show(type) else lifecycleController.hide(type)}
+        override fun runWidgetCommand(type: WidgetTypeId, commandId: String, arguments: AppCommandArguments) = pluginOf(type).runCommand(commandId, arguments)
+        override fun loadLayout(name: String): Boolean                                                       = layoutManager.loadLayout(name)
+        override fun toggleLayoutLock()                                                                      = setWidgetLayoutLocked(!isWidgetLayoutLocked)
+        override fun saveLayout()                                                                            = layoutManager.saveCurrentLayout()
+        override fun saveLayoutAs()                                                                          = layoutManager.showSaveLayoutAsPrompt()
+        override fun openSettings()                                                                          = settingsController.toggleDashboardSettings(width.toFloat(), height.toFloat())
+        override fun requestClose()                                                                          = triggerCloseAppConfirmation()
+        override fun setBrightness(value: Float)                                                             {settingsController.setBrightness(value); notifyTransientContentChanged()}
+        override fun scroll(direction: CommandScrollDirection, amount: Float)                                = scrollWidgetAtCursor(cursorX, cursorY, if (direction == CommandScrollDirection.UP) -amount else amount)
+        override fun enterText(text: String)                                                                 = onKeyPress(text)
+        override fun commandFinished()                                                                       = Unit // Each mutation owns its classified notification; a generic command completion hook would duplicate lifecycle, widget, and transient signals.
     }
-    fun          executeOpenUrlCommand(address: String): AppCommandResult = executeCommand(AppCommandInvocation(commandRegistry.openUrl.id, AppCommandArguments.Url(address)))
-
+    fun executeOpenUrlCommand(address: String): AppCommandResult = executeCommand(AppCommandInvocation(BrowserPlugin.OPEN_URL.definition.id, AppCommandArguments.Url(address)))
 
     // ==================== Menus, popups and hover controls ====================
 
@@ -256,55 +247,60 @@ class WidgetContainer @JvmOverloads constructor(
 
     /** What every widget plugin gets from the dashboard. */
     private val widgetContext   = object : WidgetContext {
-        override val viewportWidth: Int                                                       get()  = width
-        override val viewportHeight: Int                                                      get()  = height
-        override val isDisplayOff: Boolean                                                    get()  = displayState == WakeSleepManager.DisplayState.OFF
-        override val captureRestore: WidgetCaptureRestore                                     get()  = widgetCaptureRestore
-        override val appData: AppData                                                         get()  = this@WidgetContainer.appData
-        override val units: UnitSettings                                                      get()  = unitSettings
-        override val androidContext: Context                                                  get()  = context
-        override val rootLayout: ViewGroup?                                                   get()  = parent as? ViewGroup
-        override val dashboardView: View                                                      get()  = this@WidgetContainer
-        override val ui: UiThreadDispatcher                                                   get()  = assistantUiDispatcher
-        override val settings: SettingsController                                             get()  = settingsController
-        override fun singleton(type: WidgetTypeId): BaseWidget?                                      = registry.singleton(type)
-        override fun widgets(type: WidgetTypeId): List<BaseWidget>                                   = registry.widgets(type)
-        override fun stableId(widget: BaseWidget): String                                            = registry.stableId(widget)
-        override fun requestRepaint()                                                                = this@WidgetContainer.requestRepaint()
-        override fun notifyMediaFrame(sourceId: String)                                              = this@WidgetContainer.notifyMediaFrame(sourceId)
-        override fun setMediaSourceActive(sourceId: String, active: Boolean)                         = setBinocularMediaSourceActive(sourceId, active)
-        override fun refreshBrightnessRules()                                                        = this@WidgetContainer.refreshBrightnessRules()
-        override val host: WidgetHost?                                                        get()  = this@WidgetContainer.host
-        override val creationPosition: PointF?                                                get()  = this@WidgetContainer.creationPosition
+        override val viewportWidth: Int                                                           get()  = width
+        override val viewportHeight: Int                                                          get()  = height
+        override val isDisplayOff: Boolean                                                        get()  = displayState == WakeSleepManager.DisplayState.OFF
+        override val captureRestore: WidgetCaptureRestore                                         get()  = widgetCaptureRestore
+        override val appData: AppData                                                             get()  = this@WidgetContainer.appData
+        override val units: UnitSettings                                                          get()  = unitSettings
+        override val androidContext: Context                                                      get()  = context
+        override val rootLayout: ViewGroup?                                                       get()  = parent as? ViewGroup
+        override val dashboardView: View                                                          get()  = this@WidgetContainer
+        override val ui: UiThreadDispatcher                                                       get()  = assistantUiDispatcher
+        override val settings: SettingsController                                                 get()  = settingsController
+        override fun singleton(type: WidgetTypeId): BaseWidget?                                          = registry.singleton(type)
+        override fun widgets(type: WidgetTypeId): List<BaseWidget>                                       = registry.widgets(type)
+        override fun stableId(widget: BaseWidget): String                                                = registry.stableId(widget)
+        override fun requestRepaint()                                                                    = this@WidgetContainer.requestRepaint()
+        override fun notifyMediaFrame(sourceId: String)                                                  = this@WidgetContainer.notifyMediaFrame(sourceId)
+        override fun setMediaSourceActive(sourceId: String, active: Boolean)                             = setBinocularMediaSourceActive(sourceId, active)
+        override fun refreshBrightnessRules()                                                            = this@WidgetContainer.refreshBrightnessRules()
+        override val host: WidgetHost?                                                            get()  = this@WidgetContainer.host
+        override val creationPosition: PointF?                                                    get()  = this@WidgetContainer.creationPosition
         override fun dismissPresentationOf(widget: BaseWidget) {
             if (presenter.activeSession?.targetId == stableWidgetId(widget)) presenter.dismiss()
         }
-        override fun onKeyFocusChanged(widget: BaseWidget, focused: Boolean) {
+        override fun present(widget: BaseWidget, spec: PresentationSpec, createdByPresentation: Boolean) = presenter.present(widget, spec, createdByPresentation)
+        override fun closeUnreported(widget: BaseWidget)                                                 = presenter.remove(widget)
+        override fun show(type: WidgetTypeId): BaseWidget?                                               = lifecycleController.show(type)
+        override fun bringToFront(widget: BaseWidget)                                                    = bringWidgetToFront(widget)
+        override fun clearKeyFocus()                                                                     { textEditing.clearAllFocus(); hideAssistantIme() }
+        override fun notifyPersistentChange()                                                            = notifyPersistentContentChanged()
+        override fun onKeyFocusChanged(widget: BaseWidget, focused: Boolean)                             {
             val beforeZOrder = widget.zOrder
             if (focused) bringWidgetToFront(widget)
             notifyFocusChanged(persistent = focused && widget.zOrder != beforeZOrder)
         }
-        override fun notifyTransientChange()                                                         = notifyTransientContentChanged()
-        override fun <T> withTransientChanges(action: () -> T): T                                    = withTransientChangeBatch(action)
-        override fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean): Boolean      = this@WidgetContainer.runClassifiedInput(action, changed)
-        override fun <T> runPersistentMutation(changed: (T) -> Boolean, action: () -> T): T = this@WidgetContainer.runPersistentMutation(changed, action)
-        override fun <W : BaseWidget> open(type: WidgetTypeId, create: () -> W?): W?                 = lifecycleController.open(type, create)
-        override fun openClosedTemplate(type: WidgetTypeId): BaseWidget?                             = lifecycleController.openClosedTemplate(type)
+        override fun notifyTransientChange()                                                             = notifyTransientContentChanged()
+        override fun <T> withTransientChanges(action: () -> T): T                                        = withTransientChangeBatch(action)
+        override fun runClassifiedInput(action: () -> Boolean, changed: () -> Boolean): Boolean          = this@WidgetContainer.runClassifiedInput(action, changed)
+        override fun <T> runPersistentMutation(changed: (T) -> Boolean, action: () -> T): T     = this@WidgetContainer.runPersistentMutation(changed, action)
+        override fun <W : BaseWidget> open(type: WidgetTypeId, create: () -> W?): W?                     = lifecycleController.open(type, create)
+        override fun openClosedTemplate(type: WidgetTypeId): BaseWidget?                                 = lifecycleController.openClosedTemplate(type)
         override fun close(widget: BaseWidget) = lifecycleController.close(widget)
     }
     /** One plugin per widget type, built from the single list in [WidgetPlugins]. */
     private val plugins: List<WidgetPlugin> by lazy { WidgetPlugins.all.map { type -> type.create(widgetContext) } }
     private inline fun <reified P : WidgetPlugin> plugin(): P = plugins.filterIsInstance<P>().single()
+    private fun pluginOf(type: WidgetTypeId): WidgetPlugin = plugins.first { it.lifecycle.descriptor.type == type }
 
-    // The plugins the dashboard still calls by name, for commands, the activity and the assistant.
-    private val textPlugin        by lazy { plugin<TextBoxPlugin>() }
+    // The plugins the dashboard still calls by name, for the activity (WP11 moves these calls).
     private val browserPlugin     by lazy { plugin<BrowserPlugin>() }
     private val imagePlugin       by lazy { plugin<ImagePlugin>() }
     private val videoPlugin       by lazy { plugin<VideoPlugin>() }
     private val pdfPlugin         by lazy { plugin<PdfPlugin>() }
     private val fileBrowserPlugin by lazy { plugin<FileBrowserPlugin>() }
     private val newsPlugin        by lazy { plugin<NewsPlugin>() }
-    private val financePlugin     by lazy { plugin<FinancePlugin>() }
 
     // ==================== Widgets drag (resize, move, scroll) and hover ====================
 
@@ -419,27 +415,18 @@ class WidgetContainer @JvmOverloads constructor(
     internal val assistant by lazy { /** What the voice assistant can read and do on the dashboard. */
         AssistantDashboardAccess(
             services                = widgetContext,
+            plugins                 = plugins,
             registry                = registry,
-            lifecycle               = lifecycleController,
-            presenter               = presenter,
-            textEditing             = textEditing,
-            ui                      = assistantUiDispatcher,
             commands                = commandRegistry,
             isCommandAvailable      = commandCapabilities::isAvailable,
             executeCommand          = ::executeCommand,
             activeLayoutName        = { layoutManager.activeLayoutName },
-            openTextForAssistant    = textPlugin::openForAssistant,
-            openBrowserForTask      = browserPlugin::openForTask,
-            updateFinanceTile       = financePlugin::updateTile,
-            setNewsSource           = newsPlugin::setSource,
             drawAboveNativeViews    = ::ensureDrawnAboveNativeOverlays,
-            hideIme                 = ::hideAssistantIme,
             notifyPersistentChange  = ::notifyPersistentContentChanged,
         )
     }
     // ==================== Fullscreen ====================
 
-    private inline fun <reified T : BaseWidget> fullscreenAs(): T?    = registry.fullscreenWidget as? T /** The fullscreen widget when it is a T, otherwise null. WidgetRegistry is the single fullscreen owner; use this only where the widget type genuinely matters. */
     private fun hasFullscreenWidget(): Boolean                        = registry.fullscreenWidget != null
 
     // ==================== 3DOF State ====================
@@ -768,19 +755,6 @@ class WidgetContainer @JvmOverloads constructor(
     fun onTrimMemory(level: Int)                      = browserPlugin.onTrimMemory(level)
     fun onLowMemory()                                 = browserPlugin.onLowMemory()
     fun clearDebugWebViewData(profileSummary: String) = browserPlugin.clearDebugWebViewData(profileSummary)
-    private fun openBrowserAddress(address: String) {
-        val widget = textEditing.focusedPage as? BrowserWidget
-            ?: fullscreenAs<BrowserWidget>()
-            ?: browserPlugin.openFullscreen(focus = false)
-            ?: return
-
-        runPersistentMutation {
-            if (widget.isMinimized) widget.toggleMinimize()
-            bringWidgetToFront(widget)
-            widget.setFocused(true)
-            widget.navigateToAddress(address, autoFullscreenVideo = true)
-        }
-    }
 
     //speedometer
     fun setSpeedVisibilityThreshold(thresholdKmh: Float) {

@@ -1,5 +1,6 @@
 package com.everyday.everyday_glasses.widgets.weather_location
 import android.content.Context
+import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
@@ -13,6 +14,8 @@ import com.everyday.everyday_glasses.settings.UnitDisplayFormatter
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
 import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.runtime.WidgetCommand
+import com.everyday.everyday_glasses.runtime.WidgetMenu
 import org.json.JSONObject
 
 /** Puts the location and weather widget on the dashboard and feeds it place and weather data. */
@@ -166,6 +169,17 @@ internal class WeatherPlugin(
         override val descriptor = WidgetDescriptor(TYPE, "Location", WidgetInstancePolicy.SINGLETON, order = 1, category = "information", storesClosedTemplate = true)
         override val codec get() = LocationWidgetState.Codec
         override fun create(context: WidgetContext) = WeatherPlugin(context)
+        override val commands = listOf(
+            WidgetCommand(
+                AppCommandDefinition(
+                    "toggle:location",
+                    "Toggle: Location/Weather",
+                    "Weather",
+                    "Show or hide location and weather",
+                    shortcutEligible = true
+                ), WidgetMenu.TOGGLE
+            ),
+        )
         private const val WIDTH = 300f
         private const val HEIGHT = 120f
     }

@@ -18,6 +18,7 @@ import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.runtime.StatusSnapshot
 import com.everyday.everyday_glasses.widgets.system_status.StatusBarPlugin
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import com.everyday.everyday_glasses.widgets._common.PresentationSpec
 import com.everyday.everyday_glasses.widgets.text_editor.TextBoxPlugin
 import com.everyday.everyday_glasses.widgets.text_editor.TextBoxWidget
 import org.junit.Assert.assertNull
@@ -135,6 +136,12 @@ class WidgetModulesTest {
         override val host: WidgetHost? = null
         override val creationPosition: PointF? = null
         override fun dismissPresentationOf(widget: BaseWidget) = Unit
+        override fun present(widget: BaseWidget, spec: PresentationSpec, createdByPresentation: Boolean) = false
+        override fun closeUnreported(widget: BaseWidget) = Unit
+        override fun show(type: WidgetTypeId): BaseWidget? = null
+        override fun bringToFront(widget: BaseWidget) = Unit
+        override fun clearKeyFocus() = Unit
+        override fun notifyPersistentChange() = Unit
         override fun onKeyFocusChanged(widget: BaseWidget, focused: Boolean) = Unit
         override val androidContext: Context get() = error("No Android context in this test")
         override val rootLayout: ViewGroup? = null
