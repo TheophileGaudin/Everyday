@@ -1,14 +1,14 @@
 package com.everyday.everyday_glasses.interaction.commands
 
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.shared.command.AppCommandArguments
 import com.everyday.shared.command.AppCommandInvocation
 import com.everyday.shared.command.CommandScrollDirection
-import com.everyday.shared.command.CommandWidgetId
 
 interface AppCommandCapabilities {
     fun isAvailable(requirement: CommandAvailability): Boolean
-    fun toggleWidget(widgetId: CommandWidgetId)
-    fun setWidgetVisible(widgetId: CommandWidgetId, visible: Boolean)
+    fun toggleWidget(type: WidgetTypeId)
+    fun setWidgetVisible(type: WidgetTypeId, visible: Boolean)
     fun createTextWidget()
     fun createBrowserWidget()
     fun openYouTubeHistory()

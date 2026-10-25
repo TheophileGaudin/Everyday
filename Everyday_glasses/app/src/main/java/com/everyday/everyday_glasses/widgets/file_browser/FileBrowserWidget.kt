@@ -29,6 +29,9 @@ import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import java.io.File
 import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetType
 import org.json.JSONObject
 
 /**
@@ -47,7 +50,7 @@ class FileBrowserWidget(
     width: Float = 400f,
     height: Float = 500f,
     val fileFilter: FileFilter = FileFilter.IMAGES
-) : BaseWidget(WidgetTypeId.FILES, x, y, width, height) {
+) : BaseWidget(FileBrowserPlugin.TYPE, x, y, width, height) {
 
     companion object {
         private const val TAG = "FileBrowserWidget"
@@ -1043,7 +1046,7 @@ class FileBrowserPlugin(
         val height = (services.viewportHeight * 0.7f).coerceIn(300f, 600f)
         val x = ((services.viewportWidth - width) / 2f).coerceAtLeast(0f)
         val y = ((services.viewportHeight - height) / 2f).coerceAtLeast(0f)
-        services.open(WidgetTypeId.FILES) { FileBrowserWidget(context, x, y, width, height, filter) }
+        services.open(FileBrowserPlugin.TYPE) { FileBrowserWidget(context, x, y, width, height, filter) }
         // Opening the picker may complete asynchronously after a runtime/all-files permission
         // screen. Re-center after the widget actually exists so hover chrome is visible at once
         // and two-finger scrolling is routed to the new browser without a priming drag.
@@ -1081,6 +1084,20 @@ class FileBrowserPlugin(
             isPinned = c.isPinned
         )
     }
+
+    /** The file picker as a widget type: its id, its descriptor, how it is saved, and its plugin. */
+    companion object : WidgetType {
+        val TYPE = WidgetTypeId("files")
+        override val descriptor = WidgetDescriptor(
+            TYPE,
+            "Files",
+            WidgetInstancePolicy.MULTIPLE,
+            order = 15,
+            category = "content"
+        )
+        override val codec get() = FileBrowserWidgetState.Codec
+        override fun create(context: WidgetContext) = FileBrowserPlugin(context)
+    }
 }
 
 /** What a saved dashboard keeps of a file picker: which files it shows, and the folder it's in. */
@@ -1100,7 +1117,7 @@ data class FileBrowserWidgetState(
     override val isPinned: Boolean = false
 ) : DashboardPersistence.SizedWidgetFields {
     /** Its entry in the saved dashboard file. */
-    companion object Codec : WidgetDocument.StateCodec<FileBrowserWidgetState>(WidgetTypeId.FILES, FileBrowserWidgetState::class) {
+    companion object Codec : WidgetDocument.StateCodec<FileBrowserWidgetState>(FileBrowserPlugin.TYPE, FileBrowserWidgetState::class) {
         override fun toJson(state: FileBrowserWidgetState): JSONObject = JSONObject().apply {
             putCommonFields(state)
             put("filter", state.filter.name)

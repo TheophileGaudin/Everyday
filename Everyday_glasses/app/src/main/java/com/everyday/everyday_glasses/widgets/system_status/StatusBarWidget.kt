@@ -17,6 +17,9 @@ import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetType
 import androidx.core.graphics.toColorInt
 import com.everyday.everyday_glasses.runtime.StatusSnapshot
 import org.json.JSONObject
@@ -37,7 +40,7 @@ class StatusBarWidget(
     y: Float,
     widgetWidth: Float,
     widgetHeight: Float
-) : BaseWidget(WidgetTypeId.STATUS, x, y, widgetWidth, widgetHeight) {
+) : BaseWidget(StatusBarPlugin.TYPE, x, y, widgetWidth, widgetHeight) {
     companion object {
         private const val TAG = "StatusBarWidget"
         
@@ -618,7 +621,7 @@ class StatusBarWidget(
 class StatusBarPlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
-    private val current: () -> StatusBarWidget? = { services.singleton(WidgetTypeId.STATUS) as? StatusBarWidget }
+    private val current: () -> StatusBarWidget? = { services.singleton(StatusBarPlugin.TYPE) as? StatusBarWidget }
     // The last data received, so that a status bar opened later shows it right away.
     private val latest: StatusSnapshot get() = services.appData.latest(AppChannels.status) ?: StatusSnapshot()
 
@@ -672,9 +675,14 @@ class StatusBarPlugin(
         )
     }
 
-    private companion object {
-        const val WIDTH = 220f
-        const val HEIGHT = 110f
+    /** The status bar as a widget type: its id, its descriptor, how it is saved, and its plugin. */
+    companion object : WidgetType {
+        val TYPE = WidgetTypeId("status")
+        override val descriptor = WidgetDescriptor(TYPE, "Status", WidgetInstancePolicy.SINGLETON, order = 0, category = "information", storesClosedTemplate = true)
+        override val codec get() = StatusBarState.Codec
+        override fun create(context: WidgetContext) = StatusBarPlugin(context)
+        private const val WIDTH = 220f
+        private const val HEIGHT = 110f
     }
 }
 
@@ -695,7 +703,7 @@ data class StatusBarState(
     override val isPinned: Boolean = false
 ) : DashboardPersistence.CommonWidgetFields {
     /** Its entry in the saved dashboard file. */
-    companion object Codec : WidgetDocument.StateCodec<StatusBarState>(WidgetTypeId.STATUS, StatusBarState::class) {
+    companion object Codec : WidgetDocument.StateCodec<StatusBarState>(StatusBarPlugin.TYPE, StatusBarState::class) {
         override fun toJson(state: StatusBarState): JSONObject = JSONObject().apply {
             putCommonFields(state, includeSize = false)
             put("showTime", state.showTime)

@@ -5,16 +5,31 @@ import com.everyday.everyday_glasses.widgets.map.backend.MapViewMode
 import com.everyday.everyday_glasses.widgets.map.backend.MapZoom
 import com.everyday.everyday_glasses.widgets.text_editor.TextWidgetState
 import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.widgets.browser.BrowserPlugin
+import com.everyday.everyday_glasses.widgets.calendar.CalendarPlugin
 import com.everyday.everyday_glasses.widgets.system_status.StatusBarState
 import com.everyday.everyday_glasses.widgets.weather_location.LocationWidgetState
 import com.everyday.everyday_glasses.widgets.map.MapWidgetState
 import com.everyday.everyday_glasses.widgets.calendar.CalendarWidgetState
+import com.everyday.everyday_glasses.widgets.file_browser.ImagePlugin
+import com.everyday.everyday_glasses.widgets.file_browser.PdfPlugin
+import com.everyday.everyday_glasses.widgets.file_browser.VideoPlugin
+import com.everyday.everyday_glasses.widgets.finance.FinancePlugin
 import com.everyday.everyday_glasses.widgets.finance.FinanceWidgetState
+import com.everyday.everyday_glasses.widgets.map.MapPlugin
+import com.everyday.everyday_glasses.widgets.news.NewsPlugin
 import com.everyday.everyday_glasses.widgets.news.NewsWidgetState
+import com.everyday.everyday_glasses.widgets.notifications.NotificationsPlugin
+import com.everyday.everyday_glasses.widgets.phone_screen_mirror.MirrorPlugin
 import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidgetState
 import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleWidgetState
 import com.everyday.everyday_glasses.widgets.phone_screen_mirror.MirrorWidgetState
+import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitlePlugin
 import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleWidget
+import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerPlugin
+import com.everyday.everyday_glasses.widgets.system_status.StatusBarPlugin
+import com.everyday.everyday_glasses.widgets.text_editor.TextBoxPlugin
+import com.everyday.everyday_glasses.widgets.weather_location.WeatherPlugin
 
 /**
  * Programmatic app-delivered layouts. They compose a [com.everyday.everyday_glasses.persistence.WidgetDocument.PersistedDashboard] sized to the current
@@ -34,24 +49,24 @@ object BuiltInLayouts {
      * but keeping it stable keeps saved documents diffable and the golden layouts fixed.
      */
     private val SINGLETON_ORDER: List<WidgetTypeId> = listOf(
-        WidgetTypeId.STATUS,
-        WidgetTypeId.LOCATION,
-        WidgetTypeId.MAP,
-        WidgetTypeId.CALENDAR,
-        WidgetTypeId.FINANCE,
-        WidgetTypeId.NEWS,
-        WidgetTypeId.NOTIFICATIONS,
-        WidgetTypeId.SPEEDOMETER,
-        WidgetTypeId.SUBTITLE,
-        WidgetTypeId.MIRROR
+        StatusBarPlugin.TYPE,
+        WeatherPlugin.TYPE,
+        MapPlugin.TYPE,
+        CalendarPlugin.TYPE,
+        FinancePlugin.TYPE,
+        NewsPlugin.TYPE,
+        NotificationsPlugin.TYPE,
+        SpeedometerPlugin.TYPE,
+        SubtitlePlugin.TYPE,
+        MirrorPlugin.TYPE
     )
 
     private val MULTIPLE_ORDER: List<WidgetTypeId> = listOf(
-        WidgetTypeId.BROWSER,
-        WidgetTypeId.TEXT,
-        WidgetTypeId.IMAGE,
-        WidgetTypeId.VIDEO,
-        WidgetTypeId.PDF
+        BrowserPlugin.TYPE,
+        TextBoxPlugin.TYPE,
+        ImagePlugin.TYPE,
+        VideoPlugin.TYPE,
+        PdfPlugin.TYPE
     )
 
     /**
@@ -119,7 +134,7 @@ object BuiltInLayouts {
         return dashboard(
             STANDARD,
             mapOf(
-                WidgetTypeId.STATUS to StatusBarState(
+                StatusBarPlugin.TYPE to StatusBarState(
                     x = 0f, y = 41f * sy,
                     showTime = true,
                     showDate = true,
@@ -127,7 +142,7 @@ object BuiltInLayouts {
                     showGlassesBattery = true,
                     isPinned = true
                 ),
-                WidgetTypeId.LOCATION to LocationWidgetState(
+                WeatherPlugin.TYPE to LocationWidgetState(
                     x = 392.55f * sx, y = 0f,
                     width = 194.9f * sx, height = 76f * sy,
                     showWeather = true,
@@ -136,30 +151,30 @@ object BuiltInLayouts {
                     showCountry = false,
                     isPinned = true
                 ),
-                WidgetTypeId.MAP to MapWidgetState(
+                MapPlugin.TYPE to MapWidgetState(
                     x = 405.5f * sx, y = 41f * sy,
                     width = 181.95f * sx, height = 160.05f * sy,
                     mode = MapViewMode.TOP_DOWN.name, zoom = MapZoom.MEDIUM.name,
                     showLocation = true, showCountry = true, isPinned = true
                 ),
-                WidgetTypeId.CALENDAR to CalendarWidgetState(
+                CalendarPlugin.TYPE to CalendarWidgetState(
                     x = 0f, y = 201.05f * sy,
                     width = 612f * sx, height = 90.9f * sy,
                     fontScale = 1f,
                     isPinned = true
                 ),
-                WidgetTypeId.FINANCE to FinanceWidgetState(
+                FinancePlugin.TYPE to FinanceWidgetState(
                     x = 364.8f * sx, y = 301.95f * sy,
                     width = 202.2f * sx, height = 134.4f * sy,
                     isPinned = true
                 ),
-                WidgetTypeId.NEWS to NewsWidgetState(
+                NewsPlugin.TYPE to NewsWidgetState(
                     x = 0f, y = 301.95f * sy,
                     width = 352.2f * sx, height = 134.4f * sy,
                     fontScale = 0.75f,
                     isPinned = true
                 ),
-                WidgetTypeId.SPEEDOMETER to SpeedometerWidgetState(
+                SpeedometerPlugin.TYPE to SpeedometerWidgetState(
                     x = 229.9f * sx, y = 38f * sy,
                     width = 134.9f * sx, height = 92.7f * sy,
                     isPinned = true
@@ -183,17 +198,17 @@ object BuiltInLayouts {
         return dashboard(
             GROCERIES,
             mapOf(
-                WidgetTypeId.STATUS to StatusBarState(
+                StatusBarPlugin.TYPE to StatusBarState(
                     x = margin, y = margin, isPinned = true
                 ),
-                WidgetTypeId.LOCATION to LocationWidgetState(
+                WeatherPlugin.TYPE to LocationWidgetState(
                     x = w - locW - margin,
                     y = margin,
                     width = locW,
                     height = rowHeight.coerceAtMost(140f),
                     isPinned = true
                 ),
-                WidgetTypeId.SPEEDOMETER to SpeedometerWidgetState(
+                SpeedometerPlugin.TYPE to SpeedometerWidgetState(
                     x = (w - speedW) / 2f,
                     y = margin,
                     width = speedW,
@@ -202,7 +217,7 @@ object BuiltInLayouts {
                 )
             ),
             mapOf(
-                WidgetTypeId.TEXT to listOf(
+                TextBoxPlugin.TYPE to listOf(
                     TextWidgetState(
                         x = margin,
                         y = textTop,
@@ -228,7 +243,7 @@ object BuiltInLayouts {
         return dashboard(
             SUBTITLES,
             mapOf(
-                WidgetTypeId.SUBTITLE to SubtitleWidgetState(
+                SubtitlePlugin.TYPE to SubtitleWidgetState(
                     x = (w - subW) / 2f,
                     y = (h - subH) / 2f,
                     width = subW,
@@ -248,7 +263,7 @@ object BuiltInLayouts {
     private fun mirrorLayout(w: Float, h: Float): WidgetDocument.PersistedDashboard = dashboard(
         MIRROR,
         mapOf(
-            WidgetTypeId.MIRROR to MirrorWidgetState(
+            MirrorPlugin.TYPE to MirrorWidgetState(
                 x = 0f,
                 y = 0f,
                 width = w,

@@ -3,13 +3,17 @@ package com.everyday.everyday_glasses
 import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.dashboardOf
 import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.stateOf
 import com.everyday.everyday_glasses.persistence.WidgetDocument
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets.text_editor.TextWidgetState
 import com.everyday.everyday_glasses.widgets.browser.BrowserWidgetState
 import com.everyday.everyday_glasses.widgets.phone_screen_mirror.MirrorWidgetState
 import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.roundTrip
+import com.everyday.everyday_glasses.runtime.WidgetDescriptors
+import com.everyday.everyday_glasses.widgets.browser.BrowserPlugin
+import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserPlugin
 import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidget
 import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidgetState
+import com.everyday.everyday_glasses.widgets.phone_screen_mirror.MirrorPlugin
+import com.everyday.everyday_glasses.widgets.text_editor.TextBoxPlugin
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -22,7 +26,7 @@ class WidgetDocumentTest {
 
     @Test
     fun `codec catalog covers every widget type`() {
-        assertEquals(WidgetTypeId.entries.toSet(), WidgetDocument.codecs.keys)
+        assertEquals(WidgetDescriptors.all.map { it.type }.toSet(), WidgetDocument.codecs.keys)
     }
 
     @Test
@@ -33,7 +37,7 @@ class WidgetDocumentTest {
             directory = "/storage/emulated/0/Download",
             isPinned = true,
         )
-        assertEquals(picker, roundTrip(WidgetTypeId.FILES, picker))
+        assertEquals(picker, roundTrip(FileBrowserPlugin.TYPE, picker))
 
         val unknown = FileBrowserWidgetState.toJson(picker).put("filter", "SPREADSHEETS")
         assertEquals(FileBrowserWidget.FileFilter.MEDIA, FileBrowserWidgetState.fromJson(unknown)?.filter)
@@ -60,16 +64,16 @@ class WidgetDocumentTest {
         val dashboard = WidgetDocument.PersistedDashboard(
             widgets = listOf(
                 WidgetDocument.PersistedWidgetRecord(
-                    type = WidgetTypeId.TEXT,
+                    type = TextBoxPlugin.TYPE,
                     instanceId = "text#41",
-                    state = WidgetDocument.codecs.getValue(WidgetTypeId.TEXT).encode(
+                    state = WidgetDocument.codecs.getValue(TextBoxPlugin.TYPE).encode(
                         TextWidgetState(1f, 2f, 100f, 80f, "text")
                     )
                 ),
                 WidgetDocument.PersistedWidgetRecord(
-                    type = WidgetTypeId.BROWSER,
+                    type = BrowserPlugin.TYPE,
                     instanceId = "browser#9",
-                    state = WidgetDocument.codecs.getValue(WidgetTypeId.BROWSER).encode(
+                    state = WidgetDocument.codecs.getValue(BrowserPlugin.TYPE).encode(
                         BrowserWidgetState(3f, 4f, 120f, 90f, "https://example.com")
                     )
                 )
@@ -80,14 +84,14 @@ class WidgetDocumentTest {
             WidgetDocument.dashboardToJson(dashboard)
         )
 
-        assertEquals("text#41", restored.widgets.first { it.type == WidgetTypeId.TEXT }.instanceId)
-        assertEquals("browser#9", restored.widgets.first { it.type == WidgetTypeId.BROWSER }.instanceId)
+        assertEquals("text#41", restored.widgets.first { it.type == TextBoxPlugin.TYPE }.instanceId)
+        assertEquals("browser#9", restored.widgets.first { it.type == BrowserPlugin.TYPE }.instanceId)
     }
 
     @Test
     fun `unknown and malformed records are ignored without dropping valid records`() {
         val valid = dashboardOf(
-            WidgetTypeId.TEXT,
+            TextBoxPlugin.TYPE,
             TextWidgetState(1f, 2f, 100f, 80f, "text", html = "<b>text</b>"),
             instanceId = "text#1"
         ).widgets.single()
@@ -124,7 +128,7 @@ class WidgetDocumentTest {
 
         assertEquals(listOf(valid.type), parsed.widgets.map { it.type })
         assertEquals(listOf("text#1"), parsed.widgets.map { it.instanceId })
-        assertNotNull(parsed.stateOf<TextWidgetState>(WidgetTypeId.TEXT))
+        assertNotNull(parsed.stateOf<TextWidgetState>(TextBoxPlugin.TYPE))
     }
 
     @Test
@@ -152,7 +156,7 @@ class WidgetDocumentTest {
                 createdAt = 100L,
                 updatedAt = 200L,
                 dashboard = dashboardOf(
-                    WidgetTypeId.MIRROR,
+                    MirrorPlugin.TYPE,
                     MirrorWidgetState(0f, 0f, 640f, 480f)
                 )
             )
@@ -168,6 +172,6 @@ class WidgetDocumentTest {
         assertEquals(200L, record.updatedAt)
         // A stored layout always reopens under its own name.
         assertEquals("Work", record.dashboard.activeLayoutName)
-        assertNull(record.dashboard.widgets.firstOrNull { it.type != WidgetTypeId.MIRROR })
+        assertNull(record.dashboard.widgets.firstOrNull { it.type != MirrorPlugin.TYPE })
     }
 }

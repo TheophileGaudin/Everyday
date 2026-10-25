@@ -8,7 +8,6 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.util.Log
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.settings.TemperatureUnit
 import java.util.Calendar
 import androidx.core.graphics.toColorInt
@@ -20,7 +19,7 @@ class WeatherWidget(
     y: Float,
     width: Float,
     height: Float
-) : BaseWidget(WidgetTypeId.LOCATION, x, y, width, height) {
+) : BaseWidget(WeatherPlugin.TYPE, x, y, width, height) {
 
     companion object {
         private const val TAG = "LocationWidget"

@@ -3,16 +3,17 @@ package com.everyday.everyday_glasses
 import com.everyday.everyday_glasses.interaction.commands.AppCommandCapabilities
 import com.everyday.everyday_glasses.interaction.commands.AppCommandExecutor
 import com.everyday.everyday_glasses.interaction.commands.AppCommandResult
-import com.everyday.everyday_glasses.interaction.commands.CommandUiDispatcher
 import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
 import com.everyday.everyday_glasses.interaction.commands.CommandAvailability
 import com.everyday.everyday_glasses.interaction.commands.CommandValidationResult
 import com.everyday.everyday_glasses.persistence.ShortcutsStore
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import com.everyday.everyday_glasses.widgets.news.NewsPlugin
+import com.everyday.everyday_glasses.widgets.system_status.StatusBarPlugin
 import com.everyday.shared.command.AppCommandArguments
 import com.everyday.shared.command.AppCommandInvocation
 import com.everyday.shared.command.AppCommandProtocol
 import com.everyday.shared.command.CommandScrollDirection
-import com.everyday.shared.command.CommandWidgetId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -83,7 +84,7 @@ class AppCommandRegistryTest {
             AppCommandInvocation(registry.scroll.id, AppCommandArguments.Scroll(CommandScrollDirection.UP, 25f)),
             AppCommandInvocation(registry.openUrl.id, AppCommandArguments.Url("https://example.com")),
             AppCommandInvocation(registry.enterText.id, AppCommandArguments.Text("hello")),
-            AppCommandInvocation("metadata-only", AppCommandArguments.Widget(CommandWidgetId.MAP)),
+            AppCommandInvocation("metadata-only", AppCommandArguments.Widget("map")),
             AppCommandInvocation("metadata-only", AppCommandArguments.Layout("Standard"))
         )
         invocations.forEach { invocation ->
@@ -95,17 +96,17 @@ class AppCommandRegistryTest {
     fun `executor validates availability and crosses UI boundary exactly once`() {
         val capabilities = FakeCapabilities()
         var dispatchCalls = 0
-        val executor = AppCommandExecutor(registry, capabilities, CommandUiDispatcher { action ->
+        val executor = AppCommandExecutor(registry, capabilities) { action ->
             dispatchCalls++
             action()
-        })
+        }
 
         val result = executor.execute(registry.invocation(registry.toggleStatus))
         assertTrue(result is AppCommandResult.Success)
         assertEquals(1, dispatchCalls)
         assertEquals(1, capabilities.calls)
         assertEquals(1, capabilities.finishedCalls)
-        assertEquals(CommandWidgetId.STATUS, capabilities.widget)
+        assertEquals(StatusBarPlugin.TYPE, capabilities.widget)
 
         val showNews = registry.assistantDefinitions().first { it.id == "show:news" }
         val showResult = executor.execute(registry.invocation(showNews))
@@ -114,7 +115,7 @@ class AppCommandRegistryTest {
         assertEquals(2, capabilities.calls)
         assertEquals(2, capabilities.finishedCalls)
         assertEquals(true, capabilities.visible)
-        assertEquals(CommandWidgetId.NEWS, capabilities.widget)
+        assertEquals(NewsPlugin.TYPE, capabilities.widget)
 
         capabilities.available = false
         val unavailable = executor.execute(registry.invocation(registry.toggleNews))
@@ -133,7 +134,7 @@ class AppCommandRegistryTest {
     fun `executor reports application failure when capability cannot complete command`() {
         val capabilities = FakeCapabilities().apply { loadLayoutSucceeds = false }
         val executor =
-            AppCommandExecutor(registry, capabilities, CommandUiDispatcher { action -> action() })
+            AppCommandExecutor(registry, capabilities) { action -> action() }
 
         val result = executor.execute(registry.invocation("layout:Work"))
 
@@ -149,7 +150,7 @@ class AppCommandRegistryTest {
     @Test
     fun `executor reports application failure when dispatch has no completed result`() {
         val capabilities = FakeCapabilities()
-        val executor = AppCommandExecutor(registry, capabilities, CommandUiDispatcher { null })
+        val executor = AppCommandExecutor(registry, capabilities) { null }
 
         val result = executor.execute(registry.invocation(registry.toggleStatus))
 
@@ -165,15 +166,15 @@ class AppCommandRegistryTest {
     private class FakeCapabilities : AppCommandCapabilities {
         var available = true
         var calls = 0
-        var widget: CommandWidgetId? = null
+        var widget: WidgetTypeId? = null
         var visible: Boolean? = null
         var loadLayoutSucceeds = true
         var finishedCalls = 0
         override fun isAvailable(requirement: CommandAvailability) = available
-        override fun toggleWidget(widgetId: CommandWidgetId) { calls++; widget = widgetId }
-        override fun setWidgetVisible(widgetId: CommandWidgetId, visible: Boolean) {
+        override fun toggleWidget(type: WidgetTypeId) { calls++; widget = type }
+        override fun setWidgetVisible(type: WidgetTypeId, visible: Boolean) {
             calls++
-            widget = widgetId
+            widget = type
             this.visible = visible
         }
         override fun createTextWidget() { calls++ }

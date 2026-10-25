@@ -36,7 +36,7 @@ class FinanceWidget(
     y: Float,
     width: Float,
     height: Float
-) : BaseWidget(WidgetTypeId.FINANCE, x, y, width, height) {
+) : BaseWidget(FinancePlugin.TYPE, x, y, width, height) {
 
     companion object {
         private const val TAG = "FinanceWidget"

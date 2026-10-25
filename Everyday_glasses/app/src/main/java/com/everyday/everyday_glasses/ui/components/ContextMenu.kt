@@ -11,6 +11,7 @@ import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import kotlin.math.max
 import kotlin.math.min
 import androidx.core.graphics.toColorInt
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 
 /**
  * Head-locked context menu optimized for the 640x480 glasses display.
@@ -426,10 +427,10 @@ class ContextMenu(
     /** [item]'s page as it is now: which widgets are shown, and which layouts are saved. */
     private fun currentSubmenu(item: MenuItem): List<SubMenuItem> = when (item.id) {
         "toggle_widgets" -> WidgetDescriptors.all
-            .filter { it.commandId != null }
+            .filter { it.policy == WidgetInstancePolicy.SINGLETON }
             .sortedBy { it.menuOrder }
             .map { descriptor ->
-                val definition = commandRegistry.widgetDefinition(requireNotNull(descriptor.commandId))
+                val definition = commandRegistry.widgetDefinition(descriptor.type)
                 SubMenuItem(definition.id, descriptor.label, isWidgetShown(descriptor.type))
             }
         "layouts" -> {

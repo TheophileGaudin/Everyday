@@ -11,7 +11,10 @@ import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.AppQueries
 import com.everyday.everyday_glasses.runtime.NewsWidgetListener
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.shared.sync.NewsSnapshot
 import com.everyday.shared.sync.NewsSourceSpec
@@ -23,7 +26,7 @@ internal class NewsPlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
     private val ui: UiThreadDispatcher get() = services.ui
-    private val currentWidget: () -> NewsWidget? = { services.singleton(WidgetTypeId.NEWS) as? NewsWidget }
+    private val currentWidget: () -> NewsWidget? = { services.singleton(TYPE) as? NewsWidget }
     override val lifecycle = WidgetLifecycleRegistration.singleton(
         NewsWidget::class, NewsWidgetState.Codec,
         current = currentWidget,
@@ -201,6 +204,22 @@ internal class NewsPlugin(
         widget.requestData(force = true, reason = reason)
     }
 
+    /** The news widget as a widget type: its id, its descriptor, how it is saved, and its plugin. */
+    companion object : WidgetType {
+        val TYPE = WidgetTypeId("news")
+        override val descriptor = WidgetDescriptor(
+            TYPE,
+            "News",
+            WidgetInstancePolicy.SINGLETON,
+            order = 5,
+            category = "information",
+            storesClosedTemplate = true,
+            menuOrder = 6
+        )
+        override val codec get() = NewsWidgetState.Codec
+        override fun create(context: WidgetContext) = NewsPlugin(context)
+    }
+
 }
 
 /** What a saved dashboard keeps of the news widget: its source, country, selection and font scale. */
@@ -222,7 +241,7 @@ data class NewsWidgetState(
     override val isPinned: Boolean = false
 ) : DashboardPersistence.SizedWidgetFields {
     /** Its entry in the saved dashboard file. */
-    companion object Codec : WidgetDocument.StateCodec<NewsWidgetState>(WidgetTypeId.NEWS, NewsWidgetState::class) {
+    companion object Codec : WidgetDocument.StateCodec<NewsWidgetState>(NewsPlugin.TYPE, NewsWidgetState::class) {
         override fun toJson(state: NewsWidgetState): JSONObject = JSONObject().apply {
             putCommonFields(state)
             put("countryCode", state.countryCode)

@@ -9,6 +9,8 @@ import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetChangeListener
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import com.everyday.everyday_glasses.widgets.system_status.StatusBarPlugin
+import com.everyday.everyday_glasses.widgets.text_editor.TextBoxPlugin
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -26,21 +28,21 @@ class WidgetLifecycleControllerTest {
         val controller = controller(registry) { changes++ }
         controller.register(
             WidgetLifecycleRegistration(
-                descriptor = WidgetDescriptors[WidgetTypeId.STATUS],
+                descriptor = WidgetDescriptors[StatusBarPlugin.TYPE],
                 widgetType = FakeWidget::class,
                 stateType = String::class,
-                current = { registry.singleton(WidgetTypeId.STATUS) as? FakeWidget },
-                createDefault = { FakeWidget(WidgetTypeId.STATUS) },
+                current = { registry.singleton(StatusBarPlugin.TYPE) as? FakeWidget },
+                createDefault = { FakeWidget(StatusBarPlugin.TYPE) },
                 teardown = { teardowns++ }
             )
         )
 
-        val widget = controller.show(WidgetTypeId.STATUS)!!
-        assertSame(widget, controller.show(WidgetTypeId.STATUS))
+        val widget = controller.show(StatusBarPlugin.TYPE)!!
+        assertSame(widget, controller.show(StatusBarPlugin.TYPE))
         assertEquals(1, changes)
 
         controller.close(widget)
-        assertNull(registry.singleton(WidgetTypeId.STATUS))
+        assertNull(registry.singleton(StatusBarPlugin.TYPE))
         assertEquals(1, teardowns)
         assertEquals(2, changes)
     }
@@ -50,19 +52,19 @@ class WidgetLifecycleControllerTest {
         val registry = WidgetRegistry()
         var changes = 0
         val controller = controller(registry) { changes++ }
-        val codec = StringCodec(WidgetTypeId.TEXT)
+        val codec = StringCodec(TextBoxPlugin.TYPE)
         controller.register(
             WidgetLifecycleRegistration(
-                descriptor = WidgetDescriptors[WidgetTypeId.TEXT],
+                descriptor = WidgetDescriptors[TextBoxPlugin.TYPE],
                 widgetType = FakeWidget::class,
                 stateType = String::class,
                 stateCodec = codec,
-                restore = { value -> FakeWidget(WidgetTypeId.TEXT, value) },
+                restore = { value -> FakeWidget(TextBoxPlugin.TYPE, value) },
                 capture = FakeWidget::value,
             )
         )
         val record = WidgetDocument.PersistedWidgetRecord(
-            type = WidgetTypeId.TEXT,
+            type = TextBoxPlugin.TYPE,
             instanceId = "text#12",
             state = JSONObject().put("value", "restored")
         )
@@ -84,19 +86,19 @@ class WidgetLifecycleControllerTest {
         val controller = controller(registry) { changes++ }
         controller.register(
             WidgetLifecycleRegistration(
-                descriptor = WidgetDescriptors[WidgetTypeId.TEXT],
+                descriptor = WidgetDescriptors[TextBoxPlugin.TYPE],
                 widgetType = FakeWidget::class,
                 stateType = String::class,
                 teardown = { teardowns++ }
             )
         )
-        controller.open(WidgetTypeId.TEXT) { FakeWidget(WidgetTypeId.TEXT) }
-        controller.open(WidgetTypeId.TEXT) { FakeWidget(WidgetTypeId.TEXT) }
+        controller.open(TextBoxPlugin.TYPE) { FakeWidget(TextBoxPlugin.TYPE) }
+        controller.open(TextBoxPlugin.TYPE) { FakeWidget(TextBoxPlugin.TYPE) }
         assertEquals(2, changes)
 
         controller.closeAll()
 
-        assertTrue(registry.widgets(WidgetTypeId.TEXT).isEmpty())
+        assertTrue(registry.widgets(TextBoxPlugin.TYPE).isEmpty())
         assertEquals(2, teardowns)
         assertEquals(3, changes)
     }
@@ -108,13 +110,13 @@ class WidgetLifecycleControllerTest {
         val controller = controller(registry) { changes++ }
         controller.register(
             WidgetLifecycleRegistration(
-                descriptor = WidgetDescriptors[WidgetTypeId.TEXT],
+                descriptor = WidgetDescriptors[TextBoxPlugin.TYPE],
                 widgetType = FakeWidget::class,
                 stateType = String::class,
             )
         )
-        val first = controller.open(WidgetTypeId.TEXT) { FakeWidget(WidgetTypeId.TEXT) }!!
-        val second = controller.open(WidgetTypeId.TEXT) { FakeWidget(WidgetTypeId.TEXT) }!!
+        val first = controller.open(TextBoxPlugin.TYPE) { FakeWidget(TextBoxPlugin.TYPE) }!!
+        val second = controller.open(TextBoxPlugin.TYPE) { FakeWidget(TextBoxPlugin.TYPE) }!!
         assertEquals(2, changes)
 
         controller.enterFullscreen(first)
@@ -154,7 +156,7 @@ class WidgetLifecycleControllerTest {
         )
         controller.register(
             WidgetLifecycleRegistration(
-                descriptor = WidgetDescriptors[WidgetTypeId.TEXT],
+                descriptor = WidgetDescriptors[TextBoxPlugin.TYPE],
                 widgetType = FakeWidget::class,
                 stateType = String::class,
                 beforeRemove = { widget -> events += "beforeRemove registered=${registry.isRegistered(widget)}" },
@@ -162,7 +164,7 @@ class WidgetLifecycleControllerTest {
             )
         )
 
-        val widget = controller.open(WidgetTypeId.TEXT) { FakeWidget(WidgetTypeId.TEXT) }!!
+        val widget = controller.open(TextBoxPlugin.TYPE) { FakeWidget(TextBoxPlugin.TYPE) }!!
         assertTrue(registry.isRegistered(widget))
         assertSame(changeListener, widget.changeListener)
 
@@ -189,23 +191,23 @@ class WidgetLifecycleControllerTest {
         val controller = controller(registry) {}
         controller.register(
             WidgetLifecycleRegistration(
-                descriptor = WidgetDescriptors[WidgetTypeId.STATUS],
+                descriptor = WidgetDescriptors[StatusBarPlugin.TYPE],
                 widgetType = FakeWidget::class,
                 stateType = String::class,
-                stateCodec = StringCodec(WidgetTypeId.STATUS),
-                current = { registry.singleton(WidgetTypeId.STATUS) as? FakeWidget },
-                createDefault = { FakeWidget(WidgetTypeId.STATUS, "default") },
-                restore = { value -> FakeWidget(WidgetTypeId.STATUS, "reopened from $value") },
+                stateCodec = StringCodec(StatusBarPlugin.TYPE),
+                current = { registry.singleton(StatusBarPlugin.TYPE) as? FakeWidget },
+                createDefault = { FakeWidget(StatusBarPlugin.TYPE, "default") },
+                restore = { value -> FakeWidget(StatusBarPlugin.TYPE, "reopened from $value") },
                 capture = FakeWidget::value
             )
         )
 
-        val first = controller.show(WidgetTypeId.STATUS) as FakeWidget
+        val first = controller.show(StatusBarPlugin.TYPE) as FakeWidget
         assertEquals("default", first.value)
         controller.close(first)
         assertEquals(listOf("status#template"), controller.closedTemplateRecords().map { it.instanceId })
 
-        val reopened = controller.show(WidgetTypeId.STATUS) as FakeWidget
+        val reopened = controller.show(StatusBarPlugin.TYPE) as FakeWidget
         assertEquals("reopened from default", reopened.value)
         assertTrue(controller.closedTemplateRecords().isEmpty())
     }
@@ -216,21 +218,21 @@ class WidgetLifecycleControllerTest {
         val controller = controller(registry) {}
         controller.register(
             WidgetLifecycleRegistration(
-                descriptor = WidgetDescriptors[WidgetTypeId.TEXT],
+                descriptor = WidgetDescriptors[TextBoxPlugin.TYPE],
                 widgetType = FakeWidget::class,
                 stateType = String::class,
-                stateCodec = StringCodec(WidgetTypeId.TEXT),
-                restore = { value -> FakeWidget(WidgetTypeId.TEXT, "reopened from $value") },
+                stateCodec = StringCodec(TextBoxPlugin.TYPE),
+                restore = { value -> FakeWidget(TextBoxPlugin.TYPE, "reopened from $value") },
                 capture = FakeWidget::value
             )
         )
-        val first = controller.open(WidgetTypeId.TEXT) { FakeWidget(WidgetTypeId.TEXT, "notes") }!!
+        val first = controller.open(TextBoxPlugin.TYPE) { FakeWidget(TextBoxPlugin.TYPE, "notes") }!!
         controller.close(first)
 
-        val reopened = controller.openClosedTemplate(WidgetTypeId.TEXT) as FakeWidget
+        val reopened = controller.openClosedTemplate(TextBoxPlugin.TYPE) as FakeWidget
 
         assertEquals("reopened from notes", reopened.value)
-        assertNull(controller.openClosedTemplate(WidgetTypeId.TEXT))
+        assertNull(controller.openClosedTemplate(TextBoxPlugin.TYPE))
         assertTrue(controller.closedTemplateRecords().isEmpty())
     }
 
@@ -245,12 +247,12 @@ class WidgetLifecycleControllerTest {
         )
         controller.register(
             WidgetLifecycleRegistration(
-                descriptor = WidgetDescriptors[WidgetTypeId.TEXT],
+                descriptor = WidgetDescriptors[TextBoxPlugin.TYPE],
                 widgetType = FakeWidget::class,
                 stateType = String::class
             )
         )
-        val widget = controller.open(WidgetTypeId.TEXT) { FakeWidget(WidgetTypeId.TEXT) }!!
+        val widget = controller.open(TextBoxPlugin.TYPE) { FakeWidget(TextBoxPlugin.TYPE) }!!
 
         controller.enterFullscreen(widget)
 

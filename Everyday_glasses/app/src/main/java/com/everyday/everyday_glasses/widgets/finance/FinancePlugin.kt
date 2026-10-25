@@ -15,6 +15,9 @@ import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
 import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.shared.sync.FinanceAssetType
 import com.everyday.shared.sync.FinanceChartType
 import com.everyday.shared.sync.FinanceTimeRange
@@ -28,7 +31,7 @@ internal class FinancePlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
     private val ui: UiThreadDispatcher get() = services.ui
-    private val currentWidget: () -> FinanceWidget? = { services.singleton(WidgetTypeId.FINANCE) as? FinanceWidget }
+    private val currentWidget: () -> FinanceWidget? = { services.singleton(TYPE) as? FinanceWidget }
     private val runPersistentUpdate: ((() -> Result<FinanceDashboardTileConfig>) -> Result<FinanceDashboardTileConfig>) =
         { action -> services.runPersistentMutation(changed = { result -> result.isSuccess }, action = action) }
     private val stableWidgetId: (BaseWidget) -> String = { widget -> services.stableId(widget) }
@@ -236,6 +239,21 @@ internal class FinancePlugin(
     private fun onDestroyed() {
             services.appData.requests?.onFinanceVisibilityChanged(false)
         }
+    /** The finance widget as a widget type: its id, its descriptor, how it is saved, and its plugin. */
+    companion object : WidgetType {
+        val TYPE = WidgetTypeId("finance")
+        override val descriptor = WidgetDescriptor(
+            TYPE,
+            "Finance",
+            WidgetInstancePolicy.SINGLETON,
+            order = 4,
+            category = "information",
+            storesClosedTemplate = true,
+            menuOrder = 5
+        )
+        override val codec get() = FinanceWidgetState.Codec
+        override fun create(context: WidgetContext) = FinancePlugin(context)
+    }
 
 }
 
@@ -259,7 +277,7 @@ data class FinanceWidgetState(
     override val isPinned: Boolean = false
 ) : DashboardPersistence.SizedWidgetFields {
     /** Its entry in the saved dashboard file. */
-    companion object Codec : WidgetDocument.StateCodec<FinanceWidgetState>(WidgetTypeId.FINANCE, FinanceWidgetState::class) {
+    companion object Codec : WidgetDocument.StateCodec<FinanceWidgetState>(FinancePlugin.TYPE, FinanceWidgetState::class) {
         override fun toJson(state: FinanceWidgetState): JSONObject = JSONObject().apply {
             putCommonFields(state)
             put("selectedSymbol", state.selectedSymbol)

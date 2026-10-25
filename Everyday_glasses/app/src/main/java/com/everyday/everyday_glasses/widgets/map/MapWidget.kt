@@ -14,6 +14,15 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.graphics.withClip
+import com.everyday.everyday_glasses.interaction.user_input.TextEditAction
+import com.everyday.everyday_glasses.interaction.user_input.TextZone
+import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
+import com.everyday.everyday_glasses.runtime.MapWidgetListener
+import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
+import com.everyday.everyday_glasses.ui.components.KeyboardOverlayController
+import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import com.everyday.everyday_glasses.widgets._common.PresentationSpec
+import com.everyday.everyday_glasses.widgets._common.WidgetTheme
 import com.everyday.everyday_glasses.widgets.map.backend.DestinationSearchFallbackReason
 import com.everyday.everyday_glasses.widgets.map.backend.DestinationSearchListener
 import com.everyday.everyday_glasses.widgets.map.backend.DevicePose
@@ -56,16 +65,6 @@ import com.everyday.everyday_glasses.widgets.map.backend.formatGuidanceDistance
 import com.everyday.everyday_glasses.widgets.map.backend.mapPoiTier
 import com.everyday.everyday_glasses.widgets.map.backend.navigationFailureMessage
 import com.everyday.everyday_glasses.widgets.map.backend.toCompactBannerText
-import com.everyday.everyday_glasses.runtime.MapWidgetListener
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
-import com.everyday.everyday_glasses.interaction.user_input.TextEditAction
-import com.everyday.everyday_glasses.interaction.user_input.TextZone
-import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
-import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
-import com.everyday.everyday_glasses.ui.components.KeyboardOverlayController
-import com.everyday.everyday_glasses.widgets._common.BaseWidget
-import com.everyday.everyday_glasses.widgets._common.PresentationSpec
-import com.everyday.everyday_glasses.widgets._common.WidgetTheme
 import com.everyday.everyday_glasses.widgets.weather_location.WeatherWidget
 import com.everyday.shared.routing.GeoPoint
 import com.everyday.shared.routing.GuidanceFixStatus
@@ -93,13 +92,12 @@ import kotlin.math.min
 import kotlin.math.round
 import kotlin.math.roundToInt
 import kotlin.math.sin
-import kotlin.text.substringAfter
 
 /** Circular, heading-up minimap with an interactive fullscreen map. */
 class MapWidget(
     context: Context,
     x: Float, y: Float, width: Float = 210f, height: Float = 210f
-) : BaseWidget(WidgetTypeId.MAP, x, y, width, height) {
+) : BaseWidget(MapPlugin.TYPE, x, y, width, height) {
     override val minimizeLabel = "M"
     override val minWidth = MIN_WIDGET_SIZE
     override val minHeight = MIN_WIDGET_SIZE

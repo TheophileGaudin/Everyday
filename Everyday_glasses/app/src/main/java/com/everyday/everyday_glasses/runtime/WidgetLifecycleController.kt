@@ -51,7 +51,6 @@ class WidgetLifecycleRegistration<W : BaseWidget, S : Any>(
     val onMinimizeChanged: (W, Boolean) -> Unit = { _, _ -> }
 ) {
     init {
-        require(descriptor.type in WidgetTypeId.entries) { "Unknown descriptor ${descriptor.type}" }
         stateCodec?.let { codec ->
             require(codec.type == descriptor.type) { "Codec ${codec.type} does not belong to ${descriptor.type}" }
             require(codec.stateClass == stateType) {

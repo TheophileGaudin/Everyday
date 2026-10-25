@@ -5,6 +5,7 @@ import android.graphics.PointF
 import android.view.View
 import android.view.ViewGroup
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
+import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.settings.SettingsController
 import com.everyday.everyday_glasses.settings.UnitSettings
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
@@ -31,6 +32,17 @@ interface WidgetLifecycleListener {
 interface WidgetPlugin {
     /** How the dashboard opens, restores, saves and closes this type's widgets. */
     val lifecycle: WidgetLifecycleRegistration<out BaseWidget, out Any>
+}
+
+/**
+ * A widget type, as the app knows it before any widget exists: its [descriptor], how its widgets
+ * are saved ([codec]), and how to build its plugin. Each plugin's companion object is one, and
+ * `widgets/WidgetPlugins.kt` lists them.
+ */
+interface WidgetType {
+    val descriptor: WidgetDescriptor
+    val codec: WidgetDocument.WidgetStateCodec
+    fun create(context: WidgetContext): WidgetPlugin
 }
 
 /**

@@ -19,6 +19,9 @@ import java.util.Locale
 import kotlin.math.abs
 import androidx.core.graphics.toColorInt
 import com.everyday.everyday_glasses.runtime.SpeedState
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import org.json.JSONObject
 
@@ -35,7 +38,7 @@ class SpeedometerWidget(
     y: Float,
     width: Float,
     height: Float
-) : BaseWidget(WidgetTypeId.SPEEDOMETER, x, y, width, height) {
+) : BaseWidget(SpeedometerPlugin.TYPE, x, y, width, height) {
 
     enum class SpeedUnit(val code: String, val label: String) {
         KMH("kmh", "km/h"),
@@ -229,7 +232,7 @@ class SpeedometerWidget(
 class SpeedometerPlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
-    private val current: () -> SpeedometerWidget? = { services.singleton(WidgetTypeId.SPEEDOMETER) as? SpeedometerWidget }
+    private val current: () -> SpeedometerWidget? = { services.singleton(SpeedometerPlugin.TYPE) as? SpeedometerWidget }
     private val showSettings: () -> Unit = { services.settings.showSpeedometerSettingsMenu() }
     private val dismissSettings: () -> Unit = { services.settings.dismissSpeedometerSettingsMenu() }
     private val forceVisibleWhenIdle: () -> Boolean = { services.settings.getSpeedVisibilityThreshold() <= 0f }
@@ -292,10 +295,23 @@ class SpeedometerPlugin(
             setSpeedData(latest.speedKmh, latest.qualityOk, latest.isMoving)
         }
 
-    private companion object {
-        const val WIDTH = 220f
-        const val HEIGHT = 110f
-        val NO_SPEED = SpeedState(speedKmh = 0f, qualityOk = false, isMoving = false)
+    /** The speedometer as a widget type: its id, its descriptor, how it is saved, and its plugin. */
+    companion object : WidgetType {
+        val TYPE = WidgetTypeId("speedometer")
+        override val descriptor = WidgetDescriptor(
+            TYPE,
+            "Speedometer",
+            WidgetInstancePolicy.SINGLETON,
+            order = 7,
+            category = "information",
+            storesClosedTemplate = true,
+            menuOrder = 4
+        )
+        override val codec get() = SpeedometerWidgetState.Codec
+        override fun create(context: WidgetContext) = SpeedometerPlugin(context)
+        private const val WIDTH = 220f
+        private const val HEIGHT = 110f
+        private val NO_SPEED = SpeedState(speedKmh = 0f, qualityOk = false, isMoving = false)
     }
 }
 
@@ -314,7 +330,7 @@ data class SpeedometerWidgetState(
     override val isPinned: Boolean = false
 ) : DashboardPersistence.SizedWidgetFields {
     /** Its entry in the saved dashboard file. */
-    companion object Codec : WidgetDocument.StateCodec<SpeedometerWidgetState>(WidgetTypeId.SPEEDOMETER, SpeedometerWidgetState::class) {
+    companion object Codec : WidgetDocument.StateCodec<SpeedometerWidgetState>(SpeedometerPlugin.TYPE, SpeedometerWidgetState::class) {
         override fun toJson(state: SpeedometerWidgetState): JSONObject = JSONObject().apply { putCommonFields(state) }
 
         override fun fromJson(payload: JSONObject): SpeedometerWidgetState? =

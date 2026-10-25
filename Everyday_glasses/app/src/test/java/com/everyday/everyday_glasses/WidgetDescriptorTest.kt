@@ -1,9 +1,15 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
 import com.everyday.everyday_glasses.runtime.WidgetDescriptors
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
-import com.everyday.shared.command.CommandWidgetId
+import com.everyday.everyday_glasses.widgets.WidgetPlugins
+import com.everyday.everyday_glasses.widgets.browser.BrowserPlugin
+import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserPlugin
+import com.everyday.everyday_glasses.widgets.file_browser.ImagePlugin
+import com.everyday.everyday_glasses.widgets.file_browser.PdfPlugin
+import com.everyday.everyday_glasses.widgets.file_browser.VideoPlugin
+import com.everyday.everyday_glasses.widgets.text_editor.TextBoxPlugin
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -11,20 +17,18 @@ import org.junit.Test
 
 class WidgetDescriptorTest {
     @Test
-    fun `catalog contains every stable widget type exactly once`() {
-        assertEquals(WidgetTypeId.entries.toSet(), WidgetDescriptors.all.map { it.type }.toSet())
-        assertEquals(WidgetTypeId.entries.size, WidgetDescriptors.all.size)
+    fun `catalog contains every widget type exactly once, in order`() {
+        assertEquals(WidgetPlugins.all.size, WidgetDescriptors.all.map { it.type }.toSet().size)
         assertEquals(WidgetDescriptors.all.indices.toList(), WidgetDescriptors.all.map { it.order })
-        assertFalse(WidgetDescriptors.all.any { it.label.isBlank() || it.category.isBlank() })
+        assertFalse(WidgetDescriptors.all.any { it.label.isBlank() || it.category.isBlank() || it.type.persistedId.isBlank() })
     }
 
     @Test
-    fun `every command widget resolves to a singleton descriptor`() {
-        CommandWidgetId.entries.forEach { commandId ->
-            val descriptor = WidgetDescriptors.forCommand(commandId)
-            assertEquals(WidgetInstancePolicy.SINGLETON, descriptor.policy)
-            assertEquals(commandId, descriptor.commandId)
+    fun `every singleton keeps a closed template and has its toggle command`() {
+        val commands = AppCommandRegistry()
+        WidgetDescriptors.all.filter { it.policy == WidgetInstancePolicy.SINGLETON }.forEach { descriptor ->
             assertTrue(descriptor.storesClosedTemplate)
+            assertEquals("toggle:${descriptor.type.persistedId}", commands.widgetDefinition(descriptor.type).id)
         }
     }
 
@@ -36,12 +40,12 @@ class WidgetDescriptorTest {
             .toSet()
         assertEquals(
             setOf(
-                WidgetTypeId.BROWSER,
-                WidgetTypeId.TEXT,
-                WidgetTypeId.IMAGE,
-                WidgetTypeId.VIDEO,
-                WidgetTypeId.PDF,
-                WidgetTypeId.FILES
+                BrowserPlugin.TYPE,
+                TextBoxPlugin.TYPE,
+                ImagePlugin.TYPE,
+                VideoPlugin.TYPE,
+                PdfPlugin.TYPE,
+                FileBrowserPlugin.TYPE
             ),
             multiple
         )

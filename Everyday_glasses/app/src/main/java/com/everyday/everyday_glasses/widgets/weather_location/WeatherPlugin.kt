@@ -6,6 +6,9 @@ import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.settings.UnitDisplayFormatter
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
@@ -17,7 +20,7 @@ internal class WeatherPlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
     private val context: Context get() = services.androidContext
-    private val currentWidget: () -> WeatherWidget? = { services.singleton(WidgetTypeId.LOCATION) as? WeatherWidget }
+    private val currentWidget: () -> WeatherWidget? = { services.singleton(TYPE) as? WeatherWidget }
     private var address: String? = null
     private var weatherText: String? = null
     private var sunriseEpochMs: Long? = null
@@ -157,9 +160,14 @@ internal class WeatherPlugin(
         renderLocationWeather()
     }
 
-    private companion object {
-        const val WIDTH = 300f
-        const val HEIGHT = 120f
+    /** The location and weather widget as a widget type: its id, its descriptor, how it is saved, and its plugin. */
+    companion object : WidgetType {
+        val TYPE = WidgetTypeId("location")
+        override val descriptor = WidgetDescriptor(TYPE, "Location", WidgetInstancePolicy.SINGLETON, order = 1, category = "information", storesClosedTemplate = true)
+        override val codec get() = LocationWidgetState.Codec
+        override fun create(context: WidgetContext) = WeatherPlugin(context)
+        private const val WIDTH = 300f
+        private const val HEIGHT = 120f
     }
 }
 
@@ -182,7 +190,7 @@ data class LocationWidgetState(
     override val isPinned: Boolean = false
 ) : DashboardPersistence.SizedWidgetFields {
     /** Its entry in the saved dashboard file. */
-    companion object Codec : WidgetDocument.StateCodec<LocationWidgetState>(WidgetTypeId.LOCATION, LocationWidgetState::class) {
+    companion object Codec : WidgetDocument.StateCodec<LocationWidgetState>(WeatherPlugin.TYPE, LocationWidgetState::class) {
         override fun toJson(state: LocationWidgetState): JSONObject = JSONObject().apply {
             putCommonFields(state)
             put("showWeather", state.showWeather)

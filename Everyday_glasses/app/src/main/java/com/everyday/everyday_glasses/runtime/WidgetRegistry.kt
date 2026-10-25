@@ -4,18 +4,6 @@ import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
-import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
-import com.everyday.everyday_glasses.widgets.calendar.CalendarWidget
-import com.everyday.everyday_glasses.widgets.finance.FinanceWidget
-import com.everyday.everyday_glasses.widgets.file_browser.ImageWidget
-import com.everyday.everyday_glasses.widgets.weather_location.WeatherWidget
-import com.everyday.everyday_glasses.widgets.map.MapWidget
-import com.everyday.everyday_glasses.widgets.news.NewsWidget
-import com.everyday.everyday_glasses.widgets.notifications.NotificationsWidget
-import com.everyday.everyday_glasses.widgets.phone_screen_mirror.ScreenMirrorWidget
-import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidget
-import com.everyday.everyday_glasses.widgets.system_status.StatusBarWidget
-import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleWidget
 import com.everyday.everyday_glasses.widgets._common.WidgetHitTestCache
 import java.util.IdentityHashMap
 
@@ -23,9 +11,8 @@ import java.util.IdentityHashMap
  * The authoritative inventory of live widgets.
  *
  * Membership is grouped by [WidgetTypeId], while callers receive stable descriptor
- * ordering and never mutate the backing collections directly. The typed properties and
- * lists remain temporarily for WidgetContainer compatibility; they delegate to the same
- * registry operations and do not hold duplicate state.
+ * ordering and never mutate the backing collections directly. It names no widget type:
+ * callers ask for a type's widgets with [singleton], [widgets], [singletonAs] or [widgetsAs].
  */
 class WidgetRegistry {
 
@@ -34,7 +21,7 @@ class WidgetRegistry {
     }
 
     private val widgetsByType: Map<WidgetTypeId, MutableList<BaseWidget>> =
-        WidgetTypeId.entries.associateWith { ArrayList() }
+        WidgetDescriptors.all.associate { descriptor -> descriptor.type to ArrayList() }
     private val stableIds = IdentityHashMap<BaseWidget, String>()
     private val widgetsByStableId = mutableMapOf<String, BaseWidget>()
     private val nextInstanceSequence = mutableMapOf<WidgetTypeId, Int>()
@@ -46,19 +33,6 @@ class WidgetRegistry {
     /** The sole fullscreen widget, or null when all widgets are windowed. */
     var fullscreenWidget: BaseWidget? = null
         private set
-
-    val browserWidgets: List<BrowserWidget> get() = widgetsAs(WidgetTypeId.BROWSER)
-    val imageWidgets: List<ImageWidget> get() = widgetsAs(WidgetTypeId.IMAGE)
-    val statusBarWidget: StatusBarWidget? get() = singletonAs(WidgetTypeId.STATUS)
-    val weatherWidget: WeatherWidget? get() = singletonAs(WidgetTypeId.LOCATION)
-    val mapWidget: MapWidget? get() = singletonAs(WidgetTypeId.MAP)
-    val calendarWidget: CalendarWidget? get() = singletonAs(WidgetTypeId.CALENDAR)
-    val financeWidget: FinanceWidget? get() = singletonAs(WidgetTypeId.FINANCE)
-    val newsWidget: NewsWidget? get() = singletonAs(WidgetTypeId.NEWS)
-    val notificationsWidget: NotificationsWidget? get() = singletonAs(WidgetTypeId.NOTIFICATIONS)
-    val speedometerWidget: SpeedometerWidget? get() = singletonAs(WidgetTypeId.SPEEDOMETER)
-    val subtitleWidget: SubtitleWidget? get() = singletonAs(WidgetTypeId.SUBTITLE)
-    val screenMirrorWidget: ScreenMirrorWidget? get() = singletonAs(WidgetTypeId.MIRROR)
 
     /** Registers [widget], assigns its z-order and returns its durable runtime ID. */
     fun add(widget: BaseWidget, requestedStableId: String? = null): String =
@@ -167,9 +141,7 @@ class WidgetRegistry {
         widget.zOrder = nextZOrder++
         invalidateOrdering()
         Log.d(TAG, "Brought ${widget::class.simpleName} to front: zOrder $oldZOrder -> ${widget.zOrder}")
-        if (widget is BrowserWidget && rootView != null && containerView != null) {
-            updateBrowserWebViewZOrder(widget, rootView, containerView)
-        }
+        if (rootView != null && containerView != null) widget.onZOrderChanged(rootView, containerView)
     }
 
     /** Restores a persisted z-order without letting subsequent assignments collide. */
@@ -178,9 +150,7 @@ class WidgetRegistry {
         widget.zOrder = zOrder
         nextZOrder = maxOf(nextZOrder, zOrder + 1)
         invalidateOrdering()
-        if (widget is BrowserWidget && rootView != null && containerView != null) {
-            updateBrowserWebViewZOrder(widget, rootView, containerView)
-        }
+        if (rootView != null && containerView != null) widget.onZOrderChanged(rootView, containerView)
     }
 
     fun clear() {
@@ -252,18 +222,6 @@ class WidgetRegistry {
     private fun invalidateOrdering() {
         sortedWidgetsCache = null
         hitTestCache.invalidate()
-    }
-
-    private fun updateBrowserWebViewZOrder(widget: BrowserWidget, rootView: ViewGroup, containerView: View) {
-        val webView = widget.getWebView() ?: return
-        val containerIndex = rootView.indexOfChild(containerView)
-        if (containerIndex < 0) return
-        val widgetIndex = browserWidgets.indexOf(widget)
-        if (widgetIndex < 0) return
-        if (webView.parent == rootView) rootView.removeView(webView)
-        val insertAt = containerIndex.coerceIn(0, rootView.childCount)
-        rootView.addView(webView, insertAt)
-        Log.d(TAG, "Updated WebView z-order for browser at index $widgetIndex, inserted at $insertAt")
     }
 
 }

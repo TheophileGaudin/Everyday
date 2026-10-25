@@ -15,7 +15,6 @@ import com.everyday.everyday_glasses.interaction.user_input.TextZone
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
 import com.everyday.everyday_glasses.runtime.NewsWidgetListener
 import com.everyday.everyday_glasses.widgets._common.WidgetDataState
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.shared.sync.NewsArticle
 import com.everyday.shared.sync.NewsDataProvider
 import com.everyday.shared.sync.NewsSnapshot
@@ -46,7 +45,7 @@ class NewsWidget(
     y: Float,
     width: Float,
     height: Float
-) : BaseWidget(WidgetTypeId.NEWS, x, y, width, height) {
+) : BaseWidget(NewsPlugin.TYPE, x, y, width, height) {
 
     companion object {
         private const val TAG = "NewsWidget"

@@ -12,7 +12,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import com.everyday.everyday_glasses.runtime.VideoWidgetListener
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.runtime.WakeSleepManager
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets.file_browser.video_backend.VideoItem
@@ -38,7 +37,7 @@ class VideoWidget(
     width: Float = 360f,
     height: Float = 220f,
     queueItems: List<VideoItem> = emptyList(),
-) : BaseWidget(WidgetTypeId.VIDEO, x, y, width, height) {
+) : BaseWidget(VideoPlugin.TYPE, x, y, width, height) {
 
     private val host = FrameLayout(context).apply {
         setBackgroundColor(Color.BLACK)

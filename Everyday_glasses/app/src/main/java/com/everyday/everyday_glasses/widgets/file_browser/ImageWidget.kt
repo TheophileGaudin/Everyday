@@ -12,8 +12,11 @@ import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonF
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseCommonFields
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import org.json.JSONObject
@@ -23,7 +26,7 @@ class ImageWidget(
     x: Float,
     y: Float,
     private val imagePath: String
-) : BaseWidget(WidgetTypeId.IMAGE, x, y, 300f, 300f) { // Default size, will adjust to aspect ratio
+) : BaseWidget(ImagePlugin.TYPE, x, y, 300f, 300f) { // Default size, will adjust to aspect ratio
 
     private var bitmap: Bitmap? = null
     private val srcRect = Rect()
@@ -122,7 +125,7 @@ class ImagePlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
     private val context: Context get() = services.androidContext
-    private val all: () -> List<ImageWidget> = { services.widgets(WidgetTypeId.IMAGE).filterIsInstance<ImageWidget>() }
+    private val all: () -> List<ImageWidget> = { services.widgets(ImagePlugin.TYPE).filterIsInstance<ImageWidget>() }
     override val lifecycle = WidgetLifecycleRegistration.multiple(
         ImageWidget::class, ImageWidgetState.Codec,
         capture = ::capture,
@@ -160,7 +163,7 @@ class ImagePlugin(
     /** Opens the image at [path] where the user asked (top left otherwise). */
     fun open(path: String) {
         val position = services.creationPosition
-        services.open(WidgetTypeId.IMAGE) { ImageWidget(position?.x ?: 0f, position?.y ?: 0f, path) }
+        services.open(ImagePlugin.TYPE) { ImageWidget(position?.x ?: 0f, position?.y ?: 0f, path) }
     }
 
     private fun deleteFileIfUnused(widget: ImageWidget) {
@@ -169,8 +172,19 @@ class ImagePlugin(
         if (!hasSibling) ImageWidgetStorage.deleteIfManaged(context, path)
     }
 
-    private companion object {
-        const val TAG = "ImagePlugin"
+    /** The image as a widget type: its id, its descriptor, how it is saved, and its plugin. */
+    companion object : WidgetType {
+        val TYPE = WidgetTypeId("image")
+        override val descriptor = WidgetDescriptor(
+            TYPE,
+            "Image",
+            WidgetInstancePolicy.MULTIPLE,
+            order = 12,
+            category = "content"
+        )
+        override val codec get() = ImageWidgetState.Codec
+        override fun create(context: WidgetContext) = ImagePlugin(context)
+        private const val TAG = "ImagePlugin"
     }
 }
 
@@ -190,7 +204,7 @@ data class ImageWidgetState(
     override val isPinned: Boolean = false
 ) : DashboardPersistence.SizedWidgetFields {
     /** Its entry in the saved dashboard file. */
-    companion object Codec : WidgetDocument.StateCodec<ImageWidgetState>(WidgetTypeId.IMAGE, ImageWidgetState::class) {
+    companion object Codec : WidgetDocument.StateCodec<ImageWidgetState>(ImagePlugin.TYPE, ImageWidgetState::class) {
         override fun toJson(state: ImageWidgetState): JSONObject = JSONObject().apply {
             putCommonFields(state)
             put("imagePath", state.imagePath)

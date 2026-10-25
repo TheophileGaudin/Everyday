@@ -15,6 +15,9 @@ import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
 import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.widgets.map.backend.MapViewMode
 import com.everyday.everyday_glasses.widgets.map.backend.MapZoom
 import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfigState
@@ -30,7 +33,7 @@ class MapPlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
     private val context: Context get() = services.androidContext
-    private val current: () -> MapWidget? = { services.singleton(WidgetTypeId.MAP) as? MapWidget }
+    private val current: () -> MapWidget? = { services.singleton(TYPE) as? MapWidget }
     private val requestRepaint: () -> Unit = { services.requestRepaint() }
     override val lifecycle = WidgetLifecycleRegistration.singleton(
         MapWidget::class, MapWidgetState.Codec,
@@ -133,8 +136,20 @@ class MapPlugin(
             setLocationMetadata(place?.town.orEmpty(), place?.countryCode.orEmpty())
         }
 
-    private companion object {
-        const val SIZE = 210f
+    /** The map as a widget type: its id, its descriptor, how it is saved, and its plugin. */
+    companion object : WidgetType {
+        val TYPE = WidgetTypeId("map")
+        override val descriptor = WidgetDescriptor(
+            TYPE,
+            "Map",
+            WidgetInstancePolicy.SINGLETON,
+            order = 2,
+            category = "information",
+            storesClosedTemplate = true
+        )
+        override val codec get() = MapWidgetState.Codec
+        override fun create(context: WidgetContext) = MapPlugin(context)
+        private const val SIZE = 210f
     }
 }
 
@@ -158,7 +173,7 @@ data class MapWidgetState(
     override val isPinned: Boolean = false
 ) : DashboardPersistence.SizedWidgetFields {
     /** Its entry in the saved dashboard file. */
-    companion object Codec : WidgetDocument.StateCodec<MapWidgetState>(WidgetTypeId.MAP, MapWidgetState::class) {
+    companion object Codec : WidgetDocument.StateCodec<MapWidgetState>(MapPlugin.TYPE, MapWidgetState::class) {
         override fun toJson(state: MapWidgetState): JSONObject = JSONObject().apply {
             putCommonFields(state)
             put("mode", state.mode)

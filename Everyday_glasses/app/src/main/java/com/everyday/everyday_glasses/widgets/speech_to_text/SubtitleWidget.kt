@@ -20,7 +20,10 @@ import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.SubtitleWidgetListener
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.shared.sync.SubtitleControl
@@ -37,7 +40,7 @@ class SubtitleWidget(
     y: Float,
     width: Float,
     height: Float
-) : BaseWidget(WidgetTypeId.SUBTITLE, x, y, width, height) {
+) : BaseWidget(SubtitlePlugin.TYPE, x, y, width, height) {
 
     companion object {
         const val DEFAULT_WIDTH = 520f
@@ -501,7 +504,7 @@ class SubtitleWidget(
 class SubtitlePlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
-    private val current: () -> SubtitleWidget? = { services.singleton(WidgetTypeId.SUBTITLE) as? SubtitleWidget }
+    private val current: () -> SubtitleWidget? = { services.singleton(SubtitlePlugin.TYPE) as? SubtitleWidget }
     override val lifecycle = WidgetLifecycleRegistration.singleton(
         SubtitleWidget::class, SubtitleWidgetState.Codec,
         current = current,
@@ -574,6 +577,20 @@ class SubtitlePlugin(
                 }
             }
         }
+    /** Live subtitles as a widget type: its id, its descriptor, how it is saved, and its plugin. */
+    companion object : WidgetType {
+        val TYPE = WidgetTypeId("subtitle")
+        override val descriptor = WidgetDescriptor(
+            TYPE,
+            "Subtitles",
+            WidgetInstancePolicy.SINGLETON,
+            order = 8,
+            category = "media",
+            storesClosedTemplate = true
+        )
+        override val codec get() = SubtitleWidgetState.Codec
+        override fun create(context: WidgetContext) = SubtitlePlugin(context)
+    }
 }
 
 /** What a saved dashboard keeps of the subtitle widget: its options. Whether it was capturing is not kept. */
@@ -594,7 +611,7 @@ data class SubtitleWidgetState(
     override val isPinned: Boolean = false
 ) : DashboardPersistence.SizedWidgetFields {
     /** Its entry in the saved dashboard file. */
-    companion object Codec : WidgetDocument.StateCodec<SubtitleWidgetState>(WidgetTypeId.SUBTITLE, SubtitleWidgetState::class) {
+    companion object Codec : WidgetDocument.StateCodec<SubtitleWidgetState>(SubtitlePlugin.TYPE, SubtitleWidgetState::class) {
         override fun toJson(state: SubtitleWidgetState): JSONObject = JSONObject().apply {
             putCommonFields(state)
             put("phonePlaybackEnabled", state.phonePlaybackEnabled)

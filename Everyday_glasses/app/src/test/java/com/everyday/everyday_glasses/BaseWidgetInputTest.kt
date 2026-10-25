@@ -1,8 +1,8 @@
 package com.everyday.everyday_glasses
 
 import android.graphics.Canvas
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import com.everyday.everyday_glasses.widgets.text_editor.TextBoxPlugin
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -46,7 +46,7 @@ class BaseWidgetInputTest {
         assertEquals(listOf(3f to 4f), widget.releases)
     }
 
-    private class FakeWidget : BaseWidget(WidgetTypeId.TEXT, 0f, 0f, 10f, 10f) {
+    private class FakeWidget : BaseWidget(TextBoxPlugin.TYPE, 0f, 0f, 10f, 10f) {
         var savedValue = 1
         var contentTaps = 0
         val scrolls = mutableListOf<Float>()

@@ -4,8 +4,8 @@ import android.content.Context
 import android.os.Environment
 import android.util.AtomicFile
 import android.util.Log
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
+import com.everyday.everyday_glasses.widgets.file_browser.ImagePlugin
 import com.everyday.everyday_glasses.widgets.file_browser.ImageWidgetStorage
 import com.everyday.everyday_glasses.widgets.file_browser.ImageWidgetState
 import org.json.JSONObject
@@ -220,7 +220,7 @@ object DashboardPersistence {
 
     private fun imagePaths(dashboard: WidgetDocument.PersistedDashboard): List<String> =
         dashboard.widgets.mapNotNull { record ->
-            if (record.type != WidgetTypeId.IMAGE) return@mapNotNull null
+            if (record.type != ImagePlugin.TYPE) return@mapNotNull null
             ImageWidgetState.decode(record.state)?.imagePath
         }
 

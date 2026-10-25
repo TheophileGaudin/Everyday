@@ -19,6 +19,9 @@ import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
 import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.shared.sync.CalendarEventSnapshot
 import com.everyday.shared.sync.CalendarSnapshot
 import java.text.SimpleDateFormat
@@ -36,7 +39,7 @@ class CalendarWidget(
     y: Float,
     width: Float,
     height: Float
-) : BaseWidget(WidgetTypeId.CALENDAR, x, y, width, height) {
+) : BaseWidget(CalendarPlugin.TYPE, x, y, width, height) {
 
     companion object {
         const val DEFAULT_WIDTH = 320f
@@ -948,7 +951,7 @@ class CalendarWidget(
 class CalendarPlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
-    private val current: () -> CalendarWidget? = { services.singleton(WidgetTypeId.CALENDAR) as? CalendarWidget }
+    private val current: () -> CalendarWidget? = { services.singleton(CalendarPlugin.TYPE) as? CalendarWidget }
     // The last snapshot received, so that a calendar opened later shows it right away.
     private val latest: CalendarSnapshot? get() = services.appData.latest(AppChannels.calendar)
 
@@ -998,6 +1001,21 @@ class CalendarPlugin(
             isPinned = c.isPinned
         )
     }
+
+    /** The calendar as a widget type: its id, its descriptor, how it is saved, and its plugin. */
+    companion object : WidgetType {
+        val TYPE = WidgetTypeId("calendar")
+        override val descriptor = WidgetDescriptor(
+            TYPE,
+            "Calendar",
+            WidgetInstancePolicy.SINGLETON,
+            order = 3,
+            category = "information",
+            storesClosedTemplate = true
+        )
+        override val codec get() = CalendarWidgetState.Codec
+        override fun create(context: WidgetContext) = CalendarPlugin(context)
+    }
 }
 
 /** What a saved dashboard keeps of the calendar widget. */
@@ -1016,7 +1034,7 @@ data class CalendarWidgetState(
     override val isPinned: Boolean = false
 ) : DashboardPersistence.SizedWidgetFields {
     /** Its entry in the saved dashboard file. */
-    companion object Codec : WidgetDocument.StateCodec<CalendarWidgetState>(WidgetTypeId.CALENDAR, CalendarWidgetState::class) {
+    companion object Codec : WidgetDocument.StateCodec<CalendarWidgetState>(CalendarPlugin.TYPE, CalendarWidgetState::class) {
         override fun toJson(state: CalendarWidgetState): JSONObject = JSONObject().apply {
             putCommonFields(state)
             put("fontScale", state.fontScale)

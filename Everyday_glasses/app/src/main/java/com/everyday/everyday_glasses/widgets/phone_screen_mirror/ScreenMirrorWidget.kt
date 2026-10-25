@@ -32,7 +32,10 @@ import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets._common.WidgetInteractionState
@@ -57,7 +60,7 @@ class ScreenMirrorWidget(
     y: Float,
     widgetWidth: Float,
     widgetHeight: Float
-) : BaseWidget(WidgetTypeId.MIRROR, x, y, widgetWidth, widgetHeight) {
+) : BaseWidget(MirrorPlugin.TYPE, x, y, widgetWidth, widgetHeight) {
     companion object {
         private const val TAG = "ScreenMirrorWidget"
 
@@ -1135,7 +1138,7 @@ class MirrorPlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
     private val context: Context get() = services.androidContext
-    private val current: () -> ScreenMirrorWidget? = { services.singleton(WidgetTypeId.MIRROR) as? ScreenMirrorWidget }
+    private val current: () -> ScreenMirrorWidget? = { services.singleton(MirrorPlugin.TYPE) as? ScreenMirrorWidget }
     private val onMediaFrame: (sourceId: String) -> Unit = { sourceId -> services.notifyMediaFrame(sourceId) }
     private val setMediaSourceActive: (sourceId: String, active: Boolean) -> Unit = { sourceId, active -> services.setMediaSourceActive(sourceId, active) }
     private val refreshBrightnessRules: () -> Unit = { services.refreshBrightnessRules() }
@@ -1201,6 +1204,21 @@ class MirrorPlugin(
         }
         widget.refreshDisplayVisibility()
     }
+
+    /** The phone screen mirror as a widget type: its id, its descriptor, how it is saved, and its plugin. */
+    companion object : WidgetType {
+        val TYPE = WidgetTypeId("mirror")
+        override val descriptor = WidgetDescriptor(
+            TYPE,
+            "Screen mirror",
+            WidgetInstancePolicy.SINGLETON,
+            order = 9,
+            category = "media",
+            storesClosedTemplate = true
+        )
+        override val codec get() = MirrorWidgetState.Codec
+        override fun create(context: WidgetContext) = MirrorPlugin(context)
+    }
 }
 
 /** What a saved dashboard keeps of the phone screen mirror: only the common fields. */
@@ -1218,7 +1236,7 @@ data class MirrorWidgetState(
     override val isPinned: Boolean = false
 ) : DashboardPersistence.SizedWidgetFields {
     /** Its entry in the saved dashboard file. */
-    companion object Codec : WidgetDocument.StateCodec<MirrorWidgetState>(WidgetTypeId.MIRROR, MirrorWidgetState::class) {
+    companion object Codec : WidgetDocument.StateCodec<MirrorWidgetState>(MirrorPlugin.TYPE, MirrorWidgetState::class) {
         override fun toJson(state: MirrorWidgetState): JSONObject = JSONObject().apply { putCommonFields(state) }
 
         override fun fromJson(payload: JSONObject): MirrorWidgetState? =

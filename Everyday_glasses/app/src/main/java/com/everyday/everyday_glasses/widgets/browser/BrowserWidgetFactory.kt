@@ -9,8 +9,11 @@ import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseCommo
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.BrowserWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import org.json.JSONObject
 
@@ -57,7 +60,7 @@ class BrowserPlugin(
     private val context: Context get() = services.androidContext
     private val rootLayout: () -> ViewGroup? = { services.rootLayout }
     private val containerView: View get() = services.dashboardView
-    private val all: () -> List<BrowserWidget> = { services.widgets(WidgetTypeId.BROWSER).filterIsInstance<BrowserWidget>() }
+    private val all: () -> List<BrowserWidget> = { services.widgets(BrowserPlugin.TYPE).filterIsInstance<BrowserWidget>() }
     override val lifecycle = WidgetLifecycleRegistration.multiple(
         BrowserWidget::class, BrowserWidgetState.Codec,
         capture = ::capture,
@@ -116,7 +119,7 @@ class BrowserPlugin(
         url: String? = null,
     ): BrowserWidget? {
         val widget = build(x, y, width, height) ?: return null
-        services.open(WidgetTypeId.BROWSER) { widget }
+        services.open(BrowserPlugin.TYPE) { widget }
         url?.let { widget.getWebView()?.loadUrl(it) }
         if (fullscreen) widget.toggleFullscreen()
         if (focus) widget.setFocused(true)
@@ -124,7 +127,7 @@ class BrowserPlugin(
     }
 
     private fun reopenClosed(): BrowserWidget? = services.runPersistentMutation(changed = { it != null }) {
-        (services.openClosedTemplate(WidgetTypeId.BROWSER) as? BrowserWidget)?.also { browser ->
+        (services.openClosedTemplate(BrowserPlugin.TYPE) as? BrowserWidget)?.also { browser ->
             if (!browser.isMinimized) browser.setFocused(true)
         }
     }
@@ -164,8 +167,20 @@ class BrowserPlugin(
     private fun build(x: Float, y: Float, width: Float, height: Float): BrowserWidget? =
         rootLayout()?.let { root -> BrowserWidgetFactory(context, root, containerView).create(x, y, width, height) }
 
-    private companion object {
-        const val YOUTUBE_HISTORY_URL = "https://www.youtube.com/feed/history"
+    /** The web browser as a widget type: its id, its descriptor, how it is saved, and its plugin. */
+    companion object : WidgetType {
+        val TYPE = WidgetTypeId("browser")
+        override val descriptor = WidgetDescriptor(
+            TYPE,
+            "Browser",
+            WidgetInstancePolicy.MULTIPLE,
+            order = 10,
+            category = "content",
+            storesClosedTemplate = true
+        )
+        override val codec get() = BrowserWidgetState.Codec
+        override fun create(context: WidgetContext) = BrowserPlugin(context)
+        private const val YOUTUBE_HISTORY_URL = "https://www.youtube.com/feed/history"
     }
 }
 
@@ -185,7 +200,7 @@ data class BrowserWidgetState(
     override val isPinned: Boolean = false
 ) : DashboardPersistence.SizedWidgetFields {
     /** Its entry in the saved dashboard file. */
-    companion object Codec : WidgetDocument.StateCodec<BrowserWidgetState>(WidgetTypeId.BROWSER, BrowserWidgetState::class) {
+    companion object Codec : WidgetDocument.StateCodec<BrowserWidgetState>(BrowserPlugin.TYPE, BrowserWidgetState::class) {
         override fun toJson(state: BrowserWidgetState): JSONObject = JSONObject().apply {
             putCommonFields(state)
             put("url", state.url)

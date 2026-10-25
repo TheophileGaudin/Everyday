@@ -17,7 +17,10 @@ import org.json.JSONObject
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.shared.sync.PhoneNotificationItem
 import com.everyday.shared.sync.PhoneNotificationsSnapshot
@@ -33,7 +36,7 @@ class NotificationsWidget(
     width: Float,
     height: Float,
     private var screenHeight: Float
-) : BaseWidget(WidgetTypeId.NOTIFICATIONS, x, y, width, height) {
+) : BaseWidget(NotificationsPlugin.TYPE, x, y, width, height) {
 
     companion object {
         const val DEFAULT_WIDTH = 420f
@@ -585,7 +588,7 @@ class NotificationsWidget(
 class NotificationsPlugin(
     private val services: WidgetContext,
 ): WidgetPlugin {
-    private val current: () -> NotificationsWidget? = { services.singleton(WidgetTypeId.NOTIFICATIONS) as? NotificationsWidget }
+    private val current: () -> NotificationsWidget? = { services.singleton(NotificationsPlugin.TYPE) as? NotificationsWidget }
     // The last snapshot received, so that a widget opened later shows it right away.
     private val latest: PhoneNotificationsSnapshot
         get() = services.appData.latest(AppChannels.notifications)
@@ -642,6 +645,22 @@ class NotificationsPlugin(
             isPinned = c.isPinned
         )
     }
+
+    /** The notifications widget as a widget type: its id, its descriptor, how it is saved, and its plugin. */
+    companion object : WidgetType {
+        val TYPE = WidgetTypeId("notifications")
+        override val descriptor = WidgetDescriptor(
+            TYPE,
+            "Notifications",
+            WidgetInstancePolicy.SINGLETON,
+            order = 6,
+            category = "information",
+            storesClosedTemplate = true,
+            menuOrder = 7
+        )
+        override val codec get() = NotificationsWidgetState.Codec
+        override fun create(context: WidgetContext) = NotificationsPlugin(context)
+    }
 }
 
 /** What a saved dashboard keeps of the notifications widget: its font scales and scroll position. */
@@ -662,7 +681,7 @@ data class NotificationsWidgetState(
     override val isPinned: Boolean = false
 ) : DashboardPersistence.SizedWidgetFields {
     /** Its entry in the saved dashboard file. */
-    companion object Codec : WidgetDocument.StateCodec<NotificationsWidgetState>(WidgetTypeId.NOTIFICATIONS, NotificationsWidgetState::class) {
+    companion object Codec : WidgetDocument.StateCodec<NotificationsWidgetState>(NotificationsPlugin.TYPE, NotificationsWidgetState::class) {
         override fun toJson(state: NotificationsWidgetState): JSONObject = JSONObject().apply {
             putCommonFields(state)
             put("widgetFontScale", state.widgetFontScale)

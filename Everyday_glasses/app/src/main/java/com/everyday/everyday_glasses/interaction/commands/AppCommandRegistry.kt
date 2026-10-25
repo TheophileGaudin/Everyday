@@ -1,10 +1,11 @@
 package com.everyday.everyday_glasses.interaction.commands
 
 import com.everyday.everyday_glasses.runtime.WidgetDescriptors
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
 import com.everyday.shared.command.AppCommandArguments
 import com.everyday.shared.command.AppCommandInvocation
-import com.everyday.shared.command.CommandWidgetId
 import java.net.URI
 
 enum class CommandArgumentKind { NONE, BRIGHTNESS, SCROLL, URL, TEXT }
@@ -21,7 +22,7 @@ data class AppCommandDefinition(
 )
 
 data class WidgetVisibilityTarget(
-    val widgetId: CommandWidgetId,
+    val widgetId: WidgetTypeId,
     val visible: Boolean
 )
 
@@ -75,18 +76,11 @@ class AppCommandRegistry(private val savedLayoutNames: () -> List<String> = { em
         openYouTubeHistory, toggleLayoutLock, saveLayout, saveLayoutAs, openFile, openSettings, closeApp, setBrightness, scroll,
         openUrl, enterText
     )
-    private val widgetCommands = linkedMapOf(
-        CommandWidgetId.STATUS to toggleStatus,
-        CommandWidgetId.LOCATION to toggleLocation,
-        CommandWidgetId.MAP to toggleMap,
-        CommandWidgetId.CALENDAR to toggleCalendar,
-        CommandWidgetId.FINANCE to toggleFinance,
-        CommandWidgetId.NEWS to toggleNews,
-        CommandWidgetId.NOTIFICATIONS to toggleNotifications,
-        CommandWidgetId.SPEEDOMETER to toggleSpeedometer,
-        CommandWidgetId.SUBTITLE to toggleSubtitle,
-        CommandWidgetId.MIRROR to toggleMirror
-    )
+    /** Each widget toggle, by the type it toggles: "toggle:map" toggles the "map" widget type. */
+    private val widgetCommands = listOf(
+        toggleStatus, toggleLocation, toggleMap, toggleCalendar, toggleFinance, toggleNews,
+        toggleNotifications, toggleSpeedometer, toggleSubtitle, toggleMirror
+    ).associateBy { command -> WidgetTypeId(command.id.removePrefix("toggle:")) }
     private val commandWidgets = widgetCommands.entries.associate { (widget, command) -> command to widget }
     private data class AssistantVisibilityCommand(
         val definition: AppCommandDefinition,
@@ -95,12 +89,13 @@ class AppCommandRegistry(private val savedLayoutNames: () -> List<String> = { em
 
     /** Idempotent visibility commands reserved for the assistant tool catalog. */
     private val assistantVisibilityCommands: List<AssistantVisibilityCommand> =
-        CommandWidgetId.entries.flatMap { widgetId ->
-            val label = WidgetDescriptors.forCommand(widgetId).label
+        WidgetDescriptors.all.filter { it.policy == WidgetInstancePolicy.SINGLETON }.flatMap { descriptor ->
+            val widgetId = descriptor.type
+            val label = descriptor.label
             listOf(
                 AssistantVisibilityCommand(
                     definition(
-                        "show:${widgetId.name.lowercase()}",
+                        "show:${widgetId.persistedId}",
                         "Show: $label",
                         "Show $label",
                         "Ensure the $label widget is shown; no-op if it is already shown"
@@ -109,7 +104,7 @@ class AppCommandRegistry(private val savedLayoutNames: () -> List<String> = { em
                 ),
                 AssistantVisibilityCommand(
                     definition(
-                        "hide:${widgetId.name.lowercase()}",
+                        "hide:${widgetId.persistedId}",
                         "Hide: $label",
                         "Hide $label",
                         "Ensure the $label widget is hidden; no-op if it is already hidden"
@@ -142,10 +137,10 @@ class AppCommandRegistry(private val savedLayoutNames: () -> List<String> = { em
         ?: assistantVisibilityById[id]?.definition
         ?: layoutDefinitions().firstOrNull { it.id == id }
 
-    fun widgetDefinition(widgetId: CommandWidgetId): AppCommandDefinition =
-        requireNotNull(widgetCommands[widgetId])
+    fun widgetDefinition(widgetId: WidgetTypeId): AppCommandDefinition =
+        requireNotNull(widgetCommands[widgetId]) { "No toggle command for widget type $widgetId" }
 
-    fun widgetId(definition: AppCommandDefinition): CommandWidgetId? = commandWidgets[definition]
+    fun widgetId(definition: AppCommandDefinition): WidgetTypeId? = commandWidgets[definition]
 
     fun widgetVisibility(definition: AppCommandDefinition): WidgetVisibilityTarget? =
         assistantVisibilityById[definition.id]?.target

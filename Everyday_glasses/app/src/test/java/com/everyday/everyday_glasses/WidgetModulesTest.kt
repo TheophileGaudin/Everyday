@@ -87,7 +87,7 @@ class WidgetModulesTest {
 
     @Test
     fun `a module registration takes its descriptor from the widget type`() {
-        assertEquals(WidgetTypeId.STATUS, module.lifecycle.descriptor.type)
+        assertEquals(StatusBarPlugin.TYPE, module.lifecycle.descriptor.type)
     }
 
     @Test

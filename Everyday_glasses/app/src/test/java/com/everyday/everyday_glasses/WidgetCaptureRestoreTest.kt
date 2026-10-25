@@ -3,8 +3,8 @@ package com.everyday.everyday_glasses
 import android.graphics.Canvas
 import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidgetState
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerPlugin
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -70,7 +70,7 @@ class WidgetCaptureRestoreTest {
         assertEquals(200f, widget.savedMinWidth)
     }
 
-    private class FakeWidget : BaseWidget(WidgetTypeId.SPEEDOMETER, 0f, 0f, 10f, 10f) {
+    private class FakeWidget : BaseWidget(SpeedometerPlugin.TYPE, 0f, 0f, 10f, 10f) {
         override fun draw(canvas: Canvas) = Unit
     }
 }

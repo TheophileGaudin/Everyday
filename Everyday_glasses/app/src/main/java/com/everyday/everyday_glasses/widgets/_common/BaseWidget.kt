@@ -7,6 +7,8 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.util.Log
 import android.view.KeyEvent
+import android.view.View
+import android.view.ViewGroup
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneHost
 import com.everyday.everyday_glasses.runtime.WidgetChangeListener
 import com.everyday.everyday_glasses.runtime.WidgetLifecycle
@@ -134,6 +136,12 @@ abstract class BaseWidget(
 
     // Z-order for unified drawing order (higher = drawn on top)
     var zOrder: Int = 0
+
+    /**
+     * Called after [zOrder] changes, with the activity's root layout and the dashboard view, for a
+     * widget whose content is a native view stacked in the root layout (the browser's page).
+     */
+    open fun onZOrderChanged(rootView: ViewGroup, containerView: View) {}
 
     // Optional smart-alignment hook. Set by the container; may be null if the
     // feature is disabled or never wired (e.g. in tests). When non-null, drag

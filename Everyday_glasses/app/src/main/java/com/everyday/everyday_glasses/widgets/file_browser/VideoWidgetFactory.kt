@@ -12,7 +12,10 @@ import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.VideoWidgetListener
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets.file_browser.video_backend.VideoQueueRepository
 import org.json.JSONObject
@@ -77,7 +80,7 @@ class VideoPlugin(
         val y = ((services.viewportHeight - 220f) / 2f).coerceAtLeast(0f)
         val widget = factory.create(uri, displayName, x, y)
         services.runPersistentMutation {
-            services.open(WidgetTypeId.VIDEO) { widget }
+            services.open(VideoPlugin.TYPE) { widget }
             widget.toggleFullscreen()
         }
     }
@@ -109,6 +112,20 @@ class VideoPlugin(
     private fun factory(): VideoWidgetFactory? = rootLayout()?.let { root ->
         VideoWidgetFactory(context, root, containerView, queueRepository, setMediaSourceActive)
     }
+
+    /** The video as a widget type: its id, its descriptor, how it is saved, and its plugin. */
+    companion object : WidgetType {
+        val TYPE = WidgetTypeId("video")
+        override val descriptor = WidgetDescriptor(
+            TYPE,
+            "Video",
+            WidgetInstancePolicy.MULTIPLE,
+            order = 13,
+            category = "media"
+        )
+        override val codec get() = VideoWidgetState.Codec
+        override fun create(context: WidgetContext) = VideoPlugin(context)
+    }
 }
 
 /** What a saved dashboard keeps of a video: its content URI and name. */
@@ -128,7 +145,7 @@ data class VideoWidgetState(
     override val isPinned: Boolean = false
 ) : DashboardPersistence.SizedWidgetFields {
     /** Its entry in the saved dashboard file. */
-    companion object Codec : WidgetDocument.StateCodec<VideoWidgetState>(WidgetTypeId.VIDEO, VideoWidgetState::class) {
+    companion object Codec : WidgetDocument.StateCodec<VideoWidgetState>(VideoPlugin.TYPE, VideoWidgetState::class) {
         override fun toJson(state: VideoWidgetState): JSONObject = JSONObject().apply {
             putCommonFields(state)
             put("uri", state.uri)

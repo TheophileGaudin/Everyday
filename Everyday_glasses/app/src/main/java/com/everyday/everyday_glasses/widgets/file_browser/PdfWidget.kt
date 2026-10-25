@@ -27,8 +27,11 @@ import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonF
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseCommonFields
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import org.json.JSONObject
 
@@ -43,7 +46,7 @@ class PdfWidget(
     height: Float = 260f,
     initialPage: Int = 0,
     initialZoom: Float = 1f,
-) : BaseWidget(WidgetTypeId.PDF, x, y, width, height) {
+) : BaseWidget(PdfPlugin.TYPE, x, y, width, height) {
 
     companion object {
         private const val CONTROL_WIDTH = 82f
@@ -362,7 +365,7 @@ class PdfPlugin(
         val y = ((services.viewportHeight - 260f) / 2f).coerceAtLeast(0f)
         val widget = PdfWidget(context, uri, displayName, x, y)
         services.runPersistentMutation {
-            services.open(WidgetTypeId.PDF) { widget }
+            services.open(PdfPlugin.TYPE) { widget }
             widget.toggleFullscreen()
         }
     }
@@ -400,6 +403,20 @@ class PdfPlugin(
             isPinned = c.isPinned
         )
     }
+
+    /** The PDF document as a widget type: its id, its descriptor, how it is saved, and its plugin. */
+    companion object : WidgetType {
+        val TYPE = WidgetTypeId("pdf")
+        override val descriptor = WidgetDescriptor(
+            TYPE,
+            "PDF",
+            WidgetInstancePolicy.MULTIPLE,
+            order = 14,
+            category = "content"
+        )
+        override val codec get() = PdfWidgetState.Codec
+        override fun create(context: WidgetContext) = PdfPlugin(context)
+    }
 }
 
 /** What a saved dashboard keeps of a PDF: its content URI, name, page and zoom. */
@@ -421,7 +438,7 @@ data class PdfWidgetState(
     override val isPinned: Boolean = false
 ) : DashboardPersistence.SizedWidgetFields {
     /** Its entry in the saved dashboard file. */
-    companion object Codec : WidgetDocument.StateCodec<PdfWidgetState>(WidgetTypeId.PDF, PdfWidgetState::class) {
+    companion object Codec : WidgetDocument.StateCodec<PdfWidgetState>(PdfPlugin.TYPE, PdfWidgetState::class) {
         override fun toJson(state: PdfWidgetState): JSONObject = JSONObject().apply {
             putCommonFields(state)
             put("uri", state.uri)

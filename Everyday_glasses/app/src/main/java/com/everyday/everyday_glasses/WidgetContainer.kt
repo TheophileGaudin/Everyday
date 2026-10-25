@@ -26,7 +26,6 @@ import com.everyday.everyday_glasses.widgets._common.WidgetPresenter
 import com.everyday.everyday_glasses.settings.SettingsController
 import com.everyday.everyday_glasses.interaction.user_input.UserInputActivity
 import com.everyday.everyday_glasses.interaction.user_input.UserInputKind
-import com.everyday.everyday_glasses.runtime.WidgetDescriptors
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets.browser.BrowserPlugin
@@ -69,10 +68,10 @@ import com.everyday.everyday_glasses.widgets.file_browser.VideoPlugin
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
 import com.everyday.everyday_glasses.widgets.finance.FinancePlugin
 import com.everyday.everyday_glasses.widgets.news.NewsPlugin
+import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerPlugin
 import com.everyday.shared.command.AppCommandArguments
 import com.everyday.shared.command.AppCommandInvocation
 import com.everyday.shared.command.CommandScrollDirection
-import com.everyday.shared.command.CommandWidgetId
 import com.everyday.shared.transport.AssistantStatus
 
 /**
@@ -199,9 +198,8 @@ class WidgetContainer @JvmOverloads constructor(
             CommandAvailability.TEXT_FOCUSED      -> textEditing.hasKeyFocus
             CommandAvailability.BROWSER_AVAILABLE -> textEditing.focusedPage != null || fullscreenAs<BrowserWidget>() != null || isReady()
         }
-        override fun toggleWidget(widgetId: CommandWidgetId) = lifecycleController.toggle(WidgetDescriptors.forCommand(widgetId).type)
-        override fun setWidgetVisible(widgetId: CommandWidgetId, visible: Boolean) {
-            val type = WidgetDescriptors.forCommand(widgetId).type
+        override fun toggleWidget(type: WidgetTypeId) = lifecycleController.toggle(type)
+        override fun setWidgetVisible(type: WidgetTypeId, visible: Boolean) {
             if (visible) lifecycleController.show(type) else lifecycleController.hide(type)
         }
         override fun createTextWidget()                                       = textPlugin.open()
@@ -247,7 +245,7 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Widget References ====================
 
-    private val speedometerWidget: SpeedometerWidget?     get() = registry.speedometerWidget
+    private val speedometerWidget: SpeedometerWidget?     get() = registry.singletonAs(SpeedometerPlugin.TYPE)
 
     // ==================== Widget plugins ====================
 
@@ -295,7 +293,7 @@ class WidgetContainer @JvmOverloads constructor(
         override fun close(widget: BaseWidget) = lifecycleController.close(widget)
     }
     /** One plugin per widget type, built from the single list in [WidgetPlugins]. */
-    private val plugins: List<WidgetPlugin> by lazy { WidgetPlugins.all.map { create -> create(widgetContext) } }
+    private val plugins: List<WidgetPlugin> by lazy { WidgetPlugins.all.map { type -> type.create(widgetContext) } }
     private inline fun <reified P : WidgetPlugin> plugin(): P = plugins.filterIsInstance<P>().single()
 
     // The plugins the dashboard still calls by name, for commands, the activity and the assistant.

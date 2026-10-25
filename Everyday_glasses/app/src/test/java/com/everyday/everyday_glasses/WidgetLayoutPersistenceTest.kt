@@ -41,6 +41,21 @@ import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.ui.hover_controls.CloseAppHoverControl
 import com.everyday.everyday_glasses.ui.hover_controls.YouTubeHistoryHoverControl
+import com.everyday.everyday_glasses.widgets.browser.BrowserPlugin
+import com.everyday.everyday_glasses.widgets.calendar.CalendarPlugin
+import com.everyday.everyday_glasses.widgets.file_browser.ImagePlugin
+import com.everyday.everyday_glasses.widgets.file_browser.PdfPlugin
+import com.everyday.everyday_glasses.widgets.file_browser.VideoPlugin
+import com.everyday.everyday_glasses.widgets.finance.FinancePlugin
+import com.everyday.everyday_glasses.widgets.map.MapPlugin
+import com.everyday.everyday_glasses.widgets.news.NewsPlugin
+import com.everyday.everyday_glasses.widgets.notifications.NotificationsPlugin
+import com.everyday.everyday_glasses.widgets.phone_screen_mirror.MirrorPlugin
+import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitlePlugin
+import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerPlugin
+import com.everyday.everyday_glasses.widgets.system_status.StatusBarPlugin
+import com.everyday.everyday_glasses.widgets.text_editor.TextBoxPlugin
+import com.everyday.everyday_glasses.widgets.weather_location.WeatherPlugin
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -51,10 +66,10 @@ class WidgetLayoutPersistenceTest {
     @Test
     fun `standard layout includes compact weather map and speedometer cluster`() {
         val dashboard = BuiltInLayouts.buildDashboard(DashboardPersistence.DEFAULT_LAYOUT_NAME, 640f, 480f)!!
-        val map: MapWidgetState = dashboard.stateOf(WidgetTypeId.MAP)
-        val weather: LocationWidgetState = dashboard.stateOf(WidgetTypeId.LOCATION)
-        val speed: SpeedometerWidgetState = dashboard.stateOf(WidgetTypeId.SPEEDOMETER)
-        val news: NewsWidgetState = dashboard.stateOf(WidgetTypeId.NEWS)
+        val map: MapWidgetState = dashboard.stateOf(MapPlugin.TYPE)
+        val weather: LocationWidgetState = dashboard.stateOf(WeatherPlugin.TYPE)
+        val speed: SpeedometerWidgetState = dashboard.stateOf(SpeedometerPlugin.TYPE)
+        val news: NewsWidgetState = dashboard.stateOf(NewsPlugin.TYPE)
         assertTrue(map.x > 400f)
         assertTrue(weather.width < 200f)
         assertEquals(134.9f, speed.width, 0.1f)
@@ -77,8 +92,8 @@ class WidgetLayoutPersistenceTest {
     @Test
     fun `all news source kinds survive widget persistence`() {
         val dashboard = BuiltInLayouts.buildDashboard(DashboardPersistence.DEFAULT_LAYOUT_NAME, 640f, 480f)!!
-        val baseline: NewsWidgetState = dashboard.stateOf(WidgetTypeId.NEWS)
-        val codec = WidgetDocument.codecs.getValue(WidgetTypeId.NEWS)
+        val baseline: NewsWidgetState = dashboard.stateOf(NewsPlugin.TYPE)
+        val codec = WidgetDocument.codecs.getValue(NewsPlugin.TYPE)
         val sources = listOf(
             com.everyday.shared.sync.NewsSourceSpec.DEFAULT_LOCATION,
             com.everyday.shared.sync.NewsSourceSpec.QUERY("local technology"),
@@ -168,26 +183,26 @@ class WidgetLayoutPersistenceTest {
 
         val original = WidgetDocument.PersistedDashboard(
             widgets = listOf(
-                record(WidgetTypeId.TEXT, text, "text#1"),
-                record(WidgetTypeId.BROWSER, browser, "browser#1"),
-                record(WidgetTypeId.IMAGE, image, "image#1"),
-                record(WidgetTypeId.VIDEO, video, "video#1"),
-                record(WidgetTypeId.PDF, pdf, "pdf#1"),
-                record(WidgetTypeId.STATUS, status),
-                record(WidgetTypeId.LOCATION, location),
-                record(WidgetTypeId.MAP, map),
-                record(WidgetTypeId.CALENDAR, calendar),
-                record(WidgetTypeId.FINANCE, finance),
-                record(WidgetTypeId.NEWS, news),
-                record(WidgetTypeId.NOTIFICATIONS, notifications),
-                record(WidgetTypeId.SPEEDOMETER, speedometer),
-                record(WidgetTypeId.SUBTITLE, subtitle),
-                record(WidgetTypeId.MIRROR, mirror)
+                record(TextBoxPlugin.TYPE, text, "text#1"),
+                record(BrowserPlugin.TYPE, browser, "browser#1"),
+                record(ImagePlugin.TYPE, image, "image#1"),
+                record(VideoPlugin.TYPE, video, "video#1"),
+                record(PdfPlugin.TYPE, pdf, "pdf#1"),
+                record(StatusBarPlugin.TYPE, status),
+                record(WeatherPlugin.TYPE, location),
+                record(MapPlugin.TYPE, map),
+                record(CalendarPlugin.TYPE, calendar),
+                record(FinancePlugin.TYPE, finance),
+                record(NewsPlugin.TYPE, news),
+                record(NotificationsPlugin.TYPE, notifications),
+                record(SpeedometerPlugin.TYPE, speedometer),
+                record(SubtitlePlugin.TYPE, subtitle),
+                record(MirrorPlugin.TYPE, mirror)
             ),
             closedTemplates = listOf(
-                record(WidgetTypeId.TEXT, closedText, "text#template"),
-                record(WidgetTypeId.BROWSER, closedBrowser, "browser#template"),
-                record(WidgetTypeId.MAP, closedMap, "map#template")
+                record(TextBoxPlugin.TYPE, closedText, "text#template"),
+                record(BrowserPlugin.TYPE, closedBrowser, "browser#template"),
+                record(MapPlugin.TYPE, closedMap, "map#template")
             ),
             hoverControls = listOf(
                 DashboardPersistence.HoverControlPlacementState(CloseAppHoverControl.ID, 2, 1),
@@ -203,36 +218,36 @@ class WidgetLayoutPersistenceTest {
         )
 
         // Every widget comes back with its payload intact.
-        assertEquals(text, restored.stateOf<TextWidgetState>(WidgetTypeId.TEXT))
-        assertEquals(browser, restored.stateOf<BrowserWidgetState>(WidgetTypeId.BROWSER))
-        assertEquals(image, restored.stateOf<ImageWidgetState>(WidgetTypeId.IMAGE))
-        assertEquals(video, restored.stateOf<VideoWidgetState>(WidgetTypeId.VIDEO))
-        assertEquals(pdf, restored.stateOf<PdfWidgetState>(WidgetTypeId.PDF))
-        assertEquals(status, restored.stateOf<StatusBarState>(WidgetTypeId.STATUS))
+        assertEquals(text, restored.stateOf<TextWidgetState>(TextBoxPlugin.TYPE))
+        assertEquals(browser, restored.stateOf<BrowserWidgetState>(BrowserPlugin.TYPE))
+        assertEquals(image, restored.stateOf<ImageWidgetState>(ImagePlugin.TYPE))
+        assertEquals(video, restored.stateOf<VideoWidgetState>(VideoPlugin.TYPE))
+        assertEquals(pdf, restored.stateOf<PdfWidgetState>(PdfPlugin.TYPE))
+        assertEquals(status, restored.stateOf<StatusBarState>(StatusBarPlugin.TYPE))
         assertEquals(location, restored.stateOf<LocationWidgetState>(
-            WidgetTypeId.LOCATION))
-        assertEquals(map, restored.stateOf<MapWidgetState>(WidgetTypeId.MAP))
+            WeatherPlugin.TYPE))
+        assertEquals(map, restored.stateOf<MapWidgetState>(MapPlugin.TYPE))
         assertEquals(calendar, restored.stateOf<CalendarWidgetState>(
-            WidgetTypeId.CALENDAR))
+            CalendarPlugin.TYPE))
         // Finance is the one type that does not round trip identically: a widget saved
         // with no tiles is rehydrated with one derived from its symbol and range.
-        val restoredFinance = restored.stateOf<FinanceWidgetState>(WidgetTypeId.FINANCE)
+        val restoredFinance = restored.stateOf<FinanceWidgetState>(FinancePlugin.TYPE)
         assertEquals(finance.selectedSymbol, restoredFinance.selectedSymbol)
         assertEquals(finance.selectedRange, restoredFinance.selectedRange)
         assertEquals(finance.copy(tiles = restoredFinance.tiles), restoredFinance)
         assertEquals("AAPL", restoredFinance.tiles.single().symbol)
-        assertEquals(news, restored.stateOf<NewsWidgetState>(WidgetTypeId.NEWS))
+        assertEquals(news, restored.stateOf<NewsWidgetState>(NewsPlugin.TYPE))
         assertEquals(
             notifications,
-            restored.stateOf<NotificationsWidgetState>(WidgetTypeId.NOTIFICATIONS)
+            restored.stateOf<NotificationsWidgetState>(NotificationsPlugin.TYPE)
         )
         assertEquals(
             speedometer,
-            restored.stateOf<SpeedometerWidgetState>(WidgetTypeId.SPEEDOMETER)
+            restored.stateOf<SpeedometerWidgetState>(SpeedometerPlugin.TYPE)
         )
         assertEquals(subtitle, restored.stateOf<SubtitleWidgetState>(
-            WidgetTypeId.SUBTITLE))
-        assertEquals(mirror, restored.stateOf<MirrorWidgetState>(WidgetTypeId.MIRROR))
+            SubtitlePlugin.TYPE))
+        assertEquals(mirror, restored.stateOf<MirrorWidgetState>(MirrorPlugin.TYPE))
 
         // Instance ids identify repeatable widgets across a reload.
         assertEquals(
@@ -242,12 +257,12 @@ class WidgetLayoutPersistenceTest {
 
         // Closed templates and dashboard-level settings survive too.
         assertEquals(closedText, restored.templateOf<TextWidgetState>(
-            WidgetTypeId.TEXT))
+            TextBoxPlugin.TYPE))
         assertEquals(closedBrowser, restored.templateOf<BrowserWidgetState>(
-            WidgetTypeId.BROWSER))
+            BrowserPlugin.TYPE))
         assertEquals(closedMap, restored.templateOf<MapWidgetState>(
-            WidgetTypeId.MAP))
-        assertNull(restored.closedTemplates.firstOrNull { it.type == WidgetTypeId.STATUS })
+            MapPlugin.TYPE))
+        assertNull(restored.closedTemplates.firstOrNull { it.type == StatusBarPlugin.TYPE })
         val restoredHoverControls = requireNotNull(restored.hoverControls)
 
         assertEquals(2, restoredHoverControls.size)

@@ -2,15 +2,12 @@ package com.everyday.shared.command
 
 import org.json.JSONObject
 
-enum class CommandWidgetId {
-    STATUS, LOCATION, MAP, CALENDAR, FINANCE, NEWS, NOTIFICATIONS, SPEEDOMETER, SUBTITLE, MIRROR
-}
-
 enum class CommandScrollDirection { UP, DOWN }
 
 sealed class AppCommandArguments {
     object None : AppCommandArguments()
-    data class Widget(val widgetId: CommandWidgetId) : AppCommandArguments()
+
+    data class Widget(val widgetId: String) : AppCommandArguments() /** widgetId is a widget type's id, such as "map". */
     data class Layout(val layoutId: String) : AppCommandArguments()
     data class Brightness(val value: Float) : AppCommandArguments()
     data class Scroll(val direction: CommandScrollDirection, val amount: Float) : AppCommandArguments()
@@ -36,7 +33,7 @@ object AppCommandProtocol {
 
     private fun AppCommandArguments.toJson(): JSONObject = when (this) {
         AppCommandArguments.None -> JSONObject().put("type", "none")
-        is AppCommandArguments.Widget -> JSONObject().put("type", "widget").put("widgetId", widgetId.name)
+        is AppCommandArguments.Widget -> JSONObject().put("type", "widget").put("widgetId", widgetId)
         is AppCommandArguments.Layout -> JSONObject().put("type", "layout").put("layoutId", layoutId)
         is AppCommandArguments.Brightness -> JSONObject().put("type", "brightness").put("value", value.toDouble())
         is AppCommandArguments.Scroll -> JSONObject().put("type", "scroll")
@@ -47,7 +44,7 @@ object AppCommandProtocol {
 
     private fun JSONObject.toArguments(): AppCommandArguments = when (getString("type")) {
         "none" -> AppCommandArguments.None
-        "widget" -> AppCommandArguments.Widget(CommandWidgetId.valueOf(getString("widgetId")))
+        "widget" -> AppCommandArguments.Widget(getString("widgetId"))
         "layout" -> AppCommandArguments.Layout(getString("layoutId"))
         "brightness" -> AppCommandArguments.Brightness(getDouble("value").toFloat())
         "scroll" -> AppCommandArguments.Scroll(

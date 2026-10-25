@@ -42,7 +42,6 @@ import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentF
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentPageSnapshot
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentScreenshot
 import com.everyday.everyday_glasses.runtime.BrowserWidgetListener
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 import com.everyday.everyday_glasses.ui.components.KeyboardOverlayController
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
@@ -63,7 +62,7 @@ class BrowserWidget(
     y: Float,
     widgetWidth: Float,
     widgetHeight: Float
-) : BaseWidget(WidgetTypeId.BROWSER, x, y, widgetWidth, widgetHeight), KeyTarget {
+) : BaseWidget(BrowserPlugin.TYPE, x, y, widgetWidth, widgetHeight), KeyTarget {
 
     companion object {
         private const val TAG = "BrowserWidget"
@@ -233,6 +232,17 @@ class BrowserWidget(
      *  - forward touch events (proxy) into the WebView
      */
     fun getWebView(): WebView? = webView
+
+    /** The page is a native view in the root layout: it moves just below the dashboard view, where windowed pages stack. */
+    override fun onZOrderChanged(rootView: ViewGroup, containerView: View) {
+        val webView = webView ?: return
+        val containerIndex = rootView.indexOfChild(containerView)
+        if (containerIndex < 0) return
+        if (webView.parent == rootView) rootView.removeView(webView)
+        val insertAt = containerIndex.coerceIn(0, rootView.childCount)
+        rootView.addView(webView, insertAt)
+        Log.d(TAG, "Updated WebView z-order, inserted at $insertAt")
+    }
 
     fun getUrl(): String? = webView?.url ?: currentTab()?.url
 

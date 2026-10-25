@@ -18,22 +18,22 @@ class WidgetRegistryTest {
     @Test
     fun `registry enforces singleton membership and canonical identity`() {
         val registry = WidgetRegistry()
-        val status = fake(WidgetTypeId.STATUS)
+        val status = fake(StatusBarPlugin.TYPE)
 
         assertEquals("status", registry.add(status))
-        assertSame(status, registry.singleton(WidgetTypeId.STATUS))
+        assertSame(status, registry.singleton(StatusBarPlugin.TYPE))
         assertSame(status, registry.findByStableId("status"))
         assertThrows(IllegalArgumentException::class.java) {
-            registry.add(fake(WidgetTypeId.STATUS))
+            registry.add(fake(StatusBarPlugin.TYPE))
         }
     }
 
     @Test
     fun `multiple widget ids remain stable and advance past restored ids`() {
         val registry = WidgetRegistry()
-        val first = fake(WidgetTypeId.TEXT)
-        val restored = fake(WidgetTypeId.TEXT)
-        val next = fake(WidgetTypeId.TEXT)
+        val first = fake(TextBoxPlugin.TYPE)
+        val restored = fake(TextBoxPlugin.TYPE)
+        val next = fake(TextBoxPlugin.TYPE)
 
         assertEquals("text#0", registry.add(first))
         assertEquals("text#7", registry.add(restored, "text#7"))
@@ -45,9 +45,9 @@ class WidgetRegistryTest {
     @Test
     fun `descriptor and insertion ordering are deterministic snapshots`() {
         val registry = WidgetRegistry()
-        val secondText = fake(WidgetTypeId.TEXT)
-        val status = fake(WidgetTypeId.STATUS)
-        val firstText = fake(WidgetTypeId.TEXT)
+        val secondText = fake(TextBoxPlugin.TYPE)
+        val status = fake(StatusBarPlugin.TYPE)
+        val firstText = fake(TextBoxPlugin.TYPE)
 
         registry.add(secondText)
         registry.add(status)
@@ -55,24 +55,24 @@ class WidgetRegistryTest {
 
         val expected = WidgetDescriptors.all.flatMap { descriptor ->
             when (descriptor.type) {
-                WidgetTypeId.TEXT -> listOf(secondText, firstText)
-                WidgetTypeId.STATUS -> listOf(status)
+                TextBoxPlugin.TYPE -> listOf(secondText, firstText)
+                StatusBarPlugin.TYPE -> listOf(status)
                 else -> emptyList()
             }
         }
         assertEquals(expected, registry.allWidgets())
 
-        val textSnapshot = registry.widgets(WidgetTypeId.TEXT)
+        val textSnapshot = registry.widgets(TextBoxPlugin.TYPE)
         registry.remove(secondText)
         assertEquals(listOf(secondText, firstText), textSnapshot)
-        assertEquals(listOf(firstText), registry.widgets(WidgetTypeId.TEXT))
+        assertEquals(listOf(firstText), registry.widgets(TextBoxPlugin.TYPE))
     }
 
     @Test
     fun `membership and z order mutations invalidate sorted and hit test caches`() {
         val registry = WidgetRegistry()
-        val first = fake(WidgetTypeId.TEXT)
-        val second = fake(WidgetTypeId.TEXT)
+        val first = fake(TextBoxPlugin.TYPE)
+        val second = fake(TextBoxPlugin.TYPE)
         registry.add(first)
 
         val cached = registry.getAllSortedByZOrder()
@@ -93,9 +93,9 @@ class WidgetRegistryTest {
     @Test
     fun `fullscreen ownership follows registered membership`() {
         val registry = WidgetRegistry()
-        val first = fake(WidgetTypeId.TEXT)
-        val second = fake(WidgetTypeId.TEXT)
-        val unregistered = fake(WidgetTypeId.TEXT)
+        val first = fake(TextBoxPlugin.TYPE)
+        val second = fake(TextBoxPlugin.TYPE)
+        val unregistered = fake(TextBoxPlugin.TYPE)
         registry.add(first)
         registry.add(second)
 
@@ -117,7 +117,7 @@ class WidgetRegistryTest {
     @Test
     fun `an absent widget is never the fullscreen owner`() {
         val registry = WidgetRegistry()
-        val widget = fake(WidgetTypeId.TEXT)
+        val widget = fake(TextBoxPlugin.TYPE)
         registry.add(widget)
 
         // A missing singleton must not be mistaken for the fullscreen owner just because both
@@ -139,7 +139,7 @@ class WidgetRegistryTest {
     @Test
     fun `clear resets membership fullscreen and id allocation`() {
         val registry = WidgetRegistry()
-        val widget = fake(WidgetTypeId.TEXT)
+        val widget = fake(TextBoxPlugin.TYPE)
         registry.add(widget)
         registry.setFullscreen(widget)
 
@@ -148,7 +148,7 @@ class WidgetRegistryTest {
         assertTrue(registry.allWidgets().isEmpty())
         assertNull(registry.fullscreenWidget)
         assertFalse(registry.isRegistered(widget))
-        assertEquals("text#0", registry.add(fake(WidgetTypeId.TEXT)))
+        assertEquals("text#0", registry.add(fake(TextBoxPlugin.TYPE)))
     }
 
     private fun fake(type: WidgetTypeId) = FakeWidget(type)

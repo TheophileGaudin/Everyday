@@ -8,7 +8,7 @@ import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
 import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfigState
 import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayMode
 import com.everyday.everyday_glasses.persistence.WidgetDocument
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import com.everyday.everyday_glasses.widgets.map.MapPlugin
 import com.everyday.everyday_glasses.widgets.map.backend.toAssistantSemanticFacts
 import com.everyday.everyday_glasses.widgets.map.MapWidgetState
 import org.junit.Assert.assertEquals
@@ -32,12 +32,12 @@ class MapPoiConfigTest {
             poiConfig = config
         )
 
-        assertEquals(config, roundTrip(WidgetTypeId.MAP, map).poiConfig)
+        assertEquals(config, roundTrip(MapPlugin.TYPE, map).poiConfig)
     }
 
     @Test
     fun `missing persisted poi config means legacy Default`() {
-        val codec = WidgetDocument.codecs.getValue(WidgetTypeId.MAP)
+        val codec = WidgetDocument.codecs.getValue(MapPlugin.TYPE)
         val payload = codec.encode(MapWidgetState(10f, 20f, 210f, 210f))
         payload.remove("poiConfig")
 
@@ -106,7 +106,7 @@ class MapPoiConfigTest {
         )
         val map = MapWidgetState(10f, 20f, 210f, 210f, poiConfig = config)
 
-        val restored = roundTrip(WidgetTypeId.MAP, map)
+        val restored = roundTrip(MapPlugin.TYPE, map)
 
         assertEquals(config, restored.poiConfig)
         assertTrue(restored.poiConfig.isDefaultMode)

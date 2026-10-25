@@ -20,8 +20,11 @@ import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonF
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseCommonFields
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 import com.everyday.everyday_glasses.ui.components.KeyboardOverlayController
@@ -49,7 +52,7 @@ class TextBoxWidget(
     y: Float,
     widgetWidth: Float,
     widgetHeight: Float
-) : BaseWidget(WidgetTypeId.TEXT, x, y, widgetWidth, widgetHeight) {
+) : BaseWidget(TextBoxPlugin.TYPE, x, y, widgetWidth, widgetHeight) {
 
     companion object {
         private const val TAG = "TextBoxWidget"
@@ -620,7 +623,7 @@ class TextBoxPlugin(
             height
         )
         services.runPersistentMutation {
-            services.open(WidgetTypeId.TEXT) { box }
+            services.open(TextBoxPlugin.TYPE) { box }
             box.takeKeyFocus()
         }
     }
@@ -632,17 +635,29 @@ class TextBoxPlugin(
         val height = (services.viewportHeight * 0.55f).coerceAtMost(services.viewportHeight.toFloat())
         val x = ((services.viewportWidth - width) / 2f).coerceAtLeast(0f)
         val y = ((services.viewportHeight - height) / 2f).coerceAtLeast(0f)
-        return services.open(WidgetTypeId.TEXT) { TextBoxWidget(x, y, width, height) }
+        return services.open(TextBoxPlugin.TYPE) { TextBoxWidget(x, y, width, height) }
     }
 
     private fun reopenClosed(): TextBoxWidget? = services.runPersistentMutation(changed = { it != null }) {
-        (services.openClosedTemplate(WidgetTypeId.TEXT) as? TextBoxWidget)?.also { box ->
+        (services.openClosedTemplate(TextBoxPlugin.TYPE) as? TextBoxWidget)?.also { box ->
             if (!box.isMinimized) box.takeKeyFocus()
         }
     }
 
 
-    companion object {
+    /** The text box as a widget type: its id, its descriptor, how it is saved, and its plugin. */
+    companion object : WidgetType {
+        val TYPE = WidgetTypeId("text")
+        override val descriptor = WidgetDescriptor(
+            TYPE,
+            "Text",
+            WidgetInstancePolicy.MULTIPLE,
+            order = 11,
+            category = "content",
+            storesClosedTemplate = true
+        )
+        override val codec get() = TextWidgetState.Codec
+        override fun create(context: WidgetContext) = TextBoxPlugin(context)
         /** Size of a new text box, as a fraction of the dashboard. */
         const val DEFAULT_WIDTH_PERCENT = 0.30f
         const val DEFAULT_HEIGHT_PERCENT = 0.15f
@@ -669,7 +684,7 @@ data class TextWidgetState(
     override val isPinned: Boolean = false
 ) : DashboardPersistence.SizedWidgetFields {
     /** Its entry in the saved dashboard file. */
-    companion object Codec : WidgetDocument.StateCodec<TextWidgetState>(WidgetTypeId.TEXT, TextWidgetState::class) {
+    companion object Codec : WidgetDocument.StateCodec<TextWidgetState>(TextBoxPlugin.TYPE, TextWidgetState::class) {
         override fun toJson(state: TextWidgetState): JSONObject = JSONObject().apply {
             putCommonFields(state)
             put("text", state.text)

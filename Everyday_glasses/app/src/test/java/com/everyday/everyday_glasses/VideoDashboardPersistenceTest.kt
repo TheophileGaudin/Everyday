@@ -1,7 +1,7 @@
 package com.everyday.everyday_glasses
 
 import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.roundTrip
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import com.everyday.everyday_glasses.widgets.file_browser.VideoPlugin
 import com.everyday.everyday_glasses.widgets.file_browser.VideoWidgetState
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -20,6 +20,6 @@ class VideoDashboardPersistenceTest {
             isPinned = true,
         )
 
-        assertEquals(video, roundTrip(WidgetTypeId.VIDEO, video))
+        assertEquals(video, roundTrip(VideoPlugin.TYPE, video))
     }
 }

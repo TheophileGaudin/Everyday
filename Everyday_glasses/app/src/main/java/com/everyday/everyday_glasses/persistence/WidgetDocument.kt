@@ -91,9 +91,11 @@ object WidgetDocument {
 
     /**
      * The persistence catalog: every widget type a saved dashboard can hold. Each type declares
-     * its codec in its widget package; [WidgetPlugins.codecs] lists them.
+     * its codec in its widget package; [WidgetPlugins.all] lists the types. A record of a type
+     * not in here (from a newer version, say) is skipped.
      */
-    val codecs: Map<WidgetTypeId, WidgetStateCodec> = WidgetPlugins.codecs.associateBy(WidgetStateCodec::type)
+    val codecs: Map<WidgetTypeId, WidgetStateCodec> =
+        WidgetPlugins.all.map { type -> type.codec }.associateBy(WidgetStateCodec::type)
 
     fun isCurrentSchema(root: JSONObject): Boolean =
         root.optInt(KEY_SCHEMA_VERSION, -1) == SCHEMA_VERSION
@@ -183,9 +185,7 @@ object WidgetDocument {
         return buildList {
             for (index in 0 until records.length()) {
                 val record = records.optJSONObject(index) ?: continue
-                val type = WidgetTypeId.entries.firstOrNull {
-                    it.persistedId == record.optString(KEY_TYPE)
-                } ?: continue
+                val type = WidgetTypeId(record.optString(KEY_TYPE))
                 val instanceId = record.optString(KEY_INSTANCE_ID).trim()
                 val payload = record.optJSONObject(KEY_STATE) ?: continue
                 if (instanceId.isBlank() || type !in codecs) continue

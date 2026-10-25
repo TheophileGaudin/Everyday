@@ -26,9 +26,12 @@ import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.WidgetPresenter
+import com.everyday.everyday_glasses.widgets.browser.BrowserPlugin
 import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
+import com.everyday.everyday_glasses.widgets.finance.FinancePlugin
+import com.everyday.everyday_glasses.widgets.map.MapPlugin
+import com.everyday.everyday_glasses.widgets.map.MapWidget
 import com.everyday.everyday_glasses.widgets.text_editor.TextBoxWidget
 import com.everyday.shared.command.AppCommandInvocation
 import com.everyday.shared.sync.NewsSourceSpec
@@ -84,13 +87,15 @@ internal class AssistantDashboardAccess(
             removePresentationTarget = presenter::remove,
         )
     }
+    private val mapWidget: MapWidget? get() = registry.singletonAs(MapPlugin.TYPE)
+    private val browserWidgets: List<BrowserWidget> get() = registry.widgetsAs(BrowserPlugin.TYPE)
     private val mapActions by lazy {
         MapAssistantActions(
             ui = ui,
-            showMap = { lifecycle.show(WidgetTypeId.MAP); registry.mapWidget },
-            currentMap = { registry.mapWidget },
+            showMap = { lifecycle.show(MapPlugin.TYPE); mapWidget },
+            currentMap = { mapWidget },
             present = { widget, spec -> presenter.present(widget, spec) },
-            dismissPresentation = { registry.mapWidget?.let(services::dismissPresentationOf) },
+            dismissPresentation = { mapWidget?.let(services::dismissPresentationOf) },
             withTransientChanges = { action -> services.withTransientChanges(action) },
             notifyTransientChange = services::notifyTransientChange,
             notifyPersistentChange = notifyPersistentChange,
@@ -116,10 +121,11 @@ internal class AssistantDashboardAccess(
             StartNavigationSemanticToolHandler(startNavigation = mapActions::startNavigation, isAvailable = ::isReady),
             StopNavigationSemanticToolHandler(
                 stopNavigation = mapActions::stopNavigation,
-                isAvailable = { isReady() && registry.mapWidget?.hasActiveNavigation() == true },
+                isAvailable = { isReady() && mapWidget?.hasActiveNavigation() == true },
             ),
             SetNewsSourceSemanticToolHandler(setNewsSource),
-            UpdateFinanceTileSemanticToolHandler(updateTile = updateFinanceTile, isAvailable = { registry.financeWidget != null }),
+            UpdateFinanceTileSemanticToolHandler(updateTile = updateFinanceTile, isAvailable = { registry.singleton(
+                FinancePlugin.TYPE) != null }),
             browserRouting?.let(::RunBrowserTaskSemanticToolHandler),
         )
     )
@@ -148,7 +154,7 @@ internal class AssistantDashboardAccess(
      */
     override fun bindFullscreenBrowser(): PageAgentBrowserAdapter? {
         val widget = registry.fullscreenWidget as? BrowserWidget
-            ?: registry.browserWidgets.firstOrNull { it.isInVideoFullscreen() }
+            ?: browserWidgets.firstOrNull { it.isInVideoFullscreen() }
             ?: return null
         return BrowserWidgetPageAgentAdapter.bind(registry.stableId(widget), widget)
     }
@@ -157,10 +163,10 @@ internal class AssistantDashboardAccess(
     override fun bindBrowser(widgetId: String?): PageAgentBrowserAdapter? {
         val normalizedId = widgetId?.trim()?.takeIf { it.isNotBlank() }
         val widget = if (normalizedId != null) {
-            registry.browserWidgets.firstOrNull { registry.stableId(it) == normalizedId }
+            browserWidgets.firstOrNull { registry.stableId(it) == normalizedId }
         } else {
             (textEditing.focusedPage as? BrowserWidget)?.takeIf { !it.isMinimized }
-                ?: registry.browserWidgets.firstOrNull { !it.isMinimized }
+                ?: browserWidgets.firstOrNull { !it.isMinimized }
         } ?: return null
         return BrowserWidgetPageAgentAdapter.bind(registry.stableId(widget), widget)
     }
