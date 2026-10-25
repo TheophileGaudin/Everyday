@@ -669,23 +669,26 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Menus, pop-ups and hover controls ====================
 
-    private fun isAnyModalOverHoverControls(): Boolean {
+    /** Something is drawn over the dashboard: a menu, a popup, a settings screen, a plugin's overlay, the assistant's approval. Nothing under it is highlighted. */
+    private fun isDashboardOverlayOpen(): Boolean {
         if (settingsController.isHoverControlsLayoutEditorVisible()) return true
         if (settingsController.isShortcutsSettingsMenuVisible())     return true
         if (settingsController.isDashboardSettingsVisible())         return true
         if (openOverlay() != null)                                   return true
-        if (screenModalWidget() != null)                             return true
         if (closeConfirmationPopup?.isVisible == true)               return true
         if (layoutManager.isDeleteConfirmationVisible)               return true
         if (layoutManager.isNamePromptVisible)                       return true
         if (contextMenu?.isVisible == true)                          return true
         if (textEditing.isMenuVisible)                               return true
+        if (assistant.approvalOverlay.isVisible())                   return true
         return false
     }
-    fun isMenuVisible(): Boolean                     = contextMenu?.isVisible == true || textEditing.isMenuVisible || layoutManager.isNamePromptVisible
-    private fun isClosePopupVisible(): Boolean       = closeConfirmationPopup?.isVisible == true || layoutManager.isDeleteConfirmationVisible
-    private fun isAnyPopupVisible(): Boolean         = isMenuVisible() || isClosePopupVisible() || assistant.approvalOverlay.isVisible()
-    private fun dismissMenu()                        { contextMenu?.dismiss(); textEditing.dismissMenus(); layoutManager.dismissNamePrompt() }
+    /** An overlay, or a widget's own screen modal (the map's address search): the hover controls step back. */
+    private fun isAnyModalOverHoverControls(): Boolean = isDashboardOverlayOpen() || screenModalWidget() != null
+    fun isMenuVisible(): Boolean                       = contextMenu?.isVisible == true || textEditing.isMenuVisible || layoutManager.isNamePromptVisible
+    private fun isClosePopupVisible(): Boolean         = closeConfirmationPopup?.isVisible == true || layoutManager.isDeleteConfirmationVisible
+    private fun isAnyPopupVisible(): Boolean           = isMenuVisible() || isClosePopupVisible() || assistant.approvalOverlay.isVisible()
+    private fun dismissMenu()                          { contextMenu?.dismiss(); textEditing.dismissMenus(); layoutManager.dismissNamePrompt() }
 
     //======================= Context menu =======================
 
@@ -1001,7 +1004,11 @@ class WidgetContainer @JvmOverloads constructor(
 
     // ==================== Taps and double taps ====================
 
-    fun onTap(x: Float, y: Float): Boolean {
+    /** A tap or double-tap can open or close an overlay (the context menu, a popup) under a still cursor: hover is worked out again after it. */
+    fun onTap(x: Float, y: Float): Boolean = routeTap(x, y).also { updateHover(cursorX, cursorY, isCursorVisible) }
+    fun onDoubleTap(x: Float, y: Float): Boolean = routeDoubleTap(x, y).also { updateHover(cursorX, cursorY, isCursorVisible) }
+
+    private fun routeTap(x: Float, y: Float): Boolean {
         if (assistant.approvalOverlay.isVisible()) {return assistant.approvalOverlay.onTap(x, y)} // Menus use screen-space coordinates (head-locked)
         textEditing.onMenuTap(x, y)?.let { return it } // The text edit and formatting menus sit above whichever surface owns the focused text zone.
         layoutManager.onOverlayTap(x, y)?.let { return it }
@@ -1020,9 +1027,8 @@ class WidgetContainer @JvmOverloads constructor(
         if (hasFocusedWidget()) { unfocusAll(); notifyTransientContentChanged(); return true }
         return false
     }
-    fun onDoubleTap(x: Float, y: Float): Boolean {
-        if (closeConfirmationPopup?.isVisible != true) {settingsController.handleHoverControlsLayoutEditorDoubleTap(x, y)?.let { return it }}
-        if (contextMenu?.isVisible == true) {return dispatchContextMenuAction { contextMenu?.onDoubleTap(x, y) ?: false }}
+    private fun routeDoubleTap(x: Float, y: Float): Boolean {
+        if (closeConfirmationPopup?.isVisible != true)        if (contextMenu?.isVisible == true) {return dispatchContextMenuAction { contextMenu?.onDoubleTap(x, y) ?: false }}
         for (widget in registry.allWidgets()) {if (widget.onDoubleTapAnywhere()) return true} // A widget can take any double-tap first, e.g. a browser leaving a web video's fullscreen.
         val (cx, cy) = toContentSpace(x, y) // Transform to content space for widget hit testing
         if (isVisibleKeyboardAt(cx, cy)) return true
@@ -1166,6 +1172,18 @@ class WidgetContainer @JvmOverloads constructor(
         // Transform to content space for widget hit testing
         val (cx, cy) = toContentSpace(x, y)
 
+        // Menus stay head-locked, use screen coords
+        closeConfirmationPopup?.updateHover(x, y); textEditing.updateMenuHover(x, y); contextMenu?.updateHover(x, y)
+        layoutManager.updateOverlayHover(x, y)
+
+        // While something is drawn over the dashboard, nothing under it is highlighted: no widget, keyboard key or hover control.
+        if (isDashboardOverlayOpen()) {
+            hoverControlsLayer.clearHover()
+            clearWidgetHoverStates()
+            if (!isTransitioningDisplayState) invalidateHoverVisuals()
+            return
+        }
+
         if (updateKeyboardHoverAt(cx, cy)) {
             hoverControlsLayer.clearHover()
             clearWidgetHoverStatesExcept(visibleKeyboardHostAt(cx, cy))
@@ -1177,9 +1195,6 @@ class WidgetContainer @JvmOverloads constructor(
         // always receive hover updates whenever the cursor is visible.
         hoverControlsLayer.updateHover(cx, cy)
 
-        // Menus stay head-locked, use screen coords
-        closeConfirmationPopup?.updateHover(x, y); textEditing.updateMenuHover(x, y); contextMenu?.updateHover(x, y)
-        layoutManager.updateOverlayHover(x, y)
         if (hoverControlsLayer.ownsHover) {clearWidgetHoverStates(); if (!isTransitioningDisplayState) {invalidateHoverVisuals()}; return}
 
         // Widgets use content-space coordinates for hit testing

@@ -1432,14 +1432,7 @@ class MainActivity : AppCompatActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-
-        if (::permissionCoordinator.isInitialized) {
-            permissionCoordinator.onRequestPermissionsResult(
-                requestCode,
-                permissions,
-                grantResults
-            )
-        }
+        if (::permissionCoordinator.isInitialized) {permissionCoordinator.onRequestPermissionsResult(requestCode, permissions, grantResults)}
     }
 
 }
