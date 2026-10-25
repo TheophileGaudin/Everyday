@@ -6,6 +6,9 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.text.TextPaint
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
@@ -17,6 +20,7 @@ import kotlin.math.abs
 import androidx.core.graphics.toColorInt
 import com.everyday.everyday_glasses.runtime.SpeedState
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import org.json.JSONObject
 
 /**
  * Speedometer widget that displays movement speed from local or phone location updates.
@@ -246,11 +250,11 @@ class SpeedometerPlugin(
     }
 
     override val lifecycle = WidgetLifecycleRegistration.singleton(
-        WidgetTypeId.SPEEDOMETER, SpeedometerWidget::class, DashboardPersistence.SpeedometerWidgetState::class,
+        SpeedometerWidget::class, SpeedometerWidgetState.Codec,
         current = current,
         create = ::create,
         restore = ::restore,
-        capture = { services.captureRestore.getSpeedometerWidgetState(it) },
+        capture = ::capture,
         beforeRemove = { dismissSettings() },
     )
 
@@ -260,10 +264,22 @@ class SpeedometerPlugin(
         return build(x, y, WIDTH, HEIGHT)
     }
 
-    private fun restore(state: DashboardPersistence.SpeedometerWidgetState): SpeedometerWidget {
+    private fun restore(state: SpeedometerWidgetState): SpeedometerWidget {
         val widget = build(state.x, state.y, state.width, state.height)
         services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight)
         return widget
+    }
+
+    private fun capture(widget: SpeedometerWidget): SpeedometerWidgetState {
+        val c = services.captureRestore.extractCommonFields(widget)
+        return SpeedometerWidgetState(
+            x = c.x, y = c.y, width = c.width, height = c.height,
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
+        )
     }
 
     private fun build(x: Float, y: Float, width: Float, height: Float) =
@@ -280,5 +296,37 @@ class SpeedometerPlugin(
         const val WIDTH = 220f
         const val HEIGHT = 110f
         val NO_SPEED = SpeedState(speedKmh = 0f, qualityOk = false, isMoving = false)
+    }
+}
+
+/** What a saved dashboard keeps of the speedometer: only the common fields. */
+data class SpeedometerWidgetState(
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    override val isMinimized: Boolean = false,
+    override val isFullscreen: Boolean = false,
+    override val savedMinX: Float = 0f,
+    override val savedMinY: Float = 0f,
+    override val savedMinWidth: Float = 0f,
+    override val savedMinHeight: Float = 0f,
+    override val isPinned: Boolean = false
+) : DashboardPersistence.SizedWidgetFields {
+    /** Its entry in the saved dashboard file. */
+    companion object Codec : WidgetDocument.StateCodec<SpeedometerWidgetState>(WidgetTypeId.SPEEDOMETER, SpeedometerWidgetState::class) {
+        override fun toJson(state: SpeedometerWidgetState): JSONObject = JSONObject().apply { putCommonFields(state) }
+
+        override fun fromJson(payload: JSONObject): SpeedometerWidgetState? =
+            parseSizedWidgetObject(payload) { _, c, w, h ->
+                SpeedometerWidgetState(
+                    x = c.x, y = c.y, width = w, height = h,
+                    isMinimized = c.isMinimized,
+                    isFullscreen = c.isFullscreen,
+                    savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                    savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                    isPinned = c.isPinned
+                )
+            }
     }
 }

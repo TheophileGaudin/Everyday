@@ -1,6 +1,7 @@
 package com.everyday.everyday_glasses.persistence
 
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import com.everyday.everyday_glasses.widgets.WidgetPlugins
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.reflect.KClass
@@ -66,6 +67,28 @@ object WidgetDocument {
         fun decode(payload: JSONObject): Any?
     }
 
+    /**
+     * A widget type's codec, written against its own state class: [toJson] and [fromJson] only see
+     * that class. Each single-instance widget type declares one next to its saved state.
+     */
+    abstract class StateCodec<S : Any>(
+        final override val type: WidgetTypeId,
+        final override val stateClass: KClass<S>
+    ) : WidgetStateCodec {
+        abstract fun toJson(state: S): JSONObject
+        abstract fun fromJson(payload: JSONObject): S?
+
+        final override fun encode(state: Any): JSONObject {
+            require(stateClass.isInstance(state)) {
+                "Expected ${stateClass.simpleName} for ${type.persistedId}, got ${state::class.simpleName}"
+            }
+            @Suppress("UNCHECKED_CAST")
+            return toJson(state as S)
+        }
+
+        final override fun decode(payload: JSONObject): S? = fromJson(payload)
+    }
+
     private class PayloadCodec<S : Any>(
         override val type: WidgetTypeId,
         override val stateClass: KClass<S>
@@ -82,26 +105,16 @@ object WidgetDocument {
     }
 
     /**
-     * The persistence catalog. Runtime widget definitions can reuse this map
-     * instead of adding another per-type persistence switch.
+     * The persistence catalog: every widget type a saved dashboard can hold. The single-instance
+     * types declare their codec in their widget package; [WidgetPlugins.codecs] lists them.
      */
-    val codecs: Map<WidgetTypeId, WidgetStateCodec> = listOf(
-        PayloadCodec(WidgetTypeId.STATUS, DashboardPersistence.StatusBarState::class),
-        PayloadCodec(WidgetTypeId.LOCATION, DashboardPersistence.LocationWidgetState::class),
-        PayloadCodec(WidgetTypeId.MAP, DashboardPersistence.MapWidgetState::class),
-        PayloadCodec(WidgetTypeId.CALENDAR, DashboardPersistence.CalendarWidgetState::class),
-        PayloadCodec(WidgetTypeId.FINANCE, DashboardPersistence.FinanceWidgetState::class),
-        PayloadCodec(WidgetTypeId.NEWS, DashboardPersistence.NewsWidgetState::class),
-        PayloadCodec(WidgetTypeId.NOTIFICATIONS, DashboardPersistence.NotificationsWidgetState::class),
-        PayloadCodec(WidgetTypeId.SPEEDOMETER, DashboardPersistence.SpeedometerWidgetState::class),
-        PayloadCodec(WidgetTypeId.SUBTITLE, DashboardPersistence.SubtitleWidgetState::class),
-        PayloadCodec(WidgetTypeId.MIRROR, DashboardPersistence.MirrorWidgetState::class),
+    val codecs: Map<WidgetTypeId, WidgetStateCodec> = (WidgetPlugins.codecs + listOf(
         PayloadCodec(WidgetTypeId.BROWSER, DashboardPersistence.BrowserWidgetState::class),
         PayloadCodec(WidgetTypeId.TEXT, DashboardPersistence.TextWidgetState::class),
         PayloadCodec(WidgetTypeId.IMAGE, DashboardPersistence.ImageWidgetState::class),
         PayloadCodec(WidgetTypeId.VIDEO, DashboardPersistence.VideoWidgetState::class),
         PayloadCodec(WidgetTypeId.PDF, DashboardPersistence.PdfWidgetState::class)
-    ).associateBy(WidgetStateCodec::type)
+    )).associateBy(WidgetStateCodec::type)
 
     fun isCurrentSchema(root: JSONObject): Boolean =
         root.optInt(KEY_SCHEMA_VERSION, -1) == SCHEMA_VERSION

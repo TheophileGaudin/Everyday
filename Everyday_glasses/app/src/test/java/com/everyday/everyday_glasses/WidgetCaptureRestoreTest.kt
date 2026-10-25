@@ -1,7 +1,7 @@
 package com.everyday.everyday_glasses
 
 import android.graphics.Canvas
-import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidgetState
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
@@ -19,7 +19,7 @@ class WidgetCaptureRestoreTest {
 
         captureRestore.restoreCommonFields(
             widget,
-            DashboardPersistence.SpeedometerWidgetState(x = 600f, y = -20f, width = 200f, height = 100f),
+            SpeedometerWidgetState(x = 600f, y = -20f, width = 200f, height = 100f),
             screenWidth = 640,
             screenHeight = 480
         )
@@ -37,7 +37,7 @@ class WidgetCaptureRestoreTest {
 
         captureRestore.restoreCommonFields(
             widget,
-            DashboardPersistence.SpeedometerWidgetState(
+            SpeedometerWidgetState(
                 x = 10f, y = 10f, width = 100f, height = 50f,
                 isFullscreen = true, isPinned = false
             ),
@@ -56,7 +56,7 @@ class WidgetCaptureRestoreTest {
 
         captureRestore.restoreCommonFields(
             widget,
-            DashboardPersistence.SpeedometerWidgetState(
+            SpeedometerWidgetState(
                 x = 0f, y = 416f, width = 100f, height = 50f,
                 isMinimized = true, isFullscreen = true,
                 savedMinX = 50f, savedMinY = 60f, savedMinWidth = 200f, savedMinHeight = 120f

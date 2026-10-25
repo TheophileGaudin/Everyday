@@ -26,6 +26,9 @@ import android.util.Log
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.get
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
@@ -40,6 +43,7 @@ import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import org.json.JSONObject
 
 /**
  * A widget that displays mirrored screen content from the phone.
@@ -1137,11 +1141,11 @@ class MirrorPlugin(
     private val refreshBrightnessRules: () -> Unit = { services.refreshBrightnessRules() }
 
     override val lifecycle = WidgetLifecycleRegistration.singleton(
-        WidgetTypeId.MIRROR, ScreenMirrorWidget::class, DashboardPersistence.MirrorWidgetState::class,
+        ScreenMirrorWidget::class, MirrorWidgetState.Codec,
         current = current,
         create = { ScreenMirrorWidget(context, 20f, 20f, 180f, 320f) },
         restore = ::restore,
-        capture = { services.captureRestore.getMirrorWidgetState(it) },
+        capture = ::capture,
         configure = ::configure,
         teardown = { widget ->
             setMediaSourceActive(widget.binocularSourceId, false)
@@ -1163,10 +1167,22 @@ class MirrorPlugin(
         }
     }
 
-    private fun restore(state: DashboardPersistence.MirrorWidgetState): ScreenMirrorWidget {
+    private fun restore(state: MirrorWidgetState): ScreenMirrorWidget {
         val widget = ScreenMirrorWidget(context, state.x, state.y, state.width, state.height)
         services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight)
         return widget
+    }
+
+    private fun capture(widget: ScreenMirrorWidget): MirrorWidgetState {
+        val c = services.captureRestore.extractCommonFields(widget)
+        return MirrorWidgetState(
+            x = c.x, y = c.y, width = c.width, height = c.height,
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
+        )
     }
 
     private fun configure(widget: ScreenMirrorWidget) {
@@ -1184,5 +1200,37 @@ class MirrorPlugin(
             }
         }
         widget.refreshDisplayVisibility()
+    }
+}
+
+/** What a saved dashboard keeps of the phone screen mirror: only the common fields. */
+data class MirrorWidgetState(
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    override val isMinimized: Boolean = false,
+    override val isFullscreen: Boolean = false,
+    override val savedMinX: Float = 0f,
+    override val savedMinY: Float = 0f,
+    override val savedMinWidth: Float = 0f,
+    override val savedMinHeight: Float = 0f,
+    override val isPinned: Boolean = false
+) : DashboardPersistence.SizedWidgetFields {
+    /** Its entry in the saved dashboard file. */
+    companion object Codec : WidgetDocument.StateCodec<MirrorWidgetState>(WidgetTypeId.MIRROR, MirrorWidgetState::class) {
+        override fun toJson(state: MirrorWidgetState): JSONObject = JSONObject().apply { putCommonFields(state) }
+
+        override fun fromJson(payload: JSONObject): MirrorWidgetState? =
+            parseSizedWidgetObject(payload) { _, c, w, h ->
+                MirrorWidgetState(
+                    x = c.x, y = c.y, width = w, height = h,
+                    isMinimized = c.isMinimized,
+                    isFullscreen = c.isFullscreen,
+                    savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                    savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                    isPinned = c.isPinned
+                )
+            }
     }
 }

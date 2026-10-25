@@ -10,6 +10,10 @@ import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
+import org.json.JSONObject
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
@@ -597,11 +601,11 @@ class NotificationsPlugin(
     }
 
     override val lifecycle = WidgetLifecycleRegistration.singleton(
-        WidgetTypeId.NOTIFICATIONS, NotificationsWidget::class, DashboardPersistence.NotificationsWidgetState::class,
+        NotificationsWidget::class, NotificationsWidgetState.Codec,
         current = current,
         create = ::create,
         restore = ::restore,
-        capture = { services.captureRestore.getNotificationsWidgetState(it) },
+        capture = ::capture,
     )
 
     private fun create(): NotificationsWidget {
@@ -612,11 +616,73 @@ class NotificationsPlugin(
         ).apply { setNotificationsSnapshot(latest) }
     }
 
-    private fun restore(state: DashboardPersistence.NotificationsWidgetState): NotificationsWidget {
+    private fun restore(state: NotificationsWidgetState): NotificationsWidget {
         val widget = NotificationsWidget(state.x, state.y, state.width, state.height, services.viewportHeight.toFloat())
-        services.captureRestore.restoreNotificationsWidgetPosition(widget, state, services.viewportWidth, services.viewportHeight)
+        services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight) {
+            widget.setWidgetFontScale(state.widgetFontScale)
+            widget.setToastFontScale(state.toastFontScale)
+            widget.setScrollIndex(state.scrollIndex)
+        }
         widget.setScreenHeight(services.viewportHeight.toFloat())
         widget.setNotificationsSnapshot(latest)
         return widget
+    }
+
+    private fun capture(widget: NotificationsWidget): NotificationsWidgetState {
+        val c = services.captureRestore.extractCommonFields(widget)
+        return NotificationsWidgetState(
+            x = c.x, y = c.y, width = c.width, height = c.height,
+            widgetFontScale = widget.getWidgetFontScale(),
+            toastFontScale = widget.getToastFontScale(),
+            scrollIndex = widget.getScrollIndex(),
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
+        )
+    }
+}
+
+/** What a saved dashboard keeps of the notifications widget: its font scales and scroll position. */
+data class NotificationsWidgetState(
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    val widgetFontScale: Float = 1f,
+    val toastFontScale: Float = 1f,
+    val scrollIndex: Int = 0,
+    override val isMinimized: Boolean = false,
+    override val isFullscreen: Boolean = false,
+    override val savedMinX: Float = 0f,
+    override val savedMinY: Float = 0f,
+    override val savedMinWidth: Float = 0f,
+    override val savedMinHeight: Float = 0f,
+    override val isPinned: Boolean = false
+) : DashboardPersistence.SizedWidgetFields {
+    /** Its entry in the saved dashboard file. */
+    companion object Codec : WidgetDocument.StateCodec<NotificationsWidgetState>(WidgetTypeId.NOTIFICATIONS, NotificationsWidgetState::class) {
+        override fun toJson(state: NotificationsWidgetState): JSONObject = JSONObject().apply {
+            putCommonFields(state)
+            put("widgetFontScale", state.widgetFontScale)
+            put("toastFontScale", state.toastFontScale)
+            put("scrollIndex", state.scrollIndex)
+        }
+
+        override fun fromJson(payload: JSONObject): NotificationsWidgetState? =
+            parseSizedWidgetObject(payload) { obj, c, w, h ->
+                NotificationsWidgetState(
+                    x = c.x, y = c.y, width = w, height = h,
+                    widgetFontScale = obj.optDouble("widgetFontScale", 1.0).toFloat(),
+                    toastFontScale = obj.optDouble("toastFontScale", 1.0).toFloat(),
+                    scrollIndex = obj.optInt("scrollIndex", 0).coerceAtLeast(0),
+                    isMinimized = c.isMinimized,
+                    isFullscreen = c.isFullscreen,
+                    savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                    savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                    isPinned = c.isPinned
+                )
+            }
     }
 }

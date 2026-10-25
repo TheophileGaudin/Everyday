@@ -5,6 +5,7 @@ import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.stateOf
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.widgets.phone_screen_mirror.MirrorWidgetState
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -17,7 +18,7 @@ class WidgetDocumentTest {
 
     @Test
     fun `codec catalog covers every currently persisted widget type`() {
-        val expected = WidgetTypeId.values().toSet() - WidgetTypeId.FILES
+        val expected = WidgetTypeId.entries.toSet() - WidgetTypeId.FILES
         assertEquals(expected, WidgetDocument.codecs.keys)
     }
 
@@ -135,7 +136,7 @@ class WidgetDocumentTest {
                 updatedAt = 200L,
                 dashboard = dashboardOf(
                     WidgetTypeId.MIRROR,
-                    DashboardPersistence.MirrorWidgetState(0f, 0f, 640f, 480f)
+                    MirrorWidgetState(0f, 0f, 640f, 480f)
                 )
             )
         )

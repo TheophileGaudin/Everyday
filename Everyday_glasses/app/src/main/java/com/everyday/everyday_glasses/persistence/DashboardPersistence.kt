@@ -4,21 +4,9 @@ import android.content.Context
 import android.os.Environment
 import android.util.AtomicFile
 import android.util.Log
-import com.everyday.everyday_glasses.widgets.finance.FinanceWidget
-import com.everyday.everyday_glasses.widgets.map.backend.MapViewMode
-import com.everyday.everyday_glasses.widgets.map.backend.MapZoom
-import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
-import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfigState
-import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayMode
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
 import com.everyday.everyday_glasses.widgets.file_browser.ImageWidgetStorage
-import com.everyday.shared.sync.FinanceAssetType
-import com.everyday.shared.sync.FinanceChartType
-import com.everyday.shared.sync.FinanceDashboardTileConfig
-import com.everyday.shared.sync.FinanceTimeRange
-import com.everyday.shared.sync.NewsSourceSpec
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import kotlin.collections.forEach
@@ -96,6 +84,27 @@ object DashboardPersistence {
         val isPinned: Boolean
     )
 
+    /**
+     * Read the common fields and the size, then the type's own fields through [builder].
+     * Null when a field is missing, or when the saved position is negative or the size empty.
+     */
+    inline fun <T> parseSizedWidgetObject(
+        obj: JSONObject,
+        crossinline builder: (obj: JSONObject, c: ParsedCommonFields, width: Float, height: Float) -> T
+    ): T? {
+        return try {
+            val c = parseCommonFields(obj)
+            val width = obj.getDouble("width").toFloat()
+            val height = obj.getDouble("height").toFloat()
+
+            if (c.x < 0 || c.y < 0 || width <= 0 || height <= 0) return null
+
+            builder(obj, c, width, height)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     /** Read the common fields shared by every widget from a JSONObject. */
     fun parseCommonFields(obj: JSONObject): ParsedCommonFields {
         return ParsedCommonFields(
@@ -170,40 +179,6 @@ object DashboardPersistence {
         override val isPinned: Boolean = false
     ) : SizedWidgetFields
 
-    data class StatusBarState(
-        override val x: Float,
-        override val y: Float,
-        val showTime: Boolean = true,
-        val showDate: Boolean = true,
-        val showPhoneBattery: Boolean = true,
-        val showGlassesBattery: Boolean = true,
-        override val isMinimized: Boolean = false,
-        override val isFullscreen: Boolean = false,
-        override val savedMinX: Float = 0f,
-        override val savedMinY: Float = 0f,
-        override val savedMinWidth: Float = 0f,
-        override val savedMinHeight: Float = 0f,
-        override val isPinned: Boolean = false
-    ) : CommonWidgetFields
-
-    data class LocationWidgetState(
-        override val x: Float,
-        override val y: Float,
-        override val width: Float,
-        override val height: Float,
-        val showWeather: Boolean = true,
-        val showTemperature: Boolean = true,
-        val showLocation: Boolean = false,
-        val showCountry: Boolean = false,
-        override val isMinimized: Boolean = false,
-        override val isFullscreen: Boolean = false,
-        override val savedMinX: Float = 0f,
-        override val savedMinY: Float = 0f,
-        override val savedMinWidth: Float = 0f,
-        override val savedMinHeight: Float = 0f,
-        override val isPinned: Boolean = false
-    ) : SizedWidgetFields
-
     data class VideoWidgetState(
         override val x: Float,
         override val y: Float,
@@ -236,139 +211,6 @@ object DashboardPersistence {
         override val savedMinWidth: Float = 0f,
         override val savedMinHeight: Float = 0f,
         override val isPinned: Boolean = false,
-    ) : SizedWidgetFields
-
-    data class MapWidgetState(
-        override val x: Float,
-        override val y: Float,
-        override val width: Float,
-        override val height: Float,
-        val mode: String = MapViewMode.TOP_DOWN.name,
-        val zoom: String = MapZoom.MEDIUM.name,
-        val showLocation: Boolean = true,
-        val showCountry: Boolean = true,
-        val poiConfig: PoiDisplayConfig = PoiDisplayConfig.DEFAULT,
-        override val isMinimized: Boolean = false,
-        override val isFullscreen: Boolean = false,
-        override val savedMinX: Float = 0f,
-        override val savedMinY: Float = 0f,
-        override val savedMinWidth: Float = 0f,
-        override val savedMinHeight: Float = 0f,
-        override val isPinned: Boolean = false
-    ) : SizedWidgetFields
-
-    data class MirrorWidgetState(
-        override val x: Float,
-        override val y: Float,
-        override val width: Float,
-        override val height: Float,
-        override val isMinimized: Boolean = false,
-        override val isFullscreen: Boolean = false,
-        override val savedMinX: Float = 0f,
-        override val savedMinY: Float = 0f,
-        override val savedMinWidth: Float = 0f,
-        override val savedMinHeight: Float = 0f,
-        override val isPinned: Boolean = false
-    ) : SizedWidgetFields
-
-    data class CalendarWidgetState(
-        override val x: Float,
-        override val y: Float,
-        override val width: Float,
-        override val height: Float,
-        val fontScale: Float = 1f,
-        override val isMinimized: Boolean = false,
-        override val isFullscreen: Boolean = false,
-        override val savedMinX: Float = 0f,
-        override val savedMinY: Float = 0f,
-        override val savedMinWidth: Float = 0f,
-        override val savedMinHeight: Float = 0f,
-        override val isPinned: Boolean = false
-    ) : SizedWidgetFields
-
-    data class FinanceWidgetState(
-        override val x: Float,
-        override val y: Float,
-        override val width: Float,
-        override val height: Float,
-        val selectedSymbol: String = "^GSPC",
-        val selectedRange: String = "1D",
-        val tiles: List<FinanceDashboardTileConfig> = emptyList(),
-        val navigationIndex: Int = 0,
-        val tilingSpan: Int = 3,
-        override val isMinimized: Boolean = false,
-        override val isFullscreen: Boolean = false,
-        override val savedMinX: Float = 0f,
-        override val savedMinY: Float = 0f,
-        override val savedMinWidth: Float = 0f,
-        override val savedMinHeight: Float = 0f,
-        override val isPinned: Boolean = false
-    ) : SizedWidgetFields
-
-    data class NewsWidgetState(
-        override val x: Float,
-        override val y: Float,
-        override val width: Float,
-        override val height: Float,
-        val countryCode: String = "US",
-        val sourceSpec: NewsSourceSpec = NewsSourceSpec.DEFAULT_LOCATION,
-        val selectedIndex: Int = 0,
-        val fontScale: Float = 1f,
-        override val isMinimized: Boolean = false,
-        override val isFullscreen: Boolean = false,
-        override val savedMinX: Float = 0f,
-        override val savedMinY: Float = 0f,
-        override val savedMinWidth: Float = 0f,
-        override val savedMinHeight: Float = 0f,
-        override val isPinned: Boolean = false
-    ) : SizedWidgetFields
-
-    data class NotificationsWidgetState(
-        override val x: Float,
-        override val y: Float,
-        override val width: Float,
-        override val height: Float,
-        val widgetFontScale: Float = 1f,
-        val toastFontScale: Float = 1f,
-        val scrollIndex: Int = 0,
-        override val isMinimized: Boolean = false,
-        override val isFullscreen: Boolean = false,
-        override val savedMinX: Float = 0f,
-        override val savedMinY: Float = 0f,
-        override val savedMinWidth: Float = 0f,
-        override val savedMinHeight: Float = 0f,
-        override val isPinned: Boolean = false
-    ) : SizedWidgetFields
-
-    data class SpeedometerWidgetState(
-        override val x: Float,
-        override val y: Float,
-        override val width: Float,
-        override val height: Float,
-        override val isMinimized: Boolean = false,
-        override val isFullscreen: Boolean = false,
-        override val savedMinX: Float = 0f,
-        override val savedMinY: Float = 0f,
-        override val savedMinWidth: Float = 0f,
-        override val savedMinHeight: Float = 0f,
-        override val isPinned: Boolean = false
-    ) : SizedWidgetFields
-
-    data class SubtitleWidgetState(
-        override val x: Float,
-        override val y: Float,
-        override val width: Float,
-        override val height: Float,
-        val phonePlaybackEnabled: Boolean = true,
-        val microphoneEnabled: Boolean = false,
-        val translationEnabled: Boolean = false,
-        override val isMinimized: Boolean = false,
-        override val isFullscreen: Boolean = false,
-        override val savedMinX: Float = 0f,
-        override val savedMinY: Float = 0f,
-        override val savedMinWidth: Float = 0f,
-        override val savedMinHeight: Float = 0f,
-        override val isPinned: Boolean = false
     ) : SizedWidgetFields
 
     private fun getStorageFile(context: Context): File {
@@ -411,18 +253,9 @@ object DashboardPersistence {
             put("page", widget.page)
             put("zoom", widget.zoom)
         } }
-        WidgetTypeId.STATUS -> statusBarToJson(state as StatusBarState)
-        WidgetTypeId.LOCATION -> locationWidgetToJson(state as LocationWidgetState)
-        WidgetTypeId.MAP -> mapWidgetToJson(state as MapWidgetState)
-        WidgetTypeId.CALENDAR -> calendarWidgetToJson(state as CalendarWidgetState)
-        WidgetTypeId.FINANCE -> financeWidgetToJson(state as FinanceWidgetState)
-        WidgetTypeId.NEWS -> newsWidgetToJson(state as NewsWidgetState)
-        WidgetTypeId.NOTIFICATIONS -> notificationsWidgetToJson(state as NotificationsWidgetState)
-        WidgetTypeId.SPEEDOMETER -> speedometerWidgetToJson(state as SpeedometerWidgetState)
-        WidgetTypeId.SUBTITLE -> subtitleWidgetToJson(state as SubtitleWidgetState)
-        WidgetTypeId.MIRROR -> mirrorWidgetToJson(state as MirrorWidgetState)
-        // File browser state has not been persisted by the v1 schema.
-        WidgetTypeId.FILES -> error("${type.persistedId} has no persisted state codec")
+        // The single-instance types save through their own codec, in their widget package.
+        // File browser state is not saved.
+        else -> error("${type.persistedId} has no persisted state codec here")
     }
 
     /** Decodes one v2 payload through the same field-level parser as v1. */
@@ -432,17 +265,7 @@ object DashboardPersistence {
         WidgetTypeId.IMAGE -> parseImageWidget(payload)
         WidgetTypeId.VIDEO -> parseVideoWidget(payload)
         WidgetTypeId.PDF -> parsePdfWidget(payload)
-        WidgetTypeId.STATUS -> parseStatusBarObject(payload)
-        WidgetTypeId.LOCATION -> parseLocationPayload(payload)
-        WidgetTypeId.MAP -> parseMapPayload(payload)
-        WidgetTypeId.CALENDAR -> parseCalendarPayload(payload)
-        WidgetTypeId.FINANCE -> parseFinancePayload(payload)
-        WidgetTypeId.NEWS -> parseNewsPayload(payload)
-        WidgetTypeId.NOTIFICATIONS -> parseNotificationsPayload(payload)
-        WidgetTypeId.SPEEDOMETER -> parseSpeedometerPayload(payload)
-        WidgetTypeId.SUBTITLE -> parseSubtitlePayload(payload)
-        WidgetTypeId.MIRROR -> parseMirrorPayload(payload)
-        WidgetTypeId.FILES -> null
+        else -> null
     }
 
     fun saveDashboard(context: Context, dashboard: WidgetDocument.PersistedDashboard): Boolean {
@@ -677,115 +500,6 @@ object DashboardPersistence {
             put("url", widget.url)
         }
 
-    private fun statusBarToJson(state: StatusBarState): JSONObject =
-        JSONObject().apply {
-            putCommonFields(state, includeSize = false)
-            put("showTime", state.showTime)
-            put("showDate", state.showDate)
-            put("showPhoneBattery", state.showPhoneBattery)
-            put("showGlassesBattery", state.showGlassesBattery)
-        }
-
-    private fun locationWidgetToJson(state: LocationWidgetState): JSONObject =
-        JSONObject().apply {
-            putCommonFields(state)
-            put("showWeather", state.showWeather)
-            put("showTemperature", state.showTemperature)
-            put("showLocation", state.showLocation)
-            put("showCountry", state.showCountry)
-        }
-
-    private fun mapWidgetToJson(state: MapWidgetState): JSONObject =
-        JSONObject().apply {
-            putCommonFields(state)
-            put("mode", state.mode)
-            put("zoom", state.zoom)
-            put("showLocation", state.showLocation)
-            put("showCountry", state.showCountry)
-            put("poiConfig", poiConfigToJson(state.poiConfig))
-        }
-
-    private fun poiConfigToJson(config: PoiDisplayConfig): JSONObject = JSONObject().apply {
-        put("state", config.state.name)
-        put("mode", config.mode.name)
-        put("categories", JSONArray().apply { config.categories.sorted().forEach(::put) })
-        put("radiusM", config.radiusM)
-        put("maxResults", config.maxResults)
-        put("importantCategories", JSONArray().apply {
-            config.importantCategories.sorted().forEach(::put)
-        })
-        put("importantRadiiM", JSONObject().apply {
-            config.importantRadiiM.toSortedMap().forEach { (category, radius) -> put(category, radius) }
-        })
-        put("normalCategories", JSONArray().apply {
-            config.normalCategories.sorted().forEach(::put)
-        })
-        put("normalMaxResults", config.normalMaxResults)
-        put("showClosest", config.showClosest)
-        put("closestRadiusM", config.closestRadiusM)
-        put("balanceCategories", config.balanceCategories)
-    }
-
-    private fun calendarWidgetToJson(state: CalendarWidgetState): JSONObject =
-        JSONObject().apply {
-            putCommonFields(state)
-            put("fontScale", state.fontScale)
-        }
-
-    private fun mirrorWidgetToJson(state: MirrorWidgetState): JSONObject =
-        JSONObject().apply { putCommonFields(state) }
-
-    private fun financeWidgetToJson(state: FinanceWidgetState): JSONObject =
-        JSONObject().apply {
-            putCommonFields(state)
-            put("selectedSymbol", state.selectedSymbol)
-            put("selectedRange", state.selectedRange)
-            put("navigationIndex", state.navigationIndex)
-            put("tilingSpan", state.tilingSpan)
-            put("tiles", JSONArray().apply {
-                state.tiles.forEach { put(financeTileToJson(it)) }
-            })
-        }
-
-    private fun financeTileToJson(tile: FinanceDashboardTileConfig): JSONObject =
-        JSONObject().apply {
-            put("id", tile.id)
-            put("assetType", tile.assetType.name)
-            put("symbol", tile.symbol)
-            put("range", tile.range)
-            put("chartType", tile.chartType.name)
-            put("slot", tile.slot)
-        }
-
-    private fun newsWidgetToJson(state: NewsWidgetState): JSONObject =
-        JSONObject().apply {
-            putCommonFields(state)
-            put("countryCode", state.countryCode)
-            put("sourceKind", state.sourceSpec.kind.name)
-            state.sourceSpec.value?.let { put("sourceValue", it) }
-            put("selectedIndex", state.selectedIndex)
-            put("fontScale", state.fontScale)
-        }
-
-    private fun notificationsWidgetToJson(state: NotificationsWidgetState): JSONObject =
-        JSONObject().apply {
-            putCommonFields(state)
-            put("widgetFontScale", state.widgetFontScale)
-            put("toastFontScale", state.toastFontScale)
-            put("scrollIndex", state.scrollIndex)
-        }
-
-    private fun speedometerWidgetToJson(state: SpeedometerWidgetState): JSONObject =
-        JSONObject().apply { putCommonFields(state) }
-
-    private fun subtitleWidgetToJson(state: SubtitleWidgetState): JSONObject =
-        JSONObject().apply {
-            putCommonFields(state)
-            put("phonePlaybackEnabled", state.phonePlaybackEnabled)
-            put("microphoneEnabled", state.microphoneEnabled)
-            put("translationEnabled", state.translationEnabled)
-        }
-
     private fun parseTextWidget(obj: JSONObject): TextWidgetState? {
         val html: String? =
             if (obj.has("html") && !obj.isNull("html")) obj.optString("html") else null
@@ -831,46 +545,7 @@ object DashboardPersistence {
         }
     }
 
-    private fun parseStatusBarObject(obj: JSONObject): StatusBarState? {
-        return try {
-            val c = parseCommonFields(obj)
-            if (c.x < 0 || c.y < 0) return null
-
-            StatusBarState(
-                x = c.x, y = c.y,
-                showTime = obj.optBoolean("showTime", true),
-                showDate = obj.optBoolean("showDate", true),
-                showPhoneBattery = obj.optBoolean("showPhoneBattery", true),
-                showGlassesBattery = obj.optBoolean("showGlassesBattery", true),
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private inline fun <T> parseSizedWidgetObject(
-        obj: JSONObject,
-        crossinline builder: (obj: JSONObject, c: ParsedCommonFields, width: Float, height: Float) -> T
-    ): T? {
-        return try {
-            val c = parseCommonFields(obj)
-            val width = obj.getDouble("width").toFloat()
-            val height = obj.getDouble("height").toFloat()
-
-            if (c.x < 0 || c.y < 0 || width <= 0 || height <= 0) return null
-
-            builder(obj, c, width, height)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun parseImageWidget(obj: JSONObject): ImageWidgetState? = runCatching {
+   private fun parseImageWidget(obj: JSONObject): ImageWidgetState? = runCatching {
         val c = parseCommonFields(obj)
         val imagePath = obj.optString("imagePath", "")
         if (imagePath.isBlank()) return null
@@ -931,274 +606,4 @@ object DashboardPersistence {
             isPinned = c.isPinned,
         )
     }.getOrNull()
-
-    private fun parseLocationPayload(payload: JSONObject): LocationWidgetState? =
-        parseSizedWidgetObject(payload) { obj, c, w, h ->
-            LocationWidgetState(
-                x = c.x, y = c.y, width = w, height = h,
-                showWeather = obj.optBoolean("showWeather", true),
-                showTemperature = obj.optBoolean("showTemperature", true),
-                showLocation = obj.optBoolean("showLocation", false),
-                showCountry = obj.optBoolean("showCountry", false),
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
-
-    private fun parseMapPayload(payload: JSONObject): MapWidgetState? =
-        parseSizedWidgetObject(payload) { obj, c, w, h ->
-            MapWidgetState(
-                x = c.x, y = c.y, width = w, height = h,
-                mode = obj.optString("mode", MapViewMode.TOP_DOWN.name),
-                zoom = obj.optString("zoom", MapZoom.MEDIUM.name),
-                showLocation = obj.optBoolean("showLocation", true),
-                showCountry = obj.optBoolean("showCountry", true),
-                poiConfig = parsePoiConfig(obj.optJSONObject("poiConfig")),
-                isMinimized = c.isMinimized, isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
-
-    private fun parsePoiConfig(obj: JSONObject?): PoiDisplayConfig {
-        if (obj == null) return PoiDisplayConfig.DEFAULT
-        return runCatching {
-            val state = runCatching {
-                PoiDisplayConfigState.valueOf(obj.optString("state", PoiDisplayConfigState.CUSTOM.name))
-            }.getOrDefault(PoiDisplayConfigState.CUSTOM)
-            // Legacy Default records have no mode/profile fields and can be restored directly.
-            // New records are parsed below so a caller that copied Default and changed a single
-            // variable cannot have that change discarded merely because its old state flag stayed
-            // DEFAULT.
-            if (state == PoiDisplayConfigState.DEFAULT && !obj.has("mode")) {
-                return@runCatching PoiDisplayConfig.DEFAULT
-            }
-            val categoriesJson = obj.optJSONArray("categories") ?: error("POI categories missing")
-            val categories = buildSet {
-                for (index in 0 until categoriesJson.length()) add(categoriesJson.getString(index))
-            }
-            // Files written before the two-mode menu only contain the nearest-profile fields.
-            // Recreate them through the compatibility factory so the previous voice behavior
-            // remains stable.
-            if (!obj.has("mode")) {
-                return@runCatching PoiDisplayConfig.custom(
-                    categories = categories,
-                    radiusM = obj.optInt("radiusM", PoiDisplayConfig.DEFAULT_RADIUS_M),
-                    maxResults = obj.optInt("maxResults", PoiDisplayConfig.DEFAULT_MAX_RESULTS)
-                )
-            }
-            val mode = runCatching {
-                PoiDisplayMode.valueOf(obj.optString("mode", PoiDisplayMode.NEAREST.name))
-            }.getOrDefault(PoiDisplayMode.NEAREST)
-            fun stringSet(key: String, fallback: Set<String>): Set<String> {
-                val json = obj.optJSONArray(key) ?: return fallback
-                return buildSet {
-                    for (index in 0 until json.length()) add(json.getString(index))
-                }
-            }
-            val importantCategories = stringSet(
-                "importantCategories",
-                PoiDisplayConfig.DEFAULT_IMPORTANT_CATEGORIES
-            )
-            val importantRadii = buildMap {
-                val json = obj.optJSONObject("importantRadiiM")
-                if (json == null) {
-                    putAll(PoiDisplayConfig.DEFAULT_IMPORTANT_RADII_M)
-                } else {
-                    json.keys().forEach { category -> put(category, json.getInt(category)) }
-                }
-            }
-            val normalCategories = stringSet(
-                "normalCategories",
-                PoiDisplayConfig.DEFAULT_NORMAL_CATEGORIES
-            )
-            val candidate = PoiDisplayConfig(
-                categories = categories,
-                radiusM = obj.optInt("radiusM", PoiDisplayConfig.DEFAULT_RADIUS_M),
-                maxResults = obj.optInt(
-                    "maxResults",
-                    PoiDisplayConfig.DEFAULT_MAX_RESULTS
-                ),
-                state = PoiDisplayConfigState.CUSTOM,
-                mode = mode,
-                importantCategories = importantCategories,
-                importantRadiiM = importantRadii,
-                normalCategories = normalCategories,
-                normalMaxResults = obj.optInt(
-                    "normalMaxResults",
-                    PoiDisplayConfig.DEFAULT_NORMAL_MAX_RESULTS
-                ),
-                showClosest = obj.optBoolean(
-                    "showClosest",
-                    PoiDisplayConfig.DEFAULT_SHOW_CLOSEST
-                ),
-                closestRadiusM = obj.optInt(
-                    "closestRadiusM",
-                    PoiDisplayConfig.DEFAULT_CLOSEST_RADIUS_M
-                ),
-                balanceCategories = obj.optBoolean("balanceCategories", false)
-            )
-            if (
-                candidate.mode == PoiDisplayMode.DEFAULT &&
-                candidate.categories == PoiDisplayConfig.DEFAULT.categories &&
-                candidate.radiusM == PoiDisplayConfig.DEFAULT.radiusM &&
-                candidate.maxResults == PoiDisplayConfig.DEFAULT.maxResults &&
-                candidate.importantCategories == PoiDisplayConfig.DEFAULT.importantCategories &&
-                candidate.importantRadiiM == PoiDisplayConfig.DEFAULT.importantRadiiM &&
-                candidate.normalCategories == PoiDisplayConfig.DEFAULT.normalCategories &&
-                candidate.normalMaxResults == PoiDisplayConfig.DEFAULT.normalMaxResults &&
-                candidate.showClosest == PoiDisplayConfig.DEFAULT.showClosest &&
-                candidate.closestRadiusM == PoiDisplayConfig.DEFAULT.closestRadiusM &&
-                !candidate.balanceCategories
-            ) {
-                PoiDisplayConfig.DEFAULT
-            } else {
-                candidate
-            }
-        }.getOrDefault(PoiDisplayConfig.DEFAULT)
-    }
-
-    private fun parseCalendarPayload(payload: JSONObject): CalendarWidgetState? =
-        parseSizedWidgetObject(payload) { obj, c, w, h ->
-            CalendarWidgetState(
-                x = c.x, y = c.y, width = w, height = h,
-                fontScale = obj.optDouble("fontScale", 1.0).toFloat(),
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
-
-    private fun parseMirrorPayload(payload: JSONObject): MirrorWidgetState? =
-        parseSizedWidgetObject(payload) { _, c, w, h ->
-            MirrorWidgetState(
-                x = c.x, y = c.y, width = w, height = h,
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
-
-    private fun parseFinancePayload(payload: JSONObject): FinanceWidgetState? =
-        parseSizedWidgetObject(payload) { obj, c, w, h ->
-            FinanceWidgetState(
-                x = c.x, y = c.y, width = w, height = h,
-                selectedSymbol = obj.optString("selectedSymbol", "^GSPC"),
-                selectedRange = obj.optString("selectedRange", "1D"),
-                tiles = parseFinanceTiles(obj, obj.optString("selectedSymbol", "^GSPC"), obj.optString("selectedRange", "1D")),
-                navigationIndex = obj.optInt("navigationIndex", 0),
-                tilingSpan = obj.optInt("tilingSpan", 3).coerceIn(1, 3),
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
-
-    private fun parseFinanceTiles(obj: JSONObject, fallbackSymbol: String, fallbackRange: String): List<FinanceDashboardTileConfig> {
-        val items = obj.optJSONArray("tiles") ?: JSONArray()
-        val parsed = buildList {
-            for (index in 0 until items.length()) {
-                val tile = items.optJSONObject(index) ?: continue
-                val assetType = FinanceAssetType.fromWireName(tile.optString("assetType"))
-                val symbol = tile.optString("symbol").takeIf { it.isNotBlank() } ?: continue
-                val range = FinanceTimeRange.fromRange(tile.optString("range", "1d")).range
-                add(
-                    FinanceDashboardTileConfig(
-                        id = tile.optString("id", "${assetType.name}_${symbol}_$range"),
-                        assetType = assetType,
-                        symbol = symbol,
-                        range = range,
-                        chartType = FinanceChartType.fromWireName(tile.optString("chartType")),
-                        slot = tile.optInt("slot", index)
-                    )
-                )
-            }
-        }
-        if (parsed.isNotEmpty()) return parsed.take(FinanceWidget.MAX_TILES)
-        return listOf(
-            FinanceDashboardTileConfig(
-                id = "index_${fallbackSymbol}_${fallbackRange}",
-                assetType = FinanceAssetType.INDEX,
-                symbol = fallbackSymbol,
-                range = FinanceTimeRange.fromRange(fallbackRange).range,
-                chartType = FinanceChartType.LINE,
-                slot = 0
-            )
-        )
-    }
-
-    private fun parseNewsSource(obj: JSONObject): NewsSourceSpec =
-        NewsSourceSpec.fromWire(
-            obj.optString("sourceKind").takeIf { it.isNotBlank() },
-            obj.optString("sourceValue").takeIf { it.isNotBlank() }
-        ) ?: NewsSourceSpec.DEFAULT_LOCATION
-
-    private fun parseNewsPayload(payload: JSONObject): NewsWidgetState? =
-        parseSizedWidgetObject(payload) { obj, c, w, h ->
-            NewsWidgetState(
-                x = c.x, y = c.y, width = w, height = h,
-                countryCode = obj.optString("countryCode", "US"),
-                sourceSpec = parseNewsSource(obj),
-                selectedIndex = obj.optInt("selectedIndex", 0),
-                fontScale = obj.optDouble("fontScale", 1.0).toFloat(),
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
-
-    private fun parseNotificationsPayload(payload: JSONObject): NotificationsWidgetState? =
-        parseSizedWidgetObject(payload) { obj, c, w, h ->
-            NotificationsWidgetState(
-                x = c.x, y = c.y, width = w, height = h,
-                widgetFontScale = obj.optDouble("widgetFontScale", 1.0).toFloat(),
-                toastFontScale = obj.optDouble("toastFontScale", 1.0).toFloat(),
-                scrollIndex = obj.optInt("scrollIndex", 0).coerceAtLeast(0),
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
-
-    private fun parseSpeedometerPayload(payload: JSONObject): SpeedometerWidgetState? =
-        parseSizedWidgetObject(payload) { _, c, w, h ->
-            SpeedometerWidgetState(
-                x = c.x, y = c.y, width = w, height = h,
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
-
-    private fun parseSubtitlePayload(payload: JSONObject): SubtitleWidgetState? =
-        parseSizedWidgetObject(payload) { obj, c, w, h ->
-            SubtitleWidgetState(
-                x = c.x, y = c.y, width = w, height = h,
-                phonePlaybackEnabled = obj.optBoolean("phonePlaybackEnabled", true),
-                microphoneEnabled = obj.optBoolean("microphoneEnabled", false),
-                translationEnabled = obj.optBoolean("translationEnabled", false),
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
-
 }

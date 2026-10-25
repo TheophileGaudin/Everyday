@@ -20,6 +20,16 @@ import com.everyday.everyday_glasses.settings.UnitSettings
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import com.everyday.everyday_glasses.widgets.system_status.StatusBarState
+import com.everyday.everyday_glasses.widgets.weather_location.LocationWidgetState
+import com.everyday.everyday_glasses.widgets.map.MapWidgetState
+import com.everyday.everyday_glasses.widgets.calendar.CalendarWidgetState
+import com.everyday.everyday_glasses.widgets.finance.FinanceWidgetState
+import com.everyday.everyday_glasses.widgets.news.NewsWidgetState
+import com.everyday.everyday_glasses.widgets.notifications.NotificationsWidgetState
+import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidgetState
+import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleWidgetState
+import com.everyday.everyday_glasses.widgets.phone_screen_mirror.MirrorWidgetState
 import android.content.ContextWrapper
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
@@ -36,10 +46,10 @@ class WidgetLayoutPersistenceTest {
     @Test
     fun `standard layout includes compact weather map and speedometer cluster`() {
         val dashboard = BuiltInLayouts.buildDashboard(DashboardPersistence.DEFAULT_LAYOUT_NAME, 640f, 480f)!!
-        val map: DashboardPersistence.MapWidgetState = dashboard.stateOf(WidgetTypeId.MAP)
-        val weather: DashboardPersistence.LocationWidgetState = dashboard.stateOf(WidgetTypeId.LOCATION)
-        val speed: DashboardPersistence.SpeedometerWidgetState = dashboard.stateOf(WidgetTypeId.SPEEDOMETER)
-        val news: DashboardPersistence.NewsWidgetState = dashboard.stateOf(WidgetTypeId.NEWS)
+        val map: MapWidgetState = dashboard.stateOf(WidgetTypeId.MAP)
+        val weather: LocationWidgetState = dashboard.stateOf(WidgetTypeId.LOCATION)
+        val speed: SpeedometerWidgetState = dashboard.stateOf(WidgetTypeId.SPEEDOMETER)
+        val news: NewsWidgetState = dashboard.stateOf(WidgetTypeId.NEWS)
         assertTrue(map.x > 400f)
         assertTrue(weather.width < 200f)
         assertEquals(134.9f, speed.width, 0.1f)
@@ -62,7 +72,7 @@ class WidgetLayoutPersistenceTest {
     @Test
     fun `all news source kinds survive widget persistence`() {
         val dashboard = BuiltInLayouts.buildDashboard(DashboardPersistence.DEFAULT_LAYOUT_NAME, 640f, 480f)!!
-        val baseline: DashboardPersistence.NewsWidgetState = dashboard.stateOf(WidgetTypeId.NEWS)
+        val baseline: NewsWidgetState = dashboard.stateOf(WidgetTypeId.NEWS)
         val codec = WidgetDocument.codecs.getValue(WidgetTypeId.NEWS)
         val sources = listOf(
             com.everyday.shared.sync.NewsSourceSpec.DEFAULT_LOCATION,
@@ -72,7 +82,7 @@ class WidgetLayoutPersistenceTest {
 
         sources.forEach { source ->
             val state = baseline.copy(sourceSpec = source)
-            val restored = codec.decode(codec.encode(state)) as DashboardPersistence.NewsWidgetState
+            val restored = codec.decode(codec.encode(state)) as NewsWidgetState
             assertEquals(source, restored.sourceSpec)
         }
     }
@@ -101,43 +111,43 @@ class WidgetLayoutPersistenceTest {
             uri = "content://documents/report", displayName = "report.pdf",
             x = 23f, y = 24f, width = 280f, height = 200f, page = 4, zoom = 1.5f
         )
-        val status = DashboardPersistence.StatusBarState(
+        val status = StatusBarState(
             x = 100f, y = 200f, showTime = true, showDate = false,
             showPhoneBattery = true, showGlassesBattery = false
         )
-        val location = DashboardPersistence.LocationWidgetState(
+        val location = LocationWidgetState(
             x = 3f, y = 4f, width = 150f, height = 80f,
             showWeather = false, showTemperature = true,
             showLocation = false, showCountry = true
         )
-        val map = DashboardPersistence.MapWidgetState(
+        val map = MapWidgetState(
             x = 410f, y = 12f, width = 176f, height = 176f,
             mode = MapViewMode.PROJECTED.name, zoom = MapZoom.FAR.name,
             isFullscreen = true, isPinned = true
         )
-        val calendar = DashboardPersistence.CalendarWidgetState(
+        val calendar = CalendarWidgetState(
             x = 5f, y = 6f, width = 200f, height = 100f, fontScale = 1.25f
         )
-        val finance = DashboardPersistence.FinanceWidgetState(
+        val finance = FinanceWidgetState(
             x = 7f, y = 8f, width = 210f, height = 120f,
             selectedSymbol = "AAPL", selectedRange = "1M"
         )
-        val news = DashboardPersistence.NewsWidgetState(
+        val news = NewsWidgetState(
             x = 9f, y = 10f, width = 230f, height = 150f,
             countryCode = "GB", selectedIndex = 3, fontScale = 0.9f
         )
-        val notifications = DashboardPersistence.NotificationsWidgetState(
+        val notifications = NotificationsWidgetState(
             x = 10f, y = 11f, width = 240f, height = 160f,
             widgetFontScale = 1.2f, toastFontScale = 1.3f, scrollIndex = 2
         )
-        val speedometer = DashboardPersistence.SpeedometerWidgetState(
+        val speedometer = SpeedometerWidgetState(
             x = 11f, y = 12f, width = 160f, height = 80f
         )
-        val subtitle = DashboardPersistence.SubtitleWidgetState(
+        val subtitle = SubtitleWidgetState(
             x = 13f, y = 14f, width = 250f, height = 90f,
             phonePlaybackEnabled = false, microphoneEnabled = true, translationEnabled = true
         )
-        val mirror = DashboardPersistence.MirrorWidgetState(
+        val mirror = MirrorWidgetState(
             x = 15f, y = 16f, width = 120f, height = 180f, isPinned = true
         )
         val closedText = DashboardPersistence.TextWidgetState(
@@ -146,7 +156,7 @@ class WidgetLayoutPersistenceTest {
         val closedBrowser = DashboardPersistence.BrowserWidgetState(
             x = 19f, y = 20f, width = 210f, height = 130f, url = "https://closed.example"
         )
-        val closedMap = DashboardPersistence.MapWidgetState(
+        val closedMap = MapWidgetState(
             x = 420f, y = 20f, width = 150f, height = 150f,
             mode = MapViewMode.TOP_DOWN.name, zoom = MapZoom.NEAR.name
         )
@@ -193,31 +203,31 @@ class WidgetLayoutPersistenceTest {
         assertEquals(image, restored.stateOf<DashboardPersistence.ImageWidgetState>(WidgetTypeId.IMAGE))
         assertEquals(video, restored.stateOf<DashboardPersistence.VideoWidgetState>(WidgetTypeId.VIDEO))
         assertEquals(pdf, restored.stateOf<DashboardPersistence.PdfWidgetState>(WidgetTypeId.PDF))
-        assertEquals(status, restored.stateOf<DashboardPersistence.StatusBarState>(WidgetTypeId.STATUS))
-        assertEquals(location, restored.stateOf<DashboardPersistence.LocationWidgetState>(
+        assertEquals(status, restored.stateOf<StatusBarState>(WidgetTypeId.STATUS))
+        assertEquals(location, restored.stateOf<LocationWidgetState>(
             WidgetTypeId.LOCATION))
-        assertEquals(map, restored.stateOf<DashboardPersistence.MapWidgetState>(WidgetTypeId.MAP))
-        assertEquals(calendar, restored.stateOf<DashboardPersistence.CalendarWidgetState>(
+        assertEquals(map, restored.stateOf<MapWidgetState>(WidgetTypeId.MAP))
+        assertEquals(calendar, restored.stateOf<CalendarWidgetState>(
             WidgetTypeId.CALENDAR))
         // Finance is the one type that does not round trip identically: a widget saved
         // with no tiles is rehydrated with one derived from its symbol and range.
-        val restoredFinance = restored.stateOf<DashboardPersistence.FinanceWidgetState>(WidgetTypeId.FINANCE)
+        val restoredFinance = restored.stateOf<FinanceWidgetState>(WidgetTypeId.FINANCE)
         assertEquals(finance.selectedSymbol, restoredFinance.selectedSymbol)
         assertEquals(finance.selectedRange, restoredFinance.selectedRange)
         assertEquals(finance.copy(tiles = restoredFinance.tiles), restoredFinance)
         assertEquals("AAPL", restoredFinance.tiles.single().symbol)
-        assertEquals(news, restored.stateOf<DashboardPersistence.NewsWidgetState>(WidgetTypeId.NEWS))
+        assertEquals(news, restored.stateOf<NewsWidgetState>(WidgetTypeId.NEWS))
         assertEquals(
             notifications,
-            restored.stateOf<DashboardPersistence.NotificationsWidgetState>(WidgetTypeId.NOTIFICATIONS)
+            restored.stateOf<NotificationsWidgetState>(WidgetTypeId.NOTIFICATIONS)
         )
         assertEquals(
             speedometer,
-            restored.stateOf<DashboardPersistence.SpeedometerWidgetState>(WidgetTypeId.SPEEDOMETER)
+            restored.stateOf<SpeedometerWidgetState>(WidgetTypeId.SPEEDOMETER)
         )
-        assertEquals(subtitle, restored.stateOf<DashboardPersistence.SubtitleWidgetState>(
+        assertEquals(subtitle, restored.stateOf<SubtitleWidgetState>(
             WidgetTypeId.SUBTITLE))
-        assertEquals(mirror, restored.stateOf<DashboardPersistence.MirrorWidgetState>(WidgetTypeId.MIRROR))
+        assertEquals(mirror, restored.stateOf<MirrorWidgetState>(WidgetTypeId.MIRROR))
 
         // Instance ids identify repeatable widgets across a reload.
         assertEquals(
@@ -230,7 +240,7 @@ class WidgetLayoutPersistenceTest {
             WidgetTypeId.TEXT))
         assertEquals(closedBrowser, restored.templateOf<DashboardPersistence.BrowserWidgetState>(
             WidgetTypeId.BROWSER))
-        assertEquals(closedMap, restored.templateOf<DashboardPersistence.MapWidgetState>(
+        assertEquals(closedMap, restored.templateOf<MapWidgetState>(
             WidgetTypeId.MAP))
         assertNull(restored.closedTemplates.firstOrNull { it.type == WidgetTypeId.STATUS })
         val restoredHoverControls = requireNotNull(restored.hoverControls)

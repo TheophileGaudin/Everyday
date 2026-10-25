@@ -12,8 +12,16 @@ import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.shared.sync.FinanceAssetType
+import com.everyday.shared.sync.FinanceChartType
+import com.everyday.shared.sync.FinanceTimeRange
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import java.util.concurrent.CompletableFuture
+import org.json.JSONArray
+import org.json.JSONObject
 
 /** Puts the finance widget on the dashboard and connects it to the phone's market data. */
 internal class FinancePlugin(
@@ -25,11 +33,11 @@ internal class FinancePlugin(
         { action -> services.runPersistentMutation(changed = { result -> result.isSuccess }, action = action) }
     private val stableWidgetId: (BaseWidget) -> String = { widget -> services.stableId(widget) }
     override val lifecycle = WidgetLifecycleRegistration.singleton(
-        WidgetTypeId.FINANCE, FinanceWidget::class, DashboardPersistence.FinanceWidgetState::class,
+        FinanceWidget::class, FinanceWidgetState.Codec,
         current = currentWidget,
         create = ::create,
         restore = ::restore,
-        capture = { services.captureRestore.getFinanceWidgetState(it) },
+        capture = ::capture,
         teardown = { widget ->
             onDestroyed()
             widget.onDestroy()
@@ -44,12 +52,31 @@ internal class FinancePlugin(
         return widget
     }
 
-    private fun restore(state: DashboardPersistence.FinanceWidgetState): FinanceWidget {
+    private fun restore(state: FinanceWidgetState): FinanceWidget {
         val widget = FinanceWidget(state.x, state.y, state.width, state.height)
         configure(widget)
-        services.captureRestore.restoreFinanceWidgetPosition(widget, state, services.viewportWidth, services.viewportHeight)
+        services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight) {
+            widget.restoreDashboard(state.tiles, state.navigationIndex, state.tilingSpan)
+        }
         onOpened(widget, reason = "widget_restored")
         return widget
+    }
+
+    private fun capture(widget: FinanceWidget): FinanceWidgetState {
+        val c = services.captureRestore.extractCommonFields(widget)
+        return FinanceWidgetState(
+            x = c.x, y = c.y, width = c.width, height = c.height,
+            selectedSymbol = widget.currentSymbol,
+            selectedRange = widget.currentRange.range,
+            tiles = widget.getTileConfigs(),
+            navigationIndex = widget.getNavigationIndex(),
+            tilingSpan = widget.getTilingSpan(),
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
+        )
     }
 
     init {
@@ -210,4 +237,98 @@ internal class FinancePlugin(
             services.appData.requests?.onFinanceVisibilityChanged(false)
         }
 
+}
+
+/** What a saved dashboard keeps of the finance widget: its tiles and how they are laid out. */
+data class FinanceWidgetState(
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    val selectedSymbol: String = "^GSPC",
+    val selectedRange: String = "1D",
+    val tiles: List<FinanceDashboardTileConfig> = emptyList(),
+    val navigationIndex: Int = 0,
+    val tilingSpan: Int = 3,
+    override val isMinimized: Boolean = false,
+    override val isFullscreen: Boolean = false,
+    override val savedMinX: Float = 0f,
+    override val savedMinY: Float = 0f,
+    override val savedMinWidth: Float = 0f,
+    override val savedMinHeight: Float = 0f,
+    override val isPinned: Boolean = false
+) : DashboardPersistence.SizedWidgetFields {
+    /** Its entry in the saved dashboard file. */
+    companion object Codec : WidgetDocument.StateCodec<FinanceWidgetState>(WidgetTypeId.FINANCE, FinanceWidgetState::class) {
+        override fun toJson(state: FinanceWidgetState): JSONObject = JSONObject().apply {
+            putCommonFields(state)
+            put("selectedSymbol", state.selectedSymbol)
+            put("selectedRange", state.selectedRange)
+            put("navigationIndex", state.navigationIndex)
+            put("tilingSpan", state.tilingSpan)
+            put("tiles", JSONArray().apply {
+                state.tiles.forEach { put(financeTileToJson(it)) }
+            })
+        }
+
+        override fun fromJson(payload: JSONObject): FinanceWidgetState? =
+            parseSizedWidgetObject(payload) { obj, c, w, h ->
+                FinanceWidgetState(
+                    x = c.x, y = c.y, width = w, height = h,
+                    selectedSymbol = obj.optString("selectedSymbol", "^GSPC"),
+                    selectedRange = obj.optString("selectedRange", "1D"),
+                    tiles = parseFinanceTiles(obj, obj.optString("selectedSymbol", "^GSPC"), obj.optString("selectedRange", "1D")),
+                    navigationIndex = obj.optInt("navigationIndex", 0),
+                    tilingSpan = obj.optInt("tilingSpan", 3).coerceIn(1, 3),
+                    isMinimized = c.isMinimized,
+                    isFullscreen = c.isFullscreen,
+                    savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                    savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                    isPinned = c.isPinned
+                )
+            }
+
+        private fun financeTileToJson(tile: FinanceDashboardTileConfig): JSONObject =
+            JSONObject().apply {
+                put("id", tile.id)
+                put("assetType", tile.assetType.name)
+                put("symbol", tile.symbol)
+                put("range", tile.range)
+                put("chartType", tile.chartType.name)
+                put("slot", tile.slot)
+            }
+
+        private fun parseFinanceTiles(obj: JSONObject, fallbackSymbol: String, fallbackRange: String): List<FinanceDashboardTileConfig> {
+            val items = obj.optJSONArray("tiles") ?: JSONArray()
+            val parsed = buildList {
+                for (index in 0 until items.length()) {
+                    val tile = items.optJSONObject(index) ?: continue
+                    val assetType = FinanceAssetType.fromWireName(tile.optString("assetType"))
+                    val symbol = tile.optString("symbol").takeIf { it.isNotBlank() } ?: continue
+                    val range = FinanceTimeRange.fromRange(tile.optString("range", "1d")).range
+                    add(
+                        FinanceDashboardTileConfig(
+                            id = tile.optString("id", "${assetType.name}_${symbol}_$range"),
+                            assetType = assetType,
+                            symbol = symbol,
+                            range = range,
+                            chartType = FinanceChartType.fromWireName(tile.optString("chartType")),
+                            slot = tile.optInt("slot", index)
+                        )
+                    )
+                }
+            }
+            if (parsed.isNotEmpty()) return parsed.take(FinanceWidget.MAX_TILES)
+            return listOf(
+                FinanceDashboardTileConfig(
+                    id = "index_${fallbackSymbol}_${fallbackRange}",
+                    assetType = FinanceAssetType.INDEX,
+                    symbol = fallbackSymbol,
+                    range = FinanceTimeRange.fromRange(fallbackRange).range,
+                    chartType = FinanceChartType.LINE,
+                    slot = 0
+                )
+            )
+        }
+    }
 }

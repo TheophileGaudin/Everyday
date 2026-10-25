@@ -66,11 +66,10 @@ class WidgetLifecycleRegistration<W : BaseWidget, S : Any>(
     }
 
     companion object {
-        /** A singleton type's registration; its descriptor and saved-state codec come from [type]. */
+        /** A singleton type's registration; its type, descriptor and saved state come from [codec]. */
         fun <W : BaseWidget, S : Any> singleton(
-            type: WidgetTypeId,
             widgetType: KClass<W>,
-            stateType: KClass<S>,
+            codec: WidgetDocument.StateCodec<S>,
             current: () -> W?,
             create: () -> W,
             restore: (S) -> W,
@@ -82,10 +81,10 @@ class WidgetLifecycleRegistration<W : BaseWidget, S : Any>(
             onFullscreenChanged: (W, Boolean) -> Unit = { _, _ -> },
             onMinimizeChanged: (W, Boolean) -> Unit = { _, _ -> },
         ) = WidgetLifecycleRegistration(
-            descriptor = WidgetDescriptors[type],
+            descriptor = WidgetDescriptors[codec.type],
             widgetType = widgetType,
-            stateType = stateType,
-            stateCodec = WidgetDocument.codecs[type],
+            stateType = codec.stateClass,
+            stateCodec = codec,
             current = current,
             createDefault = create,
             restore = restore,

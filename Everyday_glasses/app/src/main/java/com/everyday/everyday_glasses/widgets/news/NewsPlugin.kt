@@ -2,6 +2,9 @@ package com.everyday.everyday_glasses.widgets.news
 
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.NewsSourceUpdateResult
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
@@ -13,6 +16,7 @@ import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.shared.sync.NewsSnapshot
 import com.everyday.shared.sync.NewsSourceSpec
 import java.util.concurrent.CompletableFuture
+import org.json.JSONObject
 
 /** Puts the news widget on the dashboard and connects it to the phone's news feeds. */
 internal class NewsPlugin(
@@ -21,11 +25,11 @@ internal class NewsPlugin(
     private val ui: UiThreadDispatcher get() = services.ui
     private val currentWidget: () -> NewsWidget? = { services.singleton(WidgetTypeId.NEWS) as? NewsWidget }
     override val lifecycle = WidgetLifecycleRegistration.singleton(
-        WidgetTypeId.NEWS, NewsWidget::class, DashboardPersistence.NewsWidgetState::class,
+        NewsWidget::class, NewsWidgetState.Codec,
         current = currentWidget,
         create = ::create,
         restore = ::restore,
-        capture = { services.captureRestore.getNewsWidgetState(it) },
+        capture = ::capture,
     )
 
     private fun create(): NewsWidget {
@@ -36,12 +40,33 @@ internal class NewsPlugin(
         return widget
     }
 
-    private fun restore(state: DashboardPersistence.NewsWidgetState): NewsWidget {
+    private fun restore(state: NewsWidgetState): NewsWidget {
         val widget = NewsWidget(state.x, state.y, state.width, state.height)
         configure(widget)
-        services.captureRestore.restoreNewsWidgetPosition(widget, state, services.viewportWidth, services.viewportHeight)
+        services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight) {
+            widget.setSourceSpec(state.sourceSpec)
+            widget.setCountryCode(state.countryCode)
+            widget.setSelectedIndex(state.selectedIndex)
+            widget.setFontScale(state.fontScale)
+        }
         onOpened(widget, reason = "widget_restored")
         return widget
+    }
+
+    private fun capture(widget: NewsWidget): NewsWidgetState {
+        val c = services.captureRestore.extractCommonFields(widget)
+        return NewsWidgetState(
+            x = c.x, y = c.y, width = c.width, height = c.height,
+            countryCode = widget.getCountryCode(),
+            sourceSpec = widget.getSourceSpec(),
+            selectedIndex = widget.getSelectedIndex(),
+            fontScale = widget.getFontScale(),
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
+        )
     }
 
     /** Lifting the head to wake the display shows the next news item; saved when the selection changed. */
@@ -176,5 +201,58 @@ internal class NewsPlugin(
         widget.requestData(force = true, reason = reason)
     }
 
+}
+
+/** What a saved dashboard keeps of the news widget: its source, country, selection and font scale. */
+data class NewsWidgetState(
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    val countryCode: String = "US",
+    val sourceSpec: NewsSourceSpec = NewsSourceSpec.DEFAULT_LOCATION,
+    val selectedIndex: Int = 0,
+    val fontScale: Float = 1f,
+    override val isMinimized: Boolean = false,
+    override val isFullscreen: Boolean = false,
+    override val savedMinX: Float = 0f,
+    override val savedMinY: Float = 0f,
+    override val savedMinWidth: Float = 0f,
+    override val savedMinHeight: Float = 0f,
+    override val isPinned: Boolean = false
+) : DashboardPersistence.SizedWidgetFields {
+    /** Its entry in the saved dashboard file. */
+    companion object Codec : WidgetDocument.StateCodec<NewsWidgetState>(WidgetTypeId.NEWS, NewsWidgetState::class) {
+        override fun toJson(state: NewsWidgetState): JSONObject = JSONObject().apply {
+            putCommonFields(state)
+            put("countryCode", state.countryCode)
+            put("sourceKind", state.sourceSpec.kind.name)
+            state.sourceSpec.value?.let { put("sourceValue", it) }
+            put("selectedIndex", state.selectedIndex)
+            put("fontScale", state.fontScale)
+        }
+
+        override fun fromJson(payload: JSONObject): NewsWidgetState? =
+            parseSizedWidgetObject(payload) { obj, c, w, h ->
+                NewsWidgetState(
+                    x = c.x, y = c.y, width = w, height = h,
+                    countryCode = obj.optString("countryCode", "US"),
+                    sourceSpec = parseNewsSource(obj),
+                    selectedIndex = obj.optInt("selectedIndex", 0),
+                    fontScale = obj.optDouble("fontScale", 1.0).toFloat(),
+                    isMinimized = c.isMinimized,
+                    isFullscreen = c.isFullscreen,
+                    savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                    savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                    isPinned = c.isPinned
+                )
+            }
+
+        private fun parseNewsSource(obj: JSONObject): NewsSourceSpec =
+            NewsSourceSpec.fromWire(
+                obj.optString("sourceKind").takeIf { it.isNotBlank() },
+                obj.optString("sourceValue").takeIf { it.isNotBlank() }
+            ) ?: NewsSourceSpec.DEFAULT_LOCATION
+    }
 }
 

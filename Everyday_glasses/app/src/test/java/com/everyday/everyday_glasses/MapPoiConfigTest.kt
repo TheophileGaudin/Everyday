@@ -10,7 +10,7 @@ import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayMode
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets.map.backend.toAssistantSemanticFacts
-import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.widgets.map.MapWidgetState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -24,7 +24,7 @@ class MapPoiConfigTest {
             radiusM = 300,
             maxResults = 5
         )
-        val map = DashboardPersistence.MapWidgetState(
+        val map = MapWidgetState(
             x = 10f,
             y = 20f,
             width = 210f,
@@ -38,10 +38,10 @@ class MapPoiConfigTest {
     @Test
     fun `missing persisted poi config means legacy Default`() {
         val codec = WidgetDocument.codecs.getValue(WidgetTypeId.MAP)
-        val payload = codec.encode(DashboardPersistence.MapWidgetState(10f, 20f, 210f, 210f))
+        val payload = codec.encode(MapWidgetState(10f, 20f, 210f, 210f))
         payload.remove("poiConfig")
 
-        val restored = codec.decode(payload) as DashboardPersistence.MapWidgetState
+        val restored = codec.decode(payload) as MapWidgetState
 
         assertEquals(PoiDisplayConfig.DEFAULT, restored.poiConfig)
         assertEquals(PoiDisplayConfigState.DEFAULT, restored.poiConfig.state)
@@ -104,7 +104,7 @@ class MapPoiConfigTest {
             showClosest = false,
             closestRadiusM = 300
         )
-        val map = DashboardPersistence.MapWidgetState(10f, 20f, 210f, 210f, poiConfig = config)
+        val map = MapWidgetState(10f, 20f, 210f, 210f, poiConfig = config)
 
         val restored = roundTrip(WidgetTypeId.MAP, map)
 

@@ -12,6 +12,15 @@ import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets.map.backend.MapGeoPoint
 import com.everyday.everyday_glasses.widgets.map.backend.NavigationOperationResult
 import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.widgets.map.backend.MapViewMode
+import com.everyday.everyday_glasses.widgets.map.backend.MapZoom
+import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfigState
+import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayMode
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Puts the map on the dashboard and connects it to the location sources and to the phone's
@@ -24,11 +33,11 @@ class MapPlugin(
     private val current: () -> MapWidget? = { services.singleton(WidgetTypeId.MAP) as? MapWidget }
     private val requestRepaint: () -> Unit = { services.requestRepaint() }
     override val lifecycle = WidgetLifecycleRegistration.singleton(
-        WidgetTypeId.MAP, MapWidget::class, DashboardPersistence.MapWidgetState::class,
+        MapWidget::class, MapWidgetState.Codec,
         current = current,
         create = ::create,
         restore = ::restore,
-        capture = { services.captureRestore.getMapWidgetState(it) },
+        capture = ::capture,
         beforeRemove = MapWidget::release,
         onFullscreenChanged = { widget, fullscreen -> if (!fullscreen) widget.enforceWindowedMode() },
     )
@@ -74,10 +83,32 @@ class MapPlugin(
 
     private fun create(): MapWidget = build(services.viewportWidth - SIZE - 24f, 24f, SIZE, SIZE)
 
-    private fun restore(state: DashboardPersistence.MapWidgetState): MapWidget {
+    /**
+     * Restores the common fields, then the view preferences. The projected mode is only kept for a
+     * fullscreen map, so the preferences must come after the fullscreen state.
+     */
+    private fun restore(state: MapWidgetState): MapWidget {
         val widget = build(state.x, state.y, state.width, state.height)
-        services.captureRestore.restoreMapWidgetPosition(widget, state, services.viewportWidth, services.viewportHeight)
+        services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight)
+        widget.restorePreferences(state.mode, state.zoom, state.showLocation, state.showCountry, state.poiConfig)
         return widget
+    }
+
+    private fun capture(widget: MapWidget): MapWidgetState {
+        val c = services.captureRestore.extractCommonFields(widget)
+        return MapWidgetState(
+            x = c.x, y = c.y, width = c.width, height = c.height,
+            mode = widget.mode.name,
+            zoom = widget.zoom.name,
+            showLocation = widget.isLocationVisible(),
+            showCountry = widget.isCountryVisible(),
+            poiConfig = widget.poiDisplayConfig,
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
+        )
     }
 
     private fun build(x: Float, y: Float, width: Float, height: Float): MapWidget =
@@ -104,5 +135,173 @@ class MapPlugin(
 
     private companion object {
         const val SIZE = 210f
+    }
+}
+
+/** What a saved dashboard keeps of the map: its view mode, zoom, labels and points of interest. */
+data class MapWidgetState(
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    val mode: String = MapViewMode.TOP_DOWN.name,
+    val zoom: String = MapZoom.MEDIUM.name,
+    val showLocation: Boolean = true,
+    val showCountry: Boolean = true,
+    val poiConfig: PoiDisplayConfig = PoiDisplayConfig.DEFAULT,
+    override val isMinimized: Boolean = false,
+    override val isFullscreen: Boolean = false,
+    override val savedMinX: Float = 0f,
+    override val savedMinY: Float = 0f,
+    override val savedMinWidth: Float = 0f,
+    override val savedMinHeight: Float = 0f,
+    override val isPinned: Boolean = false
+) : DashboardPersistence.SizedWidgetFields {
+    /** Its entry in the saved dashboard file. */
+    companion object Codec : WidgetDocument.StateCodec<MapWidgetState>(WidgetTypeId.MAP, MapWidgetState::class) {
+        override fun toJson(state: MapWidgetState): JSONObject = JSONObject().apply {
+            putCommonFields(state)
+            put("mode", state.mode)
+            put("zoom", state.zoom)
+            put("showLocation", state.showLocation)
+            put("showCountry", state.showCountry)
+            put("poiConfig", poiConfigToJson(state.poiConfig))
+        }
+
+        override fun fromJson(payload: JSONObject): MapWidgetState? =
+            parseSizedWidgetObject(payload) { obj, c, w, h ->
+                MapWidgetState(
+                    x = c.x, y = c.y, width = w, height = h,
+                    mode = obj.optString("mode", MapViewMode.TOP_DOWN.name),
+                    zoom = obj.optString("zoom", MapZoom.MEDIUM.name),
+                    showLocation = obj.optBoolean("showLocation", true),
+                    showCountry = obj.optBoolean("showCountry", true),
+                    poiConfig = parsePoiConfig(obj.optJSONObject("poiConfig")),
+                    isMinimized = c.isMinimized,
+                    isFullscreen = c.isFullscreen,
+                    savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                    savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                    isPinned = c.isPinned
+                )
+            }
+
+        private fun poiConfigToJson(config: PoiDisplayConfig): JSONObject = JSONObject().apply {
+            put("state", config.state.name)
+            put("mode", config.mode.name)
+            put("categories", JSONArray().apply { config.categories.sorted().forEach(::put) })
+            put("radiusM", config.radiusM)
+            put("maxResults", config.maxResults)
+            put("importantCategories", JSONArray().apply {
+                config.importantCategories.sorted().forEach(::put)
+            })
+            put("importantRadiiM", JSONObject().apply {
+                config.importantRadiiM.toSortedMap().forEach { (category, radius) -> put(category, radius) }
+            })
+            put("normalCategories", JSONArray().apply {
+                config.normalCategories.sorted().forEach(::put)
+            })
+            put("normalMaxResults", config.normalMaxResults)
+            put("showClosest", config.showClosest)
+            put("closestRadiusM", config.closestRadiusM)
+            put("balanceCategories", config.balanceCategories)
+        }
+
+        private fun parsePoiConfig(obj: JSONObject?): PoiDisplayConfig {
+            if (obj == null) return PoiDisplayConfig.DEFAULT
+            return runCatching {
+                val state = runCatching {
+                    PoiDisplayConfigState.valueOf(obj.optString("state", PoiDisplayConfigState.CUSTOM.name))
+                }.getOrDefault(PoiDisplayConfigState.CUSTOM)
+                // Legacy Default records have no mode/profile fields and can be restored directly.
+                // New records are parsed below so a caller that copied Default and changed a single
+                // variable cannot have that change discarded merely because its old state flag stayed
+                // DEFAULT.
+                if (state == PoiDisplayConfigState.DEFAULT && !obj.has("mode")) {
+                    return@runCatching PoiDisplayConfig.DEFAULT
+                }
+                val categoriesJson = obj.optJSONArray("categories") ?: error("POI categories missing")
+                val categories = buildSet {
+                    for (index in 0 until categoriesJson.length()) add(categoriesJson.getString(index))
+                }
+                // Files written before the two-mode menu only contain the nearest-profile fields.
+                // Recreate them through the compatibility factory so the previous voice behavior
+                // remains stable.
+                if (!obj.has("mode")) {
+                    return@runCatching PoiDisplayConfig.custom(
+                        categories = categories,
+                        radiusM = obj.optInt("radiusM", PoiDisplayConfig.DEFAULT_RADIUS_M),
+                        maxResults = obj.optInt("maxResults", PoiDisplayConfig.DEFAULT_MAX_RESULTS)
+                    )
+                }
+                val mode = runCatching {
+                    PoiDisplayMode.valueOf(obj.optString("mode", PoiDisplayMode.NEAREST.name))
+                }.getOrDefault(PoiDisplayMode.NEAREST)
+                fun stringSet(key: String, fallback: Set<String>): Set<String> {
+                    val json = obj.optJSONArray(key) ?: return fallback
+                    return buildSet {
+                        for (index in 0 until json.length()) add(json.getString(index))
+                    }
+                }
+                val importantCategories = stringSet(
+                    "importantCategories",
+                    PoiDisplayConfig.DEFAULT_IMPORTANT_CATEGORIES
+                )
+                val importantRadii = buildMap {
+                    val json = obj.optJSONObject("importantRadiiM")
+                    if (json == null) {
+                        putAll(PoiDisplayConfig.DEFAULT_IMPORTANT_RADII_M)
+                    } else {
+                        json.keys().forEach { category -> put(category, json.getInt(category)) }
+                    }
+                }
+                val normalCategories = stringSet(
+                    "normalCategories",
+                    PoiDisplayConfig.DEFAULT_NORMAL_CATEGORIES
+                )
+                val candidate = PoiDisplayConfig(
+                    categories = categories,
+                    radiusM = obj.optInt("radiusM", PoiDisplayConfig.DEFAULT_RADIUS_M),
+                    maxResults = obj.optInt(
+                        "maxResults",
+                        PoiDisplayConfig.DEFAULT_MAX_RESULTS
+                    ),
+                    state = PoiDisplayConfigState.CUSTOM,
+                    mode = mode,
+                    importantCategories = importantCategories,
+                    importantRadiiM = importantRadii,
+                    normalCategories = normalCategories,
+                    normalMaxResults = obj.optInt(
+                        "normalMaxResults",
+                        PoiDisplayConfig.DEFAULT_NORMAL_MAX_RESULTS
+                    ),
+                    showClosest = obj.optBoolean(
+                        "showClosest",
+                        PoiDisplayConfig.DEFAULT_SHOW_CLOSEST
+                    ),
+                    closestRadiusM = obj.optInt(
+                        "closestRadiusM",
+                        PoiDisplayConfig.DEFAULT_CLOSEST_RADIUS_M
+                    ),
+                    balanceCategories = obj.optBoolean("balanceCategories", false)
+                )
+                if (
+                    candidate.mode == PoiDisplayMode.DEFAULT &&
+                    candidate.categories == PoiDisplayConfig.DEFAULT.categories &&
+                    candidate.radiusM == PoiDisplayConfig.DEFAULT.radiusM &&
+                    candidate.maxResults == PoiDisplayConfig.DEFAULT.maxResults &&
+                    candidate.importantCategories == PoiDisplayConfig.DEFAULT.importantCategories &&
+                    candidate.importantRadiiM == PoiDisplayConfig.DEFAULT.importantRadiiM &&
+                    candidate.normalCategories == PoiDisplayConfig.DEFAULT.normalCategories &&
+                    candidate.normalMaxResults == PoiDisplayConfig.DEFAULT.normalMaxResults &&
+                    candidate.showClosest == PoiDisplayConfig.DEFAULT.showClosest &&
+                    candidate.closestRadiusM == PoiDisplayConfig.DEFAULT.closestRadiusM &&
+                    !candidate.balanceCategories
+                ) {
+                    PoiDisplayConfig.DEFAULT
+                } else {
+                    candidate
+                }
+            }.getOrDefault(PoiDisplayConfig.DEFAULT)
+        }
     }
 }

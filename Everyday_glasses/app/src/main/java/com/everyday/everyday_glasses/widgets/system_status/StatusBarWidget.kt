@@ -9,6 +9,9 @@ import android.util.Log
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets._common.WidgetInteractionState
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseCommonFields
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
@@ -16,6 +19,7 @@ import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import androidx.core.graphics.toColorInt
 import com.everyday.everyday_glasses.runtime.StatusSnapshot
+import org.json.JSONObject
 
 /**
  * A movable status bar widget that displays:
@@ -625,11 +629,11 @@ class StatusBarPlugin(
     }
 
     override val lifecycle = WidgetLifecycleRegistration.singleton(
-        WidgetTypeId.STATUS, StatusBarWidget::class, DashboardPersistence.StatusBarState::class,
+        StatusBarWidget::class, StatusBarState.Codec,
         current = current,
         create = ::create,
         restore = ::restore,
-        capture = { services.captureRestore.getStatusBarState(it) },
+        capture = ::capture,
     )
 
     private fun create(): StatusBarWidget = StatusBarWidget(
@@ -639,14 +643,87 @@ class StatusBarPlugin(
         HEIGHT
     ).apply { show(latest) }
 
-    private fun restore(state: DashboardPersistence.StatusBarState): StatusBarWidget {
+    private fun restore(state: StatusBarState): StatusBarWidget {
         val widget = StatusBarWidget(state.x, state.y, WIDTH, HEIGHT).apply { show(latest) }
-        services.captureRestore.restoreStatusBarPosition(widget, state, services.viewportWidth, services.viewportHeight)
+        services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight) {
+            widget.setElementVisibility(
+                showTime = state.showTime,
+                showDate = state.showDate,
+                showPhoneBattery = state.showPhoneBattery,
+                showGlassesBattery = state.showGlassesBattery
+            )
+        }
         return widget
+    }
+
+    private fun capture(widget: StatusBarWidget): StatusBarState {
+        val c = services.captureRestore.extractCommonFields(widget)
+        return StatusBarState(
+            x = c.x, y = c.y,
+            showTime = widget.isTimeVisible(),
+            showDate = widget.isDateVisible(),
+            showPhoneBattery = widget.isPhoneBatteryVisible(),
+            showGlassesBattery = widget.isGlassesBatteryVisible(),
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
+        )
     }
 
     private companion object {
         const val WIDTH = 220f
         const val HEIGHT = 110f
+    }
+}
+
+/** What a saved dashboard keeps of the status bar. It has no size: the status bar keeps its own. */
+data class StatusBarState(
+    override val x: Float,
+    override val y: Float,
+    val showTime: Boolean = true,
+    val showDate: Boolean = true,
+    val showPhoneBattery: Boolean = true,
+    val showGlassesBattery: Boolean = true,
+    override val isMinimized: Boolean = false,
+    override val isFullscreen: Boolean = false,
+    override val savedMinX: Float = 0f,
+    override val savedMinY: Float = 0f,
+    override val savedMinWidth: Float = 0f,
+    override val savedMinHeight: Float = 0f,
+    override val isPinned: Boolean = false
+) : DashboardPersistence.CommonWidgetFields {
+    /** Its entry in the saved dashboard file. */
+    companion object Codec : WidgetDocument.StateCodec<StatusBarState>(WidgetTypeId.STATUS, StatusBarState::class) {
+        override fun toJson(state: StatusBarState): JSONObject = JSONObject().apply {
+            putCommonFields(state, includeSize = false)
+            put("showTime", state.showTime)
+            put("showDate", state.showDate)
+            put("showPhoneBattery", state.showPhoneBattery)
+            put("showGlassesBattery", state.showGlassesBattery)
+        }
+
+        override fun fromJson(payload: JSONObject): StatusBarState? {
+            return try {
+                val c = parseCommonFields(payload)
+                if (c.x < 0 || c.y < 0) return null
+
+                StatusBarState(
+                    x = c.x, y = c.y,
+                    showTime = payload.optBoolean("showTime", true),
+                    showDate = payload.optBoolean("showDate", true),
+                    showPhoneBattery = payload.optBoolean("showPhoneBattery", true),
+                    showGlassesBattery = payload.optBoolean("showGlassesBattery", true),
+                    isMinimized = c.isMinimized,
+                    isFullscreen = c.isFullscreen,
+                    savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                    savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                    isPinned = c.isPinned
+                )
+            } catch (_: Exception) {
+                null
+            }
+        }
     }
 }

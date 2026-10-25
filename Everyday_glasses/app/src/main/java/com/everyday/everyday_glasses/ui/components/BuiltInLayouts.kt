@@ -5,6 +5,15 @@ import com.everyday.everyday_glasses.widgets.map.backend.MapViewMode
 import com.everyday.everyday_glasses.widgets.map.backend.MapZoom
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.widgets.system_status.StatusBarState
+import com.everyday.everyday_glasses.widgets.weather_location.LocationWidgetState
+import com.everyday.everyday_glasses.widgets.map.MapWidgetState
+import com.everyday.everyday_glasses.widgets.calendar.CalendarWidgetState
+import com.everyday.everyday_glasses.widgets.finance.FinanceWidgetState
+import com.everyday.everyday_glasses.widgets.news.NewsWidgetState
+import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidgetState
+import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleWidgetState
+import com.everyday.everyday_glasses.widgets.phone_screen_mirror.MirrorWidgetState
 import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleWidget
 
 /**
@@ -110,7 +119,7 @@ object BuiltInLayouts {
         return dashboard(
             STANDARD,
             mapOf(
-                WidgetTypeId.STATUS to DashboardPersistence.StatusBarState(
+                WidgetTypeId.STATUS to StatusBarState(
                     x = 0f, y = 41f * sy,
                     showTime = true,
                     showDate = true,
@@ -118,7 +127,7 @@ object BuiltInLayouts {
                     showGlassesBattery = true,
                     isPinned = true
                 ),
-                WidgetTypeId.LOCATION to DashboardPersistence.LocationWidgetState(
+                WidgetTypeId.LOCATION to LocationWidgetState(
                     x = 392.55f * sx, y = 0f,
                     width = 194.9f * sx, height = 76f * sy,
                     showWeather = true,
@@ -127,30 +136,30 @@ object BuiltInLayouts {
                     showCountry = false,
                     isPinned = true
                 ),
-                WidgetTypeId.MAP to DashboardPersistence.MapWidgetState(
+                WidgetTypeId.MAP to MapWidgetState(
                     x = 405.5f * sx, y = 41f * sy,
                     width = 181.95f * sx, height = 160.05f * sy,
                     mode = MapViewMode.TOP_DOWN.name, zoom = MapZoom.MEDIUM.name,
                     showLocation = true, showCountry = true, isPinned = true
                 ),
-                WidgetTypeId.CALENDAR to DashboardPersistence.CalendarWidgetState(
+                WidgetTypeId.CALENDAR to CalendarWidgetState(
                     x = 0f, y = 201.05f * sy,
                     width = 612f * sx, height = 90.9f * sy,
                     fontScale = 1f,
                     isPinned = true
                 ),
-                WidgetTypeId.FINANCE to DashboardPersistence.FinanceWidgetState(
+                WidgetTypeId.FINANCE to FinanceWidgetState(
                     x = 364.8f * sx, y = 301.95f * sy,
                     width = 202.2f * sx, height = 134.4f * sy,
                     isPinned = true
                 ),
-                WidgetTypeId.NEWS to DashboardPersistence.NewsWidgetState(
+                WidgetTypeId.NEWS to NewsWidgetState(
                     x = 0f, y = 301.95f * sy,
                     width = 352.2f * sx, height = 134.4f * sy,
                     fontScale = 0.75f,
                     isPinned = true
                 ),
-                WidgetTypeId.SPEEDOMETER to DashboardPersistence.SpeedometerWidgetState(
+                WidgetTypeId.SPEEDOMETER to SpeedometerWidgetState(
                     x = 229.9f * sx, y = 38f * sy,
                     width = 134.9f * sx, height = 92.7f * sy,
                     isPinned = true
@@ -174,17 +183,17 @@ object BuiltInLayouts {
         return dashboard(
             GROCERIES,
             mapOf(
-                WidgetTypeId.STATUS to DashboardPersistence.StatusBarState(
+                WidgetTypeId.STATUS to StatusBarState(
                     x = margin, y = margin, isPinned = true
                 ),
-                WidgetTypeId.LOCATION to DashboardPersistence.LocationWidgetState(
+                WidgetTypeId.LOCATION to LocationWidgetState(
                     x = w - locW - margin,
                     y = margin,
                     width = locW,
                     height = rowHeight.coerceAtMost(140f),
                     isPinned = true
                 ),
-                WidgetTypeId.SPEEDOMETER to DashboardPersistence.SpeedometerWidgetState(
+                WidgetTypeId.SPEEDOMETER to SpeedometerWidgetState(
                     x = (w - speedW) / 2f,
                     y = margin,
                     width = speedW,
@@ -219,7 +228,7 @@ object BuiltInLayouts {
         return dashboard(
             SUBTITLES,
             mapOf(
-                WidgetTypeId.SUBTITLE to DashboardPersistence.SubtitleWidgetState(
+                WidgetTypeId.SUBTITLE to SubtitleWidgetState(
                     x = (w - subW) / 2f,
                     y = (h - subH) / 2f,
                     width = subW,
@@ -239,7 +248,7 @@ object BuiltInLayouts {
     private fun mirrorLayout(w: Float, h: Float): WidgetDocument.PersistedDashboard = dashboard(
         MIRROR,
         mapOf(
-            WidgetTypeId.MIRROR to DashboardPersistence.MirrorWidgetState(
+            WidgetTypeId.MIRROR to MirrorWidgetState(
                 x = 0f,
                 y = 0f,
                 width = w,

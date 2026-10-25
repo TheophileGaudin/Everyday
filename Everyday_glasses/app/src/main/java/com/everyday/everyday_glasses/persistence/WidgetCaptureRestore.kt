@@ -6,18 +6,8 @@ import android.util.Log
 import androidx.core.net.toUri
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
-import com.everyday.everyday_glasses.widgets.calendar.CalendarWidget
-import com.everyday.everyday_glasses.widgets.finance.FinanceWidget
 import com.everyday.everyday_glasses.widgets.file_browser.ImageWidget
-import com.everyday.everyday_glasses.widgets.weather_location.WeatherWidget
-import com.everyday.everyday_glasses.widgets.map.MapWidget
-import com.everyday.everyday_glasses.widgets.news.NewsWidget
-import com.everyday.everyday_glasses.widgets.notifications.NotificationsWidget
 import com.everyday.everyday_glasses.widgets.file_browser.PdfWidget
-import com.everyday.everyday_glasses.widgets.phone_screen_mirror.ScreenMirrorWidget
-import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidget
-import com.everyday.everyday_glasses.widgets.system_status.StatusBarWidget
-import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleWidget
 import com.everyday.everyday_glasses.widgets.text_editor.TextBoxWidget
 import com.everyday.everyday_glasses.widgets.file_browser.VideoWidget
 import java.io.File
@@ -25,6 +15,9 @@ import java.io.File
 /**
  * Captures saveable properties from live widgets and restores those properties from
  * [DashboardPersistence] descriptions.
+ *
+ *  The single-instance widget types capture and restore their own state, in their plugin; they
+ *  use [extractCommonFields] and [restoreCommonFields] from here.
  *
  * This class does not read/write durable storage, encode/decode JSON, decide when saving occurs,
  * or own widget lifecycle registration and destruction.
@@ -68,7 +61,7 @@ class WidgetCaptureRestore {
     )
 
     /** Extract the common persistence fields from any [BaseWidget]. */
-    private fun extractCommonFields(widget: BaseWidget): ExtractedCommonFields {
+    fun extractCommonFields(widget: BaseWidget): ExtractedCommonFields {
         val persistenceBounds = widget.getPersistenceBounds()
         return ExtractedCommonFields(
             x = persistenceBounds.left,
@@ -232,27 +225,6 @@ class WidgetCaptureRestore {
     fun getPdfWidgetState(widget: PdfWidget): DashboardPersistence.PdfWidgetState =
         getPdfWidgetStates(listOf(widget)).single()
 
-    /**
-     * Get status bar state for persistence.
-     * Includes position, minimize state, and pin state.
-     */
-    fun getStatusBarState(statusBarWidget: StatusBarWidget?): DashboardPersistence.StatusBarState? {
-        return statusBarWidget?.let {
-            val c = extractCommonFields(it)
-            DashboardPersistence.StatusBarState(
-                x = c.x, y = c.y,
-                showTime = it.isTimeVisible(),
-                showDate = it.isDateVisible(),
-                showPhoneBattery = it.isPhoneBatteryVisible(),
-                showGlassesBattery = it.isGlassesBatteryVisible(),
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
-    }
 
     /**
      * Get a single browser widget state for persistence.
@@ -272,173 +244,6 @@ class WidgetCaptureRestore {
             savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
             isPinned = c.isPinned
         )
-    }
-
-    /**
-     * Get location widget state for persistence.
-     */
-    fun getLocationWidgetState(weatherWidget: WeatherWidget?): DashboardPersistence.LocationWidgetState? {
-        return weatherWidget?.let {
-            val c = extractCommonFields(it)
-            DashboardPersistence.LocationWidgetState(
-                x = c.x, y = c.y, width = c.width, height = c.height,
-                showWeather = it.isWeatherVisible(),
-                showTemperature = it.isTemperatureVisible(),
-                showLocation = it.isLocationVisible(),
-                showCountry = it.isCountryVisible(),
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
-    }
-
-    fun getMapWidgetState(widget: MapWidget?): DashboardPersistence.MapWidgetState? = widget?.let {
-        val c = extractCommonFields(it)
-        DashboardPersistence.MapWidgetState(
-            x = c.x, y = c.y, width = c.width, height = c.height,
-            mode = it.mode.name, zoom = it.zoom.name,
-            showLocation = it.isLocationVisible(), showCountry = it.isCountryVisible(),
-            poiConfig = it.poiDisplayConfig,
-            isMinimized = c.isMinimized, isFullscreen = c.isFullscreen,
-            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-            isPinned = c.isPinned
-        )
-    }
-
-    /**
-     * Get calendar widget state for persistence.
-     */
-    fun getCalendarWidgetState(calendarWidget: CalendarWidget?): DashboardPersistence.CalendarWidgetState? {
-        return calendarWidget?.let {
-            val c = extractCommonFields(it)
-            DashboardPersistence.CalendarWidgetState(
-                x = c.x, y = c.y, width = c.width, height = c.height,
-                fontScale = it.getFontScale(),
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
-    }
-
-    /**
-     * Get mirror widget state for persistence.
-     */
-    fun getMirrorWidgetState(screenMirrorWidget: ScreenMirrorWidget?): DashboardPersistence.MirrorWidgetState? {
-        return screenMirrorWidget?.let {
-            val c = extractCommonFields(it)
-            DashboardPersistence.MirrorWidgetState(
-                x = c.x, y = c.y, width = c.width, height = c.height,
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
-    }
-
-    /**
-     * Get news widget state for persistence.
-     */
-    fun getNewsWidgetState(newsWidget: NewsWidget?): DashboardPersistence.NewsWidgetState? {
-        return newsWidget?.let {
-            val c = extractCommonFields(it)
-            DashboardPersistence.NewsWidgetState(
-                x = c.x, y = c.y, width = c.width, height = c.height,
-                countryCode = it.getCountryCode(),
-                sourceSpec = it.getSourceSpec(),
-                selectedIndex = it.getSelectedIndex(),
-                fontScale = it.getFontScale(),
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
-    }
-
-    fun getNotificationsWidgetState(notificationsWidget: NotificationsWidget?): DashboardPersistence.NotificationsWidgetState? {
-        return notificationsWidget?.let {
-            val c = extractCommonFields(it)
-            DashboardPersistence.NotificationsWidgetState(
-                x = c.x, y = c.y, width = c.width, height = c.height,
-                widgetFontScale = it.getWidgetFontScale(),
-                toastFontScale = it.getToastFontScale(),
-                scrollIndex = it.getScrollIndex(),
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
-    }
-
-    /**
-     * Get speedometer widget state for persistence.
-     */
-    fun getSpeedometerWidgetState(speedometerWidget: SpeedometerWidget?): DashboardPersistence.SpeedometerWidgetState? {
-        return speedometerWidget?.let {
-            val c = extractCommonFields(it)
-            DashboardPersistence.SpeedometerWidgetState(
-                x = c.x, y = c.y, width = c.width, height = c.height,
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
-    }
-
-    /**
-     * Get subtitle widget state for persistence. Capture-enabled is deliberately omitted.
-     */
-    fun getSubtitleWidgetState(subtitleWidget: SubtitleWidget?): DashboardPersistence.SubtitleWidgetState? {
-        return subtitleWidget?.let {
-            val c = extractCommonFields(it)
-            DashboardPersistence.SubtitleWidgetState(
-                x = c.x, y = c.y, width = c.width, height = c.height,
-                phonePlaybackEnabled = it.options.phonePlaybackEnabled,
-                microphoneEnabled = it.options.microphoneEnabled,
-                translationEnabled = it.options.translationEnabled,
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
-    }
-
-    /**
-     * Get finance widget state for persistence.
-     */
-    fun getFinanceWidgetState(financeWidget: FinanceWidget?): DashboardPersistence.FinanceWidgetState? {
-        return financeWidget?.let {
-            val c = extractCommonFields(it)
-            DashboardPersistence.FinanceWidgetState(
-                x = c.x, y = c.y, width = c.width, height = c.height,
-                selectedSymbol = it.currentSymbol,
-                selectedRange = it.currentRange.range,
-                tiles = it.getTileConfigs(),
-                navigationIndex = it.getNavigationIndex(),
-                tilingSpan = it.getTilingSpan(),
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        }
     }
 
     // ==================== Restore State ====================
@@ -496,25 +301,6 @@ class WidgetCaptureRestore {
         }
     }
 
-    /** Restore the status bar's element visibility and common fields. It keeps its own size. */
-    fun restoreStatusBarPosition(
-        statusBarWidget: StatusBarWidget?,
-        state: DashboardPersistence.StatusBarState,
-        screenWidth: Int,
-        screenHeight: Int
-    ) {
-        statusBarWidget?.let { statusBar ->
-            restoreCommonFields(statusBar, state, screenWidth, screenHeight) {
-                statusBar.setElementVisibility(
-                    showTime = state.showTime,
-                    showDate = state.showDate,
-                    showPhoneBattery = state.showPhoneBattery,
-                    showGlassesBattery = state.showGlassesBattery
-                )
-            }
-        }
-    }
-
     /** Load the saved page of an already-created browser, then restore its common fields. */
     fun restoreBrowserWidgetState(
         widget: BrowserWidget,
@@ -527,106 +313,4 @@ class WidgetCaptureRestore {
         }
     }
 
-    /** Restore the location widget's element visibility and common fields. */
-    fun restoreLocationWidgetPosition(
-        weatherWidget: WeatherWidget?,
-        state: DashboardPersistence.LocationWidgetState,
-        screenWidth: Int,
-        screenHeight: Int
-    ) {
-        weatherWidget?.let { loc ->
-            restoreCommonFields(loc, state, screenWidth, screenHeight) {
-                loc.setElementVisibility(
-                    showWeather = state.showWeather,
-                    showTemperature = state.showTemperature,
-                    showLocation = state.showLocation,
-                    showCountry = state.showCountry
-                )
-            }
-        }
-    }
-
-    /**
-     * Restore the map's common fields, then its view preferences. The projected mode is only
-     * kept for a fullscreen map, so the preferences must come after the fullscreen state.
-     */
-    fun restoreMapWidgetPosition(
-        widget: MapWidget?, state: DashboardPersistence.MapWidgetState,
-        screenWidth: Int, screenHeight: Int
-    ) {
-        widget ?: return
-        restoreCommonFields(widget, state, screenWidth, screenHeight)
-        widget.restorePreferences(
-            state.mode,
-            state.zoom,
-            state.showLocation,
-            state.showCountry,
-            state.poiConfig
-        )
-    }
-
-    /** Restore the finance widget's tiles and common fields. */
-    fun restoreFinanceWidgetPosition(
-        financeWidget: FinanceWidget?,
-        state: DashboardPersistence.FinanceWidgetState,
-        screenWidth: Int,
-        screenHeight: Int
-    ) {
-        financeWidget?.let { fw ->
-            restoreCommonFields(fw, state, screenWidth, screenHeight) {
-                fw.restoreDashboard(state.tiles, state.navigationIndex, state.tilingSpan)
-            }
-        }
-    }
-
-    /** Restore the news widget's source, country, selection and font scale, and common fields. */
-    fun restoreNewsWidgetPosition(
-        newsWidget: NewsWidget?,
-        state: DashboardPersistence.NewsWidgetState,
-        screenWidth: Int,
-        screenHeight: Int
-    ) {
-        newsWidget?.let { nw ->
-            restoreCommonFields(nw, state, screenWidth, screenHeight) {
-                nw.setSourceSpec(state.sourceSpec)
-                nw.setCountryCode(state.countryCode)
-                nw.setSelectedIndex(state.selectedIndex)
-                nw.setFontScale(state.fontScale)
-            }
-        }
-    }
-
-    /** Restore the notifications widget's font scales and scroll position, and common fields. */
-    fun restoreNotificationsWidgetPosition(
-        notificationsWidget: NotificationsWidget?,
-        state: DashboardPersistence.NotificationsWidgetState,
-        screenWidth: Int,
-        screenHeight: Int
-    ) {
-        notificationsWidget?.let { widget ->
-            restoreCommonFields(widget, state, screenWidth, screenHeight) {
-                widget.setWidgetFontScale(state.widgetFontScale)
-                widget.setToastFontScale(state.toastFontScale)
-                widget.setScrollIndex(state.scrollIndex)
-            }
-        }
-    }
-
-    /** Restore the subtitle widget's persisted options and common fields. */
-    fun restoreSubtitleWidgetPosition(
-        subtitleWidget: SubtitleWidget?,
-        state: DashboardPersistence.SubtitleWidgetState,
-        screenWidth: Int,
-        screenHeight: Int
-    ) {
-        subtitleWidget?.let { sw ->
-            restoreCommonFields(sw, state, screenWidth, screenHeight) {
-                sw.restoreOptions(
-                    phonePlaybackEnabled = state.phonePlaybackEnabled,
-                    microphoneEnabled = state.microphoneEnabled,
-                    translationEnabled = state.translationEnabled
-                )
-            }
-        }
-    }
 }

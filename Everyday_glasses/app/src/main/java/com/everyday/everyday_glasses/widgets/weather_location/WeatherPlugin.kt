@@ -7,6 +7,10 @@ import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.settings.UnitDisplayFormatter
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
+import org.json.JSONObject
 
 /** Puts the location and weather widget on the dashboard and feeds it place and weather data. */
 internal class WeatherPlugin(
@@ -20,11 +24,11 @@ internal class WeatherPlugin(
     private var sunsetEpochMs: Long? = null
 
     override val lifecycle = WidgetLifecycleRegistration.singleton(
-        WidgetTypeId.LOCATION, WeatherWidget::class, DashboardPersistence.LocationWidgetState::class,
+        WeatherWidget::class, LocationWidgetState.Codec,
         current = currentWidget,
         create = ::create,
         restore = ::restore,
-        capture = { services.captureRestore.getLocationWidgetState(it) },
+        capture = ::capture,
     )
 
     init {
@@ -40,11 +44,34 @@ internal class WeatherPlugin(
         return widget
     }
 
-    private fun restore(state: DashboardPersistence.LocationWidgetState): WeatherWidget {
+    private fun restore(state: LocationWidgetState): WeatherWidget {
         val widget = WeatherWidget(context, state.x, state.y, state.width, state.height)
         configure(widget)
-        services.captureRestore.restoreLocationWidgetPosition(widget, state, services.viewportWidth, services.viewportHeight)
+        services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight) {
+            widget.setElementVisibility(
+                showWeather = state.showWeather,
+                showTemperature = state.showTemperature,
+                showLocation = state.showLocation,
+                showCountry = state.showCountry
+            )
+        }
         return widget
+    }
+
+    private fun capture(widget: WeatherWidget): LocationWidgetState {
+        val c = services.captureRestore.extractCommonFields(widget)
+        return LocationWidgetState(
+            x = c.x, y = c.y, width = c.width, height = c.height,
+            showWeather = widget.isWeatherVisible(),
+            showTemperature = widget.isTemperatureVisible(),
+            showLocation = widget.isLocationVisible(),
+            showCountry = widget.isCountryVisible(),
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
+        )
     }
 
     fun updateData(
@@ -133,5 +160,51 @@ internal class WeatherPlugin(
     private companion object {
         const val WIDTH = 300f
         const val HEIGHT = 120f
+    }
+}
+
+/** What a saved dashboard keeps of the location and weather widget. */
+data class LocationWidgetState(
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    val showWeather: Boolean = true,
+    val showTemperature: Boolean = true,
+    val showLocation: Boolean = false,
+    val showCountry: Boolean = false,
+    override val isMinimized: Boolean = false,
+    override val isFullscreen: Boolean = false,
+    override val savedMinX: Float = 0f,
+    override val savedMinY: Float = 0f,
+    override val savedMinWidth: Float = 0f,
+    override val savedMinHeight: Float = 0f,
+    override val isPinned: Boolean = false
+) : DashboardPersistence.SizedWidgetFields {
+    /** Its entry in the saved dashboard file. */
+    companion object Codec : WidgetDocument.StateCodec<LocationWidgetState>(WidgetTypeId.LOCATION, LocationWidgetState::class) {
+        override fun toJson(state: LocationWidgetState): JSONObject = JSONObject().apply {
+            putCommonFields(state)
+            put("showWeather", state.showWeather)
+            put("showTemperature", state.showTemperature)
+            put("showLocation", state.showLocation)
+            put("showCountry", state.showCountry)
+        }
+
+        override fun fromJson(payload: JSONObject): LocationWidgetState? =
+            parseSizedWidgetObject(payload) { obj, c, w, h ->
+                LocationWidgetState(
+                    x = c.x, y = c.y, width = w, height = h,
+                    showWeather = obj.optBoolean("showWeather", true),
+                    showTemperature = obj.optBoolean("showTemperature", true),
+                    showLocation = obj.optBoolean("showLocation", false),
+                    showCountry = obj.optBoolean("showCountry", false),
+                    isMinimized = c.isMinimized,
+                    isFullscreen = c.isFullscreen,
+                    savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                    savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                    isPinned = c.isPinned
+                )
+            }
     }
 }

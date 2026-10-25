@@ -13,6 +13,9 @@ import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
 import androidx.core.graphics.withTranslation
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
@@ -27,6 +30,7 @@ import com.everyday.shared.sync.SubtitleSource
 import com.everyday.shared.sync.SubtitleStatus
 import com.everyday.shared.sync.SubtitleStatusState
 import com.everyday.shared.sync.SubtitleTranscript
+import org.json.JSONObject
 
 class SubtitleWidget(
     x: Float,
@@ -499,11 +503,11 @@ class SubtitlePlugin(
 ) : WidgetPlugin {
     private val current: () -> SubtitleWidget? = { services.singleton(WidgetTypeId.SUBTITLE) as? SubtitleWidget }
     override val lifecycle = WidgetLifecycleRegistration.singleton(
-        WidgetTypeId.SUBTITLE, SubtitleWidget::class, DashboardPersistence.SubtitleWidgetState::class,
+        SubtitleWidget::class, SubtitleWidgetState.Codec,
         current = current,
         create = ::create,
         restore = ::restore,
-        capture = { services.captureRestore.getSubtitleWidgetState(it) },
+        capture = ::capture,
         // Reopening a closed subtitle widget resumes capture; loading a dashboard does not.
         reopen = { state -> restore(state).also { it.setCaptureEnabled(true) } },
     )
@@ -531,7 +535,7 @@ class SubtitlePlugin(
     }
 
     /** A restored subtitle widget starts with capture off. */
-    private fun restore(state: DashboardPersistence.SubtitleWidgetState): SubtitleWidget {
+    private fun restore(state: SubtitleWidgetState): SubtitleWidget {
         val widget = build(state.x, state.y, state.width, state.height)
         widget.restoreOptions(
             phonePlaybackEnabled = state.phonePlaybackEnabled,
@@ -539,8 +543,24 @@ class SubtitlePlugin(
             translationEnabled = state.translationEnabled
         )
         widget.setCaptureEnabled(false, notifyPhone = false)
-        services.captureRestore.restoreSubtitleWidgetPosition(widget, state, services.viewportWidth, services.viewportHeight)
+        services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight)
         return widget
+    }
+
+    /** Whether it was capturing is deliberately not saved. */
+    private fun capture(widget: SubtitleWidget): SubtitleWidgetState {
+        val c = services.captureRestore.extractCommonFields(widget)
+        return SubtitleWidgetState(
+            x = c.x, y = c.y, width = c.width, height = c.height,
+            phonePlaybackEnabled = widget.options.phonePlaybackEnabled,
+            microphoneEnabled = widget.options.microphoneEnabled,
+            translationEnabled = widget.options.translationEnabled,
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
+        )
     }
 
     private fun build(x: Float, y: Float, width: Float, height: Float) =
@@ -554,4 +574,47 @@ class SubtitlePlugin(
                 }
             }
         }
+}
+
+/** What a saved dashboard keeps of the subtitle widget: its options. Whether it was capturing is not kept. */
+data class SubtitleWidgetState(
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    val phonePlaybackEnabled: Boolean = true,
+    val microphoneEnabled: Boolean = false,
+    val translationEnabled: Boolean = false,
+    override val isMinimized: Boolean = false,
+    override val isFullscreen: Boolean = false,
+    override val savedMinX: Float = 0f,
+    override val savedMinY: Float = 0f,
+    override val savedMinWidth: Float = 0f,
+    override val savedMinHeight: Float = 0f,
+    override val isPinned: Boolean = false
+) : DashboardPersistence.SizedWidgetFields {
+    /** Its entry in the saved dashboard file. */
+    companion object Codec : WidgetDocument.StateCodec<SubtitleWidgetState>(WidgetTypeId.SUBTITLE, SubtitleWidgetState::class) {
+        override fun toJson(state: SubtitleWidgetState): JSONObject = JSONObject().apply {
+            putCommonFields(state)
+            put("phonePlaybackEnabled", state.phonePlaybackEnabled)
+            put("microphoneEnabled", state.microphoneEnabled)
+            put("translationEnabled", state.translationEnabled)
+        }
+
+        override fun fromJson(payload: JSONObject): SubtitleWidgetState? =
+            parseSizedWidgetObject(payload) { obj, c, w, h ->
+                SubtitleWidgetState(
+                    x = c.x, y = c.y, width = w, height = h,
+                    phonePlaybackEnabled = obj.optBoolean("phonePlaybackEnabled", true),
+                    microphoneEnabled = obj.optBoolean("microphoneEnabled", false),
+                    translationEnabled = obj.optBoolean("translationEnabled", false),
+                    isMinimized = c.isMinimized,
+                    isFullscreen = c.isFullscreen,
+                    savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                    savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                    isPinned = c.isPinned
+                )
+            }
+    }
 }

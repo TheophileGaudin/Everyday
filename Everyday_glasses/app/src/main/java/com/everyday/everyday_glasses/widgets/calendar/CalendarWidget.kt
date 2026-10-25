@@ -16,6 +16,9 @@ import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.shared.sync.CalendarEventSnapshot
 import com.everyday.shared.sync.CalendarSnapshot
 import java.text.SimpleDateFormat
@@ -26,6 +29,7 @@ import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
+import org.json.JSONObject
 
 class CalendarWidget(
     x: Float,
@@ -958,11 +962,11 @@ class CalendarPlugin(
     }
 
     override val lifecycle = WidgetLifecycleRegistration.singleton(
-        WidgetTypeId.CALENDAR, CalendarWidget::class, DashboardPersistence.CalendarWidgetState::class,
+        CalendarWidget::class, CalendarWidgetState.Codec,
         current = current,
         create = ::create,
         restore = ::restore,
-        capture = { services.captureRestore.getCalendarWidgetState(it) },
+        capture = ::capture,
     )
 
     private fun create(): CalendarWidget {
@@ -973,12 +977,62 @@ class CalendarPlugin(
         }
     }
 
-    private fun restore(state: DashboardPersistence.CalendarWidgetState): CalendarWidget {
+    private fun restore(state: CalendarWidgetState): CalendarWidget {
         val widget = CalendarWidget(state.x, state.y, state.width, state.height).apply {
             setFontScale(state.fontScale)
             setSnapshot(latest)
         }
         services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight)
         return widget
+    }
+
+    private fun capture(widget: CalendarWidget): CalendarWidgetState {
+        val c = services.captureRestore.extractCommonFields(widget)
+        return CalendarWidgetState(
+            x = c.x, y = c.y, width = c.width, height = c.height,
+            fontScale = widget.getFontScale(),
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
+        )
+    }
+}
+
+/** What a saved dashboard keeps of the calendar widget. */
+data class CalendarWidgetState(
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    val fontScale: Float = 1f,
+    override val isMinimized: Boolean = false,
+    override val isFullscreen: Boolean = false,
+    override val savedMinX: Float = 0f,
+    override val savedMinY: Float = 0f,
+    override val savedMinWidth: Float = 0f,
+    override val savedMinHeight: Float = 0f,
+    override val isPinned: Boolean = false
+) : DashboardPersistence.SizedWidgetFields {
+    /** Its entry in the saved dashboard file. */
+    companion object Codec : WidgetDocument.StateCodec<CalendarWidgetState>(WidgetTypeId.CALENDAR, CalendarWidgetState::class) {
+        override fun toJson(state: CalendarWidgetState): JSONObject = JSONObject().apply {
+            putCommonFields(state)
+            put("fontScale", state.fontScale)
+        }
+
+        override fun fromJson(payload: JSONObject): CalendarWidgetState? =
+            parseSizedWidgetObject(payload) { obj, c, w, h ->
+                CalendarWidgetState(
+                    x = c.x, y = c.y, width = w, height = h,
+                    fontScale = obj.optDouble("fontScale", 1.0).toFloat(),
+                    isMinimized = c.isMinimized,
+                    isFullscreen = c.isFullscreen,
+                    savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                    savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                    isPinned = c.isPinned
+                )
+            }
     }
 }
