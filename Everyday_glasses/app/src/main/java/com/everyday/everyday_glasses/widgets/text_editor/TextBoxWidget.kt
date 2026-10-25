@@ -16,6 +16,9 @@ import com.everyday.everyday_glasses.interaction.user_input.TextZone
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneLayout
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
@@ -25,6 +28,7 @@ import com.everyday.everyday_glasses.ui.components.KeyboardOverlayController
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets._common.WidgetInteractionState
 import com.everyday.everyday_glasses.widgets._common.WidgetTheme
+import org.json.JSONObject
 
 /**
  * A dynamic text box widget that can be moved, resized, deleted, and toggled fullscreen.
@@ -567,15 +571,40 @@ class TextBoxPlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
     override val lifecycle = WidgetLifecycleRegistration.multiple(
-        WidgetTypeId.TEXT, TextBoxWidget::class, DashboardPersistence.TextWidgetState::class,
-        capture = { services.captureRestore.getTextWidgetState(it) },
-        restore = { state ->
-            services.captureRestore
-                .restoreTextWidgets(listOf(state), services.viewportWidth, services.viewportHeight)
-                .firstOrNull()
-        },
+        TextBoxWidget::class, TextWidgetState.Codec,
+        capture = ::capture,
+        restore = ::restore,
         beforeRemove = TextBoxWidget::releaseKeyFocus,
     )
+
+    /** The content comes back as rich text (HTML) when it was saved so, as plain text otherwise. */
+    private fun restore(state: TextWidgetState): TextBoxWidget {
+        val widget = TextBoxWidget(state.x, state.y, state.width, state.height)
+        services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight) {
+            if (!state.html.isNullOrEmpty()) widget.setHtmlContent(state.html) else widget.setTextContent(state.text)
+            widget.setFontSize(state.fontSize)
+            widget.setTextWrap(state.isTextWrap)
+            widget.setColumns(state.columnCount)
+        }
+        return widget
+    }
+
+    private fun capture(widget: TextBoxWidget): TextWidgetState {
+        val c = services.captureRestore.extractCommonFields(widget)
+        return TextWidgetState(
+            x = c.x, y = c.y, width = c.width, height = c.height,
+            text = widget.text,
+            html = widget.getHtmlContent(),
+            fontSize = widget.textFontSize,
+            isTextWrap = widget.isTextWrap,
+            columnCount = widget.getColumnCount(),
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
+        )
+    }
 
     /** Opens a text box where the user asked (centered otherwise), or reopens the last closed one, and focuses it. */
     fun open() {
@@ -612,9 +641,68 @@ class TextBoxPlugin(
         }
     }
 
+
     companion object {
         /** Size of a new text box, as a fraction of the dashboard. */
         const val DEFAULT_WIDTH_PERCENT = 0.30f
         const val DEFAULT_HEIGHT_PERCENT = 0.15f
+    }
+}
+
+/** What a saved dashboard keeps of a text box: its content, font size, wrapping and columns. */
+data class TextWidgetState(
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    val text: String,
+    val html: String? = null,  // Rich text content as HTML (takes precedence if present)
+    val fontSize: Float = 28f,
+    val isTextWrap: Boolean = true,
+    val columnCount: Int = 1,
+    override val isMinimized: Boolean = false,
+    override val isFullscreen: Boolean = false,
+    override val savedMinX: Float = 0f,
+    override val savedMinY: Float = 0f,
+    override val savedMinWidth: Float = 0f,
+    override val savedMinHeight: Float = 0f,
+    override val isPinned: Boolean = false
+) : DashboardPersistence.SizedWidgetFields {
+    /** Its entry in the saved dashboard file. */
+    companion object Codec : WidgetDocument.StateCodec<TextWidgetState>(WidgetTypeId.TEXT, TextWidgetState::class) {
+        override fun toJson(state: TextWidgetState): JSONObject = JSONObject().apply {
+            putCommonFields(state)
+            put("text", state.text)
+            state.html?.let { put("html", it) }
+            put("fontSize", state.fontSize.toDouble())
+            put("isTextWrap", state.isTextWrap)
+            put("columnCount", state.columnCount)
+        }
+
+        override fun fromJson(payload: JSONObject): TextWidgetState? {
+            val html: String? =
+                if (payload.has("html") && !payload.isNull("html")) payload.optString("html") else null
+
+            return try {
+                val c = parseCommonFields(payload)
+                TextWidgetState(
+                    x = c.x, y = c.y,
+                    width = payload.getDouble("width").toFloat(),
+                    height = payload.getDouble("height").toFloat(),
+                    text = payload.optString("text", ""),
+                    html = html,
+                    fontSize = payload.optDouble("fontSize", 28.0).toFloat(),
+                    isTextWrap = payload.optBoolean("isTextWrap", true),
+                    columnCount = payload.optInt("columnCount", 1).coerceIn(1, 3),
+                    isMinimized = c.isMinimized,
+                    isFullscreen = c.isFullscreen,
+                    savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                    savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                    isPinned = c.isPinned
+                )
+            } catch (_: Exception) {
+                null
+            }
+        }
     }
 }

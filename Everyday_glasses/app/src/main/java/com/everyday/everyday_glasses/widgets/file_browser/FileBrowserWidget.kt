@@ -15,16 +15,21 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.FileBrowserWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.widgets._common.WidgetInteractionState
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import java.io.File
 import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
-import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import org.json.JSONObject
 
 /**
  * A file browser widget for navigating and selecting files on the device.
@@ -41,7 +46,7 @@ class FileBrowserWidget(
     y: Float,
     width: Float = 400f,
     height: Float = 500f,
-    private val fileFilter: FileFilter = FileFilter.IMAGES
+    val fileFilter: FileFilter = FileFilter.IMAGES
 ) : BaseWidget(WidgetTypeId.FILES, x, y, width, height) {
 
     companion object {
@@ -95,7 +100,8 @@ class FileBrowserWidget(
     var listener: FileBrowserWidgetListener? = null
 
     // Current directory and file list
-    private var currentDirectory: File = getDefaultDirectory()
+    var currentDirectory: File = getDefaultDirectory()
+        private set
     private var entries: List<FileEntry> = emptyList()
 
     // Scroll state
@@ -1012,30 +1018,108 @@ class FileBrowserWidget(
     }
 
 }
-/** Opens the file picker. Picking a file hands it over and closes the picker; pickers aren't saved. */
+/**
+ * Opens the file picker, and brings it back with the saved dashboard. Picking a file hands it to
+ * [onPicked] and closes the picker.
+ */
 class FileBrowserPlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
     private val context: Context get() = services.androidContext
-    override val lifecycle = WidgetLifecycleRegistration.multiple(WidgetTypeId.FILES, FileBrowserWidget::class, Unit::class)
 
-    fun open(filter: FileBrowserWidget.FileFilter, onPicked: (FileBrowserWidget.FileEntry) -> Unit) {
+    /** What picking a file does. The file import sets it at startup, so a restored picker imports too. */
+    var onPicked: (FileBrowserWidget.FileEntry) -> Unit = {}
+
+    override val lifecycle = WidgetLifecycleRegistration.multiple(
+        FileBrowserWidget::class, FileBrowserWidgetState.Codec,
+        capture = ::capture,
+        restore = ::restore,
+        configure = ::configure,
+    )
+
+    fun open(filter: FileBrowserWidget.FileFilter) {
         // Half the dashboard's width and 70% of its height, within limits, centered.
         val width = (services.viewportWidth * 0.5f).coerceIn(300f, 500f)
         val height = (services.viewportHeight * 0.7f).coerceIn(300f, 600f)
         val x = ((services.viewportWidth - width) / 2f).coerceAtLeast(0f)
         val y = ((services.viewportHeight - height) / 2f).coerceAtLeast(0f)
-        val picker = FileBrowserWidget(context, x, y, width, height, filter)
+        services.open(WidgetTypeId.FILES) { FileBrowserWidget(context, x, y, width, height, filter) }
+        // Opening the picker may complete asynchronously after a runtime/all-files permission
+        // screen. Re-center after the widget actually exists so hover chrome is visible at once
+        // and two-finger scrolling is routed to the new browser without a priming drag.
+        services.host?.requestCursorCenter()
+    }
+
+    /** For a new picker and a restored one alike: a pick goes to [onPicked], then the picker closes. */
+    private fun configure(picker: FileBrowserWidget) {
         picker.listener = object : FileBrowserWidgetListener {
             override fun onFileSelected(entry: FileBrowserWidget.FileEntry) {
                 onPicked(entry)
                 services.close(picker)
             }
         }
-        services.open(WidgetTypeId.FILES) { picker }
-        // Opening the picker may complete asynchronously after a runtime/all-files permission
-        // screen. Re-center after the widget actually exists so hover chrome is visible at once
-        // and two-finger scrolling is routed to the new browser without a priming drag.
-        services.host?.requestCursorCenter()
+    }
+
+    /** Back in its saved folder; in the default one when that folder can't be read anymore. */
+    private fun restore(state: FileBrowserWidgetState): FileBrowserWidget {
+        val picker = FileBrowserWidget(context, state.x, state.y, state.width, state.height, state.filter)
+        File(state.directory).takeIf { it.isDirectory && it.canRead() }?.let(picker::loadDirectory)
+        services.captureRestore.restoreCommonFields(picker, state, services.viewportWidth, services.viewportHeight)
+        return picker
+    }
+
+    private fun capture(picker: FileBrowserWidget): FileBrowserWidgetState {
+        val c = services.captureRestore.extractCommonFields(picker)
+        return FileBrowserWidgetState(
+            x = c.x, y = c.y, width = c.width, height = c.height,
+            filter = picker.fileFilter,
+            directory = picker.currentDirectory.absolutePath,
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
+        )
+    }
+}
+
+/** What a saved dashboard keeps of a file picker: which files it shows, and the folder it's in. */
+data class FileBrowserWidgetState(
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    val filter: FileBrowserWidget.FileFilter = FileBrowserWidget.FileFilter.MEDIA,
+    val directory: String = "",
+    override val isMinimized: Boolean = false,
+    override val isFullscreen: Boolean = false,
+    override val savedMinX: Float = 0f,
+    override val savedMinY: Float = 0f,
+    override val savedMinWidth: Float = 0f,
+    override val savedMinHeight: Float = 0f,
+    override val isPinned: Boolean = false
+) : DashboardPersistence.SizedWidgetFields {
+    /** Its entry in the saved dashboard file. */
+    companion object Codec : WidgetDocument.StateCodec<FileBrowserWidgetState>(WidgetTypeId.FILES, FileBrowserWidgetState::class) {
+        override fun toJson(state: FileBrowserWidgetState): JSONObject = JSONObject().apply {
+            putCommonFields(state)
+            put("filter", state.filter.name)
+            put("directory", state.directory)
+        }
+
+        override fun fromJson(payload: JSONObject): FileBrowserWidgetState? =
+            parseSizedWidgetObject(payload) { obj, c, w, h ->
+                FileBrowserWidgetState(
+                    x = c.x, y = c.y, width = w, height = h,
+                    filter = runCatching { FileBrowserWidget.FileFilter.valueOf(obj.optString("filter")) }
+                        .getOrDefault(FileBrowserWidget.FileFilter.MEDIA),
+                    directory = obj.optString("directory", ""),
+                    isMinimized = c.isMinimized,
+                    isFullscreen = c.isFullscreen,
+                    savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                    savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                    isPinned = c.isPinned
+                )
+            }
     }
 }

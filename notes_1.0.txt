@@ -13,6 +13,7 @@ Added RSS feed control settings in news widget
 Bugfix
 
 Added map data to the refresh button so any timeout can be exposed as an error message here.
+File browser is now persisted like any other widget
 
 Efficiency optimizations
 
@@ -50,4 +51,4 @@ ______
 
 Improvements as to what gets displayed on hover: 
 
-it is very confusing. Whatever widget is under another widget should not be receiving updates when the cursor hovers both. Only the widget on top should update.
+it is very confusing. Whatever widget is under another widget should not be receiving updates when the cursor hovers both. Only the widget on top should update. Same when the context menu is opened, it should not highlight widgets underneath it.

@@ -3,7 +3,7 @@ package com.everyday.everyday_glasses.ui.components
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets.map.backend.MapViewMode
 import com.everyday.everyday_glasses.widgets.map.backend.MapZoom
-import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.widgets.text_editor.TextWidgetState
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.widgets.system_status.StatusBarState
 import com.everyday.everyday_glasses.widgets.weather_location.LocationWidgetState
@@ -203,7 +203,7 @@ object BuiltInLayouts {
             ),
             mapOf(
                 WidgetTypeId.TEXT to listOf(
-                    DashboardPersistence.TextWidgetState(
+                    TextWidgetState(
                         x = margin,
                         y = textTop,
                         width = w - 2f * margin,

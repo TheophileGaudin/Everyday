@@ -97,21 +97,20 @@ class WidgetLifecycleRegistration<W : BaseWidget, S : Any>(
             onMinimizeChanged = onMinimizeChanged,
         )
 
-        /** A multiple-instance type's registration; its descriptor and saved-state codec come from [type]. */
+        /** A multiple-instance type's registration; its type, descriptor and saved state come from [codec]. */
         fun <W : BaseWidget, S : Any> multiple(
-            type: WidgetTypeId,
             widgetType: KClass<W>,
-            stateType: KClass<S>,
-            capture: ((W) -> S?)? = null,
-            restore: ((S) -> W?)? = null,
+            codec: WidgetDocument.StateCodec<S>,
+            capture: (W) -> S?,
+            restore: (S) -> W?,
             configure: (W) -> Unit = {},
             beforeRemove: (W) -> Unit = {},
             onFullscreenChanged: (W, Boolean) -> Unit = { _, _ -> },
         ) = WidgetLifecycleRegistration(
-            descriptor = WidgetDescriptors[type],
+            descriptor = WidgetDescriptors[codec.type],
             widgetType = widgetType,
-            stateType = stateType,
-            stateCodec = WidgetDocument.codecs[type],
+            stateType = codec.stateClass,
+            stateCodec = codec,
             capture = capture,
             restore = restore,
             configure = configure,

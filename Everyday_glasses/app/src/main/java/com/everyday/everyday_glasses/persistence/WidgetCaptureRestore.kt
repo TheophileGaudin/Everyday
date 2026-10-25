@@ -5,25 +5,15 @@ import android.net.Uri
 import android.util.Log
 import androidx.core.net.toUri
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
-import com.everyday.everyday_glasses.widgets.browser.BrowserWidget
-import com.everyday.everyday_glasses.widgets.file_browser.ImageWidget
-import com.everyday.everyday_glasses.widgets.file_browser.PdfWidget
-import com.everyday.everyday_glasses.widgets.text_editor.TextBoxWidget
-import com.everyday.everyday_glasses.widgets.file_browser.VideoWidget
-import java.io.File
 
 /**
- * Captures saveable properties from live widgets and restores those properties from
- * [DashboardPersistence] descriptions.
+ * The widget side of the fields every widget saves (position, size, minimized, fullscreen,
+ * pinned): [extractCommonFields] reads them from a live widget, [restoreCommonFields] puts them
+ * back. Each widget type captures and restores its own fields in its plugin, with these. Also
+ * [readableUri], for the types that save a content URI.
  *
- *  The single-instance widget types capture and restore their own state, in their plugin; they
- *  use [extractCommonFields] and [restoreCommonFields] from here.
- *
- * This class does not read/write durable storage, encode/decode JSON, decide when saving occurs,
- * or own widget lifecycle registration and destruction.
- *
- * Some legacy bulk-restore methods still construct widgets. Move those construction paths into
- * focused factories as their widget types are refactored; do not expand that legacy role.
+ * It does not read or write storage or JSON ([DashboardPersistence] does), decide when saving
+ * occurs, or own widget lifecycle registration and destruction.
  */
 class WidgetCaptureRestore {
 
@@ -39,8 +29,6 @@ class WidgetCaptureRestore {
             return uri.takeIf { readable }
         }
     }
-
-    // ==================== Common-field helpers ====================
 
     /**
      * Container for the common persistence fields extracted from a [BaseWidget].
@@ -126,191 +114,4 @@ class WidgetCaptureRestore {
             widget.toggleFullscreen()
         }
     }
-
-    // ==================== Extract State ====================
-
-    /**
-     * Get a single text widget state for persistence.
-     */
-    fun getTextWidgetState(widget: TextBoxWidget): DashboardPersistence.TextWidgetState {
-        val c = extractCommonFields(widget)
-        return DashboardPersistence.TextWidgetState(
-            x = c.x, y = c.y, width = c.width, height = c.height,
-            text = widget.text,
-            html = widget.getHtmlContent(),
-            fontSize = widget.textFontSize,
-            isTextWrap = widget.isTextWrap,
-            columnCount = widget.getColumnCount(),
-            isMinimized = c.isMinimized,
-            isFullscreen = c.isFullscreen,
-            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-            isPinned = c.isPinned
-        )
-    }
-
-    /**
-     * Get all image widget states for persistence.
-     */
-    fun getImageWidgetStates(widgets: List<ImageWidget>): List<DashboardPersistence.ImageWidgetState> {
-        return widgets.mapNotNull { widget ->
-            val imagePath = widget.getImagePath()
-            if (imagePath.isBlank()) {
-                null
-            } else {
-                val c = extractCommonFields(widget)
-                DashboardPersistence.ImageWidgetState(
-                    x = c.x, y = c.y, width = c.width, height = c.height,
-                    imagePath = imagePath,
-                    isMinimized = c.isMinimized,
-                    isFullscreen = c.isFullscreen,
-                    savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                    savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                    isPinned = c.isPinned
-                )
-            }
-        }
-    }
-
-    fun getImageWidgetState(widget: ImageWidget): DashboardPersistence.ImageWidgetState? =
-        getImageWidgetStates(listOf(widget)).singleOrNull()
-
-    fun getVideoWidgetStates(widgets: List<VideoWidget>): List<DashboardPersistence.VideoWidgetState> {
-        return widgets.map { widget ->
-            val c = extractCommonFields(widget)
-            DashboardPersistence.VideoWidgetState(
-                x = c.x,
-                y = c.y,
-                width = c.width,
-                height = c.height,
-                uri = widget.contentUri.toString(),
-                displayName = widget.displayName,
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX,
-                savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth,
-                savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned,
-            )
-        }
-    }
-
-    fun getVideoWidgetState(widget: VideoWidget): DashboardPersistence.VideoWidgetState =
-        getVideoWidgetStates(listOf(widget)).single()
-
-    fun getPdfWidgetStates(widgets: List<PdfWidget>): List<DashboardPersistence.PdfWidgetState> {
-        return widgets.map { widget ->
-            val c = extractCommonFields(widget)
-            DashboardPersistence.PdfWidgetState(
-                x = c.x,
-                y = c.y,
-                width = c.width,
-                height = c.height,
-                uri = widget.contentUri.toString(),
-                displayName = widget.displayName,
-                page = widget.currentPage,
-                zoom = widget.zoom,
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX,
-                savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth,
-                savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned,
-            )
-        }
-    }
-
-    fun getPdfWidgetState(widget: PdfWidget): DashboardPersistence.PdfWidgetState =
-        getPdfWidgetStates(listOf(widget)).single()
-
-
-    /**
-     * Get a single browser widget state for persistence.
-     */
-    fun getBrowserWidgetState(widget: BrowserWidget): DashboardPersistence.BrowserWidgetState? {
-        if (!widget.shouldPersist) {
-            return null
-        }
-
-        val c = extractCommonFields(widget)
-        return DashboardPersistence.BrowserWidgetState(
-            x = c.x, y = c.y, width = c.width, height = c.height,
-            url = widget.getUrl() ?: "https://www.google.com",
-            isMinimized = c.isMinimized,
-            isFullscreen = c.isFullscreen,
-            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-            isPinned = c.isPinned
-        )
-    }
-
-    // ==================== Restore State ====================
-
-    /**
-     * Restore text widgets from saved states.
-     * Uses HTML content if available for rich text, otherwise falls back to plain text.
-     */
-    fun restoreTextWidgets(
-        states: List<DashboardPersistence.TextWidgetState>,
-        screenWidth: Int,
-        screenHeight: Int
-    ): List<TextBoxWidget> {
-        Log.d(TAG, "Restoring ${states.size} text widgets")
-
-        return states.map { state ->
-            TextBoxWidget(state.x, state.y, state.width, state.height).apply {
-                restoreCommonFields(this, state, screenWidth, screenHeight) {
-                    // Restore content: use HTML if available, otherwise plain text
-                    if (!state.html.isNullOrEmpty()) {
-                        setHtmlContent(state.html)
-                    } else {
-                        setTextContent(state.text)
-                    }
-                    setFontSize(state.fontSize)
-                    setTextWrap(state.isTextWrap)
-                    setColumns(state.columnCount)
-                }
-            }
-        }
-    }
-
-    /**
-     * Restore image widgets from saved states.
-     *
-     * Missing image files are skipped so one bad path does not block the rest.
-     */
-    fun restoreImageWidgets(
-        states: List<DashboardPersistence.ImageWidgetState>,
-        screenWidth: Int,
-        screenHeight: Int
-    ): List<ImageWidget> {
-        Log.d(TAG, "Restoring ${states.size} image widgets")
-
-        return states.mapNotNull { state ->
-            val imageFile = File(state.imagePath)
-            if (!imageFile.exists()) {
-                Log.w(TAG, "Skipping missing image widget file: ${state.imagePath}")
-                return@mapNotNull null
-            }
-
-            ImageWidget(state.x, state.y, state.imagePath).apply {
-                restoreCommonFields(this, state, screenWidth, screenHeight)
-            }
-        }
-    }
-
-    /** Load the saved page of an already-created browser, then restore its common fields. */
-    fun restoreBrowserWidgetState(
-        widget: BrowserWidget,
-        state: DashboardPersistence.BrowserWidgetState,
-        screenWidth: Int,
-        screenHeight: Int,
-    ) {
-        restoreCommonFields(widget, state, screenWidth, screenHeight) {
-            widget.getWebView()?.loadUrl(state.url)
-        }
-    }
-
 }

@@ -8,11 +8,16 @@ import android.graphics.RectF
 import android.util.Log
 import android.content.Context
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import org.json.JSONObject
+import java.io.File
 
 class ImageWidget(
     x: Float,
@@ -119,15 +124,38 @@ class ImagePlugin(
     private val context: Context get() = services.androidContext
     private val all: () -> List<ImageWidget> = { services.widgets(WidgetTypeId.IMAGE).filterIsInstance<ImageWidget>() }
     override val lifecycle = WidgetLifecycleRegistration.multiple(
-        WidgetTypeId.IMAGE, ImageWidget::class, DashboardPersistence.ImageWidgetState::class,
-        capture = { services.captureRestore.getImageWidgetState(it) },
-        restore = { state ->
-            services.captureRestore
-                .restoreImageWidgets(listOf(state), services.viewportWidth, services.viewportHeight)
-                .firstOrNull()
-        },
+        ImageWidget::class, ImageWidgetState.Codec,
+        capture = ::capture,
+        restore = ::restore,
         beforeRemove = ::deleteFileIfUnused,
     )
+
+    /** A missing image file is skipped, so one bad path does not block the rest of the dashboard. */
+    private fun restore(state: ImageWidgetState): ImageWidget? {
+        if (!File(state.imagePath).exists()) {
+            Log.w(TAG, "Skipping missing image widget file: ${state.imagePath}")
+            return null
+        }
+        val widget = ImageWidget(state.x, state.y, state.imagePath)
+        services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight)
+        return widget
+    }
+
+    /** An image without a file is not saved. */
+    private fun capture(widget: ImageWidget): ImageWidgetState? {
+        val imagePath = widget.getImagePath()
+        if (imagePath.isBlank()) return null
+        val c = services.captureRestore.extractCommonFields(widget)
+        return ImageWidgetState(
+            x = c.x, y = c.y, width = c.width, height = c.height,
+            imagePath = imagePath,
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
+        )
+    }
 
     /** Opens the image at [path] where the user asked (top left otherwise). */
     fun open(path: String) {
@@ -139,5 +167,51 @@ class ImagePlugin(
         val path = widget.getImagePath()
         val hasSibling = all().any { it !== widget && it.getImagePath() == path }
         if (!hasSibling) ImageWidgetStorage.deleteIfManaged(context, path)
+    }
+
+    private companion object {
+        const val TAG = "ImagePlugin"
+    }
+}
+
+/** What a saved dashboard keeps of an image: the path of its file. */
+data class ImageWidgetState(
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    val imagePath: String,
+    override val isMinimized: Boolean = false,
+    override val isFullscreen: Boolean = false,
+    override val savedMinX: Float = 0f,
+    override val savedMinY: Float = 0f,
+    override val savedMinWidth: Float = 0f,
+    override val savedMinHeight: Float = 0f,
+    override val isPinned: Boolean = false
+) : DashboardPersistence.SizedWidgetFields {
+    /** Its entry in the saved dashboard file. */
+    companion object Codec : WidgetDocument.StateCodec<ImageWidgetState>(WidgetTypeId.IMAGE, ImageWidgetState::class) {
+        override fun toJson(state: ImageWidgetState): JSONObject = JSONObject().apply {
+            putCommonFields(state)
+            put("imagePath", state.imagePath)
+        }
+
+        override fun fromJson(payload: JSONObject): ImageWidgetState? = runCatching {
+            val c = parseCommonFields(payload)
+            val imagePath = payload.optString("imagePath", "")
+            if (imagePath.isBlank()) return null
+
+            ImageWidgetState(
+                x = c.x, y = c.y,
+                width = payload.getDouble("width").toFloat(),
+                height = payload.getDouble("height").toFloat(),
+                imagePath = imagePath,
+                isMinimized = c.isMinimized,
+                isFullscreen = c.isFullscreen,
+                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                isPinned = c.isPinned
+            )
+        }.getOrNull()
     }
 }

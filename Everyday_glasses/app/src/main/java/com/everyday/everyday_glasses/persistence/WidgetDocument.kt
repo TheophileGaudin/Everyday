@@ -69,7 +69,7 @@ object WidgetDocument {
 
     /**
      * A widget type's codec, written against its own state class: [toJson] and [fromJson] only see
-     * that class. Each single-instance widget type declares one next to its saved state.
+     * that class. Each widget type that saves its widgets declares one next to its saved state.
      */
     abstract class StateCodec<S : Any>(
         final override val type: WidgetTypeId,
@@ -89,32 +89,11 @@ object WidgetDocument {
         final override fun decode(payload: JSONObject): S? = fromJson(payload)
     }
 
-    private class PayloadCodec<S : Any>(
-        override val type: WidgetTypeId,
-        override val stateClass: KClass<S>
-    ) : WidgetStateCodec {
-        override fun encode(state: Any): JSONObject {
-            require(stateClass.isInstance(state)) {
-                "Expected ${stateClass.simpleName} for ${type.persistedId}, got ${state::class.simpleName}"
-            }
-            return DashboardPersistence.encodeWidgetStatePayload(type, state)
-        }
-
-        override fun decode(payload: JSONObject): Any? =
-            DashboardPersistence.decodeWidgetStatePayload(type, payload)
-    }
-
     /**
-     * The persistence catalog: every widget type a saved dashboard can hold. The single-instance
-     * types declare their codec in their widget package; [WidgetPlugins.codecs] lists them.
+     * The persistence catalog: every widget type a saved dashboard can hold. Each type declares
+     * its codec in its widget package; [WidgetPlugins.codecs] lists them.
      */
-    val codecs: Map<WidgetTypeId, WidgetStateCodec> = (WidgetPlugins.codecs + listOf(
-        PayloadCodec(WidgetTypeId.BROWSER, DashboardPersistence.BrowserWidgetState::class),
-        PayloadCodec(WidgetTypeId.TEXT, DashboardPersistence.TextWidgetState::class),
-        PayloadCodec(WidgetTypeId.IMAGE, DashboardPersistence.ImageWidgetState::class),
-        PayloadCodec(WidgetTypeId.VIDEO, DashboardPersistence.VideoWidgetState::class),
-        PayloadCodec(WidgetTypeId.PDF, DashboardPersistence.PdfWidgetState::class)
-    )).associateBy(WidgetStateCodec::type)
+    val codecs: Map<WidgetTypeId, WidgetStateCodec> = WidgetPlugins.codecs.associateBy(WidgetStateCodec::type)
 
     fun isCurrentSchema(root: JSONObject): Boolean =
         root.optInt(KEY_SCHEMA_VERSION, -1) == SCHEMA_VERSION

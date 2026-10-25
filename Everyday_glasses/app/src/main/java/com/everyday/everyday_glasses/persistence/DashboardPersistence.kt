@@ -7,15 +7,17 @@ import android.util.Log
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
 import com.everyday.everyday_glasses.widgets.file_browser.ImageWidgetStorage
+import com.everyday.everyday_glasses.widgets.file_browser.ImageWidgetState
 import org.json.JSONObject
 import java.io.File
 import kotlin.collections.forEach
 
 /**
- * Defines saveable dashboard/widget descriptions and stores them in durable app storage.
+ * Stores the active dashboard and the named layouts in durable app storage, and handles storage
+ * failures. It also holds the fields every widget saves ([CommonWidgetFields]) and their JSON;
+ * each widget type's own fields and JSON live in its widget package, next to its plugin.
  *
- * This object owns JSON encoding/decoding, active-dashboard and named-layout files, and storage
- * failures. It does not inspect, construct, register or destroy live widget instances.
+ * It does not inspect, construct, register or destroy live widget instances.
  *
  * App-specific external storage does not survive uninstall.
  */
@@ -26,8 +28,10 @@ object DashboardPersistence {
     const val DEFAULT_LAYOUT_NAME = BuiltInLayouts.STANDARD
 
     // Avoid spamming logcat if something goes wrong during load.
-    @Volatile private var hasLoggedLoadError = false
-    @Volatile private var hasLoggedSaveError = false
+    @Volatile
+    private var hasLoggedLoadError = false
+    @Volatile
+    private var hasLoggedSaveError = false
 
     // ==================== Common-field interfaces ====================
 
@@ -128,91 +132,6 @@ object DashboardPersistence {
         val row: Int
     )
 
-    // ==================== Widget state DTOs ====================
-
-    data class TextWidgetState(
-        override val x: Float,
-        override val y: Float,
-        override val width: Float,
-        override val height: Float,
-        val text: String,
-        val html: String? = null,  // Rich text content as HTML (takes precedence if present)
-        val fontSize: Float = 28f,
-        val isTextWrap: Boolean = true,
-        val columnCount: Int = 1,
-        override val isMinimized: Boolean = false,
-        override val isFullscreen: Boolean = false,
-        override val savedMinX: Float = 0f,
-        override val savedMinY: Float = 0f,
-        override val savedMinWidth: Float = 0f,
-        override val savedMinHeight: Float = 0f,
-        override val isPinned: Boolean = false
-    ) : SizedWidgetFields
-
-    data class ImageWidgetState(
-        override val x: Float,
-        override val y: Float,
-        override val width: Float,
-        override val height: Float,
-        val imagePath: String,
-        override val isMinimized: Boolean = false,
-        override val isFullscreen: Boolean = false,
-        override val savedMinX: Float = 0f,
-        override val savedMinY: Float = 0f,
-        override val savedMinWidth: Float = 0f,
-        override val savedMinHeight: Float = 0f,
-        override val isPinned: Boolean = false
-    ) : SizedWidgetFields
-
-    data class BrowserWidgetState(
-        override val x: Float,
-        override val y: Float,
-        override val width: Float,
-        override val height: Float,
-        val url: String,
-        override val isMinimized: Boolean = false,
-        override val isFullscreen: Boolean = false,
-        override val savedMinX: Float = 0f,
-        override val savedMinY: Float = 0f,
-        override val savedMinWidth: Float = 0f,
-        override val savedMinHeight: Float = 0f,
-        override val isPinned: Boolean = false
-    ) : SizedWidgetFields
-
-    data class VideoWidgetState(
-        override val x: Float,
-        override val y: Float,
-        override val width: Float,
-        override val height: Float,
-        val uri: String,
-        val displayName: String,
-        override val isMinimized: Boolean = false,
-        override val isFullscreen: Boolean = false,
-        override val savedMinX: Float = 0f,
-        override val savedMinY: Float = 0f,
-        override val savedMinWidth: Float = 0f,
-        override val savedMinHeight: Float = 0f,
-        override val isPinned: Boolean = false,
-    ) : SizedWidgetFields
-
-    data class PdfWidgetState(
-        override val x: Float,
-        override val y: Float,
-        override val width: Float,
-        override val height: Float,
-        val uri: String,
-        val displayName: String,
-        val page: Int = 0,
-        val zoom: Float = 1f,
-        override val isMinimized: Boolean = false,
-        override val isFullscreen: Boolean = false,
-        override val savedMinX: Float = 0f,
-        override val savedMinY: Float = 0f,
-        override val savedMinWidth: Float = 0f,
-        override val savedMinHeight: Float = 0f,
-        override val isPinned: Boolean = false,
-    ) : SizedWidgetFields
-
     private fun getStorageFile(context: Context): File {
         val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: context.filesDir
         val file = File(dir, FILENAME)
@@ -225,47 +144,6 @@ object DashboardPersistence {
         val file = File(dir, LAYOUTS_FILENAME)
         file.parentFile?.mkdirs()
         return file
-    }
-
-    /**
-     * Encodes one state object using the established v1 field representation.
-     *
-     * The v2 envelope keeps these payloads deliberately unchanged.  Keeping the
-     * field-level codecs here means both schemas share one authoritative parser
-     * while the runtime migration is in progress.
-     */
-    internal fun encodeWidgetStatePayload(type: WidgetTypeId, state: Any): JSONObject = when (type) {
-        WidgetTypeId.TEXT -> textWidgetToJson(state as TextWidgetState)
-        WidgetTypeId.BROWSER -> browserWidgetToJson(state as BrowserWidgetState)
-        WidgetTypeId.IMAGE -> (state as ImageWidgetState).let { widget -> JSONObject().apply {
-            putCommonFields(widget)
-            put("imagePath", widget.imagePath)
-        } }
-        WidgetTypeId.VIDEO -> (state as VideoWidgetState).let { widget -> JSONObject().apply {
-            putCommonFields(widget)
-            put("uri", widget.uri)
-            put("displayName", widget.displayName)
-        } }
-        WidgetTypeId.PDF -> (state as PdfWidgetState).let { widget -> JSONObject().apply {
-            putCommonFields(widget)
-            put("uri", widget.uri)
-            put("displayName", widget.displayName)
-            put("page", widget.page)
-            put("zoom", widget.zoom)
-        } }
-        // The single-instance types save through their own codec, in their widget package.
-        // File browser state is not saved.
-        else -> error("${type.persistedId} has no persisted state codec here")
-    }
-
-    /** Decodes one v2 payload through the same field-level parser as v1. */
-    internal fun decodeWidgetStatePayload(type: WidgetTypeId, payload: JSONObject): Any? = when (type) {
-        WidgetTypeId.TEXT -> parseTextWidget(payload)
-        WidgetTypeId.BROWSER -> parseBrowserWidget(payload)
-        WidgetTypeId.IMAGE -> parseImageWidget(payload)
-        WidgetTypeId.VIDEO -> parseVideoWidget(payload)
-        WidgetTypeId.PDF -> parsePdfWidget(payload)
-        else -> null
     }
 
     fun saveDashboard(context: Context, dashboard: WidgetDocument.PersistedDashboard): Boolean {
@@ -298,7 +176,10 @@ object DashboardPersistence {
         val rootJson = loadRootJson(context)
         if (rootJson == null || !WidgetDocument.isCurrentSchema(rootJson)) {
             if (rootJson != null) {
-                Log.w(TAG, "Ignoring widget document written by an older schema; starting from defaults")
+                Log.w(
+                    TAG,
+                    "Ignoring widget document written by an older schema; starting from defaults"
+                )
             }
             return WidgetDocument.PersistedDashboard(
                 widgets = emptyList(),
@@ -340,9 +221,7 @@ object DashboardPersistence {
     private fun imagePaths(dashboard: WidgetDocument.PersistedDashboard): List<String> =
         dashboard.widgets.mapNotNull { record ->
             if (record.type != WidgetTypeId.IMAGE) return@mapNotNull null
-            (WidgetDocument.codecs[WidgetTypeId.IMAGE]?.decode(record.state)
-                as? ImageWidgetState)
-                ?.imagePath
+            ImageWidgetState.Codec.decode(record.state)?.imagePath
         }
 
     fun listDashboardLayouts(context: Context): List<WidgetDocument.PersistedDashboardLayoutRecord> {
@@ -377,7 +256,8 @@ object DashboardPersistence {
         return try {
             val now = System.currentTimeMillis()
             val existing = listDashboardLayouts(context).toMutableList()
-            val existingIndex = existing.indexOfFirst { it.name.equals(trimmedName, ignoreCase = true) }
+            val existingIndex =
+                existing.indexOfFirst { it.name.equals(trimmedName, ignoreCase = true) }
             val createdAt = existing.getOrNull(existingIndex)?.createdAt ?: now
             val record = WidgetDocument.PersistedDashboardLayoutRecord(
                 name = trimmedName,
@@ -483,127 +363,4 @@ object DashboardPersistence {
             throw error
         }
     }
-
-    private fun textWidgetToJson(widget: TextWidgetState): JSONObject =
-        JSONObject().apply {
-            putCommonFields(widget)
-            put("text", widget.text)
-            widget.html?.let { put("html", it) }
-            put("fontSize", widget.fontSize.toDouble())
-            put("isTextWrap", widget.isTextWrap)
-            put("columnCount", widget.columnCount)
-        }
-
-    private fun browserWidgetToJson(widget: BrowserWidgetState): JSONObject =
-        JSONObject().apply {
-            putCommonFields(widget)
-            put("url", widget.url)
-        }
-
-    private fun parseTextWidget(obj: JSONObject): TextWidgetState? {
-        val html: String? =
-            if (obj.has("html") && !obj.isNull("html")) obj.optString("html") else null
-
-        return try {
-            val c = parseCommonFields(obj)
-            TextWidgetState(
-                x = c.x, y = c.y,
-                width = obj.getDouble("width").toFloat(),
-                height = obj.getDouble("height").toFloat(),
-                text = obj.optString("text", ""),
-                html = html,
-                fontSize = obj.optDouble("fontSize", 28.0).toFloat(),
-                isTextWrap = obj.optBoolean("isTextWrap", true),
-                columnCount = obj.optInt("columnCount", 1).coerceIn(1, 3),
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun parseBrowserWidget(obj: JSONObject): BrowserWidgetState? {
-        return try {
-            val c = parseCommonFields(obj)
-            BrowserWidgetState(
-                x = c.x, y = c.y,
-                width = obj.getDouble("width").toFloat(),
-                height = obj.getDouble("height").toFloat(),
-                url = obj.optString("url", "https://www.google.com"),
-                isMinimized = c.isMinimized,
-                isFullscreen = c.isFullscreen,
-                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-                isPinned = c.isPinned
-            )
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-   private fun parseImageWidget(obj: JSONObject): ImageWidgetState? = runCatching {
-        val c = parseCommonFields(obj)
-        val imagePath = obj.optString("imagePath", "")
-        if (imagePath.isBlank()) return null
-
-        ImageWidgetState(
-            x = c.x, y = c.y,
-            width = obj.getDouble("width").toFloat(),
-            height = obj.getDouble("height").toFloat(),
-            imagePath = imagePath,
-            isMinimized = c.isMinimized,
-            isFullscreen = c.isFullscreen,
-            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
-            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
-            isPinned = c.isPinned
-        )
-    }.getOrNull()
-
-    private fun parseVideoWidget(obj: JSONObject): VideoWidgetState? = runCatching {
-        val c = parseCommonFields(obj)
-        val uri = obj.optString("uri", "")
-        if (uri.isBlank()) return null
-        VideoWidgetState(
-            x = c.x,
-            y = c.y,
-            width = obj.getDouble("width").toFloat(),
-            height = obj.getDouble("height").toFloat(),
-            uri = uri,
-            displayName = obj.optString("displayName", "Video"),
-            isMinimized = c.isMinimized,
-            isFullscreen = c.isFullscreen,
-            savedMinX = c.savedMinX,
-            savedMinY = c.savedMinY,
-            savedMinWidth = c.savedMinWidth,
-            savedMinHeight = c.savedMinHeight,
-            isPinned = c.isPinned,
-        )
-    }.getOrNull()
-
-    private fun parsePdfWidget(obj: JSONObject): PdfWidgetState? = runCatching {
-        val c = parseCommonFields(obj)
-        val uri = obj.optString("uri", "")
-        if (uri.isBlank()) return null
-        PdfWidgetState(
-            x = c.x,
-            y = c.y,
-            width = obj.getDouble("width").toFloat(),
-            height = obj.getDouble("height").toFloat(),
-            uri = uri,
-            displayName = obj.optString("displayName", "PDF"),
-            page = obj.optInt("page", 0).coerceAtLeast(0),
-            zoom = obj.optDouble("zoom", 1.0).toFloat(),
-            isMinimized = c.isMinimized,
-            isFullscreen = c.isFullscreen,
-            savedMinX = c.savedMinX,
-            savedMinY = c.savedMinY,
-            savedMinWidth = c.savedMinWidth,
-            savedMinHeight = c.savedMinHeight,
-            isPinned = c.isPinned,
-        )
-    }.getOrNull()
 }

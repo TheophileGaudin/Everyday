@@ -762,7 +762,8 @@ class WidgetContainer @JvmOverloads constructor(
     fun createImageWidget(path: String)                                                               = imagePlugin.open(path)
     fun createVideoWidget(uri: android.net.Uri, displayName: String)                                  = videoPlugin.open(uri, displayName)
     fun createPdfWidget(uri: android.net.Uri, displayName: String)                                    = pdfPlugin.open(uri, displayName)
-    fun createFileBrowserWidget(filter: FileBrowserWidget.FileFilter, onFileSelected: (FileBrowserWidget.FileEntry) -> Unit) = fileBrowserPlugin.open(filter, onFileSelected)
+    fun createFileBrowserWidget(filter: FileBrowserWidget.FileFilter)                                 = fileBrowserPlugin.open(filter)
+    fun setFilePickedHandler(onPicked: (FileBrowserWidget.FileEntry) -> Unit)                         { fileBrowserPlugin.onPicked = onPicked }
 
     //browser
     fun shouldApplyBrowserMinimumBrightness()         : Boolean = registry.allWidgets().any { it.requestsBrowserMinimumBrightness }
@@ -1340,7 +1341,7 @@ class WidgetContainer @JvmOverloads constructor(
     fun          cancelPresentationForUserInput(): Boolean  = presenter.cancelForUserInput()
     private fun  stableWidgetId(widget: BaseWidget): String = registry.stableId(widget)
     private fun  onWidgetRemoving(widget: BaseWidget)         {presenter.onWidgetRemoving(widget) ; if (activeWidget === widget) activeWidget = null} /** Shared cleanup for every closed widget, run while it still has its stable ID. */
-    fun          release()                                    {presenter.dismiss() ; lifecycleController.closeAll()}
+    fun          release()                                    {presenter.dismiss() ; withContentChangeSuppressed { lifecycleController.closeAll() }} /** Tearing the widgets down is not a dashboard change: it must not save over the dashboard the activity just saved. */
 
     // Assistant status and dashboard interaction
     fun          setAssistantStatus(status: AssistantStatus)  {hoverControlsLayer.setAssistantStatus(status); notifyTransientContentChanged()}

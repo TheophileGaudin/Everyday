@@ -23,10 +23,14 @@ import kotlin.math.sqrt
 import androidx.core.graphics.createBitmap
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import org.json.JSONObject
 
 /** Canvas-backed PDF reader. Only the visible page bitmap is retained. */
 class PdfWidget(
@@ -348,8 +352,8 @@ class PdfPlugin(
 ) : WidgetPlugin {
     private val context: Context get() = services.androidContext
     override val lifecycle = WidgetLifecycleRegistration.multiple(
-        WidgetTypeId.PDF, PdfWidget::class, DashboardPersistence.PdfWidgetState::class,
-        capture = { services.captureRestore.getPdfWidgetState(it) },
+        PdfWidget::class, PdfWidgetState.Codec,
+        capture = ::capture,
         restore = ::restore,
     )
 
@@ -364,7 +368,7 @@ class PdfPlugin(
     }
 
     /** A document that can't be read anymore is dropped from the dashboard. */
-    private fun restore(state: DashboardPersistence.PdfWidgetState): PdfWidget? {
+    private fun restore(state: PdfWidgetState): PdfWidget? {
         val uri = WidgetCaptureRestore.readableUri(context, state.uri) ?: return null
         val widget = PdfWidget(
             context = context,
@@ -379,5 +383,71 @@ class PdfPlugin(
         )
         services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight)
         return widget
+    }
+
+    private fun capture(widget: PdfWidget): PdfWidgetState {
+        val c = services.captureRestore.extractCommonFields(widget)
+        return PdfWidgetState(
+            x = c.x, y = c.y, width = c.width, height = c.height,
+            uri = widget.contentUri.toString(),
+            displayName = widget.displayName,
+            page = widget.currentPage,
+            zoom = widget.zoom,
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
+        )
+    }
+}
+
+/** What a saved dashboard keeps of a PDF: its content URI, name, page and zoom. */
+data class PdfWidgetState(
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    val uri: String,
+    val displayName: String,
+    val page: Int = 0,
+    val zoom: Float = 1f,
+    override val isMinimized: Boolean = false,
+    override val isFullscreen: Boolean = false,
+    override val savedMinX: Float = 0f,
+    override val savedMinY: Float = 0f,
+    override val savedMinWidth: Float = 0f,
+    override val savedMinHeight: Float = 0f,
+    override val isPinned: Boolean = false
+) : DashboardPersistence.SizedWidgetFields {
+    /** Its entry in the saved dashboard file. */
+    companion object Codec : WidgetDocument.StateCodec<PdfWidgetState>(WidgetTypeId.PDF, PdfWidgetState::class) {
+        override fun toJson(state: PdfWidgetState): JSONObject = JSONObject().apply {
+            putCommonFields(state)
+            put("uri", state.uri)
+            put("displayName", state.displayName)
+            put("page", state.page)
+            put("zoom", state.zoom)
+        }
+
+        override fun fromJson(payload: JSONObject): PdfWidgetState? = runCatching {
+            val c = parseCommonFields(payload)
+            val uri = payload.optString("uri", "")
+            if (uri.isBlank()) return null
+            PdfWidgetState(
+                x = c.x, y = c.y,
+                width = payload.getDouble("width").toFloat(),
+                height = payload.getDouble("height").toFloat(),
+                uri = uri,
+                displayName = payload.optString("displayName", "PDF"),
+                page = payload.optInt("page", 0).coerceAtLeast(0),
+                zoom = payload.optDouble("zoom", 1.0).toFloat(),
+                isMinimized = c.isMinimized,
+                isFullscreen = c.isFullscreen,
+                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                isPinned = c.isPinned
+            )
+        }.getOrNull()
     }
 }

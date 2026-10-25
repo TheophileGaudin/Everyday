@@ -19,6 +19,11 @@ import android.view.ViewGroup
 import com.everyday.everyday_glasses.settings.UnitSettings
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
 import com.everyday.everyday_glasses.runtime.WidgetRegistry
+import com.everyday.everyday_glasses.widgets.browser.BrowserWidgetState
+import com.everyday.everyday_glasses.widgets.file_browser.ImageWidgetState
+import com.everyday.everyday_glasses.widgets.file_browser.PdfWidgetState
+import com.everyday.everyday_glasses.widgets.text_editor.TextWidgetState
+import com.everyday.everyday_glasses.widgets.file_browser.VideoWidgetState
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets.system_status.StatusBarState
 import com.everyday.everyday_glasses.widgets.weather_location.LocationWidgetState
@@ -89,25 +94,25 @@ class WidgetLayoutPersistenceTest {
 
     @Test
     fun `a full dashboard survives a json round trip`() {
-        val text = DashboardPersistence.TextWidgetState(
+        val text = TextWidgetState(
             x = 10f, y = 20f, width = 180f, height = 90f,
             text = "plain", html = "<b>rich</b>", fontSize = 30f,
             isTextWrap = false, columnCount = 2, isMinimized = true,
             savedMinX = 11f, savedMinY = 22f, savedMinWidth = 181f, savedMinHeight = 91f,
             isPinned = true
         )
-        val browser = DashboardPersistence.BrowserWidgetState(
+        val browser = BrowserWidgetState(
             x = 30f, y = 40f, width = 220f, height = 160f,
             url = "https://example.com", isFullscreen = true
         )
-        val image = DashboardPersistence.ImageWidgetState(
+        val image = ImageWidgetState(
             x = 1f, y = 2f, width = 100f, height = 120f, imagePath = "/tmp/image.png"
         )
-        val video = DashboardPersistence.VideoWidgetState(
+        val video = VideoWidgetState(
             uri = "content://media/video/1", displayName = "clip.mp4",
             x = 21f, y = 22f, width = 260f, height = 180f
         )
-        val pdf = DashboardPersistence.PdfWidgetState(
+        val pdf = PdfWidgetState(
             uri = "content://documents/report", displayName = "report.pdf",
             x = 23f, y = 24f, width = 280f, height = 200f, page = 4, zoom = 1.5f
         )
@@ -150,10 +155,10 @@ class WidgetLayoutPersistenceTest {
         val mirror = MirrorWidgetState(
             x = 15f, y = 16f, width = 120f, height = 180f, isPinned = true
         )
-        val closedText = DashboardPersistence.TextWidgetState(
+        val closedText = TextWidgetState(
             x = 17f, y = 18f, width = 110f, height = 70f, text = "closed"
         )
-        val closedBrowser = DashboardPersistence.BrowserWidgetState(
+        val closedBrowser = BrowserWidgetState(
             x = 19f, y = 20f, width = 210f, height = 130f, url = "https://closed.example"
         )
         val closedMap = MapWidgetState(
@@ -198,11 +203,11 @@ class WidgetLayoutPersistenceTest {
         )
 
         // Every widget comes back with its payload intact.
-        assertEquals(text, restored.stateOf<DashboardPersistence.TextWidgetState>(WidgetTypeId.TEXT))
-        assertEquals(browser, restored.stateOf<DashboardPersistence.BrowserWidgetState>(WidgetTypeId.BROWSER))
-        assertEquals(image, restored.stateOf<DashboardPersistence.ImageWidgetState>(WidgetTypeId.IMAGE))
-        assertEquals(video, restored.stateOf<DashboardPersistence.VideoWidgetState>(WidgetTypeId.VIDEO))
-        assertEquals(pdf, restored.stateOf<DashboardPersistence.PdfWidgetState>(WidgetTypeId.PDF))
+        assertEquals(text, restored.stateOf<TextWidgetState>(WidgetTypeId.TEXT))
+        assertEquals(browser, restored.stateOf<BrowserWidgetState>(WidgetTypeId.BROWSER))
+        assertEquals(image, restored.stateOf<ImageWidgetState>(WidgetTypeId.IMAGE))
+        assertEquals(video, restored.stateOf<VideoWidgetState>(WidgetTypeId.VIDEO))
+        assertEquals(pdf, restored.stateOf<PdfWidgetState>(WidgetTypeId.PDF))
         assertEquals(status, restored.stateOf<StatusBarState>(WidgetTypeId.STATUS))
         assertEquals(location, restored.stateOf<LocationWidgetState>(
             WidgetTypeId.LOCATION))
@@ -236,9 +241,9 @@ class WidgetLayoutPersistenceTest {
         )
 
         // Closed templates and dashboard-level settings survive too.
-        assertEquals(closedText, restored.templateOf<DashboardPersistence.TextWidgetState>(
+        assertEquals(closedText, restored.templateOf<TextWidgetState>(
             WidgetTypeId.TEXT))
-        assertEquals(closedBrowser, restored.templateOf<DashboardPersistence.BrowserWidgetState>(
+        assertEquals(closedBrowser, restored.templateOf<BrowserWidgetState>(
             WidgetTypeId.BROWSER))
         assertEquals(closedMap, restored.templateOf<MapWidgetState>(
             WidgetTypeId.MAP))

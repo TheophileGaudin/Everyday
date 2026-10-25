@@ -4,8 +4,12 @@ import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.dashboardOf
 import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.stateOf
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
-import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.widgets.text_editor.TextWidgetState
+import com.everyday.everyday_glasses.widgets.browser.BrowserWidgetState
 import com.everyday.everyday_glasses.widgets.phone_screen_mirror.MirrorWidgetState
+import com.everyday.everyday_glasses.WidgetPersistenceTestSupport.roundTrip
+import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidget
+import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidgetState
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -17,9 +21,22 @@ import org.junit.Test
 class WidgetDocumentTest {
 
     @Test
-    fun `codec catalog covers every currently persisted widget type`() {
-        val expected = WidgetTypeId.entries.toSet() - WidgetTypeId.FILES
-        assertEquals(expected, WidgetDocument.codecs.keys)
+    fun `codec catalog covers every widget type`() {
+        assertEquals(WidgetTypeId.entries.toSet(), WidgetDocument.codecs.keys)
+    }
+
+    @Test
+    fun `file picker keeps its filter and folder, and an unknown filter falls back to media`() {
+        val picker = FileBrowserWidgetState(
+            x = 70f, y = 72f, width = 500f, height = 336f,
+            filter = FileBrowserWidget.FileFilter.PDF,
+            directory = "/storage/emulated/0/Download",
+            isPinned = true,
+        )
+        assertEquals(picker, roundTrip(WidgetTypeId.FILES, picker))
+
+        val unknown = FileBrowserWidgetState.toJson(picker).put("filter", "SPREADSHEETS")
+        assertEquals(FileBrowserWidget.FileFilter.MEDIA, FileBrowserWidgetState.fromJson(unknown)?.filter)
     }
 
     @Test
@@ -46,14 +63,14 @@ class WidgetDocumentTest {
                     type = WidgetTypeId.TEXT,
                     instanceId = "text#41",
                     state = WidgetDocument.codecs.getValue(WidgetTypeId.TEXT).encode(
-                        DashboardPersistence.TextWidgetState(1f, 2f, 100f, 80f, "text")
+                        TextWidgetState(1f, 2f, 100f, 80f, "text")
                     )
                 ),
                 WidgetDocument.PersistedWidgetRecord(
                     type = WidgetTypeId.BROWSER,
                     instanceId = "browser#9",
                     state = WidgetDocument.codecs.getValue(WidgetTypeId.BROWSER).encode(
-                        DashboardPersistence.BrowserWidgetState(3f, 4f, 120f, 90f, "https://example.com")
+                        BrowserWidgetState(3f, 4f, 120f, 90f, "https://example.com")
                     )
                 )
             )
@@ -71,7 +88,7 @@ class WidgetDocumentTest {
     fun `unknown and malformed records are ignored without dropping valid records`() {
         val valid = dashboardOf(
             WidgetTypeId.TEXT,
-            DashboardPersistence.TextWidgetState(1f, 2f, 100f, 80f, "text", html = "<b>text</b>"),
+            TextWidgetState(1f, 2f, 100f, 80f, "text", html = "<b>text</b>"),
             instanceId = "text#1"
         ).widgets.single()
 
@@ -107,7 +124,7 @@ class WidgetDocumentTest {
 
         assertEquals(listOf(valid.type), parsed.widgets.map { it.type })
         assertEquals(listOf("text#1"), parsed.widgets.map { it.instanceId })
-        assertNotNull(parsed.stateOf<DashboardPersistence.TextWidgetState>(WidgetTypeId.TEXT))
+        assertNotNull(parsed.stateOf<TextWidgetState>(WidgetTypeId.TEXT))
     }
 
     @Test

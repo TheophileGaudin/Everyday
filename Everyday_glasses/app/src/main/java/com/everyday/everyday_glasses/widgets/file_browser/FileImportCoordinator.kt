@@ -28,11 +28,7 @@ enum class FileImportError(val userMessage: String) {
 
 /** UI operations requested after file selection or import completes. */
 interface FileImportCallbacks {
-    fun showFileBrowser(
-        filter: FileBrowserWidget.FileFilter,
-        onFileSelected: (FileBrowserWidget.FileEntry) -> Unit
-    )
-
+    fun showFileBrowser(filter: FileBrowserWidget.FileFilter) /** Shows the picker; a pick comes back to [FileImportCoordinator.importFileBrowserEntry]. */
     fun createImageWidget(path: String)
     fun createVideoWidget(uri: Uri, displayName: String)
     fun createPdfWidget(uri: Uri, displayName: String)
@@ -118,14 +114,12 @@ class FileImportCoordinator(
         if (released) return
 
         postUi {
-            callbacks.showFileBrowser(
-                filter = FileBrowserWidget.FileFilter.MEDIA,
-                onFileSelected = ::importFileBrowserEntry
-            )
+            callbacks.showFileBrowser(filter = FileBrowserWidget.FileFilter.MEDIA)
         }
     }
 
-    private fun importFileBrowserEntry(entry: FileBrowserWidget.FileEntry) {
+    /** Opens or imports a file picked in the file picker: a PDF, a video or an image. */
+    fun importFileBrowserEntry(entry: FileBrowserWidget.FileEntry) {
         Log.d(TAG, "File selected: ${entry.absolutePath}, uri: ${entry.uri}")
 
         when {

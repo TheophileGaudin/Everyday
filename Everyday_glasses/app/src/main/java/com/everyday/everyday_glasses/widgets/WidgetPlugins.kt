@@ -29,6 +29,12 @@ import com.everyday.everyday_glasses.widgets.notifications.NotificationsWidgetSt
 import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidgetState
 import com.everyday.everyday_glasses.widgets.speech_to_text.SubtitleWidgetState
 import com.everyday.everyday_glasses.widgets.phone_screen_mirror.MirrorWidgetState
+import com.everyday.everyday_glasses.widgets.browser.BrowserWidgetState
+import com.everyday.everyday_glasses.widgets.text_editor.TextWidgetState
+import com.everyday.everyday_glasses.widgets.file_browser.ImageWidgetState
+import com.everyday.everyday_glasses.widgets.file_browser.VideoWidgetState
+import com.everyday.everyday_glasses.widgets.file_browser.PdfWidgetState
+import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidgetState
 
 /**
  * Every widget type of the dashboard. This is the one place that names them all: a new widget type
@@ -58,10 +64,15 @@ internal object WidgetPlugins {
 
     /**
      * How each type saves its widgets. A saved dashboard is read before any plugin exists, so this
-     * lists the codecs themselves. The types that can be open several times still save through
-     * the persistence package.
+     * lists the codecs themselves.
      */
     val codecs: List<WidgetDocument.WidgetStateCodec> = listOf(
+        BrowserWidgetState.Codec,
+        TextWidgetState.Codec,
+        ImageWidgetState.Codec,
+        VideoWidgetState.Codec,
+        PdfWidgetState.Codec,
+        FileBrowserWidgetState.Codec,
         StatusBarState.Codec,
         LocationWidgetState.Codec,
         MapWidgetState.Codec,

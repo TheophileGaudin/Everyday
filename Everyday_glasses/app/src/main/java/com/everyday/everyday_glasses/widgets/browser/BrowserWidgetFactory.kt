@@ -4,11 +4,15 @@ import android.content.Context
 import android.view.View
 import android.view.ViewGroup
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.BrowserWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import org.json.JSONObject
 
 /** Constructs BrowserWidget instances and places their native WebView below the canvas layer. */
 internal class BrowserWidgetFactory(
@@ -55,8 +59,8 @@ class BrowserPlugin(
     private val containerView: View get() = services.dashboardView
     private val all: () -> List<BrowserWidget> = { services.widgets(WidgetTypeId.BROWSER).filterIsInstance<BrowserWidget>() }
     override val lifecycle = WidgetLifecycleRegistration.multiple(
-        WidgetTypeId.BROWSER, BrowserWidget::class, DashboardPersistence.BrowserWidgetState::class,
-        capture = { services.captureRestore.getBrowserWidgetState(it) },
+        BrowserWidget::class, BrowserWidgetState.Codec,
+        capture = ::capture,
         restore = ::restore,
         configure = ::configure,
         beforeRemove = BrowserWidget::releaseKeyFocus,
@@ -125,10 +129,27 @@ class BrowserPlugin(
         }
     }
 
-    private fun restore(state: DashboardPersistence.BrowserWidgetState): BrowserWidget? {
+    private fun restore(state: BrowserWidgetState): BrowserWidget? {
         val widget = build(state.x, state.y, state.width, state.height) ?: return null
-        services.captureRestore.restoreBrowserWidgetState(widget, state, services.viewportWidth, services.viewportHeight)
+        services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight) {
+            widget.getWebView()?.loadUrl(state.url)
+        }
         return widget
+    }
+
+    /** A browser marked not to be kept ([BrowserWidget.shouldPersist]) is not saved. */
+    private fun capture(widget: BrowserWidget): BrowserWidgetState? {
+        if (!widget.shouldPersist) return null
+        val c = services.captureRestore.extractCommonFields(widget)
+        return BrowserWidgetState(
+            x = c.x, y = c.y, width = c.width, height = c.height,
+            url = widget.getUrl() ?: "https://www.google.com",
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
+        )
     }
 
     private fun configure(widget: BrowserWidget) {
@@ -145,5 +166,48 @@ class BrowserPlugin(
 
     private companion object {
         const val YOUTUBE_HISTORY_URL = "https://www.youtube.com/feed/history"
+    }
+}
+
+/** What a saved dashboard keeps of a browser: the address of its page. */
+data class BrowserWidgetState(
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    val url: String,
+    override val isMinimized: Boolean = false,
+    override val isFullscreen: Boolean = false,
+    override val savedMinX: Float = 0f,
+    override val savedMinY: Float = 0f,
+    override val savedMinWidth: Float = 0f,
+    override val savedMinHeight: Float = 0f,
+    override val isPinned: Boolean = false
+) : DashboardPersistence.SizedWidgetFields {
+    /** Its entry in the saved dashboard file. */
+    companion object Codec : WidgetDocument.StateCodec<BrowserWidgetState>(WidgetTypeId.BROWSER, BrowserWidgetState::class) {
+        override fun toJson(state: BrowserWidgetState): JSONObject = JSONObject().apply {
+            putCommonFields(state)
+            put("url", state.url)
+        }
+
+        override fun fromJson(payload: JSONObject): BrowserWidgetState? {
+            return try {
+                val c = parseCommonFields(payload)
+                BrowserWidgetState(
+                    x = c.x, y = c.y,
+                    width = payload.getDouble("width").toFloat(),
+                    height = payload.getDouble("height").toFloat(),
+                    url = payload.optString("url", "https://www.google.com"),
+                    isMinimized = c.isMinimized,
+                    isFullscreen = c.isFullscreen,
+                    savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                    savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                    isPinned = c.isPinned
+                )
+            } catch (_: Exception) {
+                null
+            }
+        }
     }
 }

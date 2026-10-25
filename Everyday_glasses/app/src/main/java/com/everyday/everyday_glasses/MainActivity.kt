@@ -76,7 +76,6 @@ import com.everyday.everyday_glasses.headup_wake.HeadUpWakeManager
 import com.everyday.everyday_glasses._threedof.ThreeDofManager
 import com.everyday.everyday_glasses.runtime.WakeSleepManager
 import com.everyday.everyday_glasses.persistence.ActiveDashboardStore
-import com.everyday.everyday_glasses.ui.components.BuiltInLayouts
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.GlassesSettingsStore
 import com.everyday.everyday_glasses.auth_permissions.GoogleAuthPreferencesStore
@@ -663,14 +662,8 @@ class MainActivity : AppCompatActivity() {
         fileImportCoordinator = FileImportCoordinator(
             activity = this,
             callbacks = object : FileImportCallbacks {
-                override fun showFileBrowser(
-                    filter: FileBrowserWidget.FileFilter,
-                    onFileSelected: (FileBrowserWidget.FileEntry) -> Unit
-                ) {
-                    widgetContainer.createFileBrowserWidget(
-                        filter = filter,
-                        onFileSelected = onFileSelected
-                    )
+                override fun showFileBrowser(filter: FileBrowserWidget.FileFilter) {
+                    widgetContainer.createFileBrowserWidget(filter)
                 }
 
                 override fun createImageWidget(path: String) {
@@ -700,6 +693,8 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         )
+        // Every pick, from a new picker or one restored with the dashboard, is imported here.
+        widgetContainer.setFilePickedHandler(fileImportCoordinator::importFileBrowserEntry)
     }
 
     private fun setupPermissionCoordinator() {
@@ -1205,6 +1200,9 @@ class MainActivity : AppCompatActivity() {
      * On first run (no saved state): the built-in Standard layout is created by WidgetContainer.
      * On returning user (saved state exists): Restore currently open widgets and keep the
      * last-closed widget templates available so reopening uses the previous bounds/config.
+     * The saved widgets are restored as they were, even when the active layout is a built-in one:
+     * changes made on top of a built-in layout are kept. A built-in layout is only rebuilt when
+     * it is loaded from the menu.
      *
      * @param state The preloaded persisted state (loaded before layout to set isReturningUser flag)
      */
@@ -1215,10 +1213,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val delivered = state.activeLayoutName
-            ?.takeIf(BuiltInLayouts::isDelivered)
-            ?.let { BuiltInLayouts.buildDashboard(it, widgetContainer.width.toFloat(), widgetContainer.height.toFloat()) }
-        widgetContainer.applyPersistedDashboardReplacingCurrent(delivered ?: state)
+        widgetContainer.applyPersistedDashboardReplacingCurrent(state)
     }
     
     /**

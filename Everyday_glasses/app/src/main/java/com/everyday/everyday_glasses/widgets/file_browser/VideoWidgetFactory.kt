@@ -6,12 +6,16 @@ import android.view.View
 import android.view.ViewGroup
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.VideoWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets.file_browser.video_backend.VideoQueueRepository
+import org.json.JSONObject
 
 /** Constructs VideoWidget instances with their shared queue and playback callback. */
 internal class VideoWidgetFactory(
@@ -57,8 +61,8 @@ class VideoPlugin(
     private val queueRepository = VideoQueueRepository(context)
 
     override val lifecycle = WidgetLifecycleRegistration.multiple(
-        WidgetTypeId.VIDEO, VideoWidget::class, DashboardPersistence.VideoWidgetState::class,
-        capture = { services.captureRestore.getVideoWidgetState(it) },
+        VideoWidget::class, VideoWidgetState.Codec,
+        capture = ::capture,
         restore = ::restore,
         onFullscreenChanged = { widget, fullscreen ->
             if (fullscreen) widget.startPlayback(autoPlay = true)
@@ -79,7 +83,7 @@ class VideoPlugin(
     }
 
     /** A video that can't be read anymore is dropped from the dashboard. */
-    private fun restore(state: DashboardPersistence.VideoWidgetState): VideoWidget? {
+    private fun restore(state: VideoWidgetState): VideoWidget? {
         val factory = factory() ?: return null
         val uri = WidgetCaptureRestore.readableUri(context, state.uri) ?: return null
         val widget = factory.create(uri, state.displayName, state.x, state.y)
@@ -87,8 +91,66 @@ class VideoPlugin(
         return widget
     }
 
+    private fun capture(widget: VideoWidget): VideoWidgetState {
+        val c = services.captureRestore.extractCommonFields(widget)
+        return VideoWidgetState(
+            x = c.x, y = c.y, width = c.width, height = c.height,
+            uri = widget.contentUri.toString(),
+            displayName = widget.displayName,
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
+        )
+    }
+
     // The player's native views go into the root layout, which exists once the dashboard is attached.
     private fun factory(): VideoWidgetFactory? = rootLayout()?.let { root ->
         VideoWidgetFactory(context, root, containerView, queueRepository, setMediaSourceActive)
+    }
+}
+
+/** What a saved dashboard keeps of a video: its content URI and name. */
+data class VideoWidgetState(
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    val uri: String,
+    val displayName: String,
+    override val isMinimized: Boolean = false,
+    override val isFullscreen: Boolean = false,
+    override val savedMinX: Float = 0f,
+    override val savedMinY: Float = 0f,
+    override val savedMinWidth: Float = 0f,
+    override val savedMinHeight: Float = 0f,
+    override val isPinned: Boolean = false
+) : DashboardPersistence.SizedWidgetFields {
+    /** Its entry in the saved dashboard file. */
+    companion object Codec : WidgetDocument.StateCodec<VideoWidgetState>(WidgetTypeId.VIDEO, VideoWidgetState::class) {
+        override fun toJson(state: VideoWidgetState): JSONObject = JSONObject().apply {
+            putCommonFields(state)
+            put("uri", state.uri)
+            put("displayName", state.displayName)
+        }
+
+        override fun fromJson(payload: JSONObject): VideoWidgetState? = runCatching {
+            val c = parseCommonFields(payload)
+            val uri = payload.optString("uri", "")
+            if (uri.isBlank()) return null
+            VideoWidgetState(
+                x = c.x, y = c.y,
+                width = payload.getDouble("width").toFloat(),
+                height = payload.getDouble("height").toFloat(),
+                uri = uri,
+                displayName = payload.optString("displayName", "Video"),
+                isMinimized = c.isMinimized,
+                isFullscreen = c.isFullscreen,
+                savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                isPinned = c.isPinned
+            )
+        }.getOrNull()
     }
 }
