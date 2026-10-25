@@ -504,7 +504,7 @@ class SubtitleWidget(
 class SubtitlePlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
-    private val current: () -> SubtitleWidget? = { services.singleton(SubtitlePlugin.TYPE) as? SubtitleWidget }
+    private val current: () -> SubtitleWidget? = { services.singleton(TYPE) as? SubtitleWidget }
     override val lifecycle = WidgetLifecycleRegistration.singleton(
         SubtitleWidget::class, SubtitleWidgetState.Codec,
         current = current,

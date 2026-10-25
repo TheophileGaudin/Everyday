@@ -1046,7 +1046,7 @@ class FileBrowserPlugin(
         val height = (services.viewportHeight * 0.7f).coerceIn(300f, 600f)
         val x = ((services.viewportWidth - width) / 2f).coerceAtLeast(0f)
         val y = ((services.viewportHeight - height) / 2f).coerceAtLeast(0f)
-        services.open(FileBrowserPlugin.TYPE) { FileBrowserWidget(context, x, y, width, height, filter) }
+        services.open(TYPE) { FileBrowserWidget(context, x, y, width, height, filter) }
         // Opening the picker may complete asynchronously after a runtime/all-files permission
         // screen. Re-center after the widget actually exists so hover chrome is visible at once
         // and two-finger scrolling is routed to the new browser without a priming drag.

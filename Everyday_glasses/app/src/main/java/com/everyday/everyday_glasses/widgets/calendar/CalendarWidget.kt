@@ -951,7 +951,7 @@ class CalendarWidget(
 class CalendarPlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
-    private val current: () -> CalendarWidget? = { services.singleton(CalendarPlugin.TYPE) as? CalendarWidget }
+    private val current: () -> CalendarWidget? = { services.singleton(TYPE) as? CalendarWidget }
     // The last snapshot received, so that a calendar opened later shows it right away.
     private val latest: CalendarSnapshot? get() = services.appData.latest(AppChannels.calendar)
 

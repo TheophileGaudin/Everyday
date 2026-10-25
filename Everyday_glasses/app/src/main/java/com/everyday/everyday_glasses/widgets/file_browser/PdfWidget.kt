@@ -365,7 +365,7 @@ class PdfPlugin(
         val y = ((services.viewportHeight - 260f) / 2f).coerceAtLeast(0f)
         val widget = PdfWidget(context, uri, displayName, x, y)
         services.runPersistentMutation {
-            services.open(PdfPlugin.TYPE) { widget }
+            services.open(TYPE) { widget }
             widget.toggleFullscreen()
         }
     }

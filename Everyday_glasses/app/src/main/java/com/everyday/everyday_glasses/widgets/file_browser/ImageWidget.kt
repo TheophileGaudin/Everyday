@@ -125,7 +125,7 @@ class ImagePlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
     private val context: Context get() = services.androidContext
-    private val all: () -> List<ImageWidget> = { services.widgets(ImagePlugin.TYPE).filterIsInstance<ImageWidget>() }
+    private val all: () -> List<ImageWidget> = { services.widgets(TYPE).filterIsInstance<ImageWidget>() }
     override val lifecycle = WidgetLifecycleRegistration.multiple(
         ImageWidget::class, ImageWidgetState.Codec,
         capture = ::capture,
@@ -163,7 +163,7 @@ class ImagePlugin(
     /** Opens the image at [path] where the user asked (top left otherwise). */
     fun open(path: String) {
         val position = services.creationPosition
-        services.open(ImagePlugin.TYPE) { ImageWidget(position?.x ?: 0f, position?.y ?: 0f, path) }
+        services.open(TYPE) { ImageWidget(position?.x ?: 0f, position?.y ?: 0f, path) }
     }
 
     private fun deleteFileIfUnused(widget: ImageWidget) {

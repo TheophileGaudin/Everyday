@@ -1138,7 +1138,7 @@ class MirrorPlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
     private val context: Context get() = services.androidContext
-    private val current: () -> ScreenMirrorWidget? = { services.singleton(MirrorPlugin.TYPE) as? ScreenMirrorWidget }
+    private val current: () -> ScreenMirrorWidget? = { services.singleton(TYPE) as? ScreenMirrorWidget }
     private val onMediaFrame: (sourceId: String) -> Unit = { sourceId -> services.notifyMediaFrame(sourceId) }
     private val setMediaSourceActive: (sourceId: String, active: Boolean) -> Unit = { sourceId, active -> services.setMediaSourceActive(sourceId, active) }
     private val refreshBrightnessRules: () -> Unit = { services.refreshBrightnessRules() }

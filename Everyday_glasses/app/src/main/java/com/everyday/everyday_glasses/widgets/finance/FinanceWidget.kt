@@ -13,7 +13,6 @@ import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.Finan
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.FinanceTileTargetResolver
 import com.everyday.everyday_glasses.interaction.assistant.widget_adapters.FinanceWidgetSemanticState
 import com.everyday.everyday_glasses.runtime.FinanceWidgetListener
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.shared.sync.FinanceAssetType
 import com.everyday.shared.sync.FinanceCandle

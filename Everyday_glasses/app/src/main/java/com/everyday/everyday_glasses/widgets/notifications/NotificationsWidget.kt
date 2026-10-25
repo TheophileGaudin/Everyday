@@ -588,7 +588,7 @@ class NotificationsWidget(
 class NotificationsPlugin(
     private val services: WidgetContext,
 ): WidgetPlugin {
-    private val current: () -> NotificationsWidget? = { services.singleton(NotificationsPlugin.TYPE) as? NotificationsWidget }
+    private val current: () -> NotificationsWidget? = { services.singleton(TYPE) as? NotificationsWidget }
     // The last snapshot received, so that a widget opened later shows it right away.
     private val latest: PhoneNotificationsSnapshot
         get() = services.appData.latest(AppChannels.notifications)

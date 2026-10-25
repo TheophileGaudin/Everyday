@@ -623,7 +623,7 @@ class TextBoxPlugin(
             height
         )
         services.runPersistentMutation {
-            services.open(TextBoxPlugin.TYPE) { box }
+            services.open(TYPE) { box }
             box.takeKeyFocus()
         }
     }
@@ -635,11 +635,11 @@ class TextBoxPlugin(
         val height = (services.viewportHeight * 0.55f).coerceAtMost(services.viewportHeight.toFloat())
         val x = ((services.viewportWidth - width) / 2f).coerceAtLeast(0f)
         val y = ((services.viewportHeight - height) / 2f).coerceAtLeast(0f)
-        return services.open(TextBoxPlugin.TYPE) { TextBoxWidget(x, y, width, height) }
+        return services.open(TYPE) { TextBoxWidget(x, y, width, height) }
     }
 
     private fun reopenClosed(): TextBoxWidget? = services.runPersistentMutation(changed = { it != null }) {
-        (services.openClosedTemplate(TextBoxPlugin.TYPE) as? TextBoxWidget)?.also { box ->
+        (services.openClosedTemplate(TYPE) as? TextBoxWidget)?.also { box ->
             if (!box.isMinimized) box.takeKeyFocus()
         }
     }

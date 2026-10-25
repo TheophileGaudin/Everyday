@@ -621,7 +621,7 @@ class StatusBarWidget(
 class StatusBarPlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
-    private val current: () -> StatusBarWidget? = { services.singleton(StatusBarPlugin.TYPE) as? StatusBarWidget }
+    private val current: () -> StatusBarWidget? = { services.singleton(TYPE) as? StatusBarWidget }
     // The last data received, so that a status bar opened later shows it right away.
     private val latest: StatusSnapshot get() = services.appData.latest(AppChannels.status) ?: StatusSnapshot()
 

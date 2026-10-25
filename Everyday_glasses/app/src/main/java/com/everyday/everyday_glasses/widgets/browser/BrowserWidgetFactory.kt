@@ -60,7 +60,7 @@ class BrowserPlugin(
     private val context: Context get() = services.androidContext
     private val rootLayout: () -> ViewGroup? = { services.rootLayout }
     private val containerView: View get() = services.dashboardView
-    private val all: () -> List<BrowserWidget> = { services.widgets(BrowserPlugin.TYPE).filterIsInstance<BrowserWidget>() }
+    private val all: () -> List<BrowserWidget> = { services.widgets(TYPE).filterIsInstance<BrowserWidget>() }
     override val lifecycle = WidgetLifecycleRegistration.multiple(
         BrowserWidget::class, BrowserWidgetState.Codec,
         capture = ::capture,
@@ -119,7 +119,7 @@ class BrowserPlugin(
         url: String? = null,
     ): BrowserWidget? {
         val widget = build(x, y, width, height) ?: return null
-        services.open(BrowserPlugin.TYPE) { widget }
+        services.open(TYPE) { widget }
         url?.let { widget.getWebView()?.loadUrl(it) }
         if (fullscreen) widget.toggleFullscreen()
         if (focus) widget.setFocused(true)
@@ -127,7 +127,7 @@ class BrowserPlugin(
     }
 
     private fun reopenClosed(): BrowserWidget? = services.runPersistentMutation(changed = { it != null }) {
-        (services.openClosedTemplate(BrowserPlugin.TYPE) as? BrowserWidget)?.also { browser ->
+        (services.openClosedTemplate(TYPE) as? BrowserWidget)?.also { browser ->
             if (!browser.isMinimized) browser.setFocused(true)
         }
     }

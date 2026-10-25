@@ -80,7 +80,7 @@ class VideoPlugin(
         val y = ((services.viewportHeight - 220f) / 2f).coerceAtLeast(0f)
         val widget = factory.create(uri, displayName, x, y)
         services.runPersistentMutation {
-            services.open(VideoPlugin.TYPE) { widget }
+            services.open(TYPE) { widget }
             widget.toggleFullscreen()
         }
     }

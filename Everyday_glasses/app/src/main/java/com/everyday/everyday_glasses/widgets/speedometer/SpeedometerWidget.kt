@@ -232,7 +232,7 @@ class SpeedometerWidget(
 class SpeedometerPlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
-    private val current: () -> SpeedometerWidget? = { services.singleton(SpeedometerPlugin.TYPE) as? SpeedometerWidget }
+    private val current: () -> SpeedometerWidget? = { services.singleton(TYPE) as? SpeedometerWidget }
     private val showSettings: () -> Unit = { services.settings.showSpeedometerSettingsMenu() }
     private val dismissSettings: () -> Unit = { services.settings.dismissSpeedometerSettingsMenu() }
     private val forceVisibleWhenIdle: () -> Boolean = { services.settings.getSpeedVisibilityThreshold() <= 0f }
