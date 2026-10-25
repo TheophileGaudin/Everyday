@@ -221,7 +221,7 @@ object DashboardPersistence {
     private fun imagePaths(dashboard: WidgetDocument.PersistedDashboard): List<String> =
         dashboard.widgets.mapNotNull { record ->
             if (record.type != WidgetTypeId.IMAGE) return@mapNotNull null
-            ImageWidgetState.Codec.decode(record.state)?.imagePath
+            ImageWidgetState.decode(record.state)?.imagePath
         }
 
     fun listDashboardLayouts(context: Context): List<WidgetDocument.PersistedDashboardLayoutRecord> {
