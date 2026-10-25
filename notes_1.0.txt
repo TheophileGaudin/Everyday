@@ -10,6 +10,10 @@ Added turn by turn navigation in map widget
 Added POI control settings in map widget
 Added RSS feed control settings in news widget
 
+Bugfix
+
+Added map data to the refresh button so any timeout can be exposed as an error message here.
+
 Efficiency optimizations
 
 Tiered binocular update notifications
@@ -42,3 +46,8 @@ Optimize Everyday_glasses/app/src/main/java/com/everyday/everyday_glasses/widget
 Also inspect WidgetContainer.onDraw() and binocular rendering: cursor/hover updates redraw the dashboard, including the map. Aim to redraw the cursor independently and avoid map invalidations while minimized.
 ADB profiling implicated map drawing and path/texture churn; minimizing the map noticeably improved responsiveness. Validate with cursor movement before and after map data loads.
 
+______
+
+Improvements as to what gets displayed on hover: 
+
+it is very confusing. Whatever widget is under another widget should not be receiving updates when the cursor hovers both. Only the widget on top should update.
