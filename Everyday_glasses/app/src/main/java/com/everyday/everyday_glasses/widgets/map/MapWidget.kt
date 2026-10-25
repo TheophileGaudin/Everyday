@@ -17,7 +17,6 @@ import androidx.core.graphics.withClip
 import com.everyday.everyday_glasses.interaction.user_input.TextEditAction
 import com.everyday.everyday_glasses.interaction.user_input.TextZone
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
-import com.everyday.everyday_glasses.runtime.MapWidgetListener
 import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 import com.everyday.everyday_glasses.ui.components.KeyboardOverlayController
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
@@ -34,10 +33,10 @@ import com.everyday.everyday_glasses.widgets.map.backend.GeocodingFailureKind
 import com.everyday.everyday_glasses.widgets.map.backend.GeocodingRanker
 import com.everyday.everyday_glasses.widgets.map.backend.GeocodingResolution
 import com.everyday.everyday_glasses.widgets.map.backend.GlassesDestinationSearchCoordinator
-import com.everyday.everyday_glasses.widgets.map.backend.GlassesDestinationSearchTransport
+import com.everyday.everyday_glasses.connectivity.GlassesDestinationSearchTransport
 import com.everyday.everyday_glasses.widgets.map.backend.GlassesPhoneRoutingCoordinator
 import com.everyday.everyday_glasses.widgets.map.backend.GlassesRouteFallbackReason
-import com.everyday.everyday_glasses.widgets.map.backend.GlassesRouteTransport
+import com.everyday.everyday_glasses.connectivity.GlassesRouteTransport
 import com.everyday.everyday_glasses.widgets.map.backend.GroundProjection
 import com.everyday.everyday_glasses.widgets.map.backend.LocalWalkingNavigationService
 import com.everyday.everyday_glasses.widgets.map.backend.MapGeoPoint
@@ -2840,4 +2839,11 @@ internal fun compassRelativeBearingDeg(absoluteBearingDeg: Float, headingDeg: Fl
     var relative = (absoluteBearingDeg - headingDeg) % 360f
     if (relative < 0f) relative += 360f
     return relative
+}
+
+interface MapWidgetListener {
+    fun onMapDataRequested(point: MapGeoPoint, config: PoiDisplayConfig) = Unit
+    fun onAddressFocusChanged(focused: Boolean) = Unit
+    fun onNavigationResult(result: NavigationOperationResult) = Unit
+    fun onStopNavigationRequested() = Unit
 }

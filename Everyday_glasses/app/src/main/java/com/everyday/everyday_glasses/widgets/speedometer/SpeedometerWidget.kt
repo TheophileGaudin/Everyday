@@ -27,6 +27,7 @@ import com.everyday.everyday_glasses.runtime.WidgetMenu
 import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import org.json.JSONObject
+import com.everyday.everyday_glasses.settings.SpeedUnit
 
 /**
  * Speedometer widget that displays movement speed from local or phone location updates.
@@ -42,17 +43,6 @@ class SpeedometerWidget(
     width: Float,
     height: Float
 ) : BaseWidget(SpeedometerPlugin.TYPE, x, y, width, height) {
-
-    enum class SpeedUnit(val code: String, val label: String) {
-        KMH("kmh", "km/h"),
-        MPH("mph", "mph");
-
-        companion object {
-            fun fromCode(code: String?): SpeedUnit {
-                return SpeedUnit.entries.firstOrNull { it.code.equals(code, ignoreCase = true) } ?: KMH
-            }
-        }
-    }
 
     override val minimizeLabel: String = "V"
     override val minWidth: Float = MIN_WIDGET_SIZE
@@ -236,9 +226,28 @@ class SpeedometerPlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
     private val current: () -> SpeedometerWidget? = { services.singleton(TYPE) as? SpeedometerWidget }
-    private val showSettings: () -> Unit = { services.settings.showSpeedometerSettingsMenu() }
-    private val dismissSettings: () -> Unit = { services.settings.dismissSpeedometerSettingsMenu() }
-    private val forceVisibleWhenIdle: () -> Boolean = { services.settings.getSpeedVisibilityThreshold() <= 0f }
+    private val threshold: Float
+        get() = services.appData.latest(AppChannels.speedVisibilityThreshold) ?: DEFAULT_VISIBILITY_THRESHOLD_KMH
+    private val forceVisibleWhenIdle: () -> Boolean = { threshold <= 0f }
+
+    /** The settings panel (the visibility threshold), created the first time it's asked for. */
+    private var settingsMenu: SpeedometerSettingsMenu? = null
+    private val showSettings: () -> Unit = {
+        val menu = settingsMenu ?: SpeedometerSettingsMenu(services.viewportWidth.toFloat(), services.viewportHeight.toFloat()).apply {
+            setSpeedUnit(services.units.effectiveSpeedUnit())
+            listener = object : SpeedometerSettingsMenu.Listener {
+                override fun onThresholdChanged(threshold: Float) {
+                    if (this@SpeedometerPlugin.threshold != threshold) services.host?.setSpeedVisibilityThreshold(threshold)
+                    services.notifyTransientChange()
+                }
+                override fun onDismissed() = services.notifyTransientChange()
+            }
+        }.also { settingsMenu = it; services.addOverlay(it) }
+        menu.setThreshold(threshold, notify = false)
+        menu.show()
+        services.notifyTransientChange()
+    }
+    private val dismissSettings: () -> Unit = { settingsMenu?.dismiss() }
     // The last speed received, so that a speedometer opened later shows it right away.
     private val latest: SpeedState get() = services.appData.latest(AppChannels.speed) ?: NO_SPEED
 
@@ -252,7 +261,15 @@ class SpeedometerPlugin(
                 if (changed && !services.isDisplayOff) services.notifyTransientChange()
             }
         }
-        services.appData.subscribe(AppChannels.unitsChanged) { current()?.setUnit(services.units.effectiveSpeedUnit()) }
+        services.appData.subscribe(AppChannels.unitsChanged) {
+            current()?.setUnit(services.units.effectiveSpeedUnit())
+            settingsMenu?.setSpeedUnit(services.units.effectiveSpeedUnit())
+        }
+        services.appData.subscribe(AppChannels.speedVisibilityThreshold) { kmh ->
+            settingsMenu?.setThreshold(kmh, notify = false)
+            val changed = current()?.setForceVisibleWhenIdle(kmh <= 0f) == true
+            if (changed && !services.isDisplayOff) services.notifyTransientChange()
+        }
     }
 
     override val lifecycle = WidgetLifecycleRegistration.singleton(
@@ -312,6 +329,8 @@ class SpeedometerPlugin(
         )
         override val codec get() = SpeedometerWidgetState.Codec
         override fun create(context: WidgetContext) = SpeedometerPlugin(context)
+        /** Until the app publishes the saved threshold. */
+        private const val DEFAULT_VISIBILITY_THRESHOLD_KMH = 1f
         override val commands = listOf(
             WidgetCommand(
                 AppCommandDefinition(

@@ -5,8 +5,6 @@ import android.net.wifi.p2p.WifiP2pDevice
 import android.util.Log
 import com.everyday.everyday_glasses.auth_permissions.GoogleAccountSummary
 import com.everyday.everyday_glasses.auth_permissions.GooglePhoneAuthStatus
-import com.everyday.everyday_glasses.widgets.map.backend.GlassesDestinationSearchTransport
-import com.everyday.everyday_glasses.widgets.map.backend.GlassesRouteTransport
 import com.everyday.shared.sync.SubtitleControl
 import com.everyday.shared.sync.SubtitleStatus
 import com.everyday.shared.sync.SubtitleTranscript
@@ -525,4 +523,16 @@ class PhoneConnectionCoordinator(
         }
     }
 
+}
+
+interface GlassesRouteTransport {
+    fun isConnected(): Boolean
+    fun sendRouteRequest(request: RouteTransportRequest): Boolean
+    fun sendRouteCancellation(cancellation: RouteTransportCancellation): Boolean
+}
+
+interface GlassesDestinationSearchTransport {
+    fun isConnected(): Boolean
+    fun sendDestinationSearchRequest(request: DestinationSearchRequest): Boolean
+    fun sendDestinationSearchCancellation(cancellation: DestinationSearchCancellation): Boolean
 }

@@ -1,5 +1,6 @@
 package com.everyday.everyday_glasses.widgets.map.backend
 
+import com.everyday.everyday_glasses.connectivity.GlassesRouteTransport
 import com.everyday.shared.transport.RouteTransportCancellation
 import com.everyday.shared.transport.RouteTransportError
 import com.everyday.shared.transport.RouteTransportErrorCode
@@ -9,12 +10,6 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
-
-interface GlassesRouteTransport {
-    fun isConnected(): Boolean
-    fun sendRouteRequest(request: RouteTransportRequest): Boolean
-    fun sendRouteCancellation(cancellation: RouteTransportCancellation): Boolean
-}
 
 enum class GlassesRouteFallbackReason {
     NOT_CONNECTED,

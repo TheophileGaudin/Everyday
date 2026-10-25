@@ -1,12 +1,12 @@
 package com.everyday.everyday_glasses.runtime
 
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.PointF
 import android.view.View
 import android.view.ViewGroup
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
 import com.everyday.everyday_glasses.persistence.WidgetDocument
-import com.everyday.everyday_glasses.settings.SettingsController
 import com.everyday.everyday_glasses.settings.UnitSettings
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.shared.sync.SubtitleControl
@@ -36,8 +36,24 @@ interface WidgetPlugin {
     /** How the dashboard opens, restores, saves and closes this type's widgets. */
     val lifecycle: WidgetLifecycleRegistration<out BaseWidget, out Any>
 
-    /** Runs one of this type's [WidgetType.commands]; false when [commandId] isn't one of them, or it failed. */
     fun runCommand(commandId: String, arguments: AppCommandArguments): Boolean = false
+
+    /** The dashboard is going away: release what the plugin itself holds (threads, files). Its widgets are closed separately. */
+    fun release() = Unit
+}
+
+/**
+ * A panel a plugin shows over the dashboard (the speedometer's settings), registered with
+ * [WidgetContext.addOverlay]. While it's visible, it's modal: it takes every press, move and tap.
+ */
+interface DashboardOverlay {
+    val isVisible: Boolean
+    fun draw(canvas: Canvas)
+    fun onDown(x: Float, y: Float): Boolean
+    fun onMove(x: Float, y: Float): Boolean
+    fun onUp(): Boolean
+    fun onTap(x: Float, y: Float): Boolean
+    fun dismiss()
 }
 
 /**
@@ -92,9 +108,6 @@ interface WidgetContext {
 
     /** Runs code on the main thread, from the assistant's worker thread for example. */
     val ui: UiThreadDispatcher
-
-    /** The settings screens. For now only the speedometer uses it, for its settings menu (WP11 moves that into its package). */
-    val settings: SettingsController
 
     /** The widget of the single-instance [type] on the dashboard, if there is one. */
     fun singleton(type: WidgetTypeId): BaseWidget?
@@ -160,6 +173,12 @@ interface WidgetContext {
     /** A change that is saved: the dashboard is written soon after. */
     fun notifyPersistentChange()
 
+    /** Shows [overlay] over the dashboard whenever it's visible; see [DashboardOverlay]. */
+    fun addOverlay(overlay: DashboardOverlay)
+
+    /** Another type's plugin, for a family of types that work together (the file picker opens images, videos and PDFs). */
+    fun plugin(type: WidgetTypeId): WidgetPlugin
+
     /** [widget] took or gave up the keyboard by itself (the map's address search): bring it forward and tell the phone. */
     fun onKeyFocusChanged(widget: BaseWidget, focused: Boolean)
 
@@ -203,4 +222,6 @@ interface WidgetHost {
     /** False when the phone didn't take the request. */
     fun requestSubtitleControl(control: SubtitleControl): Boolean
     fun toggleAssistantVoice()
+    /** Sets the speed below which the speedometer hides; the app saves it and publishes it on [AppChannels.speedVisibilityThreshold]. */
+    fun setSpeedVisibilityThreshold(thresholdKmh: Float)
 }

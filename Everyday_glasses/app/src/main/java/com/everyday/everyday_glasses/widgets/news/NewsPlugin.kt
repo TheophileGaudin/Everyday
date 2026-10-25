@@ -12,7 +12,7 @@ import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.AppQueries
-import com.everyday.everyday_glasses.runtime.NewsWidgetListener
+import com.everyday.everyday_glasses.widgets.news.NewsWidgetListener
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
 import com.everyday.everyday_glasses.runtime.WidgetCommand
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
@@ -91,6 +91,7 @@ internal class NewsPlugin(
     init {
         services.appData.subscribe(AppChannels.place) { place -> currentWidget()?.setCountryCode(place.countryCode) }
         services.appData.subscribe(AppChannels.news, ::applySnapshot)
+        services.appData.subscribe(AppChannels.headUpWake) { onHeadUpWake() }
         services.appData.subscribe(AppChannels.newsError) { message ->
             services.withTransientChanges {
                 currentWidget()?.applyError(message)

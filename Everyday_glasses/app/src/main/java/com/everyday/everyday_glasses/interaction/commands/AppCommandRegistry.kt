@@ -185,11 +185,6 @@ class AppCommandRegistry(private val savedLayoutNames: () -> List<String> = { em
 
     private fun layoutCommandId(name: String) = "$LAYOUT_PREFIX$name"
 
-    private fun isSafeUrl(value: String): Boolean = runCatching {
-        val uri = URI(value.trim())
-        uri.isAbsolute && uri.host != null && uri.scheme.lowercase() in setOf("http", "https")
-    }.getOrDefault(false)
-
     private fun definition(
         id: String,
         label: String,
@@ -203,5 +198,11 @@ class AppCommandRegistry(private val savedLayoutNames: () -> List<String> = { em
     companion object {
         const val MAX_LEMON_COMMANDS = 10
         private const val LAYOUT_PREFIX = "layout:"
+
+        /** An absolute http or https address: what Open URL accepts, from the menu, the assistant or the phone. */
+        fun isSafeUrl(value: String): Boolean = runCatching {
+            val uri = URI(value.trim())
+            uri.isAbsolute && uri.host != null && uri.scheme.lowercase() in setOf("http", "https")
+        }.getOrDefault(false)
     }
 }

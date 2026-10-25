@@ -11,21 +11,16 @@ import com.everyday.everyday_glasses.interaction.assistant.AssistantVoiceHoverCo
 import com.everyday.everyday_glasses.ui.hover_controls.BaseHoverControl
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.ui.components.DashboardSettings
-import com.everyday.everyday_glasses.runtime.GeminiSettingsListener
 import com.everyday.everyday_glasses.auth_permissions.GoogleAuthState
 import com.everyday.everyday_glasses.headup_wake.HeadUpWakeManager
 import com.everyday.everyday_glasses.ui.hover_controls.HoverControlsLayoutEditor
 import com.everyday.everyday_glasses.ui.components.ShortcutsSettingsMenu
-import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerSettingsMenu
-import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidget
 import com.everyday.shared.command.AppCommandInvocation
 
 class SettingsController(
     private val resources: Resources,
-    defaultSpeedVisibilityThresholdKmh: Float,
     private val notifyTransientContentChanged: () -> Unit,
     private val notifyPersistentContentChanged: () -> Unit,
-    private val setSpeedometerForceVisibleWhenIdle: (Boolean) -> Boolean,
     private val isSmartAlignmentEnabled: () -> Boolean,
     private val setSmartAlignmentEnabled: (Boolean) -> Unit,
     private val notifyBrightnessChanged: (Float) -> Unit,
@@ -36,7 +31,6 @@ class SettingsController(
     private val notifyAngleThresholdChanged: (Float) -> Unit,
     private val notifyHeadsUpEnabledChanged: (Boolean) -> Unit,
     private val notifySmartAlignmentChanged: (Boolean) -> Unit,
-    private val notifySpeedVisibilityThresholdChanged: (Float) -> Unit,
     private val notifyUnitSystemModeChanged: (UnitSystemMode) -> Unit,
     private val connectGoogle: () -> Unit,
     private val grantCalendarAccess: () -> Unit,
@@ -51,7 +45,6 @@ class SettingsController(
     }
 
     private var dashboardSettings: DashboardSettings? = null
-    private var speedometerSettingsMenu: SpeedometerSettingsMenu? = null
     private var hoverControlsLayoutEditor: HoverControlsLayoutEditor? = null
     private var hoverControlPlacements: List<DashboardPersistence.HoverControlPlacementState>? = null
     private var hasHoverControlPlacements = false
@@ -72,9 +65,7 @@ class SettingsController(
     private var assistantModels: List<AssistantModel> = emptyList()
     private var assistantDetail: String = "Paste an API key to enable voice"
     var geminiListener: GeminiSettingsListener? = null
-    private var speedVisibilityThresholdKmh = defaultSpeedVisibilityThresholdKmh
     private var unitSystemMode = UnitSystemMode.AUTO
-    private var speedUnit = SpeedometerWidget.SpeedUnit.KMH
 
     fun createHoverControlsLayoutEditor(
         screenWidth: Float,
@@ -187,27 +178,10 @@ class SettingsController(
         return true
     }
 
-    fun createSpeedometerSettingsMenu(screenWidth: Float, screenHeight: Float) {
+    /** The dashboard's size, for the menus opened later (the shortcuts menu). */
+    fun onScreenSizeChanged(screenWidth: Float, screenHeight: Float) {
         lastScreenWidth = screenWidth
         lastScreenHeight = screenHeight
-        speedometerSettingsMenu = SpeedometerSettingsMenu(screenWidth, screenHeight).apply {
-            setThreshold(speedVisibilityThresholdKmh, notify = false)
-            setSpeedUnit(speedUnit)
-            listener = object : SpeedometerSettingsMenu.Listener {
-                override fun onThresholdChanged(threshold: Float) {
-                    if (speedVisibilityThresholdKmh != threshold) {
-                        speedVisibilityThresholdKmh = threshold
-                        setSpeedometerForceVisibleWhenIdle(speedVisibilityThresholdKmh <= 0f)
-                        notifySpeedVisibilityThresholdChanged(threshold)
-                    }
-                    notifyTransientContentChanged()
-                }
-
-                override fun onDismissed() {
-                    notifyTransientContentChanged()
-                }
-            }
-        }
     }
 
     fun toggleDashboardSettings(screenWidth: Float, screenHeight: Float) {
@@ -221,28 +195,15 @@ class SettingsController(
         notifyTransientContentChanged()
     }
 
-    fun showSpeedometerSettingsMenu() {
-        speedometerSettingsMenu?.let { menu ->
-            menu.setThreshold(speedVisibilityThresholdKmh, notify = false)
-            menu.show()
-            notifyTransientContentChanged()
-        }
-    }
-
-    fun dismissSpeedometerSettingsMenu() {
-        speedometerSettingsMenu?.dismiss()
-    }
-
     fun dismissAll() {
         dashboardSettings?.dismiss()
-        speedometerSettingsMenu?.dismiss()
+        dashboardSettings?.dismiss()
         hoverControlsLayoutEditor?.dismiss()
         shortcutsSettingsMenu?.dismiss()
     }
 
     fun draw(canvas: Canvas) {
         dashboardSettings?.draw(canvas)
-        speedometerSettingsMenu?.draw(canvas)
         shortcutsSettingsMenu?.draw(canvas)
     }
 
@@ -251,8 +212,6 @@ class SettingsController(
     fun isShortcutsSettingsMenuVisible(): Boolean = shortcutsSettingsMenu?.isVisible == true
 
     fun isDashboardSettingsVisible(): Boolean = dashboardSettings?.isVisible == true
-
-    fun isSpeedometerSettingsMenuVisible(): Boolean = speedometerSettingsMenu?.isVisible == true
 
     fun showShortcutsSettingsMenu() {
         val screenWidth = lastScreenWidth.takeIf { it > 0f } ?: return
@@ -311,36 +270,6 @@ class SettingsController(
         return true
     }
 
-
-    fun handleSpeedometerDown(x: Float, y: Float): Boolean {
-        val menu = speedometerSettingsMenu ?: return false
-        if (!menu.isVisible) return false
-        menu.onDown(x, y)
-        notifyTransientContentChanged()
-        return true
-    }
-
-    fun handleSpeedometerMove(x: Float, y: Float): Boolean {
-        val menu = speedometerSettingsMenu ?: return false
-        if (!menu.isVisible) return false
-        menu.onMove(x, y)
-        notifyTransientContentChanged()
-        return true
-    }
-
-    fun handleSpeedometerUp() {
-        val menu = speedometerSettingsMenu ?: return
-        if (!menu.isVisible) return
-        menu.onUp()
-        notifyTransientContentChanged()
-    }
-
-    fun handleSpeedometerTap(x: Float, y: Float): Boolean? {
-        val menu = speedometerSettingsMenu ?: return null
-        if (!menu.isVisible) return null
-        return menu.onTap(x, y)
-    }
-
     fun handleDashboardDown(x: Float, y: Float): Boolean {
         val settings = dashboardSettings ?: return false
         if (!settings.isVisible) return false
@@ -372,29 +301,9 @@ class SettingsController(
         return true
     }
 
-    fun setSpeedVisibilityThreshold(thresholdKmh: Float): Boolean {
-        val clamped = thresholdKmh.coerceIn(0f, 1f)
-        val forceVisibleChanged = setSpeedometerForceVisibleWhenIdle(clamped <= 0f)
-        if (speedVisibilityThresholdKmh == clamped) {
-            speedometerSettingsMenu?.setThreshold(clamped, notify = false)
-            return forceVisibleChanged
-        }
-        speedVisibilityThresholdKmh = clamped
-        speedometerSettingsMenu?.setThreshold(clamped, notify = false)
-        notifySpeedVisibilityThresholdChanged(clamped)
-        return forceVisibleChanged
-    }
-
-    fun getSpeedVisibilityThreshold(): Float = speedVisibilityThresholdKmh
-
     fun setUnitSystemMode(mode: UnitSystemMode) {
         unitSystemMode = mode
         dashboardSettings?.setUnitSystemMode(mode, notify = false)
-    }
-
-    fun setSpeedUnit(unit: SpeedometerWidget.SpeedUnit) {
-        speedUnit = unit
-        speedometerSettingsMenu?.setSpeedUnit(unit)
     }
 
     fun setBrightness(value: Float) {
@@ -606,5 +515,10 @@ interface DisplaySettingsHandler {
     fun applyHeadUpAngleThreshold(degrees: Float)
     fun applyHeadsUpEnabled(enabled: Boolean)
     fun applySmartAlignment(enabled: Boolean)
-    fun applySpeedVisibilityThreshold(threshold: Float)
+}
+
+interface GeminiSettingsListener {
+    fun onPasteGeminiKey() = Unit
+    fun onRemoveGeminiKey() = Unit
+    fun onSelectGeminiModel(model: String?) = Unit
 }

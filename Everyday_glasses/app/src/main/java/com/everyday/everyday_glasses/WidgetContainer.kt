@@ -11,62 +11,54 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
-import com.everyday.everyday_glasses.interaction.commands.AwaitingCommandUiDispatcher
-import com.everyday.everyday_glasses.interaction.user_input.TextEditingController
-import com.everyday.everyday_glasses.runtime.DashboardChangeCoordinator
-import com.everyday.everyday_glasses.settings.DisplaySettingsHandler
-import com.everyday.everyday_glasses.auth_permissions.GoogleAccountHandler
-import com.everyday.everyday_glasses.runtime.WidgetChangeListener
 import com.everyday.everyday_glasses._binocular.BinocularContentClass
+import com.everyday.everyday_glasses._threedof.DashboardTransform
+import com.everyday.everyday_glasses._threedof.ThreeDofOverlay
+import com.everyday.everyday_glasses.auth_permissions.GoogleAccountHandler
+import com.everyday.everyday_glasses.interaction.assistant.AssistantDashboardAccess
 import com.everyday.everyday_glasses.interaction.commands.AppCommandCapabilities
 import com.everyday.everyday_glasses.interaction.commands.AppCommandExecutor
+import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
 import com.everyday.everyday_glasses.interaction.commands.AppCommandResult
-import com.everyday.everyday_glasses.widgets._common.HandlerPresentationScheduler
-import com.everyday.everyday_glasses.widgets._common.WidgetPresenter
-import com.everyday.everyday_glasses.settings.SettingsController
+import com.everyday.everyday_glasses.interaction.commands.AwaitingCommandUiDispatcher
+import com.everyday.everyday_glasses.interaction.commands.CommandAvailability
+import com.everyday.everyday_glasses.interaction.user_input.CursorStabilizer
+import com.everyday.everyday_glasses.interaction.user_input.TextEditingController
 import com.everyday.everyday_glasses.interaction.user_input.UserInputActivity
 import com.everyday.everyday_glasses.interaction.user_input.UserInputKind
-import com.everyday.everyday_glasses.persistence.WidgetDocument
-import com.everyday.everyday_glasses.runtime.WidgetTypeId
-import com.everyday.everyday_glasses.widgets.browser.BrowserPlugin
-import com.everyday.everyday_glasses.ui.components.CloseConfirmationHandler
-import com.everyday.everyday_glasses.ui.components.ContextMenuHandler
-import com.everyday.everyday_glasses.interaction.user_input.CursorStabilizer
-import com.everyday.everyday_glasses.widgets._common.SmartAlignmentHelper
-import com.everyday.everyday_glasses.widgets._common.SmartAlignmentRenderer
-import com.everyday.everyday_glasses._threedof.DashboardTransform
-import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
-import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
-import com.everyday.everyday_glasses.interaction.commands.CommandAvailability
-import com.everyday.everyday_glasses.settings.UnitSettings
-import com.everyday.everyday_glasses.runtime.WakeSleepManager
-import com.everyday.everyday_glasses.persistence.WidgetLayoutManager
-import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
-import com.everyday.everyday_glasses.runtime.WidgetContext
-import com.everyday.everyday_glasses.runtime.WidgetPlugin
-import com.everyday.everyday_glasses.runtime.AppData
-import com.everyday.everyday_glasses.widgets.WidgetPlugins
-import com.everyday.everyday_glasses.runtime.WidgetHost
-import com.everyday.everyday_glasses.runtime.AppChannels
-import com.everyday.everyday_glasses.runtime.WidgetRegistry
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.LayoutLibrary
-import com.everyday.everyday_glasses.ui.hover_controls.HoverControlsLayer
-import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
+import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.persistence.WidgetLayoutManager
+import com.everyday.everyday_glasses.runtime.AppChannels
+import com.everyday.everyday_glasses.runtime.AppData
+import com.everyday.everyday_glasses.runtime.DashboardChangeCoordinator
+import com.everyday.everyday_glasses.runtime.DashboardOverlay
+import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
+import com.everyday.everyday_glasses.runtime.WakeSleepManager
+import com.everyday.everyday_glasses.runtime.WidgetChangeListener
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetHost
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleController
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
+import com.everyday.everyday_glasses.runtime.WidgetRegistry
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import com.everyday.everyday_glasses.settings.DisplaySettingsHandler
+import com.everyday.everyday_glasses.settings.SettingsController
+import com.everyday.everyday_glasses.settings.UnitSettings
+import com.everyday.everyday_glasses.ui.components.CloseConfirmationHandler
 import com.everyday.everyday_glasses.ui.components.CloseConfirmationPopup
 import com.everyday.everyday_glasses.ui.components.ContextMenu
-import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserPlugin
-import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidget
-import com.everyday.everyday_glasses.widgets.file_browser.ImagePlugin
-import com.everyday.everyday_glasses.widgets.file_browser.PdfPlugin
-import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidget
-import com.everyday.everyday_glasses._threedof.ThreeDofOverlay
-import com.everyday.everyday_glasses.interaction.assistant.AssistantDashboardAccess
-import com.everyday.everyday_glasses.widgets.file_browser.VideoPlugin
-import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
+import com.everyday.everyday_glasses.ui.components.ContextMenuHandler
+import com.everyday.everyday_glasses.ui.hover_controls.HoverControlsLayer
+import com.everyday.everyday_glasses.widgets.WidgetPlugins
+import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import com.everyday.everyday_glasses.widgets._common.HandlerPresentationScheduler
 import com.everyday.everyday_glasses.widgets._common.PresentationSpec
-import com.everyday.everyday_glasses.widgets.news.NewsPlugin
-import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerPlugin
+import com.everyday.everyday_glasses.widgets._common.SmartAlignmentHelper
+import com.everyday.everyday_glasses.widgets._common.SmartAlignmentRenderer
+import com.everyday.everyday_glasses.widgets._common.WidgetPresenter
 import com.everyday.shared.command.AppCommandArguments
 import com.everyday.shared.command.AppCommandInvocation
 import com.everyday.shared.command.CommandScrollDirection
@@ -117,7 +109,6 @@ class WidgetContainer @JvmOverloads constructor(
     enum class InputSource {GLASSES_TEMPLE, PHONE_TRACKPAD}
     companion object {
         private const val TAG                                    = "WidgetContainer"
-        private const val DEFAULT_SPEED_VISIBILITY_THRESHOLD_KMH = 1f
         private const val LONG_PRESS_DELAY_MS                    = 250L
         private const val LONG_PRESS_MAX_MOVEMENT                = 20f
         private const val PHONE_TRACKPAD_SENSITIVITY             = 1.5f // Phone trackpad sensitivity multiplier
@@ -210,7 +201,6 @@ class WidgetContainer @JvmOverloads constructor(
         override fun enterText(text: String)                                                                 = onKeyPress(text)
         override fun commandFinished()                                                                       = Unit // Each mutation owns its classified notification; a generic command completion hook would duplicate lifecycle, widget, and transient signals.
     }
-    fun executeOpenUrlCommand(address: String): AppCommandResult = executeCommand(AppCommandInvocation(BrowserPlugin.OPEN_URL.definition.id, AppCommandArguments.Url(address)))
 
     // ==================== Menus, popups and hover controls ====================
 
@@ -234,10 +224,6 @@ class WidgetContainer @JvmOverloads constructor(
         isModalOpen           = { isAnyModalOverHoverControls() },
     )
 
-    // ==================== Widget References ====================
-
-    private val speedometerWidget: SpeedometerWidget?     get() = registry.singletonAs(SpeedometerPlugin.TYPE)
-
     // ==================== Widget plugins ====================
 
     private var creationPosition: PointF? = null // Where the user last asked for a new widget (the context menu's spot)
@@ -257,7 +243,6 @@ class WidgetContainer @JvmOverloads constructor(
         override val rootLayout: ViewGroup?                                                       get()  = parent as? ViewGroup
         override val dashboardView: View                                                          get()  = this@WidgetContainer
         override val ui: UiThreadDispatcher                                                       get()  = assistantUiDispatcher
-        override val settings: SettingsController                                                 get()  = settingsController
         override fun singleton(type: WidgetTypeId): BaseWidget?                                          = registry.singleton(type)
         override fun widgets(type: WidgetTypeId): List<BaseWidget>                                       = registry.widgets(type)
         override fun stableId(widget: BaseWidget): String                                                = registry.stableId(widget)
@@ -276,6 +261,8 @@ class WidgetContainer @JvmOverloads constructor(
         override fun bringToFront(widget: BaseWidget)                                                    = bringWidgetToFront(widget)
         override fun clearKeyFocus()                                                                     { textEditing.clearAllFocus(); hideAssistantIme() }
         override fun notifyPersistentChange()                                                            = notifyPersistentContentChanged()
+        override fun addOverlay(overlay: DashboardOverlay)                                               { overlays += overlay }
+        override fun plugin(type: WidgetTypeId): WidgetPlugin                                            = pluginOf(type)
         override fun onKeyFocusChanged(widget: BaseWidget, focused: Boolean)                             {
             val beforeZOrder = widget.zOrder
             if (focused) bringWidgetToFront(widget)
@@ -291,16 +278,11 @@ class WidgetContainer @JvmOverloads constructor(
     }
     /** One plugin per widget type, built from the single list in [WidgetPlugins]. */
     private val plugins: List<WidgetPlugin> by lazy { WidgetPlugins.all.map { type -> type.create(widgetContext) } }
-    private inline fun <reified P : WidgetPlugin> plugin(): P = plugins.filterIsInstance<P>().single()
     private fun pluginOf(type: WidgetTypeId): WidgetPlugin = plugins.first { it.lifecycle.descriptor.type == type }
 
-    // The plugins the dashboard still calls by name, for the activity (WP11 moves these calls).
-    private val browserPlugin     by lazy { plugin<BrowserPlugin>() }
-    private val imagePlugin       by lazy { plugin<ImagePlugin>() }
-    private val videoPlugin       by lazy { plugin<VideoPlugin>() }
-    private val pdfPlugin         by lazy { plugin<PdfPlugin>() }
-    private val fileBrowserPlugin by lazy { plugin<FileBrowserPlugin>() }
-    private val newsPlugin        by lazy { plugin<NewsPlugin>() }
+    /** The panels plugins show over the dashboard ([DashboardOverlay]); an open one takes the input. */
+    private val overlays = mutableListOf<DashboardOverlay>()
+    private fun openOverlay(): DashboardOverlay? = overlays.lastOrNull { it.isVisible }
 
     // ==================== Widgets drag (resize, move, scroll) and hover ====================
 
@@ -322,10 +304,8 @@ class WidgetContainer @JvmOverloads constructor(
 
     val settingsController = SettingsController(
         resources                             = resources,
-        defaultSpeedVisibilityThresholdKmh    = DEFAULT_SPEED_VISIBILITY_THRESHOLD_KMH,
         notifyTransientContentChanged         = ::notifyTransientContentChanged,
         notifyPersistentContentChanged        = ::notifyPersistentContentChanged,
-        setSpeedometerForceVisibleWhenIdle    = { forceVisible -> speedometerWidget?.setForceVisibleWhenIdle(forceVisible) == true},
         isSmartAlignmentEnabled               = { smartAlignment.enabled },
         setSmartAlignmentEnabled              = { enabled   -> smartAlignment.enabled = enabled },
         notifyBrightnessChanged               = { value     -> displaySettingsHandler?.applyBrightness(value) },
@@ -336,7 +316,6 @@ class WidgetContainer @JvmOverloads constructor(
         notifyAngleThresholdChanged           = { degrees   -> displaySettingsHandler?.applyHeadUpAngleThreshold(degrees)},
         notifyHeadsUpEnabledChanged           = { enabled   -> displaySettingsHandler?.applyHeadsUpEnabled(enabled)},
         notifySmartAlignmentChanged           = { enabled   -> displaySettingsHandler?.applySmartAlignment(enabled)},
-        notifySpeedVisibilityThresholdChanged = { threshold -> displaySettingsHandler?.applySpeedVisibilityThreshold(threshold)},
         notifyUnitSystemModeChanged           = { mode      -> unitSettings.setGlobalMode(mode) },
         connectGoogle                         = { googleAccountHandler?.connectGoogleAccount() },
         grantCalendarAccess                   = { googleAccountHandler?.grantCalendarAccess() },
@@ -557,7 +536,7 @@ class WidgetContainer @JvmOverloads constructor(
             }
         }
         layoutManager.createOverlays(w.toFloat(), h.toFloat(), textEditing)
-        settingsController.createSpeedometerSettingsMenu(w.toFloat(), h.toFloat())
+        settingsController.onScreenSizeChanged(w.toFloat(), h.toFloat())
         settingsController.createHoverControlsLayoutEditor(w.toFloat(), h.toFloat(), hoverControlsLayer.controls) // Initialize the hover-controls layout editor. Constructing it snaps the controls to default grid cells, so this must run after hoverControlsLayer.onSizeChanged.
         layoutManager.createDefaultLayoutIfFirstRun()         // Only create the built-in Standard layout on first run. For returning users, the restoration code will create widgets based on saved state.
         updateFullscreenBounds()
@@ -571,6 +550,7 @@ class WidgetContainer @JvmOverloads constructor(
         closeConfirmationPopup?.draw(canvas)
         layoutManager.drawDeleteConfirmation(canvas)
         settingsController.draw(canvas)
+        overlays.forEach { if (it.isVisible) it.draw(canvas) }
         layoutManager.drawNamePrompt(canvas)
         textEditing.drawMenus(canvas)
         assistant.approvalOverlay.draw(canvas)
@@ -648,6 +628,7 @@ class WidgetContainer @JvmOverloads constructor(
         closeConfirmationPopup?.dismiss()
         layoutManager.dismissOverlays()
         settingsController.dismissAll()
+        overlays.forEach { it.dismiss() }
         cancelLongPress()
         hoverControlsLayer.cancelInteractions()
         textEditing.clearAllFocus()
@@ -692,7 +673,7 @@ class WidgetContainer @JvmOverloads constructor(
         if (settingsController.isHoverControlsLayoutEditorVisible()) return true
         if (settingsController.isShortcutsSettingsMenuVisible())     return true
         if (settingsController.isDashboardSettingsVisible())         return true
-        if (settingsController.isSpeedometerSettingsMenuVisible())   return true
+        if (openOverlay() != null)                                   return true
         if (screenModalWidget() != null)                             return true
         if (closeConfirmationPopup?.isVisible == true)               return true
         if (layoutManager.isDeleteConfirmationVisible)               return true
@@ -737,30 +718,13 @@ class WidgetContainer @JvmOverloads constructor(
     // ==================== Location and units ====================
 
     private fun applyEffectiveUnitSettings() {
-        settingsController.setSpeedUnit(unitSettings.effectiveSpeedUnit())
         settingsController.setUnitSystemMode(unitSettings.globalMode)
         appData.publish(AppChannels.unitsChanged, Unit)
     }
 
     //======================= Widget wiring ==============================
-    //file widgets
-    fun createImageWidget(path: String)                                                               = imagePlugin.open(path)
-    fun createVideoWidget(uri: android.net.Uri, displayName: String)                                  = videoPlugin.open(uri, displayName)
-    fun createPdfWidget(uri: android.net.Uri, displayName: String)                                    = pdfPlugin.open(uri, displayName)
-    fun createFileBrowserWidget(filter: FileBrowserWidget.FileFilter)                                 = fileBrowserPlugin.open(filter)
-    fun setFilePickedHandler(onPicked: (FileBrowserWidget.FileEntry) -> Unit)                         { fileBrowserPlugin.onPicked = onPicked }
 
-    //browser
     fun shouldApplyBrowserMinimumBrightness()         : Boolean = registry.allWidgets().any { it.requestsBrowserMinimumBrightness }
-    fun onTrimMemory(level: Int)                      = browserPlugin.onTrimMemory(level)
-    fun onLowMemory()                                 = browserPlugin.onLowMemory()
-    fun clearDebugWebViewData(profileSummary: String) = browserPlugin.clearDebugWebViewData(profileSummary)
-
-    //speedometer
-    fun setSpeedVisibilityThreshold(thresholdKmh: Float) {
-        val forceVisibleChanged = settingsController.setSpeedVisibilityThreshold(thresholdKmh)
-        if (forceVisibleChanged && displayState != WakeSleepManager.DisplayState.OFF) {notifyTransientContentChanged()}
-    }
 
     // ==================== Cursor state ====================
 
@@ -796,7 +760,7 @@ class WidgetContainer @JvmOverloads constructor(
         // Menus are NOT transformed (they stay head-locked like cursor)
         textEditing.formattingMenu?.let { menu -> if (menu.isVisible && menu.shouldScheduleLongPress(x, y)) { pendingFormattingMenuDrag = true; scheduleLongPress(); return } }
 
-        if (settingsController.handleSpeedometerDown(x, y)) return
+        openOverlay()?.let { overlay -> overlay.onDown(x, y); notifyTransientContentChanged(); return }
 
         // A widget panel that owns its drag gestures while open (the map's POI settings, even over
         // a fullscreen map) takes the press before normal widget and focus handling.
@@ -855,8 +819,10 @@ class WidgetContainer @JvmOverloads constructor(
             return Pair(cursorX, cursorY)
         }
 
-        // If SpeedometerSettings is open, treat it as modal and route movement to it.
-        if (settingsController.handleSpeedometerMove(cursorX, cursorY)) {
+        // An open plugin overlay (the speedometer's settings) is modal: it takes the movement.
+        openOverlay()?.let { overlay ->
+            overlay.onMove(cursorX, cursorY)
+            notifyTransientContentChanged()
             lastCursorX = cursorX; lastCursorY = cursorY
             return Pair(cursorX, cursorY)
         }
@@ -893,7 +859,7 @@ class WidgetContainer @JvmOverloads constructor(
         return Pair(cursorX, cursorY)
     }
     fun onCursorUp(x: Float, y: Float) {
-        settingsController.handleSpeedometerUp()
+        openOverlay()?.let { overlay -> overlay.onUp(); notifyTransientContentChanged() }
         settingsController.handleDashboardUp() // If DashboardSettings is open, end its interaction (e.g., stop slider drag).
         settingsController.handleHoverControlsLayoutEditorUp() // If the hover-controls layout editor is open, finalize any drag.
         settingsController.handleShortcutsSettingsMenuUp() // Shortcuts settings menu.
@@ -1043,7 +1009,7 @@ class WidgetContainer @JvmOverloads constructor(
         settingsController.handleHoverControlsLayoutEditorTap(x, y)?.let { return it }
         settingsController.handleShortcutsSettingsMenuTap(x, y)?.let { return it }
         if (contextMenu?.isVisible == true) { return dispatchContextMenuAction { contextMenu?.onTap(x, y) ?: false }}
-        settingsController.handleSpeedometerTap(x, y)?.let { return it }
+        openOverlay()?.let { overlay -> return overlay.onTap(x, y) }
         val (cx, cy) = toContentSpace(x, y) // Transform to content space for widget hit testing
         if (consumeVisibleKeyboardTap(cx, cy)) return true
         if (hoverControlsLayer.onTap(cx, cy)) return true // Hover controls are above every widget, including fullscreen ones.
@@ -1313,7 +1279,7 @@ class WidgetContainer @JvmOverloads constructor(
     fun          cancelPresentationForUserInput(): Boolean  = presenter.cancelForUserInput()
     private fun  stableWidgetId(widget: BaseWidget): String = registry.stableId(widget)
     private fun  onWidgetRemoving(widget: BaseWidget)         {presenter.onWidgetRemoving(widget) ; if (activeWidget === widget) activeWidget = null} /** Shared cleanup for every closed widget, run while it still has its stable ID. */
-    fun          release()                                    {presenter.dismiss() ; withContentChangeSuppressed { lifecycleController.closeAll() }} /** Tearing the widgets down is not a dashboard change: it must not save over the dashboard the activity just saved. */
+    fun          release()                                    {presenter.dismiss() ; withContentChangeSuppressed { lifecycleController.closeAll() } ; plugins.forEach { it.release() }} /** Tearing the widgets down is not a dashboard change: it must not save over the dashboard the activity just saved. */
 
     // Assistant status and dashboard interaction
     fun          setAssistantStatus(status: AssistantStatus)  {hoverControlsLayer.setAssistantStatus(status); notifyTransientContentChanged()}
@@ -1370,7 +1336,6 @@ class WidgetContainer @JvmOverloads constructor(
             registry.forEachWidget { it.onResume() }
         }
     }
-    fun onHeadUpWake()              {newsPlugin.onHeadUpWake(); Log.d(TAG, "Head-up wake -> advance news item")}
     fun hasPinnedWidgets(): Boolean = registry.hasPinnedWidgets()
     fun isDisplayAwake():   Boolean = displayState == WakeSleepManager.DisplayState.WAKE
     private fun <T> withContentChangeSuppressed(action: () -> T): T = contentChanges.withNotificationsSuppressed(action) /** Discards callbacks produced by a temporary or restorative compound mutation. */

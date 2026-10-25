@@ -20,7 +20,6 @@ import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
-import com.everyday.everyday_glasses.runtime.SubtitleWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetCommand
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
@@ -648,4 +647,8 @@ data class SubtitleWidgetState(
                 )
             }
     }
+}
+
+interface SubtitleWidgetListener {
+    fun onSubtitleControlRequested(control: SubtitleControl) = Unit
 }

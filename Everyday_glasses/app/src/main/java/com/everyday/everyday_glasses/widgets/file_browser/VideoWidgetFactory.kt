@@ -11,7 +11,6 @@ import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseCommo
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
-import com.everyday.everyday_glasses.runtime.VideoWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration

@@ -1,4 +1,4 @@
-package com.everyday.everyday_glasses.widgets.calendar
+package com.everyday.everyday_glasses.connectivity
 
 import android.app.Activity
 import android.os.Handler

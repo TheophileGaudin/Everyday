@@ -10,6 +10,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.net.Uri
+import android.widget.Toast
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -18,7 +19,6 @@ import androidx.core.content.ContextCompat
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
-import com.everyday.everyday_glasses.runtime.FileBrowserWidgetListener
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
@@ -30,6 +30,7 @@ import java.io.File
 import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
 import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
+import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetCommand
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
@@ -1026,16 +1027,34 @@ class FileBrowserWidget(
 
 }
 /**
- * Opens the file picker, and brings it back with the saved dashboard. Picking a file hands it to
- * [onPicked] and closes the picker.
+ * Opens the file picker, and brings it back with the saved dashboard. Picking a file opens it (an
+ * image, a video or a PDF, through their plugins) and closes the picker. Also shows the images the
+ * phone sends.
  */
 class FileBrowserPlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
     private val context: Context get() = services.androidContext
 
-    /** What picking a file does. The file import sets it at startup, so a restored picker imports too. */
-    var onPicked: (FileBrowserWidget.FileEntry) -> Unit = {}
+    /** Opens what's picked, and the images the phone sends. */
+    private val importer = FileImportCoordinator(context, object : FileImportCallbacks {
+        override fun showFileBrowser(filter: FileBrowserWidget.FileFilter) = open(filter)
+        override fun createImageWidget(path: String) = (services.plugin(ImagePlugin.TYPE) as ImagePlugin).open(path)
+        override fun createVideoWidget(uri: Uri, displayName: String) =
+            (services.plugin(VideoPlugin.TYPE) as VideoPlugin).open(uri, displayName)
+        override fun createPdfWidget(uri: Uri, displayName: String) =
+            (services.plugin(PdfPlugin.TYPE) as PdfPlugin).open(uri, displayName)
+        override fun showFileImportError(error: FileImportError) {
+            Toast.makeText(context, error.userMessage, Toast.LENGTH_SHORT).show()
+        }
+    })
+
+    init {
+        services.appData.subscribe(AppChannels.fileAccessGranted) { importer.openFileBrowser() }
+        services.appData.subscribe(AppChannels.phoneImage) { image -> importer.importReceivedImage(image.data, image.fileName) }
+    }
+
+    override fun release() = importer.release()
 
     override val lifecycle = WidgetLifecycleRegistration.multiple(
         FileBrowserWidget::class, FileBrowserWidgetState.Codec,
@@ -1057,11 +1076,11 @@ class FileBrowserPlugin(
         services.host?.requestCursorCenter()
     }
 
-    /** For a new picker and a restored one alike: a pick goes to [onPicked], then the picker closes. */
+    /** For a new picker and a restored one alike: a pick is opened, then the picker closes. */
     private fun configure(picker: FileBrowserWidget) {
         picker.listener = object : FileBrowserWidgetListener {
             override fun onFileSelected(entry: FileBrowserWidget.FileEntry) {
-                onPicked(entry)
+                importer.importFileBrowserEntry(entry)
                 services.close(picker)
             }
         }
@@ -1153,4 +1172,8 @@ data class FileBrowserWidgetState(
                 )
             }
     }
+}
+
+interface FileBrowserWidgetListener {
+    fun onFileSelected(entry: FileBrowserWidget.FileEntry) = Unit
 }

@@ -6,12 +6,13 @@ import android.view.ViewGroup
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserRoutingHost
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentBrowserAdapter
 import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
+import com.everyday.everyday_glasses.interaction.commands.AppCommandRegistry
 import com.everyday.everyday_glasses.interaction.commands.CommandArgumentKind
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseCommonFields
 import com.everyday.everyday_glasses.persistence.WidgetDocument
-import com.everyday.everyday_glasses.runtime.BrowserWidgetListener
+import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.WidgetCommand
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
@@ -75,6 +76,15 @@ class BrowserPlugin(
         configure = ::configure,
         beforeRemove = BrowserWidget::releaseKeyFocus,
     )
+
+    init {
+        services.appData.subscribe(AppChannels.memoryTrimmed) { level -> onTrimMemory(level) }
+        services.appData.subscribe(AppChannels.lowMemory) { onLowMemory() }
+        services.appData.subscribe(AppChannels.debugClearWebViews) { profileSummary -> clearDebugWebViewData(profileSummary) }
+        services.appData.subscribe(AppChannels.phoneOpenAddress) { address ->
+            if (AppCommandRegistry.isSafeUrl(address)) openAddress(address)
+        }
+    }
 
     /** From the menu: reopens the last closed browser, or opens a new one that goes fullscreen. */
     fun openFromMenu() {
@@ -257,7 +267,7 @@ class BrowserPlugin(
             AppCommandDefinition("open:youtube", "Open: YouTube history", "YouTube", "Open YouTube history", shortcutEligible = true),
         )
         /** Also how the phone's "open this address" requests reach the browser ([com.everyday.everyday_glasses.WidgetContainer.executeOpenUrlCommand]). */
-        val OPEN_URL = WidgetCommand(
+        private val OPEN_URL = WidgetCommand(
             AppCommandDefinition("browser:open_url", "Open URL", "URL", "Open an HTTP or HTTPS URL", CommandArgumentKind.URL),
         )
         override val commands = listOf(CREATE, YOUTUBE_HISTORY, OPEN_URL)

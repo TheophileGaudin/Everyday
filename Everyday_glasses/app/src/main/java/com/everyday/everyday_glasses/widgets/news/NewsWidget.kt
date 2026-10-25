@@ -13,7 +13,6 @@ import android.util.Log
 import com.everyday.everyday_glasses.interaction.user_input.TextEditAction
 import com.everyday.everyday_glasses.interaction.user_input.TextZone
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
-import com.everyday.everyday_glasses.runtime.NewsWidgetListener
 import com.everyday.everyday_glasses.widgets._common.WidgetDataState
 import com.everyday.shared.sync.NewsArticle
 import com.everyday.shared.sync.NewsDataProvider
@@ -1296,4 +1295,15 @@ class NewsWidget(
         return currentIndex.coerceIn(0, newsItems.lastIndex)
     }
 
+}
+
+interface NewsWidgetListener {
+    fun onDataRequested(countryCode: String, force: Boolean, reason: String) = Unit
+    fun onSourceDataRequested(
+        sourceSpec: NewsSourceSpec,
+        countryCode: String,
+        force: Boolean,
+        reason: String,
+        completion: (Result<NewsSnapshot>) -> Unit
+    ) = Unit
 }

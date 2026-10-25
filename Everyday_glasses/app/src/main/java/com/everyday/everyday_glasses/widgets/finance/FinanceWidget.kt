@@ -8,11 +8,6 @@ import android.graphics.RectF
 import android.util.Log
 import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withClip
-import com.everyday.everyday_glasses.widgets.finance.FinanceTileSemanticState
-import com.everyday.everyday_glasses.widgets.finance.FinanceTileTarget
-import com.everyday.everyday_glasses.widgets.finance.FinanceTileTargetResolver
-import com.everyday.everyday_glasses.widgets.finance.FinanceWidgetSemanticState
-import com.everyday.everyday_glasses.runtime.FinanceWidgetListener
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.shared.sync.FinanceAssetType
 import com.everyday.shared.sync.FinanceCandle
@@ -1150,4 +1145,13 @@ class FinanceWidget(
             "done" -> "Done"
             else -> id
         }
+}
+
+interface FinanceWidgetListener {
+    fun onDataRequested(
+        visibleConfigs: List<FinanceDashboardTileConfig>,
+        refreshTileIds: List<String>,
+        force: Boolean,
+        reason: String
+    ) = Unit
 }

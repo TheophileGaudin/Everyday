@@ -41,7 +41,6 @@ import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentFullscreenMode
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentPageSnapshot
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentScreenshot
-import com.everyday.everyday_glasses.runtime.BrowserWidgetListener
 import com.everyday.everyday_glasses.ui.components.GlassesKeyboardView
 import com.everyday.everyday_glasses.ui.components.KeyboardOverlayController
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
@@ -2952,4 +2951,9 @@ class BrowserWidget(
         // Base
         canvas.drawLine(cx - size * 0.8f, cy + size * 0.6f, cx + size * 0.8f, cy + size * 0.6f, paint)
     }
+}
+
+/** Browser events besides change notifications. */
+interface BrowserWidgetListener {
+    fun onKeyboardRequested(show: Boolean) = Unit
 }

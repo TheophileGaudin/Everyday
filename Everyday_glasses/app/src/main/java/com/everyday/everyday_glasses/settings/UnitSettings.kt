@@ -4,7 +4,6 @@ import android.content.Context
 import android.icu.util.LocaleData
 import android.icu.util.ULocale
 import android.os.Build
-import com.everyday.everyday_glasses.widgets.speedometer.SpeedometerWidget
 import java.util.Locale
 import androidx.core.content.edit
 
@@ -35,13 +34,13 @@ internal object UnitResolver {
     fun speedUnit(
         mode: UnitSystemMode,
         measurementSystem: LocationMeasurementSystem?,
-        override: SpeedometerWidget.SpeedUnit?
-    ): SpeedometerWidget.SpeedUnit = override ?: when (mode) {
-        UnitSystemMode.METRIC -> SpeedometerWidget.SpeedUnit.KMH
-        UnitSystemMode.IMPERIAL -> SpeedometerWidget.SpeedUnit.MPH
+        override: SpeedUnit?
+    ): SpeedUnit = override ?: when (mode) {
+        UnitSystemMode.METRIC -> SpeedUnit.KMH
+        UnitSystemMode.IMPERIAL -> SpeedUnit.MPH
         UnitSystemMode.AUTO -> when (measurementSystem) {
-            LocationMeasurementSystem.US, LocationMeasurementSystem.UK -> SpeedometerWidget.SpeedUnit.MPH
-            LocationMeasurementSystem.SI, null -> SpeedometerWidget.SpeedUnit.KMH
+            LocationMeasurementSystem.US, LocationMeasurementSystem.UK -> SpeedUnit.MPH
+            LocationMeasurementSystem.SI, null -> SpeedUnit.KMH
         }
     }
 
@@ -90,7 +89,7 @@ class UnitSettings(context: Context) {
 
     var globalMode: UnitSystemMode = UnitSystemMode.AUTO
         private set
-    private var speedOverride: SpeedometerWidget.SpeedUnit? = null
+    private var speedOverride: SpeedUnit? = null
     private var temperatureOverride: TemperatureUnit? = null
     private val sessionLocationCountry = SessionLocationCountry()
     val sessionLocationCountryCode: String?
@@ -98,11 +97,11 @@ class UnitSettings(context: Context) {
 
     init {
         globalMode = UnitSystemMode.fromCode(prefs.getString(KEY_UNIT_SYSTEM_MODE, null))
-        speedOverride = prefs.getString(KEY_SPEED_OVERRIDE, null)?.let(SpeedometerWidget.SpeedUnit::fromCode)
+        speedOverride = prefs.getString(KEY_SPEED_OVERRIDE, null)?.let(SpeedUnit::fromCode)
         temperatureOverride = TemperatureUnit.fromCode(prefs.getString(KEY_TEMPERATURE_OVERRIDE, null))
     }
 
-    fun effectiveSpeedUnit(): SpeedometerWidget.SpeedUnit =
+    fun effectiveSpeedUnit(): SpeedUnit =
         UnitResolver.speedUnit(globalMode, currentMeasurementSystem(), speedOverride)
 
     fun effectiveTemperatureUnit(): TemperatureUnit =
@@ -121,10 +120,10 @@ class UnitSettings(context: Context) {
     }
 
     fun toggleSpeedOverride() {
-        speedOverride = if (effectiveSpeedUnit() == SpeedometerWidget.SpeedUnit.KMH) {
-            SpeedometerWidget.SpeedUnit.MPH
+        speedOverride = if (effectiveSpeedUnit() == SpeedUnit.KMH) {
+            SpeedUnit.MPH
         } else {
-            SpeedometerWidget.SpeedUnit.KMH
+            SpeedUnit.KMH
         }
         prefs.edit { putString(KEY_SPEED_OVERRIDE, speedOverride!!.code) }
         onChanged?.invoke()
@@ -170,8 +169,8 @@ class UnitSettings(context: Context) {
 internal object UnitDisplayFormatter {
     private const val KMH_TO_MPH = 0.621371f
 
-    fun speedFromKmh(speedKmh: Float, unit: SpeedometerWidget.SpeedUnit): Float =
-        if (unit == SpeedometerWidget.SpeedUnit.KMH) speedKmh else speedKmh * KMH_TO_MPH
+    fun speedFromKmh(speedKmh: Float, unit: SpeedUnit): Float =
+        if (unit == SpeedUnit.KMH) speedKmh else speedKmh * KMH_TO_MPH
 
     fun temperatureFromCelsius(celsius: Double, unit: TemperatureUnit): Double =
         if (unit == TemperatureUnit.CELSIUS) celsius else celsius * 9.0 / 5.0 + 32.0
@@ -186,6 +185,20 @@ internal object UnitDisplayFormatter {
         return "$number${unit.label}"
     }
 
-    fun formatSpeedThreshold(thresholdKmh: Float, unit: SpeedometerWidget.SpeedUnit): String =
+    fun formatSpeedThreshold(thresholdKmh: Float, unit: SpeedUnit): String =
         String.format(Locale.ENGLISH, "%.2f %s", speedFromKmh(thresholdKmh, unit), unit.label)
+
+
+}
+
+/** The speedometer's unit; [UnitSettings] chooses it. */
+enum class SpeedUnit(val code: String, val label: String) {
+    KMH("kmh", "km/h"),
+    MPH("mph", "mph");
+
+    companion object {
+        fun fromCode(code: String?): SpeedUnit {
+            return SpeedUnit.entries.firstOrNull { it.code.equals(code, ignoreCase = true) } ?: KMH
+        }
+    }
 }

@@ -10,7 +10,6 @@ import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonF
 import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.AppChannels
 import com.everyday.everyday_glasses.runtime.AppQueries
-import com.everyday.everyday_glasses.runtime.FinanceWidgetListener
 import com.everyday.everyday_glasses.runtime.UiThreadDispatcher
 import com.everyday.everyday_glasses.runtime.WidgetCommand
 import com.everyday.everyday_glasses.runtime.WidgetContext

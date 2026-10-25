@@ -4,7 +4,9 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import com.everyday.everyday_glasses.settings.SpeedUnit
 import com.everyday.everyday_glasses.settings.UnitDisplayFormatter
+import com.everyday.everyday_glasses.runtime.DashboardOverlay
 import androidx.core.graphics.toColorInt
 
 /**
@@ -14,7 +16,7 @@ import androidx.core.graphics.toColorInt
 class SpeedometerSettingsMenu(
     private val screenWidth: Float,
     private val screenHeight: Float
-) {
+) : DashboardOverlay {
     /** Receives speedometer threshold changes and menu dismissal. */
     interface Listener {
         fun onThresholdChanged(threshold: Float) = Unit
@@ -33,13 +35,13 @@ class SpeedometerSettingsMenu(
         private const val DEFAULT_THRESHOLD = 0.5f
     }
 
-    var isVisible = false
+    override var isVisible = false
         private set
 
     var listener: Listener? = null
 
     private var thresholdValue = DEFAULT_THRESHOLD
-    private var speedUnit = SpeedometerWidget.SpeedUnit.KMH
+    private var speedUnit = SpeedUnit.KMH
     private var sliderDragging = false
 
     private val menuRect = RectF()
@@ -114,7 +116,7 @@ class SpeedometerSettingsMenu(
         sliderDragging = false
     }
 
-    fun dismiss() {
+    override fun dismiss() {
         if (!isVisible) return
         isVisible = false
         sliderDragging = false
@@ -128,11 +130,11 @@ class SpeedometerSettingsMenu(
         if (notify) listener?.onThresholdChanged(thresholdValue)
     }
 
-    fun setSpeedUnit(unit: SpeedometerWidget.SpeedUnit) {
+    fun setSpeedUnit(unit: SpeedUnit) {
         speedUnit = unit
     }
 
-    fun draw(canvas: Canvas) {
+    override fun draw(canvas: Canvas) {
         if (!isVisible) return
 
         canvas.drawRoundRect(menuRect, CORNER_RADIUS, CORNER_RADIUS, backgroundPaint)
@@ -160,7 +162,7 @@ class SpeedometerSettingsMenu(
         canvas.drawCircle(thumbX, trackY, THUMB_RADIUS, thumbPaint)
     }
 
-    fun onDown(x: Float, y: Float): Boolean {
+    override fun onDown(x: Float, y: Float): Boolean {
         if (!isVisible) return false
         if (closeButtonRect.contains(x, y)) return true
         if (expandedSliderRect().contains(x, y)) {
@@ -171,7 +173,7 @@ class SpeedometerSettingsMenu(
         return menuRect.contains(x, y)
     }
 
-    fun onMove(x: Float, y: Float): Boolean {
+    override fun onMove(x: Float, y: Float): Boolean {
         if (!isVisible) return false
         if (sliderDragging) {
             if (!expandedSliderRect().contains(x, y)) {
@@ -184,14 +186,14 @@ class SpeedometerSettingsMenu(
         return menuRect.contains(x, y)
     }
 
-    fun onUp(): Boolean {
+    override fun onUp(): Boolean {
         if (!isVisible) return false
         if (!sliderDragging) return false
         sliderDragging = false
         return true
     }
 
-    fun onTap(x: Float, y: Float): Boolean {
+    override fun onTap(x: Float, y: Float): Boolean {
         if (!isVisible) return false
 
         if (closeButtonRect.contains(x, y)) {

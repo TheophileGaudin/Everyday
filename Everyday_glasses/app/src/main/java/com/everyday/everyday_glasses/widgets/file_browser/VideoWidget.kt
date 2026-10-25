@@ -11,7 +11,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import com.everyday.everyday_glasses.runtime.VideoWidgetListener
 import com.everyday.everyday_glasses.runtime.WakeSleepManager
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets.file_browser.video_backend.VideoItem
@@ -257,4 +256,8 @@ class VideoWidget(
         (host.parent as? ViewGroup)?.removeView(host)
         listener = null
     }
+}
+
+interface VideoWidgetListener {
+    fun onPlaybackVisibilityChanged(active: Boolean) = Unit
 }

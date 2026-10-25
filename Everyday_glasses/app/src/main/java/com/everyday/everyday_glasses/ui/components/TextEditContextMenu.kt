@@ -1,11 +1,10 @@
-package com.everyday.everyday_glasses.widgets.text_editor
+package com.everyday.everyday_glasses.ui.components
 
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.util.Log
-import com.everyday.everyday_glasses.ui.components.TextEditCommandHandler
 import androidx.core.graphics.toColorInt
 
 /**

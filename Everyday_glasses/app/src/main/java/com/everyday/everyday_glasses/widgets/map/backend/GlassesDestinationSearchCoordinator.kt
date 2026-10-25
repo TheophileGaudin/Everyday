@@ -1,16 +1,11 @@
 package com.everyday.everyday_glasses.widgets.map.backend
 
+import com.everyday.everyday_glasses.connectivity.GlassesDestinationSearchTransport
 import com.everyday.shared.transport.*
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
-
-interface GlassesDestinationSearchTransport {
-    fun isConnected(): Boolean
-    fun sendDestinationSearchRequest(request: DestinationSearchRequest): Boolean
-    fun sendDestinationSearchCancellation(cancellation: DestinationSearchCancellation): Boolean
-}
 
 enum class DestinationSearchFallbackReason { NOT_CONNECTED, SEND_FAILURE, HEDGE, PHONE_ERROR }
 

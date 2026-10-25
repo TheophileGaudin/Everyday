@@ -18,8 +18,8 @@ import androidx.core.graphics.withClip
 import com.everyday.everyday_glasses.ui.components.TextEditCommandHandler
 import com.everyday.everyday_glasses.ui.components.TextFormattingHandler
 import com.everyday.everyday_glasses.widgets._common.WidgetTheme
-import com.everyday.everyday_glasses.widgets.text_editor.FormattingMenu
-import com.everyday.everyday_glasses.widgets.text_editor.TextEditContextMenu
+import com.everyday.everyday_glasses.ui.components.FormattingMenu
+import com.everyday.everyday_glasses.ui.components.TextEditContextMenu
 
 // ==================== Text zone contract ====================
 

@@ -3,7 +3,6 @@ package com.everyday.everyday_glasses
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.graphics.Color
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Looper
@@ -13,10 +12,32 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.everyday.everyday_glasses._binocular.BinocularContentClass
+import com.everyday.everyday_glasses._binocular.BinocularUpdateType
+import com.everyday.everyday_glasses._binocular.BinocularView
+import com.everyday.everyday_glasses._binocular.DisplayConfig
+import com.everyday.everyday_glasses._threedof.ThreeDofManager
+import com.everyday.everyday_glasses._threedof.ThreeDofObserver
 import com.everyday.everyday_glasses.auth_permissions.DefaultNetworkStatusProvider
-import com.everyday.everyday_glasses.widgets.calendar.GoogleCalendarClient
+import com.everyday.everyday_glasses.auth_permissions.GoogleAccountHandler
+import com.everyday.everyday_glasses.auth_permissions.GoogleAccountSummary
+import com.everyday.everyday_glasses.auth_permissions.GoogleAuthCoordinator
+import com.everyday.everyday_glasses.auth_permissions.GoogleAuthPreferencesStore
+import com.everyday.everyday_glasses.auth_permissions.GoogleAuthState
+import com.everyday.everyday_glasses.auth_permissions.GooglePhoneAuthStatus
+import com.everyday.everyday_glasses.auth_permissions.GooglePhoneFallbackBridge
+import com.everyday.everyday_glasses.auth_permissions.PermissionCoordinator
+import com.everyday.everyday_glasses.auth_permissions.PermissionCoordinatorCallbacks
+import com.everyday.everyday_glasses.connectivity.GlassesDataSyncCoordinator
+import com.everyday.everyday_glasses.connectivity.GoogleCalendarClient
+import com.everyday.everyday_glasses.connectivity.PhoneConnectionCallbacks
+import com.everyday.everyday_glasses.connectivity.PhoneConnectionCoordinator
+import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
+import com.everyday.everyday_glasses.headup_wake.GlassesService
+import com.everyday.everyday_glasses.headup_wake.HeadUpSessionController
+import com.everyday.everyday_glasses.headup_wake.HeadUpWakeManager
+import com.everyday.everyday_glasses.headup_wake.WakeRequestListener
 import com.everyday.everyday_glasses.interaction.assistant.AssistantAudioRecorder
 import com.everyday.everyday_glasses.interaction.assistant.AssistantConfiguration
 import com.everyday.everyday_glasses.interaction.assistant.AssistantModel
@@ -24,73 +45,44 @@ import com.everyday.everyday_glasses.interaction.assistant.AssistantNetworkLease
 import com.everyday.everyday_glasses.interaction.assistant.AssistantPreferencesStore
 import com.everyday.everyday_glasses.interaction.assistant.AssistantStateObserver
 import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContext
+import com.everyday.everyday_glasses.interaction.assistant.GeminiVoiceAssistantProvider
+import com.everyday.everyday_glasses.interaction.assistant.VoiceAssistantCoordinator
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserRoutingCoordinator
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.GeminiPageAgentProvider
-import com.everyday.everyday_glasses.interaction.assistant.GeminiVoiceAssistantProvider
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentCoordinator
-import com.everyday.everyday_glasses.interaction.assistant.VoiceAssistantCoordinator
-import com.everyday.everyday_glasses.ui.components.CursorActivityObserver
-import com.everyday.everyday_glasses.settings.DisplaySettingsHandler
-import com.everyday.everyday_glasses.auth_permissions.GoogleAccountHandler
-import com.everyday.everyday_glasses.interaction.user_input.TapGestureListener
-import com.everyday.everyday_glasses._threedof.ThreeDofObserver
-import com.everyday.everyday_glasses.headup_wake.WakeRequestListener
-import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
-import com.everyday.everyday_glasses._binocular.BinocularContentClass
-import com.everyday.everyday_glasses._binocular.DisplayConfig
-import com.everyday.everyday_glasses._binocular.BinocularUpdateType
-import com.everyday.everyday_glasses._binocular.BinocularView
-import com.everyday.everyday_glasses.runtime.BrightnessController
-import com.everyday.everyday_glasses.runtime.AppChannels
-import com.everyday.everyday_glasses.runtime.PhoneMirror
-import com.everyday.everyday_glasses.runtime.WidgetHost
-import com.everyday.everyday_glasses.runtime.DisplayPowerCallbacks
-import com.everyday.everyday_glasses.runtime.DisplayPowerController
-import com.everyday.everyday_glasses.widgets.file_browser.FileImportCallbacks
-import com.everyday.everyday_glasses.widgets.file_browser.FileImportCoordinator
-import com.everyday.everyday_glasses.widgets.file_browser.FileImportError
-import com.everyday.everyday_glasses.connectivity.GlassesDataSyncCoordinator
-import com.everyday.everyday_glasses.auth_permissions.GoogleAuthCoordinator
-import com.everyday.everyday_glasses.auth_permissions.GooglePhoneAuthStatus
-import com.everyday.everyday_glasses.auth_permissions.GooglePhoneFallbackBridge
-import com.everyday.everyday_glasses.headup_wake.HeadUpSessionController
 import com.everyday.everyday_glasses.interaction.user_input.InputCoordinator
-import com.everyday.everyday_glasses.runtime.LocationSpeedController
-import com.everyday.everyday_glasses.auth_permissions.PermissionCoordinator
-import com.everyday.everyday_glasses.auth_permissions.PermissionCoordinatorCallbacks
-import com.everyday.everyday_glasses.connectivity.PhoneConnectionCallbacks
-import com.everyday.everyday_glasses.connectivity.PhoneConnectionCoordinator
-import com.everyday.everyday_glasses.runtime.StatusController
-import com.everyday.everyday_glasses.runtime.StatusControllerCallbacks
-import com.everyday.everyday_glasses.runtime.StatusSnapshot
+import com.everyday.everyday_glasses.interaction.user_input.TapGestureDetector
+import com.everyday.everyday_glasses.interaction.user_input.TapGestureListener
 import com.everyday.everyday_glasses.interaction.user_input.UserInputActivity
 import com.everyday.everyday_glasses.interaction.user_input.UserInputKind
-import com.everyday.everyday_glasses.auth_permissions.GoogleAccountSummary
-import com.everyday.everyday_glasses.auth_permissions.GoogleAuthState
-import com.everyday.everyday_glasses.widgets.map.backend.MapGeoPoint
-import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
-import com.everyday.everyday_glasses.persistence.WidgetDocument
-import com.everyday.everyday_glasses.headup_wake.GlassesService
-import com.everyday.everyday_glasses.interaction.user_input.TapGestureDetector
-import com.everyday.everyday_glasses.headup_wake.HeadUpWakeManager
-import com.everyday.everyday_glasses._threedof.ThreeDofManager
-import com.everyday.everyday_glasses.runtime.WakeSleepManager
 import com.everyday.everyday_glasses.persistence.ActiveDashboardStore
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.GlassesSettingsStore
-import com.everyday.everyday_glasses.auth_permissions.GoogleAuthPreferencesStore
 import com.everyday.everyday_glasses.persistence.HeadUpSettings
-import com.everyday.everyday_glasses.runtime.GeminiSettingsListener
+import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.runtime.AppChannels
+import com.everyday.everyday_glasses.runtime.BrightnessController
+import com.everyday.everyday_glasses.runtime.DisplayPowerCallbacks
+import com.everyday.everyday_glasses.runtime.DisplayPowerController
+import com.everyday.everyday_glasses.runtime.LocationSpeedController
+import com.everyday.everyday_glasses.runtime.PhoneMirror
+import com.everyday.everyday_glasses.runtime.StatusController
+import com.everyday.everyday_glasses.runtime.StatusControllerCallbacks
+import com.everyday.everyday_glasses.runtime.StatusSnapshot
+import com.everyday.everyday_glasses.runtime.WakeSleepManager
+import com.everyday.everyday_glasses.runtime.WidgetHost
+import com.everyday.everyday_glasses.settings.DisplaySettingsHandler
+import com.everyday.everyday_glasses.settings.GeminiSettingsListener
+import com.everyday.everyday_glasses.ui.components.CursorActivityObserver
 import com.everyday.everyday_glasses.ui.components.CursorView
-import com.everyday.everyday_glasses.widgets.file_browser.FileBrowserWidget
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.NewsSnapshot
 import com.everyday.shared.sync.NewsSourceSpec
-import com.everyday.shared.sync.SyncError
-import com.everyday.shared.sync.SyncSnapshot
 import com.everyday.shared.sync.SubtitleControl
 import com.everyday.shared.sync.SubtitleStatus
 import com.everyday.shared.sync.SubtitleTranscript
+import com.everyday.shared.sync.SyncError
+import com.everyday.shared.sync.SyncSnapshot
 import com.everyday.shared.transport.AssistantControl
 import com.everyday.shared.transport.AssistantStatus
 import com.everyday.shared.transport.DestinationSearchError
@@ -99,6 +91,8 @@ import com.everyday.shared.transport.RouteTransportError
 import com.everyday.shared.transport.RouteTransportResult
 import com.everyday.shared.transport.TransportMessage
 import java.util.concurrent.CompletableFuture
+import com.everyday.everyday_glasses.runtime.PhoneImage
+import com.everyday.shared.sync.SyncRequest
 
 /**
  * Main Android activity and top-level runtime coordinator for the glasses app.
@@ -171,7 +165,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var voiceAssistantCoordinator: VoiceAssistantCoordinator
     private lateinit var browserRoutingCoordinator: BrowserRoutingCoordinator
     private lateinit var permissionCoordinator: PermissionCoordinator
-    private lateinit var fileImportCoordinator: FileImportCoordinator
 
     companion object {
         private const val TAG = "Everyday_glasses"
@@ -260,7 +253,6 @@ class MainActivity : AppCompatActivity() {
         )
 
         // Initialize imports from the in-app file browser.
-        setupFileImportCoordinator()
         setupPermissionCoordinator()
 
         cursorView.activityObserver = object : CursorActivityObserver {
@@ -591,10 +583,14 @@ class MainActivity : AppCompatActivity() {
             override fun toggleAssistantVoice() {
                 if (::voiceAssistantCoordinator.isInitialized) voiceAssistantCoordinator.toggleLocal()
             }
+
+            override fun setSpeedVisibilityThreshold(thresholdKmh: Float) {
+                locationSpeedController.setVisibilityThreshold(thresholdKmh)
+                widgetContainer.appData.publish(AppChannels.speedVisibilityThreshold, thresholdKmh.coerceIn(0f, 1f))
+            }
         }
 
         widgetContainer.displaySettingsHandler = object : DisplaySettingsHandler {
-            override fun applySpeedVisibilityThreshold(threshold: Float) {locationSpeedController.setVisibilityThreshold(threshold)}
             override fun applyBrightness(brightness: Float) {brightnessController.setBrightness(brightness)}
             override fun applyAdaptiveBrightness(enabled: Boolean) {brightnessController.setAdaptiveBrightness(enabled)}
             override fun applyMediaBrightnessCap(active: Boolean) {brightnessController.setMediaBrightnessCap(active)}
@@ -633,7 +629,7 @@ class MainActivity : AppCompatActivity() {
         restoreHeadUpSettings()
         restoreSmartAlignmentSetting()
         val speedThreshold = locationSpeedController.restoreVisibilityThreshold()
-        widgetContainer.setSpeedVisibilityThreshold(speedThreshold)
+        widgetContainer.appData.publish(AppChannels.speedVisibilityThreshold, speedThreshold)
         speedLog { "Loaded speed visibility threshold $speedThreshold" }
     }
 
@@ -656,45 +652,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         )
-    }
-
-    private fun setupFileImportCoordinator() {
-        fileImportCoordinator = FileImportCoordinator(
-            activity = this,
-            callbacks = object : FileImportCallbacks {
-                override fun showFileBrowser(filter: FileBrowserWidget.FileFilter) {
-                    widgetContainer.createFileBrowserWidget(filter)
-                }
-
-                override fun createImageWidget(path: String) {
-                    widgetContainer.createImageWidget(path)
-                }
-
-                override fun createVideoWidget(
-                    uri: Uri,
-                    displayName: String
-                ) {
-                    widgetContainer.createVideoWidget(uri, displayName)
-                }
-
-                override fun createPdfWidget(
-                    uri: Uri,
-                    displayName: String
-                ) {
-                    widgetContainer.createPdfWidget(uri, displayName)
-                }
-
-                override fun showFileImportError(error: FileImportError) {
-                    Toast.makeText(
-                        this@MainActivity,
-                        error.userMessage,
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-            }
-        )
-        // Every pick, from a new picker or one restored with the dashboard, is imported here.
-        widgetContainer.setFilePickedHandler(fileImportCoordinator::importFileBrowserEntry)
     }
 
     private fun setupPermissionCoordinator() {
@@ -725,7 +682,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 override fun onFileBrowserAccessHandled() {
-                    widgetContainer.post { fileImportCoordinator.openFileBrowser() }
+                    widgetContainer.post { widgetContainer.appData.publish(AppChannels.fileAccessGranted, Unit) }
                 } // The all-files settings path returns through onResume; post until the resumed view hierarchy is ready for widget work.
 
                 override fun onAssistantAudioPermissionResult(granted: Boolean) {
@@ -785,8 +742,8 @@ class MainActivity : AppCompatActivity() {
                     widgetContainer.setPhoneClipboard(clipboardContent)
                 }
                 override fun onClipboardReceived(clipboardContent: String)                      {Log.d(TAG, "Phone clipboard updated: chars=${clipboardContent.length}"); widgetContainer.setPhoneClipboard(clipboardContent)}
-                override fun onImageReceived(imageData: ByteArray, fileName: String)            {Log.d(TAG, "Image received from phone: $fileName (${imageData.size} bytes)"); fileImportCoordinator.importReceivedImage(imageData, fileName)}
-                override fun onOpenBrowserRequested(address: String)                            {Log.d(TAG, "Open browser requested from phone: ${address.take(80)}") ; widgetContainer.executeOpenUrlCommand(address)}
+                override fun onImageReceived(imageData: ByteArray, fileName: String)            {Log.d(TAG, "Image received from phone: $fileName (${imageData.size} bytes)"); widgetContainer.appData.publish(AppChannels.phoneImage, PhoneImage(imageData, fileName))}
+                override fun onOpenBrowserRequested(address: String)                            {Log.d(TAG, "Open browser requested from phone: ${address.take(80)}") ; widgetContainer.appData.publish(AppChannels.phoneOpenAddress, address)}
                 override fun onMirroringChanged(enabled: Boolean, ip: String?)                  {widgetContainer.appData.publish(AppChannels.mirroring, PhoneMirror(enabled, ip))}
                 override fun onGoogleAuthStateReceived(
                     status: GooglePhoneAuthStatus,
@@ -912,8 +869,8 @@ class MainActivity : AppCompatActivity() {
                 dataSyncCoordinator.requestNewsSource(sourceSpec, countryCode, completion)
             }
 
-            override fun requestMapData(point: MapGeoPoint, config: PoiDisplayConfig) {
-                dataSyncCoordinator.onMapDataRequested(point, config)
+            override fun requestMapData(request: SyncRequest) {
+                dataSyncCoordinator.onMapDataRequested(request)
             }
         }
         dataSyncCoordinator.restoreCachedSnapshots()
@@ -1084,7 +1041,7 @@ class MainActivity : AppCompatActivity() {
                                 WakeSleepManager.DisplayState.WAKE,
                                 reason = "head_up_gesture"
                             )
-                            widgetContainer.onHeadUpWake()
+                            widgetContainer.appData.publish(AppChannels.headUpWake, Unit)
                         }
 
                         WakeSleepManager.DisplayState.WAKE -> Unit
@@ -1232,7 +1189,7 @@ class MainActivity : AppCompatActivity() {
 
         val profileSummary = binocularView.getRenderProfileSummary()
         Log.d(TAG, "Debug clear WebView requested, binocularProfile=$profileSummary")
-        widgetContainer.clearDebugWebViewData(profileSummary)
+        widgetContainer.appData.publish(AppChannels.debugClearWebViews, profileSummary)
     }
     
     private fun captureAssistantUiContextOnDemand(): CompletableFuture<AssistantUiContext> {
@@ -1286,7 +1243,7 @@ class MainActivity : AppCompatActivity() {
                 )
             }
 
-            widgetContainer.onHeadUpWake()
+            widgetContainer.appData.publish(AppChannels.headUpWake, Unit)
         }
 
         // Hardware action-button wake can resume the activity without an internal
@@ -1358,7 +1315,6 @@ class MainActivity : AppCompatActivity() {
         if (::dataSyncCoordinator.isInitialized) {dataSyncCoordinator.release()}
         if (::permissionCoordinator.isInitialized) {permissionCoordinator.release()}
         if (::statusController.isInitialized) {statusController.release()} // Stop status bar monitoring
-        if (::fileImportCoordinator.isInitialized) {fileImportCoordinator.release()}
 
         widgetContainer.release() // Clean up widget container resources
 
@@ -1371,13 +1327,13 @@ class MainActivity : AppCompatActivity() {
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         binocularView.onTrimMemory(level)
-        widgetContainer.onTrimMemory(level)
+        widgetContainer.appData.publish(AppChannels.memoryTrimmed, level)
     }
 
     override fun onLowMemory() {
         super.onLowMemory()
         binocularView.onLowMemory()
-        widgetContainer.onLowMemory()
+        widgetContainer.appData.publish(AppChannels.lowMemory, Unit)
     }
 
     // ==================== Phone Data Handling ====================

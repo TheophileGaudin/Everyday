@@ -10,7 +10,7 @@ import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
-import com.everyday.everyday_glasses.runtime.MapWidgetListener
+import com.everyday.everyday_glasses.widgets.map.backend.toMapSyncRequest
 import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets.map.backend.MapGeoPoint
@@ -137,7 +137,7 @@ class MapPlugin(
             val map = this
             listener = object : MapWidgetListener {
                 override fun onMapDataRequested(point: MapGeoPoint, config: PoiDisplayConfig) {
-                    data.requests?.requestMapData(point, config)
+                    data.requests?.requestMapData(config.toMapSyncRequest(point))
                 }
                 override fun onAddressFocusChanged(focused: Boolean) = this@MapPlugin.services.onKeyFocusChanged(map, focused)
                 override fun onNavigationResult(result: NavigationOperationResult) = services.notifyTransientChange()

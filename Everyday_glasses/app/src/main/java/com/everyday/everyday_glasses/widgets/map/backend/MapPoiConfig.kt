@@ -1,6 +1,8 @@
 package com.everyday.everyday_glasses.widgets.map.backend
 
 import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticFact
+import com.everyday.shared.sync.SyncChannel
+import com.everyday.shared.sync.SyncRequest
 
 /** Identifies whether a POI configuration is the legacy, compatibility configuration. */
 enum class PoiDisplayConfigState {
@@ -338,3 +340,29 @@ fun PoiDisplayConfig.toAssistantSemanticFacts(): List<AssistantSemanticFact> = l
     AssistantSemanticFact("poi_show_closest", showClosest.toString()),
     AssistantSemanticFact("poi_closest_radius_m", closestRadiusM.toString())
 )
+
+/**
+ * The phone's request for the roads and places around [point], for this configuration. The
+ * phone's empty-category request is the legacy superset query used by every older phone build;
+ * current builds also receive the Default profile's query categories and radii, so changing an
+ * important radius stays effective through the phone proxy.
+ */
+fun PoiDisplayConfig.toMapSyncRequest(point: MapGeoPoint): SyncRequest {
+    val defaultProfile = takeUnless(PoiDisplayConfig::isDefault)?.takeIf(PoiDisplayConfig::isDefaultMode)
+    val nearestProfile = takeUnless(PoiDisplayConfig::isDefaultMode)
+    return SyncRequest(
+        channels = setOf(SyncChannel.MAP), force = true, reason = "map_proxy",
+        mapLat = point.lat,
+        mapLon = point.lon,
+        mapPoiMode = mode.name,
+        mapPoiCategories = nearestProfile?.categories?.sorted().orEmpty(),
+        mapPoiRadiusM = nearestProfile?.radiusM,
+        mapPoiMaxResults = nearestProfile?.maxResults,
+        mapPoiImportantCategories = defaultProfile?.importantCategories?.sorted().orEmpty(),
+        mapPoiImportantRadiiM = defaultProfile?.importantRadiiM.orEmpty(),
+        mapPoiNormalCategories = defaultProfile?.normalCategories?.sorted().orEmpty(),
+        mapPoiNormalMaxResults = defaultProfile?.normalMaxResults,
+        mapPoiShowClosest = defaultProfile?.showClosest,
+        mapPoiClosestRadiusM = defaultProfile?.closestRadiusM
+    )
+}

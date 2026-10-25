@@ -11,11 +11,8 @@ import com.everyday.everyday_glasses.runtime.AppQueries
 import com.everyday.everyday_glasses.runtime.Place
 import com.everyday.everyday_glasses.auth_permissions.GoogleAuthCoordinator
 import com.everyday.everyday_glasses.auth_permissions.GoogleAuthState
-import com.everyday.everyday_glasses.widgets.calendar.GoogleCalendarClient
 import com.everyday.everyday_glasses.auth_permissions.NetworkStatusProvider
 import com.everyday.everyday_glasses.settings.UnitSettings
-import com.everyday.everyday_glasses.widgets.map.backend.MapGeoPoint
-import com.everyday.everyday_glasses.widgets.map.backend.PoiDisplayConfig
 import com.everyday.shared.sync.CalendarAccount
 import com.everyday.shared.sync.CalendarEventSnapshot
 import com.everyday.shared.sync.CalendarSnapshot
@@ -255,37 +252,14 @@ class GlassesDataSyncCoordinator(
         )
     }
 
-    fun onMapDataRequested(point: MapGeoPoint, poiConfig: PoiDisplayConfig = PoiDisplayConfig.DEFAULT) {
+    /** Sends the map's request for the roads and places around a point ([request] is built by the map). */
+    fun onMapDataRequested(request: SyncRequest) {
         if (!phoneConnected) {
             Log.d(TAG, "Map proxy skipped: phone is not connected")
             return
         }
-        Log.d(TAG, "Requesting phone map proxy for ${point.lat},${point.lon} mode=${poiConfig.mode} config=${poiConfig.state}")
-        val defaultProfile = poiConfig
-            .takeUnless(PoiDisplayConfig::isDefault)
-            ?.takeIf(PoiDisplayConfig::isDefaultMode)
-        val nearestProfile = poiConfig.takeUnless(PoiDisplayConfig::isDefaultMode)
-        requestPhoneSync(
-            SyncRequest(
-                channels = setOf(SyncChannel.MAP), force = true, reason = "map_proxy",
-                mapLat = point.lat,
-                mapLon = point.lon,
-                mapPoiMode = poiConfig.mode.name,
-                // The phone's empty-category request is the legacy superset query used by every
-                // older phone build. Current builds also receive the Default profile's query
-                // categories/radii so changing an important radius remains effective through the
-                // phone proxy.
-                mapPoiCategories = nearestProfile?.categories?.sorted().orEmpty(),
-                mapPoiRadiusM = nearestProfile?.radiusM,
-                mapPoiMaxResults = nearestProfile?.maxResults,
-                mapPoiImportantCategories = defaultProfile?.importantCategories?.sorted().orEmpty(),
-                mapPoiImportantRadiiM = defaultProfile?.importantRadiiM.orEmpty(),
-                mapPoiNormalCategories = defaultProfile?.normalCategories?.sorted().orEmpty(),
-                mapPoiNormalMaxResults = defaultProfile?.normalMaxResults,
-                mapPoiShowClosest = defaultProfile?.showClosest,
-                mapPoiClosestRadiusM = defaultProfile?.closestRadiusM
-            )
-        )
+        Log.d(TAG, "Requesting phone map proxy for ${request.mapLat},${request.mapLon} mode=${request.mapPoiMode}")
+        requestPhoneSync(request)
     }
 
     fun requestPhoneCalendarSnapshot() {
@@ -707,5 +681,6 @@ interface WidgetDataProvider {
         completion: (Result<NewsSnapshot>) -> Unit
     )
 
-    fun requestMapData(point: MapGeoPoint, config: PoiDisplayConfig)
+    /** The roads and places around a point; the map builds [request] ([com.everyday.shared.sync.SyncChannel.MAP]). */
+    fun requestMapData(request: SyncRequest)
 }

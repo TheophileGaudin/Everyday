@@ -19,8 +19,6 @@ import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
 import androidx.core.app.ActivityCompat
-import com.everyday.everyday_glasses.widgets.map.backend.GlassesDestinationSearchTransport
-import com.everyday.everyday_glasses.widgets.map.backend.GlassesRouteTransport
 import com.everyday.everyday_glasses.auth_permissions.GooglePhoneAuthStatus
 import com.everyday.everyday_glasses.auth_permissions.GoogleAccountSummary
 import com.everyday.shared.sync.SyncError

@@ -1,6 +1,6 @@
 package com.everyday.everyday_glasses.widgets.file_browser
 
-import android.app.Activity
+import android.content.Context
 import android.content.ContentResolver
 import android.database.Cursor
 import android.graphics.BitmapFactory
@@ -85,7 +85,7 @@ object ImageImportClassifier {
  * storage permission policy remain outside this class.
  */
 class FileImportCoordinator(
-    activity: Activity,
+    context: Context,
     private val callbacks: FileImportCallbacks,
     private val importExecutor: ExecutorService =
         Executors.newSingleThreadExecutor { runnable ->
@@ -102,7 +102,7 @@ class FileImportCoordinator(
         private const val MAX_IMAGE_PIXELS = 40_000_000L
     }
 
-    private val appContext = activity.applicationContext
+    private val appContext = context.applicationContext
     private val contentResolver = appContext.contentResolver
     private val mainHandler = Handler(Looper.getMainLooper())
 

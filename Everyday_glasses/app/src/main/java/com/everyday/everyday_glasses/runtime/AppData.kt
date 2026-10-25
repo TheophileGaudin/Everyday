@@ -2,7 +2,7 @@ package com.everyday.everyday_glasses.runtime
 
 import android.location.Location
 import com.everyday.everyday_glasses.connectivity.WidgetDataProvider
-import com.everyday.everyday_glasses.widgets.map.backend.GlassesRouteTransport
+import com.everyday.everyday_glasses.connectivity.GlassesRouteTransport
 import com.everyday.shared.sync.CalendarSnapshot
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.FinanceSnapshot
@@ -84,6 +84,9 @@ data class Place(val town: String, val countryCode: String)
 /** The phone's screen-mirroring state: whether it's on, and where to receive the stream. */
 data class PhoneMirror(val enabled: Boolean, val phoneIp: String?)
 
+/** An image the phone sent, as its bytes and its file name. */
+class PhoneImage(val data: ByteArray, val fileName: String)
+
 /**
  * The kinds of app data widgets can listen to. A new kind of data is added here, together with the
  * source that publishes it; widgets never publish on these channels.
@@ -113,6 +116,14 @@ object AppChannels {
     val liveCountry        = AppChannel<String>("live country")                      /** The country from a live location (not from saved data); it sets the automatic units. */
     val unitsChanged       = AppChannel<Unit>("units changed")                       /** km/h or mph, °C or °F changed; read them from the widget context's units. */
     val mirroring          = AppChannel<PhoneMirror>("mirroring")                    /** The phone started or stopped mirroring its screen. */
+    val headUpWake         = AppChannel<Unit>("head-up wake")                        /** The display woke because the user lifted their head. */
+    val memoryTrimmed      = AppChannel<Int>("memory trimmed")                       /** Android asked the app to free memory, at this level (ComponentCallbacks2). */
+    val lowMemory          = AppChannel<Unit>("low memory")                          /** The system is low on memory. */
+    val debugClearWebViews = AppChannel<String>("debug clear web views")             /** Debug builds: clear web data; the text describes the display profile, for the log. */
+    val phoneOpenAddress   = AppChannel<String>("phone open address")                /** The phone asked to open this web address. */
+    val phoneImage         = AppChannel<PhoneImage>("phone image")                   /** The phone sent an image to show. */
+    val fileAccessGranted  = AppChannel<Unit>("file access granted")                 /** Storage access is settled after the user asked to open a file: the file picker can open. */
+    val speedVisibilityThreshold = AppChannel<Float>("speed visibility threshold")   /** The speed (km/h) below which the speedometer hides; 0 keeps it shown. Change it through [WidgetHost.setSpeedVisibilityThreshold]. */
 }
 
 /** The questions the app's data sources can ask the widgets. */
