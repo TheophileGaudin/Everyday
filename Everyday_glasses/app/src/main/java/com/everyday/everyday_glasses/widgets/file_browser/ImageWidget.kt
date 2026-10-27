@@ -124,13 +124,10 @@ class ImageWidget(
 class ImagePlugin(
     private val services: WidgetContext,
 ) : WidgetPlugin {
-    private val context: Context get() = services.androidContext
-    private val all: () -> List<ImageWidget> = { services.widgets(TYPE).filterIsInstance<ImageWidget>() }
     override val lifecycle = WidgetLifecycleRegistration.multiple(
         ImageWidget::class, ImageWidgetState.Codec,
         capture = ::capture,
         restore = ::restore,
-        beforeRemove = ::deleteFileIfUnused,
     )
 
     /** A missing image file is skipped, so one bad path does not block the rest of the dashboard. */
@@ -164,12 +161,6 @@ class ImagePlugin(
     fun open(path: String) {
         val position = services.creationPosition
         services.open(TYPE) { ImageWidget(position?.x ?: 0f, position?.y ?: 0f, path) }
-    }
-
-    private fun deleteFileIfUnused(widget: ImageWidget) {
-        val path = widget.getImagePath()
-        val hasSibling = all().any { it !== widget && it.getImagePath() == path }
-        if (!hasSibling) ImageWidgetStorage.deleteIfManaged(context, path)
     }
 
     /** The image as a widget type: its id, its descriptor, how it is saved, and its plugin. */
