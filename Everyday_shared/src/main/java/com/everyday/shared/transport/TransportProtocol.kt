@@ -20,7 +20,7 @@ enum class PointerAction(val wireName: String) {
     POINTER_COUNT("pointer_count");
 
     companion object {
-        fun fromWireName(value: String): PointerAction? = values().firstOrNull { it.wireName == value }
+        fun fromWireName(value: String): PointerAction? = PointerAction.entries.firstOrNull { it.wireName == value }
     }
 }
 
@@ -31,7 +31,7 @@ enum class TransportGoogleAuthStatus(val wireName: String) {
     ERROR("error");
 
     companion object {
-        fun fromWireName(value: String): TransportGoogleAuthStatus? = values().firstOrNull { it.wireName == value }
+        fun fromWireName(value: String): TransportGoogleAuthStatus? = TransportGoogleAuthStatus.entries.firstOrNull { it.wireName == value }
     }
 }
 
@@ -41,7 +41,7 @@ enum class AssistantControlAction(val wireName: String) {
     START("start"), KEEPALIVE("keepalive"), STOP("stop"), CANCEL("cancel");
 
     companion object {
-        fun fromWireName(value: String): AssistantControlAction? = values().firstOrNull { it.wireName == value }
+        fun fromWireName(value: String): AssistantControlAction? = AssistantControlAction.entries.firstOrNull { it.wireName == value }
     }
 }
 
@@ -50,7 +50,7 @@ enum class AssistantSessionState(val wireName: String) {
     SUCCESS("success"), ERROR("error");
 
     companion object {
-        fun fromWireName(value: String): AssistantSessionState? = values().firstOrNull { it.wireName == value }
+        fun fromWireName(value: String): AssistantSessionState? = AssistantSessionState.entries.firstOrNull { it.wireName == value }
     }
 }
 
@@ -58,7 +58,7 @@ enum class AssistantSessionOrigin(val wireName: String) {
     GLASSES("glasses"), PHONE("phone");
 
     companion object {
-        fun fromWireName(value: String): AssistantSessionOrigin? = values().firstOrNull { it.wireName == value }
+        fun fromWireName(value: String): AssistantSessionOrigin? = AssistantSessionOrigin.entries.firstOrNull { it.wireName == value }
     }
 }
 

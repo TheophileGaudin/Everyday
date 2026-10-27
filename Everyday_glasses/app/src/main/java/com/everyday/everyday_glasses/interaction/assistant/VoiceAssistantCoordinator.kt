@@ -7,8 +7,6 @@ import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserRou
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentResult
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentTerminalState
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentUpdateState
-import com.everyday.everyday_glasses.interaction.assistant.AssistantTextPresentationPolicy
-import com.everyday.everyday_glasses.interaction.assistant.AssistantTextPresentationRequest
 import com.everyday.everyday_glasses.interaction.commands.AppCommandResult
 import com.everyday.shared.command.AppCommandInvocation
 import com.everyday.shared.transport.AssistantControl

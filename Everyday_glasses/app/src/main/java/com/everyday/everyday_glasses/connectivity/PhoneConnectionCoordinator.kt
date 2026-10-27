@@ -511,7 +511,7 @@ private var latestPhoneBatteryPercent = -1
         }
         val response = try {
             answer.get(PHONE_INTERNET_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        } catch (e: TimeoutException) {
+        } catch (_: TimeoutException) {
             throw SocketTimeoutException("The phone didn't answer in time")
         } catch (e: ExecutionException) {
             throw IOException(e.cause?.message ?: "Request through the phone failed")

@@ -10,6 +10,4 @@ interface SyncMessenger {
     fun sendSyncSnapshot(snapshot: SyncSnapshot): Boolean
     fun sendSyncError(error: SyncError): Boolean
 
-    /** The phone's answer to an HTTP request it made for the glasses (see [HttpRelayPolicy]). */
-    fun sendHttpRelayResponse(response: TransportMessage.HttpRelayResponse): Boolean = false
 }

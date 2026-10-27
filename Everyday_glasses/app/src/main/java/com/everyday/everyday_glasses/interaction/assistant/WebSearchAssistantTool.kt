@@ -1,6 +1,5 @@
 package com.everyday.everyday_glasses.interaction.assistant
 
-import com.everyday.everyday_glasses.interaction.assistant.AssistantSource
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
