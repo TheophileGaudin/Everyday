@@ -3,6 +3,7 @@ package com.everyday.everyday_glasses.interaction.assistant.page_agent
 import android.util.Base64
 import com.everyday.everyday_glasses.interaction.assistant.AssistantToolDefinition
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -20,10 +21,13 @@ object PageAgentGeminiConfig {
 }
 
 class GeminiPageAgentProvider(
+    /** Lets requests go through the phone when the glasses have no internet ([com.everyday.everyday_glasses.connectivity.PhoneConnectionCoordinator.assistantInternet]). */
+    internet: Interceptor? = null,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
+        .apply { internet?.let(::addInterceptor) }
         .build()
 ) : PageAgentProvider {
 

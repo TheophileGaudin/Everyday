@@ -59,7 +59,9 @@ internal class AssistantDashboardAccess(
     val approvalOverlay = PageAgentApprovalOverlay(notifyPersistentChange)
 
     private var browserRouting: BrowserRoutingCoordinator? = null
-    private val webSearch = WebSearchSemanticToolHandler(DuckDuckGoWebSearchProvider())
+    /** How web search reaches the internet when the glasses have none; the activity sets it before the first search. */
+    var internet: okhttp3.Interceptor? = null
+    private val webSearch by lazy { WebSearchSemanticToolHandler(DuckDuckGoWebSearchProvider(internet)) }
     private val contributions: Map<WidgetTypeId, AssistantContribution> = plugins
         .filterIsInstance<AssistantContribution>()
         .associateBy { (it as WidgetPlugin).lifecycle.descriptor.type }

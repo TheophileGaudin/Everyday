@@ -52,6 +52,8 @@ interface RemoteAuthListener {
 interface SyncMessageListener {
     fun onSyncSnapshotReceived(snapshot: SyncSnapshot) = Unit
     fun onSyncErrorReceived(error: SyncError) = Unit
+    /** The phone's answer to a request it made for the glasses' assistant. Called on the reader thread. */
+    fun onHttpRelayResponse(response: TransportMessage.HttpRelayResponse) = Unit
 }
 
 /** Receives phone-originated route calculation responses. */

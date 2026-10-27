@@ -1,6 +1,7 @@
 package com.everyday.everyday_glasses.interaction.assistant
 
 import com.everyday.everyday_glasses.interaction.assistant.AssistantSource
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -18,10 +19,13 @@ fun interface WebSearchProvider {
 
 /** Keyless search provider. Kept behind [WebSearchProvider] so a proxy or paid API can replace it. */
 class DuckDuckGoWebSearchProvider(
+    /** Lets requests go through the phone when the glasses have no internet ([com.everyday.everyday_glasses.connectivity.PhoneConnectionCoordinator.assistantInternet]). */
+    internet: Interceptor? = null,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .callTimeout(20, TimeUnit.SECONDS)
+        .apply { internet?.let(::addInterceptor) }
         .build()
 ) : WebSearchProvider {
     override fun search(query: String, maxResults: Int, recencyDays: Int?): Result<List<WebSearchResult>> = runCatching {

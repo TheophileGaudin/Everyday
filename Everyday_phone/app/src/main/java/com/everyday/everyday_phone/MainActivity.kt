@@ -364,6 +364,10 @@ private var assistantStatus: AssistantStatus? = null
                 override fun onDestinationSearchCancellationReceived(cancellation: com.everyday.shared.transport.DestinationSearchCancellation) {
                     phoneDestinationSearchCoordinator.onSearchCancellation(cancellation)
                 }
+
+                override fun onHttpRelayRequested(request: com.everyday.shared.transport.TransportMessage.HttpRelayRequest) {
+                    dataSyncCoordinator.onHttpRelayRequest(request)
+                }
             }
 
             experienceControlListener = object : RfcommServer.ExperienceControlListener {

@@ -1,6 +1,8 @@
 package com.everyday.everyday_glasses.connectivity
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.wifi.p2p.WifiP2pDevice
 import android.os.Handler
 import android.os.Looper
@@ -24,7 +26,26 @@ import com.everyday.shared.transport.RouteTransportError
 import com.everyday.shared.transport.RouteTransportRequest
 import com.everyday.shared.transport.RouteTransportResult
 import com.everyday.shared.transport.SyncMessenger
+import com.everyday.shared.transport.HttpRelayPolicy
 import com.everyday.shared.transport.TransportMessage
+import okhttp3.Interceptor
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.Buffer
+import java.io.IOException
+import java.net.ConnectException
+import java.net.NoRouteToHostException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 /**
  * Application-level reactions to messages arriving from the paired phone.
@@ -87,6 +108,12 @@ class PhoneConnectionCoordinator(
 
         /** How long the glasses try to join the phone's group before falling back to the shared Wi-Fi network. */
         private const val GROUP_JOIN_TIMEOUT_MS = 15_000L
+
+        /** How long a request made through the phone may take (the phone's own timeouts are shorter). */
+        private const val PHONE_INTERNET_TIMEOUT_MS = 120_000L
+
+        /** After the glasses failed to reach a server, their requests go through the phone this long. */
+        private const val PREFER_PHONE_INTERNET_MS = 2 * 60_000L
 
         /** Selects a P2P peer only when its identity is unambiguous. */
         internal fun selectWifiDirectPeerIndex(
@@ -182,6 +209,7 @@ private var latestPhoneBatteryPercent = -1
         wifiDirectClient = null
         pendingMirror = null
         handler.removeCallbacks(groupJoinTimeout)
+        failPendingPhoneRequests("App closing")
     }
 
     // ---------------------------------------------------------------------
@@ -281,6 +309,7 @@ private var latestPhoneBatteryPercent = -1
                 if (released) return
                 if (!connected) {
                     latestPhoneBatteryPercent = -1
+                    failPendingPhoneRequests("Phone disconnected")
                 }
 
                 callbacks.onConnectionChanged(
@@ -351,6 +380,10 @@ private var latestPhoneBatteryPercent = -1
         }
 
         rfcommClient.syncMessageListener = object : SyncMessageListener {
+            override fun onHttpRelayResponse(response: TransportMessage.HttpRelayResponse) {
+                pendingPhoneRequests.remove(response.requestId)?.complete(response)
+            }
+
             override fun onSyncSnapshotReceived(snapshot: SyncSnapshot) {
                 if (released) return
                 callbacks.onSyncSnapshotReceived(snapshot)
@@ -409,6 +442,96 @@ private var latestPhoneBatteryPercent = -1
                 callbacks.onAssistantControlReceived(control)
             }
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // The assistant's internet: the glasses' own, or the phone's
+    // ---------------------------------------------------------------------
+
+    private val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
+    private val pendingPhoneRequests = ConcurrentHashMap<String, CompletableFuture<TransportMessage.HttpRelayResponse>>()
+    @Volatile private var preferPhoneInternetUntilMs = 0L
+
+    /**
+     * Added to the assistant's HTTP clients so it works wherever the glasses are: requests go out
+     * directly when the glasses have internet (Wi-Fi, or RayNeo's link), and through the phone's
+     * connection otherwise (4G, Wi-Fi, whatever it has), over Bluetooth. A direct request that
+     * couldn't reach the server is sent again through the phone, which is then preferred for a
+     * couple of minutes. Only [HttpRelayPolicy]'s hosts are relayed.
+     */
+    val assistantInternet: Interceptor = object : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val request = chain.request()
+            if (!HttpRelayPolicy.isAllowed(request.url.toString())) return chain.proceed(request)
+            val phoneReachable = rfcommClient.isConnected()
+            if (phoneReachable && (System.currentTimeMillis() < preferPhoneInternetUntilMs || !glassesHaveInternet())) {
+                return throughPhone(request)
+            }
+            return try {
+                chain.proceed(request)
+            } catch (e: IOException) {
+                if (!phoneReachable || !neverReachedServer(e)) throw e
+                Log.w(TAG, "Assistant request couldn't reach ${request.url.host} (${e.javaClass.simpleName}); using the phone's internet")
+                preferPhoneInternetUntilMs = System.currentTimeMillis() + PREFER_PHONE_INTERNET_MS
+                throughPhone(request)
+            }
+        }
+    }
+
+    private fun glassesHaveInternet(): Boolean {
+        val capabilities = connectivity?.getNetworkCapabilities(connectivity.activeNetwork) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
+
+    /** Failures that happen before anything is sent, so sending again through the phone can't repeat a request. */
+    private fun neverReachedServer(e: IOException): Boolean = e is UnknownHostException || e is ConnectException ||
+        e is NoRouteToHostException || (e is SocketTimeoutException && e.message.orEmpty().contains("connect", ignoreCase = true))
+
+    /** Makes [request] through the phone and waits for its answer, as if it had been made here. */
+    private fun throughPhone(request: Request): Response {
+        val body = request.body?.let { requestBody -> Buffer().also(requestBody::writeTo).readByteArray() }
+        if (body != null && body.size > HttpRelayPolicy.MAX_BODY_BYTES) throw IOException("Request too large to send through the phone")
+        val id = UUID.randomUUID().toString()
+        val answer = CompletableFuture<TransportMessage.HttpRelayResponse>()
+        pendingPhoneRequests[id] = answer
+        val sent = rfcommClient.sendHttpRelayRequest(
+            TransportMessage.HttpRelayRequest(
+                requestId = id,
+                method = request.method,
+                url = request.url.toString(),
+                headers = request.headers.names().associateWith { request.headers[it].orEmpty() },
+                contentType = request.body?.contentType()?.toString(),
+                bodyBase64 = body?.let { android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP) },
+            )
+        )
+        if (!sent) {
+            pendingPhoneRequests.remove(id)
+            throw IOException("No internet: the glasses are offline and the phone isn't connected")
+        }
+        val response = try {
+            answer.get(PHONE_INTERNET_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        } catch (e: TimeoutException) {
+            throw SocketTimeoutException("The phone didn't answer in time")
+        } catch (e: ExecutionException) {
+            throw IOException(e.cause?.message ?: "Request through the phone failed")
+        } finally {
+            pendingPhoneRequests.remove(id)
+        }
+        response.error?.let { throw IOException("Through the phone: $it") }
+        val bytes = response.bodyBase64?.let { android.util.Base64.decode(it, android.util.Base64.NO_WRAP) } ?: ByteArray(0)
+        return Response.Builder()
+            .request(request)
+            .protocol(Protocol.HTTP_1_1)
+            .code(response.code)
+            .message("")
+            .body(bytes.toResponseBody(response.contentType?.toMediaTypeOrNull()))
+            .build()
+    }
+
+    private fun failPendingPhoneRequests(reason: String) {
+        pendingPhoneRequests.values.forEach { it.completeExceptionally(IOException(reason)) }
+        pendingPhoneRequests.clear()
     }
 
     // ---------------------------------------------------------------------

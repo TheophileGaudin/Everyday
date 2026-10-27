@@ -27,6 +27,7 @@ import com.everyday.shared.transport.TransportGoogleAuthStatus
 import com.everyday.shared.transport.TransportMessage
 import com.everyday.shared.transport.TransportProtocol
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -53,6 +54,13 @@ class TransportProtocolTest {
                 networkName = "DIRECT-Ev-Everyday", passphrase = "secret-pass", lanIp = "192.168.1.20"
             ),
             TransportMessage.MirrorState(false),
+            TransportMessage.HttpRelayRequest(
+                "req-1", "POST", "https://generativelanguage.googleapis.com/v1beta/interactions",
+                mapOf("x-goog-api-key" to "key"), "application/json", "e30="
+            ),
+            TransportMessage.HttpRelayRequest("req-2", "GET", "https://html.duckduckgo.com/html/?q=x", emptyMap(), null, null),
+            TransportMessage.HttpRelayResponse("req-1", 200, "application/json", "e30=", null),
+            TransportMessage.HttpRelayResponse("req-2", 0, null, null, "UnknownHostException: no network"),
             TransportMessage.TextFieldFocus(true, "field-1"),
             TransportMessage.GoogleAuthRequest,
             TransportMessage.GoogleAuthDisconnect,
@@ -101,6 +109,14 @@ class TransportProtocolTest {
             assertTrue("Failed round trip for ${message.kind}: $decoded", decoded is TransportDecodeResult.Success)
             assertEquals(message, (decoded as TransportDecodeResult.Success).message)
         }
+    }
+
+    @Test
+    fun `the phone relays assistant requests to the allowed hosts only`() {
+        val elsewhere = TransportMessage.HttpRelayRequest("req-3", "GET", "https://example.com/", emptyMap(), null, null)
+        assertTrue(TransportProtocol.decode(TransportProtocol.encode(elsewhere)) is TransportDecodeResult.Failure)
+        assertTrue(com.everyday.shared.transport.HttpRelayPolicy.isAllowed("https://generativelanguage.googleapis.com/v1beta/models"))
+        assertFalse(com.everyday.shared.transport.HttpRelayPolicy.isAllowed("http://generativelanguage.googleapis.com/v1beta/models"))
     }
 
     @Test

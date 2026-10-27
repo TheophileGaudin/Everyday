@@ -132,6 +132,44 @@ sealed class TransportMessage(val kind: String) {
     data class DestinationSearchResultMessage(val result: DestinationSearchResult) : TransportMessage("destination.search.result")
     data class DestinationSearchErrorMessage(val error: DestinationSearchError) : TransportMessage("destination.search.error")
     data class DestinationSearchCancellationMessage(val cancellation: DestinationSearchCancellation) : TransportMessage("destination.search.cancel")
+
+    /**
+     * An HTTPS request the glasses ask the phone to make for them, when they can't reach the
+     * internet themselves (see [HttpRelayPolicy]). [bodyBase64] is the request body, if any.
+     */
+    data class HttpRelayRequest(
+        val requestId: String,
+        val method: String,
+        val url: String,
+        val headers: Map<String, String>,
+        val contentType: String?,
+        val bodyBase64: String?,
+    ) : TransportMessage("http.request")
+
+    /** The phone's answer to an [HttpRelayRequest]: the response, or [error] when the phone couldn't make the request. */
+    data class HttpRelayResponse(
+        val requestId: String,
+        val code: Int,
+        val contentType: String?,
+        val bodyBase64: String?,
+        val error: String?,
+    ) : TransportMessage("http.response")
+}
+
+/**
+ * What the phone relays for the glasses: HTTPS requests to the assistant's services only, so the
+ * relay can't be used to reach anything else. Bodies are capped to fit one Bluetooth message.
+ */
+object HttpRelayPolicy {
+    val ALLOWED_HOSTS = setOf("generativelanguage.googleapis.com", "html.duckduckgo.com")
+
+    /** The largest body relayed either way, in bytes (base64 grows it by a third, under the message cap). */
+    const val MAX_BODY_BYTES = 5_000_000
+
+    fun isAllowed(url: String): Boolean {
+        val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return false
+        return uri.scheme.equals("https", ignoreCase = true) && uri.host?.lowercase() in ALLOWED_HOSTS
+    }
 }
 
 sealed class TransportDecodeResult {
@@ -309,6 +347,21 @@ object TransportProtocol {
             }
             TransportMessage.Image(payload.requiredString("fileName"), base64Data)
         }
+        "http.request" -> TransportMessage.HttpRelayRequest(
+            requestId = payload.requiredString("requestId"),
+            method = payload.requiredString("method"),
+            url = payload.requiredString("url").also { if (!HttpRelayPolicy.isAllowed(it)) throw InvalidPayload("url not relayed") },
+            headers = payload.optJSONObject("headers")?.let { h -> h.keys().asSequence().associateWith { h.optString(it) } }.orEmpty(),
+            contentType = payload.optionalString("contentType"),
+            bodyBase64 = payload.optionalStringAllowEmpty("bodyBase64"),
+        )
+        "http.response" -> TransportMessage.HttpRelayResponse(
+            requestId = payload.requiredString("requestId"),
+            code = payload.optionalInt("code") ?: 0,
+            contentType = payload.optionalString("contentType"),
+            bodyBase64 = payload.optionalStringAllowEmpty("bodyBase64"),
+            error = payload.optionalString("error"),
+        )
         "route.request" -> TransportMessage.RouteRequestMessage(RouteTransportProtocol.requestFromJson(payload))
         "route.result" -> TransportMessage.RouteResultMessage(RouteTransportProtocol.resultFromJson(payload))
         "route.error" -> TransportMessage.RouteErrorMessage(RouteTransportProtocol.errorFromJson(payload))
@@ -367,6 +420,10 @@ object TransportProtocol {
         is TransportMessage.DestinationSearchResultMessage -> DestinationSearchProtocol.resultToJson(result)
         is TransportMessage.DestinationSearchErrorMessage -> DestinationSearchProtocol.errorToJson(error)
         is TransportMessage.DestinationSearchCancellationMessage -> DestinationSearchProtocol.cancellationToJson(cancellation)
+        is TransportMessage.HttpRelayRequest -> JSONObject().put("requestId", requestId).put("method", method).put("url", url)
+            .put("headers", JSONObject(headers)).putNullable("contentType", contentType).putNullable("bodyBase64", bodyBase64)
+        is TransportMessage.HttpRelayResponse -> JSONObject().put("requestId", requestId).put("code", code)
+            .putNullable("contentType", contentType).putNullable("bodyBase64", bodyBase64).putNullable("error", error)
     }
 
     private class InvalidPayload(message: String) : IllegalArgumentException(message)

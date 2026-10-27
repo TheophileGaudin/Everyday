@@ -200,6 +200,10 @@ class RfcommClient(
     fun requestClipboard(): Boolean =
         enqueueMessage(TransportMessage.ClipboardRequest, "request clipboard")
 
+    /** Asks the phone to make an HTTP request for the glasses' assistant. */
+    fun sendHttpRelayRequest(request: TransportMessage.HttpRelayRequest): Boolean =
+        enqueueMessage(request, "relay assistant request")
+
     override fun sendSyncRequest(request: SyncRequest): Boolean =
         enqueueMessage(TransportMessage.SyncRequestMessage(request), "request sync")
 
@@ -554,6 +558,8 @@ class RfcommClient(
             is TransportMessage.DeviceStatus -> postIfActive { remoteContentListener?.onDeviceStatusReceived(message) }
             is TransportMessage.SyncSnapshotMessage -> postIfActive { syncMessageListener?.onSyncSnapshotReceived(message.snapshot) }
             is TransportMessage.SyncErrorMessage -> postIfActive { syncMessageListener?.onSyncErrorReceived(message.error) }
+            // A worker thread waits for this answer: hand it over here, not through the UI thread.
+            is TransportMessage.HttpRelayResponse -> if (!released) syncMessageListener?.onHttpRelayResponse(message)
             is TransportMessage.SubtitleStatusMessage -> postIfActive { subtitleMessageListener?.onSubtitleStatusReceived(message.status) }
             is TransportMessage.SubtitleTranscriptMessage -> postIfActive {
                 subtitleMessageListener?.onSubtitleTranscriptReceived(message.transcript)

@@ -175,6 +175,37 @@ class VoiceAssistantCoordinator(
         }
     }
 
+    /** The phone connected: a key that couldn't be checked for lack of internet is checked now, through it if needed. */
+    fun onPhoneConnected() {
+        if (!checkWhenOnline) return
+        configuration?.let { validateAndResolve(it.apiKey, persistKey = false) }
+    }
+
+    /** True when the stored key couldn't be checked because there was no internet. */
+    private var checkWhenOnline = false
+
+    /**
+     * Without internet (the glasses offline and the phone not connected yet), a stored key stays
+     * stored and shown as such, and is checked again later; a key just pasted can't be checked, so
+     * it isn't saved.
+     */
+    private fun onValidationFailed(failure: Throwable, pastedKey: Boolean) {
+        val offline = failure is java.io.IOException
+        checkWhenOnline = offline
+        val stored = configuration
+        if (offline && stored != null) {
+            stateObserver.onAssistantConfigurationChanged(stored, models, "Gemini key stored. No internet yet")
+        }
+        when {
+            offline && pastedKey -> fail("No internet: the key could not be checked. ${shortReason(failure)}")
+            offline && stored != null -> {
+                state = AssistantSessionState.IDLE
+                emitStatus("Gemini key stored. No internet yet")
+            }
+            else -> fail("Gemini validation failed. ${shortReason(failure)}")
+        }
+    }
+
     fun onPhoneDisconnected() {
         if (activeOrigin == AssistantSessionOrigin.PHONE) cancel(activeSession, "Phone disconnected")
     }
@@ -198,7 +229,7 @@ class VoiceAssistantCoordinator(
         worker.execute {
             val available = provider.listModels(apiKey).getOrElse { failure ->
                 Log.w(TAG, "Gemini validation failed: ${failure.message}")
-                main.post { if (token == generation) fail("Gemini validation failed. ${shortReason(failure)}") }
+                main.post { if (token == generation) onValidationFailed(failure, persistKey) }
                 return@execute
             }
             val prior = configuration
@@ -250,6 +281,7 @@ class VoiceAssistantCoordinator(
                     return@post
                 }
                 configuration = next
+                checkWhenOnline = false
                 state = AssistantSessionState.IDLE
                 val ready = replacedChoice?.let { "Gemini ready: $it is unavailable, using $selected" } ?: "Gemini ready"
                 if (replacedChoice != null) Log.w(TAG, ready)

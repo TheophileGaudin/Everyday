@@ -2,6 +2,7 @@ package com.everyday.everyday_glasses.interaction.assistant
 
 import android.util.Base64
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -15,10 +16,13 @@ import java.nio.ByteOrder
 import java.util.concurrent.TimeUnit
 
 class GeminiVoiceAssistantProvider(
+    /** Lets requests go through the phone when the glasses have no internet ([com.everyday.everyday_glasses.connectivity.PhoneConnectionCoordinator.assistantInternet]). */
+    internet: Interceptor? = null,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS)
         .writeTimeout(90, TimeUnit.SECONDS)
+        .apply { internet?.let(::addInterceptor) }
         .build()
 ) : VoiceAssistantProvider {
 

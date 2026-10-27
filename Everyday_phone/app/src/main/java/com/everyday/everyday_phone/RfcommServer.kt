@@ -69,6 +69,8 @@ class RfcommServer(private val context: Context) : SyncMessenger, PhoneRouteTran
         fun onRouteCancellationReceived(cancellation: com.everyday.shared.transport.RouteTransportCancellation) = Unit
         fun onDestinationSearchRequestReceived(request: com.everyday.shared.transport.DestinationSearchRequest) = Unit
         fun onDestinationSearchCancellationReceived(cancellation: com.everyday.shared.transport.DestinationSearchCancellation) = Unit
+        /** The glasses have no internet: they ask the phone to make this request (their voice assistant's). */
+        fun onHttpRelayRequested(request: TransportMessage.HttpRelayRequest) = Unit
     }
 
     /** Receives controls for interactive glasses experiences. */
@@ -429,6 +431,8 @@ class RfcommServer(private val context: Context) : SyncMessenger, PhoneRouteTran
     override fun sendSyncError(error: SyncError): Boolean =
         sendMessage(TransportMessage.SyncErrorMessage(error))
 
+    override fun sendHttpRelayResponse(response: TransportMessage.HttpRelayResponse): Boolean = sendMessage(response)
+
 
     fun sendSubtitleStatus(status: SubtitleStatus) {
         sendMessage(TransportMessage.SubtitleStatusMessage(status))
@@ -653,11 +657,12 @@ class RfcommServer(private val context: Context) : SyncMessenger, PhoneRouteTran
             is TransportMessage.AssistantStatusMessage -> handler.post {
                 experienceControlListener?.onAssistantStatusReceived(message.status)
             }
-            else -> fileLog("RX unexpected kind=${message.kind} for phone endpoint")
+            is TransportMessage.HttpRelayRequest -> dataRequestListener?.onHttpRelayRequested(message)
+else -> fileLog("RX unexpected kind=${message.kind} for phone endpoint")
         }
     }
 
-    private fun sendMessage(message: TransportMessage): Boolean =
+private fun sendMessage(message: TransportMessage): Boolean =
         writeEncoded(message.kind, TransportProtocol.encode(message) + "\n")
 
     private fun writeEncoded(kind: String, encoded: String): Boolean {

@@ -25,7 +25,12 @@ import com.everyday.shared.sync.LocationFix
 import com.everyday.shared.sync.WeatherSnapshot
 import com.everyday.shared.sync.MapDataProvider
 import com.everyday.shared.sync.isStale
+import com.everyday.shared.transport.HttpRelayPolicy
 import com.everyday.shared.transport.SyncMessenger
+import com.everyday.shared.transport.TransportMessage
+import okhttp3.Headers.Companion.toHeaders
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.ExecutorService
@@ -605,6 +610,67 @@ class PhoneDataSyncCoordinator(
         if (!isGlassesConnected) return
         outboundSyncExecutor.execute {
             if (isGlassesConnected) syncMessengerProvider()?.sendSyncError(SyncError(channel, message))
+        }
+    }
+
+    // ==================== The glasses' assistant, through the phone's internet ====================
+
+    private val relayClient by lazy {
+        okhttp3.OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(90, TimeUnit.SECONDS)
+            .writeTimeout(90, TimeUnit.SECONDS)
+            .build()
+    }
+
+    /**
+     * Makes an HTTPS request for the glasses when they have no internet of their own (no Wi-Fi in the
+     * street): their voice assistant reaches Gemini and web search through the phone's connection.
+     * Only [HttpRelayPolicy]'s hosts are relayed. Bodies and headers (they carry the API key) are not logged.
+     */
+    fun onHttpRelayRequest(request: TransportMessage.HttpRelayRequest) {
+        executeRefresh("assistant request", {
+            sendHttpRelayResponse(TransportMessage.HttpRelayResponse(request.requestId, 0, null, null, "Phone busy"))
+        }) {
+            sendHttpRelayResponse(relay(request))
+        }
+    }
+
+    private fun relay(request: TransportMessage.HttpRelayRequest): TransportMessage.HttpRelayResponse {
+        val started = System.currentTimeMillis()
+        val host = runCatching { java.net.URI(request.url).host }.getOrNull() ?: "?"
+        fun failure(message: String) = TransportMessage.HttpRelayResponse(request.requestId, 0, null, null, message)
+        if (!HttpRelayPolicy.isAllowed(request.url)) return failure("Host not relayed")
+        return try {
+            val body = request.bodyBase64?.let { android.util.Base64.decode(it, android.util.Base64.NO_WRAP) }
+                ?.toRequestBody(request.contentType?.toMediaTypeOrNull())
+            val call = okhttp3.Request.Builder()
+                .url(request.url)
+                .headers(request.headers.filterKeys { !it.equals("Content-Length", ignoreCase = true) }.toHeaders())
+                .method(request.method, body)
+                .build()
+            relayClient.newCall(call).execute().use { response ->
+                val bytes = response.body?.bytes() ?: ByteArray(0)
+                fileLog("Assistant request ${request.method} $host through the phone: ${response.code}, ${bytes.size} B in ${System.currentTimeMillis() - started} ms")
+                if (bytes.size > HttpRelayPolicy.MAX_BODY_BYTES) return failure("Response too large to relay")
+                TransportMessage.HttpRelayResponse(
+                    requestId = request.requestId,
+                    code = response.code,
+                    contentType = response.header("Content-Type"),
+                    bodyBase64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP),
+                    error = null,
+                )
+            }
+        } catch (e: Exception) {
+            fileLog("Assistant request ${request.method} $host through the phone failed: ${e.javaClass.simpleName}: ${e.message}")
+            failure("${e.javaClass.simpleName}: ${e.message ?: "request failed"}")
+        }
+    }
+
+    private fun sendHttpRelayResponse(response: TransportMessage.HttpRelayResponse) {
+        if (!isGlassesConnected) return
+        outboundSyncExecutor.execute {
+            if (isGlassesConnected) syncMessengerProvider()?.sendHttpRelayResponse(response)
         }
     }
 

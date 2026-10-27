@@ -328,10 +328,11 @@ class MainActivity : AppCompatActivity() {
 
         val assistantPreferences = AssistantPreferencesStore(this)
         assistantNetworkLease = AssistantNetworkLease(this)
+        widgetContainer.assistant.internet = assistantInternet
         browserRoutingCoordinator = BrowserRoutingCoordinator(
             pageAgent = PageAgentCoordinator.usingPreferences(
                 preferences = assistantPreferences,
-                provider = GeminiPageAgentProvider()
+                provider = GeminiPageAgentProvider(assistantInternet)
             ),
             host = widgetContainer.assistant,
             showApproval = widgetContainer.assistant::showApproval,
@@ -340,7 +341,7 @@ class MainActivity : AppCompatActivity() {
         widgetContainer.assistant.configureBrowserRouting(browserRoutingCoordinator)
         voiceAssistantCoordinator = VoiceAssistantCoordinator(
             preferences = assistantPreferences,
-            provider = GeminiVoiceAssistantProvider(),
+            provider = GeminiVoiceAssistantProvider(assistantInternet),
             recorder = AssistantAudioRecorder(this),
             hasMicrophonePermission = permissionCoordinator::hasMicrophonePermission,
             requestMicrophonePermission = permissionCoordinator::requestMicrophonePermission,
@@ -723,6 +724,7 @@ class MainActivity : AppCompatActivity() {
                             phoneConnectionCoordinator.sendAssistantStatus(
                                 voiceAssistantCoordinator.currentStatus()
                             )
+                            voiceAssistantCoordinator.onPhoneConnected()
                         } else {
                             voiceAssistantCoordinator.onPhoneDisconnected()
                         }
@@ -1193,6 +1195,15 @@ class MainActivity : AppCompatActivity() {
         Log.d(TAG, "Received key input from phone: chars=${key.length}")
         userInputActivity.onUserInput(UserInputKind.KEYBOARD)
         widgetContainer.onKeyPress(key, userInitiated = true)
+    }
+
+    /**
+     * The assistant's way to the internet: the phone connection's hook, once it exists (the
+     * assistant is built before it). Without it, requests simply go out directly.
+     */
+    private val assistantInternet = object : okhttp3.Interceptor {
+        override fun intercept(chain: okhttp3.Interceptor.Chain): okhttp3.Response =
+            phoneConnectionOrNull()?.assistantInternet?.intercept(chain) ?: chain.proceed(chain.request())
     }
 
     /** True from a press on "Paste Gemini API key" until the phone's clipboard is pasted. */
