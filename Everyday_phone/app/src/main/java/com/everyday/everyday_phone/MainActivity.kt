@@ -58,7 +58,6 @@ import androidx.core.content.edit
 class MainActivity : AppCompatActivity() {
     
     companion object {
-        private const val TAG = "Everyday_phone"
         private const val REQUEST_PERMISSIONS = 1
         private const val REQUEST_BACKGROUND_LOCATION = 2
         private const val ACTION_START_MIRROR = "com.everyday.everyday_phone.START_MIRROR"
@@ -70,7 +69,6 @@ class MainActivity : AppCompatActivity() {
         private const val MIRROR_RECONNECT_GRACE_MS = 60_000L
 
         private const val REQUEST_WIFI_DIRECT_PERMISSIONS = 2001
-        private const val REQUEST_IMAGE_PICKER = 2002
         private const val REQUEST_IMAGE_PERMISSION = 2003
         private const val REQUEST_SUBTITLE_AUDIO_PERMISSION = 2004
         private const val PREFS_NAME = "everyday_phone"
@@ -187,7 +185,7 @@ private var assistantStatus: AssistantStatus? = null
                         Toast.LENGTH_LONG
                     ).show()
                 }
-            } catch (e: Exception) {}
+            } catch (_: Exception) {}
             previousCrashHandler?.uncaughtException(thread, throwable)
                 ?: run {
                     android.os.Process.killProcess(android.os.Process.myPid())
@@ -474,7 +472,7 @@ private var assistantStatus: AssistantStatus? = null
         checkWifiDirectPermissions()
         
         // Check for overlay permission to allow background starts
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+        if (Settings.canDrawOverlays(this)) {
             Toast.makeText(
                 this,
                 "Please grant 'Display over other apps' to allow background mirroring",
@@ -694,11 +692,9 @@ private var assistantStatus: AssistantStatus? = null
 
     private fun hasInternetConnection(): Boolean {
         val connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-        return connectivityManager.allNetworks.any { network ->
-            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return@any false
-            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+        val capabilities = connectivityManager.getNetworkCapabilities(connectivityManager.activeNetwork) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
                 capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-        }
     }
 
     private fun showRefreshErrorDialog(message: String) {
@@ -832,10 +828,6 @@ private var assistantStatus: AssistantStatus? = null
             } catch (e: Exception) {
                 fileLog("Error in onActivityResult: ${e.message}\n${e.stackTraceToString()}")
                 // DEBUG: coordsText.text = "Error: ${e.message}"
-            }
-        } else if (requestCode == REQUEST_IMAGE_PICKER) {
-            if (resultCode == RESULT_OK && data?.data != null) {
-                handleSelectedImage(data.data!!)
             }
         }
     }
@@ -1029,6 +1021,10 @@ private var assistantStatus: AssistantStatus? = null
      * Open the system image picker to select an image to send to glasses.
      * Requests permission first if not already granted.
      */
+    private val imagePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK) result.data?.data?.let(::handleSelectedImage)
+    }
+
     private fun openImagePicker() {
         if (!hasImagePermission()) {
             requestImagePermission()
@@ -1038,7 +1034,7 @@ private var assistantStatus: AssistantStatus? = null
         val intent = Intent(Intent.ACTION_PICK).apply {
             type = "image/*"
         }
-        startActivityForResult(intent, REQUEST_IMAGE_PICKER)
+        imagePicker.launch(intent)
     }
 
     /**
@@ -1373,6 +1369,7 @@ private var assistantStatus: AssistantStatus? = null
         screenStreamServer?.requestPermission(this)
     }
 
+    @SuppressLint("FullScreenIntentPolicy")
     private fun startMirroringFromBackground() {
         fileLog("Starting mirroring from background...")
         
