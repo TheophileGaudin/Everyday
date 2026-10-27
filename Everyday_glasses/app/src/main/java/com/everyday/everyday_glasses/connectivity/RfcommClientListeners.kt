@@ -36,7 +36,7 @@ interface RemoteContentListener {
 
 /** Receives phone screen-mirroring session state. */
 interface MirrorSessionListener {
-    fun onMirrorStateChanged(enabled: Boolean, ip: String?, isWifiDirect: Boolean) = Unit
+    fun onMirrorStateChanged(state: TransportMessage.MirrorState) = Unit
 }
 
 /** Receives the paired phone's Google authorization state. */

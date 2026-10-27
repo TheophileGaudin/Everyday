@@ -533,7 +533,7 @@ class RfcommClient(
             is TransportMessage.LongPress -> postIfActive { remoteInputListener?.onLongPressWithClipboard(message.clipboard) }
             is TransportMessage.ClipboardUpdate -> postIfActive { remoteInputListener?.onClipboardReceived(message.content) }
             is TransportMessage.MirrorState -> postIfActive {
-                mirrorSessionListener?.onMirrorStateChanged(message.enabled, message.ip, message.wifiDirect)
+                mirrorSessionListener?.onMirrorStateChanged(message)
             }
             is TransportMessage.OpenBrowser -> postIfActive { remoteContentListener?.onOpenBrowserRequested(message.address) }
             is TransportMessage.GoogleAuthState -> {

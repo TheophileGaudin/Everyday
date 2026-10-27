@@ -46,6 +46,7 @@ import com.everyday.everyday_glasses.widgets._common.WidgetTheme
 import java.io.InputStream
 import java.net.Socket
 import java.net.SocketTimeoutException
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -117,7 +118,19 @@ class ScreenMirrorWidget(
     private var useRenderScript = true
 
     private var detectedContentRect: Rect? = null
-    private var lastContentBoundsDetectionMs = 0L
+
+    // Where the last frame was drawn: the part of the frame shown ([shownFrameRect], in frame pixels)
+    // and where on the widget ([shownWidgetRect]). A cursor point maps back through them to the phone.
+    private val shownFrameRect = Rect()
+    private val shownWidgetRect = RectF()
+    private var shownFrameWidth = 0
+    private var shownFrameHeight = 0
+
+    /** True from a press on the shown phone screen to its release: the press is a touch on the phone. */
+    private var phoneTouchActive = false
+    /** Touches go back to the phone on the stream socket, written off the UI thread, in order. */
+    private val inputWriter = Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "MirrorInputWriter") }
+private var lastContentBoundsDetectionMs = 0L
 
     private var nv21Buffer: ByteArray? = null
     private var argbPixels: IntArray? = null
@@ -506,6 +519,8 @@ class ScreenMirrorWidget(
     }
 
     override fun onContentTap(px: Float, py: Float): Boolean {
+        // A tap on the shown phone screen already reached the phone as a press and release.
+        if (hitTest(px, py) == HitArea.CONTENT && toFrame(px, py) != null) return true
         if (hitTest(px, py) != HitArea.RUN_PAUSE_BUTTON) return false
         val shouldStart = streamState != StreamState.STREAMING && streamState != StreamState.CONNECTING
         Log.d(TAG, "Run/Pause button tapped. Requesting start=$shouldStart")
@@ -533,6 +548,80 @@ class ScreenMirrorWidget(
             handler.post { notifyTransientChange() }
             dispatchMediaStateIfChanged()
         }
+    }
+
+    // ==================== Controlling the phone ====================
+
+    private fun rememberShownFrame(bitmap: Bitmap, frameRect: Rect, widgetRect: RectF) {
+        shownFrameRect.set(frameRect)
+        shownWidgetRect.set(widgetRect)
+        shownFrameWidth = bitmap.width
+        shownFrameHeight = bitmap.height
+    }
+
+    /** The widget point ([px], [py]) as a point of the video frame, in fractions of it; null off the shown screen. */
+    private fun toFrame(px: Float, py: Float, clamp: Boolean = false): Pair<Float, Float>? {
+        if (streamState != StreamState.STREAMING || shownWidgetRect.isEmpty || shownFrameWidth <= 0) return null
+        if (!clamp && !shownWidgetRect.contains(px, py)) return null
+        val x = px.coerceIn(shownWidgetRect.left, shownWidgetRect.right)
+        val y = py.coerceIn(shownWidgetRect.top, shownWidgetRect.bottom)
+        val frameX = shownFrameRect.left + (x - shownWidgetRect.left) / shownWidgetRect.width() * shownFrameRect.width()
+        val frameY = shownFrameRect.top + (y - shownWidgetRect.top) / shownWidgetRect.height() * shownFrameRect.height()
+        return frameX / shownFrameWidth to frameY / shownFrameHeight
+    }
+
+    /** Sends one touch event to the phone: {"a":action,"x":..,"y":..} in fractions of the frame. */
+    private fun sendInput(action: String, frame: Pair<Float, Float>, dy: Float = 0f) {
+        val socket = streamSocket ?: return
+        if (action != "move") Log.d(TAG, "Phone touch $action at $frame")
+        val line = JSONObject().put("a", action).put("x", frame.first.toDouble()).put("y", frame.second.toDouble())
+            .apply { if (dy != 0f) put("dy", dy.toDouble()) }
+            .toString() + "\n"
+        inputWriter.execute {
+            try {
+                val out = socket.getOutputStream()
+                out.write(line.toByteArray())
+                out.flush()
+            } catch (e: Exception) {
+                Log.w(TAG, "Input not sent: ${e.message}")
+            }
+        }
+    }
+
+    /** A press on the shown phone screen becomes a finger on the phone: it follows the cursor until released. */
+    override fun onPress(px: Float, py: Float): Boolean {
+        if (hitTest(px, py) != HitArea.CONTENT) return false
+        val frame = toFrame(px, py) ?: return false
+        phoneTouchActive = true
+        sendInput("down", frame)
+        return true
+    }
+
+    override fun onPressMove(px: Float, py: Float): Boolean {
+        if (!phoneTouchActive) return false
+        toFrame(px, py, clamp = true)?.let { sendInput("move", it) }
+        return true
+    }
+
+    override fun onPressRelease(px: Float, py: Float) {
+        if (!phoneTouchActive) return
+        phoneTouchActive = false
+        toFrame(px, py, clamp = true)?.let { sendInput("up", it) }
+    }
+
+    override fun onPressCancel(px: Float, py: Float) = onPressRelease(px, py)
+
+    /** A double-tap on the shown phone screen reached the phone as two taps; it doesn't open the menu. */
+    override fun onDoubleTap(px: Float, py: Float): Boolean =
+        hitTest(px, py) == HitArea.CONTENT && toFrame(px, py) != null
+
+    /** A two-finger scroll over the shown phone screen scrolls the phone. */
+    override fun onScrollAt(px: Float, py: Float, dy: Float): Boolean {
+        val frame = toFrame(px, py) ?: return false
+        if (shownWidgetRect.height() <= 0f || shownFrameHeight <= 0) return false
+        val frameDy = dy / shownWidgetRect.height() * shownFrameRect.height() / shownFrameHeight
+        sendInput("scroll", frame, frameDy)
+        return true
     }
 
     private fun startStreaming(ip: String) {
@@ -598,6 +687,8 @@ class ScreenMirrorWidget(
 
     private fun stopStreaming() {
         isStreaming.set(false)
+        phoneTouchActive = false
+        shownWidgetRect.setEmpty()
         try { streamSocket?.close() } catch (_: Exception) {}
         streamSocket = null
         inputStream = null
@@ -984,6 +1075,7 @@ class ScreenMirrorWidget(
                             }
 
                             canvas.drawBitmap(bitmap, contentRect, dstRect, bitmapPaint)
+                            rememberShownFrame(bitmap, contentRect, dstRect)
                         } else {
                             val scale = contentBounds.width() / contentWidth
                             val scaledHeight = contentHeight * scale
@@ -1005,6 +1097,7 @@ class ScreenMirrorWidget(
                             )
 
                             canvas.drawBitmap(bitmap, srcRect, dstRect, bitmapPaint)
+                            rememberShownFrame(bitmap, srcRect, dstRect)
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Draw error: ${e.message}")
@@ -1084,6 +1177,7 @@ class ScreenMirrorWidget(
         }
         yuvToRgbScript = null
         renderScript = null
+        inputWriter.shutdown()
     }
 
     fun release() = onDestroy()
@@ -1159,12 +1253,16 @@ class MirrorPlugin(
         },
     )
 
+    /** Where the phone's running mirror streams from; null when there is none (or the phone is away). */
+    private var liveMirrorIp: String? = null
+
     init {
         services.appData.subscribe(AppChannels.mirroring) { mirror -> setMirroringEnabled(mirror.enabled, mirror.phoneIp) }
         services.appData.subscribe(AppChannels.phoneConnected) { connected -> if (!connected) setMirroringEnabled(false, null) }
     }
 
     private fun setMirroringEnabled(enabled: Boolean, phoneIp: String?) {
+        liveMirrorIp = phoneIp.takeIf { enabled }
         services.withTransientChanges {
             current()?.setMirroringEnabled(enabled, phoneIp)
             current()?.refreshDisplayVisibility()
@@ -1206,6 +1304,8 @@ class MirrorPlugin(
             }
         }
         widget.refreshDisplayVisibility()
+        // A mirror already running when the widget opens: start showing it.
+        liveMirrorIp?.let { widget.setMirroringEnabled(true, it) }
     }
 
     /** The phone screen mirror as a widget type: its id, its descriptor, how it is saved, and its plugin. */

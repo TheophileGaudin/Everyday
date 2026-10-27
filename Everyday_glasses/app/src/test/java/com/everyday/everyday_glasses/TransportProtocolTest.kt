@@ -48,6 +48,10 @@ class TransportProtocolTest {
             TransportMessage.ClipboardUpdate(specialText),
             TransportMessage.MirrorRequest(true),
             TransportMessage.MirrorState(true, "192.168.49.1", 5050, wifiDirect = true),
+            TransportMessage.MirrorState(
+                true, "192.168.49.1", 5050, wifiDirect = true,
+                networkName = "DIRECT-Ev-Everyday", passphrase = "secret-pass", lanIp = "192.168.1.20"
+            ),
             TransportMessage.MirrorState(false),
             TransportMessage.TextFieldFocus(true, "field-1"),
             TransportMessage.GoogleAuthRequest,

@@ -97,6 +97,20 @@
             </intent-filter>
         </service>
 
+        <!-- Lets the glasses control the phone through its mirrored screen -->
+        <service
+            android:name=".MirrorControlService"
+            android:exported="false"
+            android:label="@string/mirror_control_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/mirror_control_service" />
+        </service>
+
     </application>
 
 </manifest>

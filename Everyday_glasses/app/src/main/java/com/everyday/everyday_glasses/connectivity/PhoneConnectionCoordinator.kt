@@ -2,6 +2,8 @@ package com.everyday.everyday_glasses.connectivity
 
 import android.content.Context
 import android.net.wifi.p2p.WifiP2pDevice
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.everyday.everyday_glasses.auth_permissions.GoogleAccountSummary
 import com.everyday.everyday_glasses.auth_permissions.GooglePhoneAuthStatus
@@ -83,6 +85,9 @@ class PhoneConnectionCoordinator(
     companion object {
         private const val TAG = "PhoneConnectionCoordinator"
 
+        /** How long the glasses try to join the phone's group before falling back to the shared Wi-Fi network. */
+        private const val GROUP_JOIN_TIMEOUT_MS = 15_000L
+
         /** Selects a P2P peer only when its identity is unambiguous. */
         internal fun selectWifiDirectPeerIndex(
             addresses: List<String>,
@@ -115,8 +120,26 @@ class PhoneConnectionCoordinator(
     private val rfcommClient = RfcommClient(appContext, preferredPhoneAddress)
     private var wifiDirectClient: WifiDirectClient? = null
 
-    private var pendingWifiDirectMirrorIp: String? = null
-    private var latestPhoneBatteryPercent = -1
+    private val handler = Handler(Looper.getMainLooper())
+
+    /** A mirror waiting for the Wi-Fi Direct link (joining, or asking for permission first). */
+    private var pendingMirror: TransportMessage.MirrorState? = null
+
+    /** True while the glasses are in a group they joined for mirroring, so they leave it when it stops. */
+    private var joinedMirrorGroup = false
+
+    private val groupJoinTimeout = Runnable {
+        val mirror = pendingMirror ?: return@Runnable
+        pendingMirror = null
+        val lanIp = mirror.lanIp
+        if (lanIp != null) {
+            Log.w(TAG, "Wi-Fi Direct join timed out; streaming over Wi-Fi from $lanIp")
+            callbacks.onMirroringChanged(true, lanIp)
+        } else {
+            Log.w(TAG, "Wi-Fi Direct join timed out and there is no Wi-Fi fallback")
+        }
+    }
+private var latestPhoneBatteryPercent = -1
     private var initialized = false
     private var released = false
 
@@ -157,7 +180,8 @@ class PhoneConnectionCoordinator(
             client.release()
         }
         wifiDirectClient = null
-        pendingWifiDirectMirrorIp = null
+        pendingMirror = null
+        handler.removeCallbacks(groupJoinTimeout)
     }
 
     // ---------------------------------------------------------------------
@@ -168,32 +192,24 @@ class PhoneConnectionCoordinator(
         rfcommClient.sendTextFieldFocus(focused, fieldId)
 
     fun sendMirrorRequest(start: Boolean): Boolean {
-        if (!start) pendingWifiDirectMirrorIp = null
+        if (!start) cancelPendingMirror()
         return if (!released) rfcommClient.sendMirrorRequest(start) else false
     }
 
     /** Continues a deferred Wi-Fi Direct mirror after PermissionCoordinator grants access. */
     fun onWifiDirectPermissionAvailable() {
         if (released) return
-        val mirrorIp = pendingWifiDirectMirrorIp ?: return
-        val client = wifiDirectClient ?: return
-
-        if (client.isConnected) {
-            pendingWifiDirectMirrorIp = null
-            callbacks.onMirroringChanged(true, mirrorIp)
-            return
-        }
-
-        if (!client.discoverPeers()) {
-            pendingWifiDirectMirrorIp = null
-            callbacks.onWifiDirectPermissionRequired()
-        }
+        val mirror = pendingMirror ?: return
+        pendingMirror = null
+        handleMirrorStateChanged(mirror)
     }
 
-    /** Cancels any deferred mirror when the user declines the permission request. */
+    /** Falls back to the shared Wi-Fi network, if any, when the user declines the permission request. */
     fun onWifiDirectPermissionDenied() {
         if (released) return
-        pendingWifiDirectMirrorIp = null
+        val lanIp = pendingMirror?.lanIp
+        cancelPendingMirror()
+        if (lanIp != null) callbacks.onMirroringChanged(true, lanIp)
     }
 
     fun requestClipboard(): Boolean =
@@ -317,13 +333,9 @@ class PhoneConnectionCoordinator(
         }
 
         rfcommClient.mirrorSessionListener = object : MirrorSessionListener {
-            override fun onMirrorStateChanged(
-                enabled: Boolean,
-                ip: String?,
-                isWifiDirect: Boolean
-            ) {
+            override fun onMirrorStateChanged(state: TransportMessage.MirrorState) {
                 if (released) return
-                handleMirrorStateChanged(enabled, ip, isWifiDirect)
+                handleMirrorStateChanged(state)
             }
         }
 
@@ -403,54 +415,92 @@ class PhoneConnectionCoordinator(
     // Mirroring and Wi-Fi Direct handoff
     // ---------------------------------------------------------------------
 
-    private fun handleMirrorStateChanged(
-        enabled: Boolean,
-        ip: String?,
-        isWifiDirect: Boolean
-    ) {
+    /**
+     * The phone started, moved or stopped its mirror. With its Wi-Fi Direct group's credentials, the
+     * glasses join the group and stream from the phone there; if that fails or takes longer than
+     * [GROUP_JOIN_TIMEOUT_MS], they stream over the shared Wi-Fi network when the phone gave one.
+     * Without credentials (an older phone app), they find the phone by peer discovery as before.
+     */
+    private fun handleMirrorStateChanged(state: TransportMessage.MirrorState) {
         if (released) return
         Log.d(
             TAG,
-            "Mirror state changed: enabled=$enabled, ip=$ip, wifiDirect=$isWifiDirect"
+            "Mirror state changed: enabled=${state.enabled}, ip=${state.ip}, wifiDirect=${state.wifiDirect}, " +
+                "group=${state.networkName}, lan=${state.lanIp}"
         )
-
-        // A disabled/non-P2P mirror supersedes any earlier P2P handoff request.
-        if (!enabled || !isWifiDirect) {
-            pendingWifiDirectMirrorIp = null
+        cancelPendingMirror()
+        val ip = state.ip
+        if (!state.enabled || ip.isNullOrBlank()) {
+            leaveMirrorGroup()
+            callbacks.onMirroringChanged(false, null)
+            return
+        }
+        if (!state.wifiDirect) {
+            callbacks.onMirroringChanged(true, ip)
+            return
         }
 
-        if (enabled && isWifiDirect) {
-            if (wifiDirectClient?.isConnected != true) {
-                Log.d(TAG, "Wi-Fi Direct required; starting peer discovery")
-                pendingWifiDirectMirrorIp = null
-                if (ip.isNullOrBlank()) {
-                    Log.e(TAG, "Cannot start Wi-Fi Direct mirroring without a mirror IP")
-                    return
-                }
-                pendingWifiDirectMirrorIp = ip
-                if (wifiDirectClient == null) {
-                    pendingWifiDirectMirrorIp = null
-                    Log.e(TAG, "Wi-Fi Direct client is unavailable")
-                    return
-                }
-                val client = wifiDirectClient ?: return
-                if (!client.hasRequiredRuntimePermission()) {
-                    Log.d(TAG, "Wi-Fi Direct permission required before peer discovery")
-                    callbacks.onWifiDirectPermissionRequired()
-                    return
-                }
-                if (!client.discoverPeers()) {
-                    pendingWifiDirectMirrorIp = null
-                    callbacks.onWifiDirectPermissionRequired()
-                }
-                return
-            }
-
-            Log.d(TAG, "Wi-Fi Direct already connected; enabling mirroring")
-            pendingWifiDirectMirrorIp = null
+        val client = wifiDirectClient
+        if (client == null) {
+            Log.e(TAG, "Wi-Fi Direct client is unavailable")
+            state.lanIp?.let { callbacks.onMirroringChanged(true, it) }
+            return
         }
+        if (client.isConnected && client.groupOwnerAddress == ip) {
+            Log.d(TAG, "Already in the phone's group; enabling mirroring")
+            callbacks.onMirroringChanged(true, ip)
+            return
+        }
+        pendingMirror = state
+        if (!client.hasRequiredRuntimePermission()) {
+            Log.d(TAG, "Wi-Fi Direct permission required before joining")
+            callbacks.onWifiDirectPermissionRequired()
+            return
+        }
+        val name = state.networkName
+        val passphrase = state.passphrase
+        val started = if (name != null && passphrase != null) {
+            client.joinGroup(name, passphrase).also { if (it) joinedMirrorGroup = true }
+        } else {
+            Log.d(TAG, "No group credentials; starting peer discovery")
+            client.discoverPeers()
+        }
+        if (!started) {
+            pendingMirror = null
+            state.lanIp?.let { callbacks.onMirroringChanged(true, it) }
+            return
+        }
+        handler.postDelayed(groupJoinTimeout, GROUP_JOIN_TIMEOUT_MS)
+    }
 
-        callbacks.onMirroringChanged(enabled, ip)
+    private fun cancelPendingMirror() {
+        pendingMirror = null
+        handler.removeCallbacks(groupJoinTimeout)
+    }
+
+    /** Leaves the phone's group when the glasses joined it for mirroring. */
+    private fun leaveMirrorGroup() {
+        if (!joinedMirrorGroup) return
+        joinedMirrorGroup = false
+        wifiDirectClient?.disconnect()
+    }
+
+    /** The Wi-Fi Direct link is up: start the mirror that was waiting for it. */
+    private fun onMirrorLinkReady(groupOwnerIp: String) {
+        val mirror = pendingMirror ?: return
+        cancelPendingMirror()
+        val ip = mirror.ip ?: groupOwnerIp
+        Log.d(TAG, "Wi-Fi Direct ready; streaming from $ip")
+        callbacks.onMirroringChanged(true, ip)
+    }
+
+    /** The Wi-Fi Direct link failed: stream over the shared Wi-Fi network if the phone gave one. */
+    private fun onMirrorLinkFailed(reason: String) {
+        val mirror = pendingMirror ?: return
+        cancelPendingMirror()
+        val lanIp = mirror.lanIp
+        Log.w(TAG, "Wi-Fi Direct failed ($reason); Wi-Fi fallback: $lanIp")
+        if (lanIp != null) callbacks.onMirroringChanged(true, lanIp)
     }
 
     private fun initializeWifiDirect() {
@@ -459,63 +509,35 @@ class PhoneConnectionCoordinator(
                 override fun onConnected(groupOwnerIp: String) {
                     if (released) return
                     Log.d(TAG, "Wi-Fi Direct connected, group owner: $groupOwnerIp")
-
-                    pendingWifiDirectMirrorIp?.let { mirrorIp ->
-                        Log.d(TAG, "Enabling pending mirror connection to $mirrorIp")
-                        callbacks.onMirroringChanged(true, mirrorIp)
-                        pendingWifiDirectMirrorIp = null
-                    }
+                    onMirrorLinkReady(groupOwnerIp)
                 }
 
                 override fun onDisconnected() {
                     if (released) return
                     Log.d(TAG, "Wi-Fi Direct disconnected")
-                    pendingWifiDirectMirrorIp = null
                 }
 
                 override fun onPeersAvailable(peers: List<WifiP2pDevice>) {
                     if (released) return
                     Log.d(TAG, "Wi-Fi Direct peers available: ${peers.size}")
-                    if (pendingWifiDirectMirrorIp == null) {
-                        Log.d(TAG, "Ignoring peers because no mirror handoff is pending")
-                        return
-                    }
-                    peers.forEach { device ->
-                        Log.d(
-                            TAG,
-                            "  - ${device.deviceName} (${device.deviceAddress}) " +
-                                    "status=${device.status}"
-                        )
-                    }
-
-                    val connectedDevice = peers.firstOrNull { it.status == WifiP2pDevice.CONNECTED }
-                    if (connectedDevice != null) {
-                        Log.d(TAG, "Already connected to: ${connectedDevice.deviceName}")
-                        return
-                    }
-
+                    // Peer discovery is only the fallback for a phone app that sends no group credentials.
+                    val mirror = pendingMirror ?: return
+                    if (mirror.networkName != null) return
+                    if (peers.any { it.status == WifiP2pDevice.CONNECTED }) return
                     val availableDevices = peers.filter { it.status == WifiP2pDevice.AVAILABLE }
-                    val availableDevice = selectWifiDirectPeer(
-                        availableDevices,
-                        preferredWifiDirectDeviceAddress
-                    )
-
+                    val availableDevice = selectWifiDirectPeer(availableDevices, preferredWifiDirectDeviceAddress)
                     if (availableDevice != null) {
                         Log.d(TAG, "Auto-connecting to: ${availableDevice.deviceName}")
                         wifiDirectClient?.connectToDevice(availableDevice)
                     } else {
-                        Log.w(
-                            TAG,
-                            "No unique Wi-Fi Direct phone peer found " +
-                                "(available=${availableDevices.size}, configured=${preferredWifiDirectDeviceAddress != null})"
-                        )
+                        Log.w(TAG, "No unique Wi-Fi Direct phone peer found (available=${availableDevices.size})")
                     }
                 }
 
                 override fun onError(message: String) {
                     if (released) return
                     Log.e(TAG, "Wi-Fi Direct error: $message")
-                    pendingWifiDirectMirrorIp = null
+                    onMirrorLinkFailed(message)
                 }
             }
 

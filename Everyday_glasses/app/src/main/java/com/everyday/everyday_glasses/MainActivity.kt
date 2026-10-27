@@ -75,6 +75,7 @@ import com.everyday.everyday_glasses.settings.DisplaySettingsHandler
 import com.everyday.everyday_glasses.settings.GeminiSettingsListener
 import com.everyday.everyday_glasses.ui.components.CursorActivityObserver
 import com.everyday.everyday_glasses.ui.components.CursorView
+import com.everyday.shared.command.AppCommandInvocation
 import com.everyday.shared.sync.FinanceDashboardTileConfig
 import com.everyday.shared.sync.NewsSnapshot
 import com.everyday.shared.sync.NewsSourceSpec
@@ -175,7 +176,13 @@ class MainActivity : AppCompatActivity() {
         private const val SPEEDO_LOG_TAG = "Speedometer"
         private const val ACTION_DEBUG_CLEAR_WEBVIEW =
             "com.everyday.everyday_glasses.action.DEBUG_CLEAR_WEBVIEW"
-    }
+        /**
+         * Debug builds: runs the app command in the "command" extra ("toggle:mirror", ...), and/or moves
+         * the cursor to the "cursorX"/"cursorY" float extras, for testing over adb.
+         */
+        private const val ACTION_DEBUG_COMMAND =
+            "com.everyday.everyday_glasses.action.DEBUG_COMMAND"
+}
 
     private inline fun speedLog(msg: () -> String) {
         if (SPEEDO_LOG) {
@@ -1185,7 +1192,18 @@ class MainActivity : AppCompatActivity() {
     private fun handleDebugIntent(intent: Intent?) {
         val isDebuggable =
             (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
-        if (!isDebuggable || intent?.action != ACTION_DEBUG_CLEAR_WEBVIEW) return
+        if (!isDebuggable) return
+        if (intent?.action == ACTION_DEBUG_COMMAND) {
+            if (intent.hasExtra("cursorX") && intent.hasExtra("cursorY")) {
+                cursorView.setCursorPosition(intent.getFloatExtra("cursorX", 0f), intent.getFloatExtra("cursorY", 0f))
+                widgetContainer.setCursorPosition(cursorView.getCursorX(), cursorView.getCursorY())
+                Log.d(TAG, "Debug cursor at (${cursorView.getCursorX()}, ${cursorView.getCursorY()})")
+            }
+            val commandId = intent.getStringExtra("command") ?: return
+            Log.d(TAG, "Debug command $commandId: ${widgetContainer.executeCommand(AppCommandInvocation(commandId))}")
+            return
+        }
+        if (intent?.action != ACTION_DEBUG_CLEAR_WEBVIEW) return
 
         val profileSummary = binocularView.getRenderProfileSummary()
         Log.d(TAG, "Debug clear WebView requested, binocularProfile=$profileSummary")

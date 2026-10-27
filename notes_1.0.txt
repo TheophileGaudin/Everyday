@@ -1,6 +1,7 @@
 New features
 
 Added voice control agent (default Lite class of Gemini models, others can be selected)
+Added remote control of phone from screen mirror
 Added page agent in browser (default Flash class of Gemini models, others can be selected)
 
 Improvement
@@ -14,6 +15,8 @@ Bugfix
 
 Added map data to the refresh button so any timeout can be exposed as an error message here.
 File browser is now persisted like any other widget
+Widgets no longer get highlighted when something is overlaid on the dashboard
+Fixed screen mirror requiring RayNeo phone app to run on top of Everyday phone companion app: now only the latter needed
 
 Efficiency optimizations
 
@@ -21,34 +24,19 @@ Tiered binocular update notifications
 Localized map refreshing
 
 Refactor
-General codebase refactor: files classified in categories for easier navigation by humans and agents
-Text edition refactor: unification of text edition across fields from different UI components
-Migrated a number of functionalities in WidgetContainer to dedicated services.
-Extracted a number of classes from MainActivity and WidgetContainer to reduce the number of responsibilities in these central files
-Grouped a number of callbacks into interfaces.
-Defined boundary between active dashboard and listing of saved layouts
-
+1. General codebase refactor: Codebase made navigable with subdirectories reflecting its different component roles.
+2. MainActivity (the core app class) WidgetContainer (the class for the dashboard) were god objects. A number of classes were extracted from them. 
+3. Modularized widget functionalities: now adding a widget to the codebase requires only a single addition into a list class (WidgetPlugins) on top of the widget files themselves.
+4. Text edition refactor: unification of text edition across fields from different UI components
 
 Behaviors to investigate before full release:
 => make sure the agent can run map searches
 => make it so the images are saved if they are made part of a layout
-=> investigate performance in general
 
 Questions: 
-=> Screen mirror appears to be depending on the connection to the main RayNeo app. It shouldn't be necessary to connect on the phone's app from RayNeo. Going through my app should work. If I do it and RayNeo app is disconnected I get "reconnecting...".
-
-=> Shouldn't setSpeedometerForceVisibleWhenIdle be secluded in the speedometer widget rather than part of the generic settings controller?
-
-______
 
 Map performance improvements
 
 Optimize Everyday_glasses/app/src/main/java/com/everyday/everyday_glasses/widgets/map/MapWidget.kt, particularly drawTopDown(), drawRoad(), and mapPoint(). These rebuild road paths and repeat geographic distance/bearing calculations on each redraw. Cache projected geometry or a rendered map layer, updating only when location, heading, zoom, map data, or widget size changes.
 Also inspect WidgetContainer.onDraw() and binocular rendering: cursor/hover updates redraw the dashboard, including the map. Aim to redraw the cursor independently and avoid map invalidations while minimized.
 ADB profiling implicated map drawing and path/texture churn; minimizing the map noticeably improved responsiveness. Validate with cursor movement before and after map data loads.
-
-______
-
-Improvements as to what gets displayed on hover: 
-
-it is very confusing. Whatever widget is under another widget should not be receiving updates when the cursor hovers both. Only the widget on top should update. Same when the context menu is opened, it should not highlight widgets underneath it.

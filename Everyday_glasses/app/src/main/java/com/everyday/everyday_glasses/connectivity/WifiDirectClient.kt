@@ -181,6 +181,52 @@ class WifiDirectClient(private val context: Context) {
     }
 
     /**
+     * Joins the phone's Wi-Fi Direct group by its name and passphrase (sent over Bluetooth), with no
+     * peer discovery and no prompt on either device. Leaves any other group first. The result
+     * arrives as [WifiDirectConnectionListener.onConnected] or [WifiDirectConnectionListener.onError].
+     * Needs Android 10.
+     */
+    @SuppressLint("MissingPermission") // Guarded by canUseWifiDirect().
+    fun joinGroup(networkName: String, passphrase: String): Boolean {
+        if (!canUseWifiDirect()) return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        val config = WifiP2pConfig.Builder()
+            .setNetworkName(networkName)
+            .setPassphrase(passphrase)
+            .build()
+        Log.d(TAG, "Joining group $networkName")
+        val connect = {
+            wifiP2pManager?.connect(channel, config, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() {
+                    Log.d(TAG, "Join initiated")
+                }
+
+                override fun onFailure(reason: Int) {
+                    Log.e(TAG, "Join failed: $reason")
+                    handler.post { connectionListener?.onError("Join failed ($reason)") }
+                }
+            })
+        }
+        // A stale group (an earlier session, another app's) would make the join fail as busy.
+        wifiP2pManager?.requestGroupInfo(channel) { group ->
+            if (released) return@requestGroupInfo
+            if (group == null) {
+                connect()
+            } else if (group.networkName == networkName && !group.isGroupOwner) {
+                Log.d(TAG, "Already in group $networkName")
+                requestConnectionInfo()
+            } else {
+                Log.d(TAG, "Leaving group ${group.networkName} first")
+                wifiP2pManager?.removeGroup(channel, object : WifiP2pManager.ActionListener {
+                    override fun onSuccess() { connect() }
+                    override fun onFailure(reason: Int) { connect() }
+                })
+            }
+        }
+        return true
+    }
+
+    /**
      * Connect to a specific Wi-Fi Direct device (the phone).
      */
     @SuppressLint("MissingPermission") // Guarded by canUseWifiDirect().

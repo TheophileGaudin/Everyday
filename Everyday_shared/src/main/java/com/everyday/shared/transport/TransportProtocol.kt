@@ -86,8 +86,21 @@ sealed class TransportMessage(val kind: String) {
     object ClipboardRequest : TransportMessage("clipboard.request")
     data class ClipboardUpdate(val content: String) : TransportMessage("clipboard.update")
     data class MirrorRequest(val start: Boolean) : TransportMessage("mirror.request")
-    data class MirrorState(val enabled: Boolean, val ip: String? = null, val port: Int? = null, val wifiDirect: Boolean = false) :
-        TransportMessage("mirror.state")
+    /**
+     * The phone's mirror session. [ip] is where the glasses stream from: the phone's own Wi-Fi Direct
+     * group ([wifiDirect]), which the glasses join with [networkName] and [passphrase], or the phone's
+     * address on a shared Wi-Fi network. [lanIp], when set, is that shared-network address, a fallback
+     * when the glasses can't join the group.
+     */
+    data class MirrorState(
+        val enabled: Boolean,
+        val ip: String? = null,
+        val port: Int? = null,
+        val wifiDirect: Boolean = false,
+        val networkName: String? = null,
+        val passphrase: String? = null,
+        val lanIp: String? = null,
+    ) : TransportMessage("mirror.state")
     data class TextFieldFocus(val focused: Boolean, val fieldId: String? = null) : TransportMessage("text_field.focus")
     object GoogleAuthRequest : TransportMessage("google_auth.request")
     object GoogleAuthDisconnect : TransportMessage("google_auth.disconnect")
@@ -184,7 +197,10 @@ object TransportProtocol {
                 enabled = enabled,
                 ip = ip,
                 port = payload.optionalInt("port"),
-                wifiDirect = payload.optionalBoolean("wifiDirect") ?: false
+                wifiDirect = payload.optionalBoolean("wifiDirect") ?: false,
+                networkName = payload.optionalString("networkName"),
+                passphrase = payload.optionalString("passphrase"),
+                lanIp = payload.optionalString("lanIp"),
             )
         }
         "text_field.focus" -> TransportMessage.TextFieldFocus(
@@ -314,6 +330,7 @@ object TransportProtocol {
         is TransportMessage.MirrorRequest -> JSONObject().put("start", start)
         is TransportMessage.MirrorState -> JSONObject().put("enabled", enabled).putNullable("ip", ip)
             .putNullable("port", port).put("wifiDirect", wifiDirect)
+            .putNullable("networkName", networkName).putNullable("passphrase", passphrase).putNullable("lanIp", lanIp)
         is TransportMessage.TextFieldFocus -> JSONObject().put("focused", focused).putNullable("fieldId", fieldId)
         TransportMessage.GoogleAuthRequest, TransportMessage.GoogleAuthDisconnect -> JSONObject()
         is TransportMessage.GoogleAuthState -> JSONObject().put("status", status.wireName)

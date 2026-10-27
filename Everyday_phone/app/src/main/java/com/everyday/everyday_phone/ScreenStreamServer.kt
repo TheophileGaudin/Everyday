@@ -47,6 +47,8 @@ class ScreenStreamServer(private val context: Context) {
         fun onStreamError(error: String) = Unit
         fun onStreamStatusChanged(status: String) = Unit
         fun onCaptureOrientationChanged(isLandscape: Boolean) = Unit
+        /** The glasses tried to control the phone, but the remote-control accessibility service is off. */
+        fun onRemoteControlUnavailable() = Unit
     }
 
     companion object {
@@ -202,6 +204,9 @@ class ScreenStreamServer(private val context: Context) {
         }
     }
 
+    /** The phone's address on a regular Wi-Fi network (not its Wi-Fi Direct group), if it has one. */
+    fun getLanIp(): String? = getBestStreamingIp()?.takeIf { it.second == ConnectionMode.REGULAR_WIFI }?.first
+
     /**
      * Request screen capture permission from the user.
      */
@@ -257,6 +262,8 @@ class ScreenStreamServer(private val context: Context) {
     fun getMediaProjection(): MediaProjection? = mediaProjection
 
     fun releaseProjection() {
+        try { virtualDisplay?.release() } catch (_: Exception) {}
+        virtualDisplay = null
         try {
             mediaProjection?.stop()
         } catch (e: Exception) {
@@ -319,7 +326,30 @@ class ScreenStreamServer(private val context: Context) {
         }
         
         screenDensity = displayMetrics.densityDpi
-        
+
+        // Since Android 14 a capture permission expires unless its virtual display is created
+        // soon after it's granted, and the glasses may connect minutes later: create it now,
+        // drawing nowhere, and hand it each glasses connection's encoder (startCapture).
+        if (virtualDisplay == null) {
+            try {
+                virtualDisplay = mediaProjection?.createVirtualDisplay(
+                    "ScreenMirror",
+                    getCaptureWidth(currentIsLandscape),
+                    getCaptureHeight(currentIsLandscape),
+                    screenDensity,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    null,
+                    null,
+                    null
+                )
+                fileLog("Virtual display created, waiting for the glasses")
+            } catch (e: Exception) {
+                fileLog("Failed to create virtual display: ${e.message}")
+                setError("Capture: ${e.message}")
+                return
+            }
+        }
+
         isRunning.set(true)
         framesSent.set(0)
         bytesSent.set(0)
@@ -482,9 +512,9 @@ class ScreenStreamServer(private val context: Context) {
         fileLog("Stopping stream server")
         isRunning.set(false)
         isStreaming.set(false)
-        
-        stopCapture()
-        
+
+        stopCapture(releaseDisplay = true)
+
         try { clientSocket?.close() } catch (e: Exception) {}
         try { serverSocket?.close() } catch (e: Exception) {}
         
@@ -617,7 +647,8 @@ class ScreenStreamServer(private val context: Context) {
                     
                     isStreaming.set(true)
                     handler.post { streamingListener?.onStreamingStateChanged(true) }
-                    
+                    startInputReader(socket, captureWidth, captureHeight)
+
                     // Start capture and encoding with current orientation
                     if (!startCapture(captureWidth, captureHeight)) {
                         fileLog("startCapture failed, closing connection")
@@ -712,19 +743,28 @@ class ScreenStreamServer(private val context: Context) {
             fileLog("Encoder started successfully")
             handler.post { streamingListener?.onStreamStatusChanged("Encoder started") }
             
-            // Create virtual display that renders to encoder surface
-            fileLog("Creating virtual display...")
-            virtualDisplay = mediaProjection?.createVirtualDisplay(
-                "ScreenMirror",
-                captureWidth,
-                captureHeight,
-                screenDensity,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                encoderSurface,
-                null,
-                null
-            )
-            
+            // The virtual display is made once per screen-capture session and handed each new
+            // encoder: since Android 14 a MediaProjection may create only one, so a glasses
+            // reconnection must reuse it.
+            val existing = virtualDisplay
+            if (existing != null) {
+                fileLog("Reusing virtual display")
+                existing.resize(captureWidth, captureHeight, screenDensity)
+                existing.surface = encoderSurface
+            } else {
+                fileLog("Creating virtual display...")
+                virtualDisplay = mediaProjection?.createVirtualDisplay(
+                    "ScreenMirror",
+                    captureWidth,
+                    captureHeight,
+                    screenDensity,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    encoderSurface,
+                    null,
+                    null
+                )
+            }
+
             if (virtualDisplay == null) {
                 fileLog("Failed to create virtual display - returned null")
                 setError("Failed to create virtual display")
@@ -745,16 +785,22 @@ class ScreenStreamServer(private val context: Context) {
         }
     }
     
-    private fun stopCapture() {
+    /** Stops the encoder. The virtual display is kept for the next connection unless [releaseDisplay]. */
+    private fun stopCapture(releaseDisplay: Boolean = false) {
         fileLog("Stopping capture")
-        
+
         try {
-            virtualDisplay?.release()
+            if (releaseDisplay) {
+                virtualDisplay?.release()
+                virtualDisplay = null
+            } else {
+                virtualDisplay?.surface = null
+            }
         } catch (e: Exception) {
             fileLog("Error releasing virtual display: ${e.message}")
+            virtualDisplay = null
         }
-        virtualDisplay = null
-        
+
         try {
             encoder?.stop()
             encoder?.release()
@@ -836,6 +882,83 @@ class ScreenStreamServer(private val context: Context) {
         fileLog("Stream ended. Total frames: ${framesSent.get()}, bytes: ${bytesSent.get()}")
     }
     
+    // ==================== Remote control from the glasses ====================
+
+    /** Whether the user was told, this session, that remote control needs the accessibility service. */
+    private val remoteControlPrompted = AtomicBoolean(false)
+
+    /**
+     * Reads the glasses' touches on the mirror, sent back on the stream socket as one JSON object per
+     * line: {"a":"down|move|up|scroll","x":0..1,"y":0..1,"dy":0..1}, in fractions of the video
+     * frame ([captureWidth] x [captureHeight]). Each is mapped to the phone screen and played by
+     * [MirrorControlService].
+     */
+    private fun startInputReader(socket: Socket, captureWidth: Int, captureHeight: Int) {
+        Thread {
+            try {
+                socket.getInputStream().bufferedReader().forEachLine { line ->
+                    val input = runCatching { org.json.JSONObject(line) }.getOrNull() ?: return@forEachLine
+                    handler.post { playInput(input, captureWidth, captureHeight) }
+                }
+            } catch (e: Exception) {
+                fileLog("Mirror input reader ended: ${e.message}")
+            }
+        }.apply {
+            name = "MirrorInputReader"
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun playInput(input: org.json.JSONObject, captureWidth: Int, captureHeight: Int) {
+        val injector = MirrorControlService.instance?.injector
+        if (injector == null) {
+            if (remoteControlPrompted.compareAndSet(false, true)) {
+                fileLog("Mirror input received, but the remote control service is off")
+                streamingListener?.onRemoteControlUnavailable()
+            }
+            return
+        }
+        val (x, y) = frameToScreen(input.optDouble("x", 0.5).toFloat(), input.optDouble("y", 0.5).toFloat(), captureWidth, captureHeight)
+        val action = input.optString("a")
+        if (action != "move") fileLog("Mirror input $action at (${x.toInt()}, ${y.toInt()})")
+        when (action) {
+            "down" -> injector.down(x, y)
+            "move" -> injector.move(x, y)
+            "up" -> injector.up(x, y)
+            "scroll" -> {
+                val screenHeight = screenSize().second.toFloat()
+                val dy = input.optDouble("dy", 0.0).toFloat() * captureHeight / frameToScreenScale(captureWidth, captureHeight)
+                injector.scroll(x, y, dy.coerceIn(-screenHeight, screenHeight))
+            }
+        }
+    }
+
+    /** The phone screen's current size in pixels, in its current rotation. */
+    private fun screenSize(): Pair<Int, Int> {
+        val display = displayManager?.getDisplay(android.view.Display.DEFAULT_DISPLAY)
+        val metrics = DisplayMetrics()
+        display?.getRealMetrics(metrics)
+        return metrics.widthPixels.coerceAtLeast(1) to metrics.heightPixels.coerceAtLeast(1)
+    }
+
+    /** How much the screen is scaled down in the frame, which letterboxes it, centred. */
+    private fun frameToScreenScale(captureWidth: Int, captureHeight: Int): Float {
+        val (w, h) = screenSize()
+        return minOf(captureWidth.toFloat() / w, captureHeight.toFloat() / h)
+    }
+
+    /** A point of the video frame, in fractions of it, as a point of the phone screen, in pixels. */
+    private fun frameToScreen(fx: Float, fy: Float, captureWidth: Int, captureHeight: Int): Pair<Float, Float> {
+        val (w, h) = screenSize()
+        val scale = frameToScreenScale(captureWidth, captureHeight)
+        val offsetX = (captureWidth - w * scale) / 2f
+        val offsetY = (captureHeight - h * scale) / 2f
+        val x = ((fx * captureWidth - offsetX) / scale).coerceIn(0f, w - 1f)
+        val y = ((fy * captureHeight - offsetY) / scale).coerceIn(0f, h - 1f)
+        return x to y
+    }
+
     /**
      * Release all resources.
      */

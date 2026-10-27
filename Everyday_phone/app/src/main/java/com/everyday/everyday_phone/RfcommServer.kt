@@ -396,24 +396,13 @@ class RfcommServer(private val context: Context) : SyncMessenger, PhoneRouteTran
         sendMessage(TransportMessage.KeyInput(key))
     }
     
-    /**
-     * Send mirror control message to glasses.
-     * @param enabled Whether mirroring should be enabled
-     * @param ip The phone's IP address for WiFi streaming (required when enabled)
-     */
-    fun sendMirrorControl(enabled: Boolean, ip: String? = null, isWifiDirect: Boolean = false) {
-        if (enabled && ip.isNullOrBlank()) {
+    /** Tells the glasses where to stream the mirrored screen from, or that mirroring stopped. */
+    fun sendMirrorState(state: TransportMessage.MirrorState) {
+        if (state.enabled && state.ip.isNullOrBlank()) {
             fileLog("Mirror state not sent: enabled state requires an IP address")
             return
         }
-        sendMessage(
-            TransportMessage.MirrorState(
-                enabled = enabled,
-                ip = ip,
-                port = ScreenStreamServer.STREAM_PORT.takeIf { enabled },
-                wifiDirect = isWifiDirect
-            )
-        )
+        sendMessage(state)
     }
     
     /**

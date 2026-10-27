@@ -1,8 +1,14 @@
 package com.everyday.everyday_phone
 
 import android.util.DisplayMetrics
+import com.everyday.shared.transport.TransportMessage
 
-/** Owns screen-mirroring route selection and Wi-Fi/Wi-Fi Direct arbitration. */
+/**
+ * Owns how the mirrored screen reaches the glasses. The phone always offers its own Wi-Fi Direct
+ * group, a direct link that needs no router: the glasses join it with the credentials sent over
+ * Bluetooth. When the phone is also on a regular Wi-Fi network, that address goes along as a
+ * fallback. Main thread.
+ */
 class TransportManager(
     private val rfcommServerProvider: () -> RfcommServer?,
     private val screenStreamServerProvider: () -> ScreenStreamServer?,
@@ -10,89 +16,74 @@ class TransportManager(
     private val log: (String) -> Unit
 ) {
 
-    enum class MirrorStartAction {
-        REQUEST_PROJECTION,
-        WAIT_FOR_WIFI_DIRECT,
-        NO_NETWORK
-    }
+    /** True from [startMirror] until [stopMirror]: a late group callback is ignored after a stop. */
+    private var mirrorActive = false
 
-    private enum class MirrorRoute {
-        WIFI,
-        WIFI_DIRECT
-    }
+    /** The last mirror state sent, so it can be sent again when the glasses reconnect. */
+    private var lastMirrorState: TransportMessage.MirrorState? = null
 
-    private var pendingMirrorRoute: MirrorRoute? = null
-
-    fun prepareMirrorStart(): MirrorStartAction {
-        val bestIp = screenStreamServerProvider()?.getBestStreamingIp()
-        return when {
-            bestIp != null -> {
-                pendingMirrorRoute = when (bestIp.second) {
-                    ScreenStreamServer.ConnectionMode.WIFI_DIRECT -> MirrorRoute.WIFI_DIRECT
-                    else -> MirrorRoute.WIFI
-                }
-                log("Starting mirror with ${bestIp.second}: ${bestIp.first}")
-                MirrorStartAction.REQUEST_PROJECTION
+    /**
+     * Starts the stream server (screen capture must be granted already), then tells the glasses where
+     * to connect once the link is ready. [onFailed] runs when there is no way to reach the glasses.
+     */
+    fun startMirror(metrics: DisplayMetrics, onFailed: () -> Unit) {
+        val server = screenStreamServerProvider() ?: return onFailed()
+        server.start(metrics)
+        mirrorActive = true
+        val lanIp = server.getLanIp()
+        val wifiDirect = wifiDirectManagerProvider()
+        if (wifiDirect == null) {
+            useLanOnly(lanIp, onFailed)
+            return
+        }
+        log("Mirror: preparing the Wi-Fi Direct group (LAN fallback: $lanIp)")
+        wifiDirect.ensureMirrorGroup { group ->
+            if (!mirrorActive) return@ensureMirrorGroup
+            if (group == null) {
+                useLanOnly(lanIp, onFailed)
+                return@ensureMirrorGroup
             }
-
-            wifiDirectManagerProvider()?.isWifiDirectEnabled == true -> {
-                pendingMirrorRoute = MirrorRoute.WIFI_DIRECT
-                log("No network IP, creating WiFi Direct group...")
-                wifiDirectManagerProvider()?.createGroup()
-                MirrorStartAction.WAIT_FOR_WIFI_DIRECT
-            }
-
-            else -> {
-                pendingMirrorRoute = null
-                log("No WiFi or WiFi Direct available")
-                MirrorStartAction.NO_NETWORK
-            }
+            sendMirrorState(
+                TransportMessage.MirrorState(
+                    enabled = true,
+                    ip = group.ownerIp,
+                    port = ScreenStreamServer.STREAM_PORT,
+                    wifiDirect = true,
+                    networkName = group.networkName,
+                    passphrase = group.passphrase,
+                    lanIp = lanIp,
+                )
+            )
+            log("Mirror started over Wi-Fi Direct: ${group.networkName} at ${group.ownerIp}")
         }
     }
 
-    fun onWifiDirectGroupFormed(ownerIp: String, isMirroringEnabled: Boolean): MirrorStartAction? {
-        if (pendingMirrorRoute != MirrorRoute.WIFI_DIRECT) {
-            return null
+    private fun useLanOnly(lanIp: String?, onFailed: () -> Unit) {
+        if (lanIp == null) {
+            log("Mirror: no Wi-Fi Direct group and no Wi-Fi network")
+            onFailed()
+            return
         }
-        if (!isMirroringEnabled) {
-            return MirrorStartAction.REQUEST_PROJECTION
-        }
-        if (screenStreamServerProvider()?.isRunning() == true) {
-            sendMirrorControl(enabled = true, ip = ownerIp, isWifiDirect = true)
-        }
-        return null
+        sendMirrorState(TransportMessage.MirrorState(enabled = true, ip = lanIp, port = ScreenStreamServer.STREAM_PORT))
+        log("Mirror started over Wi-Fi: $lanIp")
     }
 
-    fun onWifiDirectError() {
-        if (pendingMirrorRoute == MirrorRoute.WIFI_DIRECT) {
-            pendingMirrorRoute = null
-        }
-    }
-
-    fun startMirrorAfterPermission(metrics: DisplayMetrics): Boolean {
-        val bestIp = screenStreamServerProvider()?.getBestStreamingIp() ?: return false
-        pendingMirrorRoute = when (bestIp.second) {
-            ScreenStreamServer.ConnectionMode.WIFI_DIRECT -> MirrorRoute.WIFI_DIRECT
-            else -> MirrorRoute.WIFI
-        }
-
-        screenStreamServerProvider()?.start(metrics)
-        val isWifiDirect = pendingMirrorRoute == MirrorRoute.WIFI_DIRECT
-        sendMirrorControl(enabled = true, ip = bestIp.first, isWifiDirect = isWifiDirect)
-        log("Mirror started, IP: ${bestIp.first}, WiFi Direct: $isWifiDirect")
-        return true
+    /** Sends the current mirror state again, for glasses that just reconnected. */
+    fun resendMirrorState() {
+        if (mirrorActive) lastMirrorState?.let(::sendMirrorState)
     }
 
     fun stopMirror() {
-        pendingMirrorRoute = null
-        sendMirrorControl(enabled = false)
+        mirrorActive = false
+        lastMirrorState = null
+        rfcommServerProvider()?.takeIf { it.isConnected() }?.sendMirrorState(TransportMessage.MirrorState(enabled = false))
         screenStreamServerProvider()?.stop()
+        wifiDirectManagerProvider()?.removeMirrorGroup()
     }
 
-    private fun sendMirrorControl(enabled: Boolean, ip: String? = null, isWifiDirect: Boolean = false): Boolean {
-        val server = rfcommServerProvider() ?: return false
-        if (!server.isConnected()) return false
-        server.sendMirrorControl(enabled, ip, isWifiDirect)
-        return true
+    private fun sendMirrorState(state: TransportMessage.MirrorState) {
+        lastMirrorState = state
+        val server = rfcommServerProvider() ?: return
+        if (server.isConnected()) server.sendMirrorState(state)
     }
 }

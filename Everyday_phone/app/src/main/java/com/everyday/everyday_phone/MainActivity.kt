@@ -65,6 +65,8 @@ class MainActivity : AppCompatActivity() {
         private const val ACTION_DEBUG_STOP_SUBTITLE = "com.everyday.everyday_phone.DEBUG_STOP_SUBTITLE"
         private const val REQUEST_CHANNEL_ID = "mirror_request_channel"
         private const val REQUEST_NOTIFICATION_ID = 2002
+        private const val REMOTE_CONTROL_NOTIFICATION_ID = 2003
+        private const val MIRROR_RECONNECT_GRACE_MS = 60_000L
 
         private const val REQUEST_WIFI_DIRECT_PERMISSIONS = 2001
         private const val REQUEST_IMAGE_PICKER = 2002
@@ -99,7 +101,15 @@ class MainActivity : AppCompatActivity() {
     private var imagePickerButton: Button? = null
     private lateinit var assistantPushToTalkButton: Button
     private val assistantHandler = Handler(Looper.getMainLooper())
-    private var assistantStatus: AssistantStatus? = null
+
+    /** Ends a mirror whose glasses went away and didn't come back within MIRROR_RECONNECT_GRACE_MS. */
+    private val stopMirrorWithoutGlasses = Runnable {
+        if (isMirroringEnabled && !isGlassesConnected) {
+            fileLog("Glasses didn't reconnect; stopping mirroring")
+            stopMirroring()
+        }
+    }
+private var assistantStatus: AssistantStatus? = null
     private var assistantSessionId: String? = null
     private var assistantStopPendingSessionId: String? = null
     private var assistantStopTimeout: Runnable? = null
@@ -261,6 +271,8 @@ class MainActivity : AppCompatActivity() {
                             // Also send current clipboard so glasses have it
                             sendCurrentClipboardToGlasses()
                             sendPendingSharedAddress()
+                            assistantHandler.removeCallbacks(stopMirrorWithoutGlasses)
+                            transportManager.resendMirrorState()
                         }
                         updateStatusDisplay()
                         trackpad.alpha = if (connected) 1.0f else 0.5f
@@ -272,9 +284,11 @@ class MainActivity : AppCompatActivity() {
 
                         if (!connected) {
                             hideKeyboard()
-                            // Stop mirroring when glasses disconnect
+                            // Keep mirroring through a short disconnection (the glasses app restarting,
+                            // a Bluetooth dropout): the screen capture can't restart without the user.
                             if (isMirroringEnabled) {
-                                stopMirroring()
+                                assistantHandler.removeCallbacks(stopMirrorWithoutGlasses)
+                                assistantHandler.postDelayed(stopMirrorWithoutGlasses, MIRROR_RECONNECT_GRACE_MS)
                             }
                             phoneSubtitleCoordinator?.stop()
                         }
@@ -415,6 +429,10 @@ class MainActivity : AppCompatActivity() {
                 override fun onCaptureOrientationChanged(isLandscape: Boolean) {
                     // Orientation button removed - no action needed
                 }
+
+                override fun onRemoteControlUnavailable() {
+                    this@MainActivity.runOnUiThread { showRemoteControlSetupNotification() }
+                }
             }
         }
 
@@ -477,20 +495,7 @@ class MainActivity : AppCompatActivity() {
         wifiDirectManager = WifiDirectManager(this).apply {
             connectionListener = object : WifiDirectManager.ConnectionListener {
                 override fun onGroupFormed(ownerIp: String) {
-                fileLog("WiFi Direct group formed, IP: $ownerIp")
-                runOnUiThread {
-                    Toast.makeText(this@MainActivity, "WiFi Direct ready: $ownerIp", Toast.LENGTH_SHORT).show()
-                }
-
-                when (transportManager.onWifiDirectGroupFormed(ownerIp, isMirroringEnabled)) {
-                    TransportManager.MirrorStartAction.REQUEST_PROJECTION -> {
-                        runOnUiThread {
-                            pendingProjectionPurpose = ProjectionPurpose.MIRROR
-                            screenStreamServer?.requestPermission(this@MainActivity)
-                        }
-                    }
-                    else -> Unit
-                }
+                    fileLog("WiFi Direct group formed, IP: $ownerIp")
                 }
 
                 override fun onGroupRemoved() {
@@ -498,11 +503,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 override fun onError(error: String) {
-                fileLog("WiFi Direct error: $error")
-                runOnUiThread {
-                    Toast.makeText(this@MainActivity, "WiFi Direct: $error", Toast.LENGTH_SHORT).show()
-                    transportManager.onWifiDirectError()
-                }
+                    fileLog("WiFi Direct error: $error")
                 }
 
                 override fun onStateChanged(enabled: Boolean) {
@@ -1344,23 +1345,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Asks for screen capture; the link to the glasses is made once it's granted. */
     private fun startMirroring() {
         fileLog("Starting mirroring...")
-
-        when (transportManager.prepareMirrorStart()) {
-            TransportManager.MirrorStartAction.REQUEST_PROJECTION -> {
-                pendingProjectionPurpose = ProjectionPurpose.MIRROR
-                screenStreamServer?.requestPermission(this)
-            }
-
-            TransportManager.MirrorStartAction.WAIT_FOR_WIFI_DIRECT -> {
-                Toast.makeText(this, "Creating WiFi Direct connection...", Toast.LENGTH_SHORT).show()
-            }
-
-            TransportManager.MirrorStartAction.NO_NETWORK -> {
-                Toast.makeText(this, "Please enable WiFi for screen mirroring", Toast.LENGTH_LONG).show()
-            }
-        }
+        pendingProjectionPurpose = ProjectionPurpose.MIRROR
+        screenStreamServer?.requestPermission(this)
     }
 
     private fun startMirroringFromBackground() {
@@ -1416,14 +1405,40 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startMirroringAfterPermission() {
-        val metrics = resources.displayMetrics
-        if (!transportManager.startMirrorAfterPermission(metrics)) {
-            ScreenCaptureService.stop(this)
-            return
-        }
-
         isMirroringEnabled = true
         updateMirrorButton()
+        transportManager.startMirror(resources.displayMetrics) {
+            Toast.makeText(this, "Can't reach the glasses: turn on Wi-Fi", Toast.LENGTH_LONG).show()
+            stopMirroring()
+        }
+    }
+
+    /** Remote control from the glasses needs the accessibility service: a notification opens its settings. */
+    private fun showRemoteControlSetupNotification() {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                android.app.NotificationChannel(
+                    REQUEST_CHANNEL_ID,
+                    "Mirror Requests",
+                    android.app.NotificationManager.IMPORTANCE_HIGH
+                )
+            )
+        }
+        val settings = android.app.PendingIntent.getActivity(
+            this, 1,
+            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = androidx.core.app.NotificationCompat.Builder(this, REQUEST_CHANNEL_ID)
+            .setSmallIcon(R.drawable.glasses_connected)
+            .setContentTitle("Control your phone from the glasses")
+            .setContentText("Turn on \"${getString(R.string.mirror_control_label)}\" in Accessibility settings")
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(settings)
+            .build()
+        manager.notify(REMOTE_CONTROL_NOTIFICATION_ID, notification)
     }
     
     private fun stopMirroring() {
