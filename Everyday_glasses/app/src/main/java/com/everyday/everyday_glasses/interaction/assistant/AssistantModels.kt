@@ -21,6 +21,18 @@ data class AssistantConfiguration(
     val selectionMode: AssistantModelSelectionMode
 )
 
+/** A Google API key ("AIza" and 35 more characters). */
+private val GOOGLE_API_KEY = Regex("AIza[0-9A-Za-z_-]{35}")
+
+/**
+ * The API key in pasted text: a Google API key found anywhere in it (the text copied may hold more
+ * than the key), otherwise the text without its spaces and line breaks.
+ */
+fun extractApiKey(text: String): String = GOOGLE_API_KEY.find(text)?.value ?: text.filterNot(Char::isWhitespace)
+
+/** Whether [text] holds a Google API key, for logs that must not show the key itself. */
+fun containsGoogleApiKey(text: String): Boolean = GOOGLE_API_KEY.containsMatchIn(text)
+
 class AssistantPreferencesStore(context: Context) {
     companion object {
         const val INITIAL_RECOMMENDED_MODEL = "gemini-3.5-flash-lite"
@@ -89,10 +101,44 @@ class AssistantPreferencesStore(context: Context) {
         models += modelId
         prefs.edit {putStringSet(KEY_PROBED_MODELS, models)}
     }
+
+    /** Forgets that [modelId] passed its check (Google retired it, say), so it is checked again. */
+    fun forgetCapabilityProbe(modelId: String) {
+        val models = prefs.getStringSet(KEY_PROBED_MODELS, emptySet()).orEmpty().toMutableSet()
+        if (models.remove(modelId)) prefs.edit {putStringSet(KEY_PROBED_MODELS, models)}
+    }
 }
 
 object AssistantModelPolicy {
     private val stableFlashLite = Regex("^gemini-(\\d+(?:\\.\\d+)*)-flash-lite$")
+
+    /** A versioned model id: "gemini-3.5-flash" is version 3.5 of the "flash" family. */
+    private val versioned = Regex("^gemini-(\\d+(?:\\.\\d+)*)-(.+)$")
+
+    /** The family of [id] ("flash", "flash-lite", "pro"), or null when it carries no version. */
+    fun family(id: String): String? = versioned.matchEntire(id.removePrefix("models/").lowercase())?.groupValues?.get(2)
+
+    private fun version(id: String): List<Int> = versioned.matchEntire(id.removePrefix("models/").lowercase())
+        ?.groupValues?.get(1)?.split('.')?.mapNotNull(String::toIntOrNull).orEmpty()
+
+    /**
+     * The models of [id]'s family, newest first ("gemini-2.5-flash" → "gemini-3.8-flash", "gemini-3.7-flash", …):
+     * what replaces a model Google retired.
+     */
+    fun sameFamilyNewestFirst(models: List<AssistantModel>, id: String): List<AssistantModel> {
+        val family = family(id) ?: return emptyList()
+        return models
+            .filter { family(it.id) == family }
+            .sortedWith { left, right -> compareParts(version(right.id), version(left.id)).takeIf { it != 0 } ?: left.id.compareTo(right.id) }
+    }
+
+    private fun compareParts(a: List<Int>, b: List<Int>): Int {
+        for (index in 0 until maxOf(a.size, b.size)) {
+            val delta = a.getOrElse(index) { 0 }.compareTo(b.getOrElse(index) { 0 })
+            if (delta != 0) return delta
+        }
+        return 0
+    }
     private val excluded = listOf("preview", "experimental", "exp", "latest", "live", "tts", "image", "embedding")
 
     fun isGeneralGeminiModel(id: String): Boolean {

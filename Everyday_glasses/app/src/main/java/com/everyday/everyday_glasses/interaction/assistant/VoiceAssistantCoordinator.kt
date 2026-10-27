@@ -93,7 +93,10 @@ class VoiceAssistantCoordinator(
         private const val MIN_AUDIO_BYTES = 700L
         private const val MAX_ROUNDS = AssistantToolLoop.DEFAULT_MAX_ROUNDS
         private const val MAX_COMMANDS = AssistantToolLoop.DEFAULT_MAX_CALLS
-    }
+        /** How long an error stays shown before the next step (and the idle state). */
+        private const val ERROR_DISPLAY_MS = 2_000L
+        private const val MAX_REASON_CHARS = 120
+}
 
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "VoiceAssistant") }
@@ -193,28 +196,40 @@ class VoiceAssistantCoordinator(
         state = AssistantSessionState.PROCESSING
         emitStatus("Validating Gemini…")
         worker.execute {
-            val available = provider.listModels(apiKey).getOrElse {
-                main.post { if (token == generation) fail("Gemini validation failed") }
+            val available = provider.listModels(apiKey).getOrElse { failure ->
+                Log.w(TAG, "Gemini validation failed: ${failure.message}")
+                main.post { if (token == generation) fail("Gemini validation failed. ${shortReason(failure)}") }
                 return@execute
             }
             val prior = configuration
             val mode = prior?.selectionMode ?: AssistantModelSelectionMode.AUTO_RECOMMENDED
-            val selected = if (mode == AssistantModelSelectionMode.USER_SELECTED) {
-                prior?.modelId?.takeIf { id ->
-                    available.any { it.id == id } && (
-                        preferences.isCapabilityProbed(id) || provider.probeAudioTools(apiKey, id).onSuccess {
-                            preferences.markCapabilityProbed(id)
-                        }.isSuccess
-                    )
-                }
-            } else {
-                AssistantModelPolicy.recommendedCandidates(available).firstOrNull { candidate ->
-                    preferences.isCapabilityProbed(candidate.id) ||
-                        provider.probeAudioTools(apiKey, candidate.id).onSuccess {
-                            preferences.markCapabilityProbed(candidate.id)
-                        }.isSuccess
-                }?.id
-            }
+            Log.d(TAG, "Gemini models (${available.size}): ${available.joinToString { it.id }}; mode=$mode, saved=${prior?.modelId}")
+            // A model is usable when Google lists it for this key and it passes a short audio-and-tools
+            // check. A retired model fails the check, and Google's answer may name its replacement.
+            var suggestedReplacement: String? = null
+            fun usable(id: String): Boolean = available.any { it.id == id } && (
+                preferences.isCapabilityProbed(id) || provider.probeAudioTools(apiKey, id)
+                    .onSuccess { preferences.markCapabilityProbed(id) }
+                    .onFailure { failure ->
+                        Log.w(TAG, "Model $id failed its check: ${failure.message}")
+                        suggestedReplacement = suggestedReplacement ?: replacementNamedIn(failure)
+                    }
+                    .isSuccess
+            )
+            // The user's model is kept while Google lists it and it works. Once it's retired, the user
+            // keeps a model of the same kind: the replacement Google names, else the newest of its family
+            // that works. With no choice of the user's, or none of its kind left, the recommended model.
+            val userModel = prior?.modelId?.takeIf { mode == AssistantModelSelectionMode.USER_SELECTED }
+            val userChoice = userModel?.takeIf(::usable)
+            val equivalent = if (userModel != null && userChoice == null) {
+                (listOfNotNull(suggestedReplacement) + AssistantModelPolicy.sameFamilyNewestFirst(available, userModel).map { it.id })
+                    .distinct()
+                    .firstOrNull { it != userModel && usable(it) }
+            } else null
+            val selected = userChoice ?: equivalent
+                ?: AssistantModelPolicy.recommendedCandidates(available).firstOrNull { usable(it.id) }?.id
+            val selectedMode = if (userChoice != null || equivalent != null) mode else AssistantModelSelectionMode.AUTO_RECOMMENDED
+            val replacedChoice = userModel?.takeIf { userChoice == null }
             main.post {
                 if (token != generation) return@post
                 models = available
@@ -228,17 +243,19 @@ class VoiceAssistantCoordinator(
                     emitStatus("No compatible model")
                     return@post
                 }
-                val next = AssistantConfiguration(apiKey, selected, mode)
-                val saved = if (persistKey) preferences.save(next) else preferences.saveModel(selected, mode)
+                val next = AssistantConfiguration(apiKey, selected, selectedMode)
+                val saved = if (persistKey) preferences.save(next) else preferences.saveModel(selected, selectedMode)
                 if (!saved && persistKey) {
                     fail("Secure key storage unavailable")
                     return@post
                 }
                 configuration = next
                 state = AssistantSessionState.IDLE
-                stateObserver.onAssistantConfigurationChanged(next, models, "Gemini ready")
+                val ready = replacedChoice?.let { "Gemini ready: $it is unavailable, using $selected" } ?: "Gemini ready"
+                if (replacedChoice != null) Log.w(TAG, ready)
+                stateObserver.onAssistantConfigurationChanged(next, models, ready)
                 if (!hasMicrophonePermission()) requestMicrophonePermission()
-                emitStatus(if (hasMicrophonePermission()) "Gemini ready" else "Microphone permission required")
+                emitStatus(if (hasMicrophonePermission()) ready else "Microphone permission required")
             }
         }
     }
@@ -445,12 +462,47 @@ class VoiceAssistantCoordinator(
                         (rootCause.message ?: rootCause.javaClass.simpleName),
                     failure
                 )
-                main.post { if (token == generation) fail("Gemini request failed", origin, sessionId) }
+                val modelGone = isModelUnavailable(rootCause)
+                main.post {
+                    if (token != generation) return@post
+                    if (modelGone) {
+                        fail("Model ${config.modelId} unavailable, choosing another. ${shortReason(rootCause)}", origin, sessionId)
+                        replaceRetiredModel(config)
+                    } else {
+                        fail("Gemini request failed. ${shortReason(rootCause)}", origin, sessionId)
+                    }
+                }
             } finally {
                 uploadedFileName?.let { provider.deleteUploadedFile(config.apiKey, it) }
                 file.delete()
             }
         }
+    }
+
+    /**
+     * Google retired the model (it answers 404 for it): forget that it passed its check and validate
+     * again, which picks its newest equivalent (or the recommended model).
+     */
+    private fun replaceRetiredModel(config: AssistantConfiguration) {
+        preferences.forgetCapabilityProbe(config.modelId)
+        main.postDelayed({ configuration?.let { validateAndResolve(it.apiKey, persistKey = false) } }, ERROR_DISPLAY_MS)
+    }
+
+    /** The model Google names as the replacement in a "no longer available" answer, if any. */
+    private fun replacementNamedIn(failure: Throwable): String? =
+        Regex("""use models/([A-Za-z0-9._-]+)""").find(failure.message.orEmpty())?.groupValues?.get(1)
+
+    private fun isModelUnavailable(failure: Throwable): Boolean {
+        val message = failure.message.orEmpty()
+        return message.contains("(404)") && message.contains("model", ignoreCase = true)
+    }
+
+    /** A short clue for the phone's toast: "HTTP 404: This model …", or the failure's message. */
+    private fun shortReason(failure: Throwable): String {
+        val message = failure.message ?: failure.javaClass.simpleName
+        val http = Regex("""\((\d{3})\)(?::\s*(.*))?""").find(message)
+        val reason = if (http != null) "HTTP ${http.groupValues[1]}: ${http.groupValues[2]}".trimEnd(' ', ':') else message
+        return reason.take(MAX_REASON_CHARS)
     }
 
     private fun cancel(sessionId: String?, detail: String?) {
@@ -480,7 +532,7 @@ class VoiceAssistantCoordinator(
                 clearSession()
                 emitStatus()
             }
-        }, 2_000L)
+        }, ERROR_DISPLAY_MS)
     }
 
     private fun matches(sessionId: String, origin: AssistantSessionOrigin?): Boolean =

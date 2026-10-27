@@ -47,6 +47,8 @@ import com.everyday.everyday_glasses.interaction.assistant.AssistantStateObserve
 import com.everyday.everyday_glasses.interaction.assistant.AssistantUiContext
 import com.everyday.everyday_glasses.interaction.assistant.GeminiVoiceAssistantProvider
 import com.everyday.everyday_glasses.interaction.assistant.VoiceAssistantCoordinator
+import com.everyday.everyday_glasses.interaction.assistant.containsGoogleApiKey
+import com.everyday.everyday_glasses.interaction.assistant.extractApiKey
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.BrowserRoutingCoordinator
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.GeminiPageAgentProvider
 import com.everyday.everyday_glasses.interaction.assistant.page_agent.PageAgentCoordinator
@@ -176,6 +178,8 @@ class MainActivity : AppCompatActivity() {
         private const val SPEEDO_LOG_TAG = "Speedometer"
         private const val ACTION_DEBUG_CLEAR_WEBVIEW =
             "com.everyday.everyday_glasses.action.DEBUG_CLEAR_WEBVIEW"
+        /** How long a paste waits for the phone's current clipboard before using the copy held here. */
+        private const val CLIPBOARD_REPLY_TIMEOUT_MS = 1_500L
         /**
          * Debug builds: runs the app command in the "command" extra ("toggle:mirror", ...), and/or moves
          * the cursor to the "cursorX"/"cursorY" float extras, for testing over adb.
@@ -373,9 +377,11 @@ class MainActivity : AppCompatActivity() {
         // The assistant section of Settings: the Gemini key (pasted from the phone's clipboard) and the model.
         widgetContainer.settingsController.geminiListener = object : GeminiSettingsListener {
             override fun onPasteGeminiKey() {
-                val clipboard = widgetContainer.phoneClipboard
-                if (!clipboard.isNullOrBlank()) voiceAssistantCoordinator.configureApiKey(clipboard)
-                else phoneConnectionOrNull()?.requestClipboard()
+                // Ask the phone for its clipboard as it is now; the copy held here may be older than the key.
+                pendingGeminiKeyPaste = true
+                handler.removeCallbacks(pasteHeldClipboard)
+                if (phoneConnectionOrNull()?.requestClipboard() == true) handler.postDelayed(pasteHeldClipboard, CLIPBOARD_REPLY_TIMEOUT_MS)
+                else pasteHeldClipboard.run()
             }
             override fun onRemoveGeminiKey() { voiceAssistantCoordinator.removeApiKey() }
             override fun onSelectGeminiModel(model: String?) { voiceAssistantCoordinator.selectModel(model) }
@@ -748,7 +754,7 @@ class MainActivity : AppCompatActivity() {
                     Log.d(TAG, "Phone clipboard received: available=${clipboardContent != null}")
                     widgetContainer.setPhoneClipboard(clipboardContent)
                 }
-                override fun onClipboardReceived(clipboardContent: String)                      {Log.d(TAG, "Phone clipboard updated: chars=${clipboardContent.length}"); widgetContainer.setPhoneClipboard(clipboardContent)}
+                override fun onClipboardReceived(clipboardContent: String)                      {Log.d(TAG, "Phone clipboard updated: chars=${clipboardContent.length}"); widgetContainer.setPhoneClipboard(clipboardContent); if (pendingGeminiKeyPaste) {handler.removeCallbacks(pasteHeldClipboard); pasteGeminiKey(clipboardContent)}}
                 override fun onImageReceived(imageData: ByteArray, fileName: String)            {Log.d(TAG, "Image received from phone: $fileName (${imageData.size} bytes)"); widgetContainer.appData.publish(AppChannels.phoneImage, PhoneImage(imageData, fileName))}
                 override fun onOpenBrowserRequested(address: String)                            {Log.d(TAG, "Open browser requested from phone: ${address.take(80)}") ; widgetContainer.appData.publish(AppChannels.phoneOpenAddress, address)}
                 override fun onMirroringChanged(enabled: Boolean, ip: String?)                  {widgetContainer.appData.publish(AppChannels.mirroring, PhoneMirror(enabled, ip))}
@@ -1187,6 +1193,20 @@ class MainActivity : AppCompatActivity() {
         Log.d(TAG, "Received key input from phone: chars=${key.length}")
         userInputActivity.onUserInput(UserInputKind.KEYBOARD)
         widgetContainer.onKeyPress(key, userInitiated = true)
+    }
+
+    /** True from a press on "Paste Gemini API key" until the phone's clipboard is pasted. */
+    private var pendingGeminiKeyPaste = false
+
+    /** The phone didn't answer (or isn't connected): paste the clipboard copy already held here. */
+    private val pasteHeldClipboard = Runnable { widgetContainer.phoneClipboard?.let(::pasteGeminiKey) ?: run { pendingGeminiKeyPaste = false } }
+
+    private fun pasteGeminiKey(clipboard: String) {
+        pendingGeminiKeyPaste = false
+        if (clipboard.isBlank()) return
+        val key = extractApiKey(clipboard)
+        Log.d(TAG, "Pasting Gemini key: clipboard chars=${clipboard.length}, key chars=${key.length}, google key format=${containsGoogleApiKey(clipboard)}")
+        voiceAssistantCoordinator.configureApiKey(key)
     }
 
     private fun handleDebugIntent(intent: Intent?) {

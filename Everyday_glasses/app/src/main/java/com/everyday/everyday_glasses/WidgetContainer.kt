@@ -750,7 +750,8 @@ class WidgetContainer @JvmOverloads constructor(
         }
         if (closeConfirmationPopup?.isVisible != true && settingsController.handleHoverControlsLayoutEditorDown(x, y)) return // The hover-controls layout editor is fully modal; consume input before any widget hit-testing.
         if (settingsController.handleShortcutsSettingsMenuDown(x, y)) return // Shortcuts settings menu is also modal.
-        val (cx, cy) = toContentSpace(x, y) // Transform to content space for hit testing against widgets
+        if (settingsController.handleDashboardDown(x, y)) return // So is the settings screen (its sliders).
+val (cx, cy) = toContentSpace(x, y) // Transform to content space for hit testing against widgets
 
         // Hover controls sit above every widget — including fullscreen ones — so let any
         // currently-interacting (e.g. lemon mid-magnify) control or any hover-control
@@ -783,8 +784,6 @@ class WidgetContainer @JvmOverloads constructor(
             return
         }
 
-        // Modal dashboard check - prioritize input if visible
-        if (settingsController.handleDashboardDown(x, y)) return
 
         // Route the press to the single top-most widget under the cursor — the same widget
         // that owns hover. This prevents an overlapping, unintended widget (e.g. one whose
@@ -1017,19 +1016,21 @@ class WidgetContainer @JvmOverloads constructor(
         settingsController.handleShortcutsSettingsMenuTap(x, y)?.let { return it }
         if (contextMenu?.isVisible == true) { return dispatchContextMenuAction { contextMenu?.onTap(x, y) ?: false }}
         openOverlay()?.let { overlay -> return overlay.onTap(x, y) }
+        settingsController.handleDashboardTap(x, y)?.let { return it } // The settings screen is modal: it takes every tap, inside it or not.
         val (cx, cy) = toContentSpace(x, y) // Transform to content space for widget hit testing
         if (consumeVisibleKeyboardTap(cx, cy)) return true
         if (hoverControlsLayer.onTap(cx, cy)) return true // Hover controls are above every widget, including fullscreen ones.
         for (widget in widgetsTopDown()) {if (runWidgetInput(widget) { widget.onModalTap(cx, cy) }) return true} // Screen modals and open popups take taps anywhere, even over a fullscreen widget.
         registry.fullscreenWidget?.let { fullscreen -> return fullscreen.containsPoint(cx, cy) && tapWidget(fullscreen, cx, cy)} // A fullscreen widget is the only possible target; outside its bounds the tap does nothing.
-        settingsController.handleDashboardTap(x, y)?.let { return it } // Modal dashboard check
-        interactionTargetAt(cx, cy)?.let { target -> if (target.isMinimized) { target.toggleMinimize(); return true }; return tapWidget(target, cx, cy)} // Route the tap to the single top-most widget under the cursor — the same widget that owns hover — so an overlapping widget can't consume a tap meant for it.
+interactionTargetAt(cx, cy)?.let { target -> if (target.isMinimized) { target.toggleMinimize(); return true }; return tapWidget(target, cx, cy)} // Route the tap to the single top-most widget under the cursor — the same widget that owns hover — so an overlapping widget can't consume a tap meant for it.
         if (hasFocusedWidget()) { unfocusAll(); notifyTransientContentChanged(); return true }
         return false
     }
     private fun routeDoubleTap(x: Float, y: Float): Boolean {
-        if (closeConfirmationPopup?.isVisible != true)        if (contextMenu?.isVisible == true) {return dispatchContextMenuAction { contextMenu?.onDoubleTap(x, y) ?: false }}
-        for (widget in registry.allWidgets()) {if (widget.onDoubleTapAnywhere()) return true} // A widget can take any double-tap first, e.g. a browser leaving a web video's fullscreen.
+        if (closeConfirmationPopup?.isVisible != true) {settingsController.handleHoverControlsLayoutEditorDoubleTap(x, y)?.let { return it }}
+        if (contextMenu?.isVisible == true) {return dispatchContextMenuAction { contextMenu?.onDoubleTap(x, y) ?: false }}
+        if (isDashboardOverlayOpen()) {if (textEditing.isMenuVisible) textEditing.onDoubleTap(x, y); return true} // Nothing under an overlay (settings, a popup) takes a double-tap; a text menu keeps its own.
+for (widget in registry.allWidgets()) {if (widget.onDoubleTapAnywhere()) return true} // A widget can take any double-tap first, e.g. a browser leaving a web video's fullscreen.
         val (cx, cy) = toContentSpace(x, y) // Transform to content space for widget hit testing
         if (isVisibleKeyboardAt(cx, cy)) return true
         if (hoverControlsLayer.onDoubleTap(cx, cy)) return true
@@ -1133,6 +1134,7 @@ class WidgetContainer @JvmOverloads constructor(
                 return
             }
         }
+        if (isDashboardOverlayOpen()) return // Nothing under an overlay scrolls.
 
         // Transform to content space for widget hit testing
         val (cx, cy) = toContentSpace(cursorX, cursorY)

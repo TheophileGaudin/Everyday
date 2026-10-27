@@ -52,7 +52,8 @@ class DashboardSettings(
         fun onRetryGoogleAuth() = Unit
         fun onPasteGeminiKey() = Unit
         fun onRemoveGeminiKey() = Unit
-        fun onCycleGeminiModel() = Unit
+        /** The user picked a Gemini model; null is the recommended, automatic choice. */
+        fun onSelectGeminiModel(modelId: String?) = Unit
         fun onAppearanceRequested() = Unit
         fun onShortcutsRequested() = Unit
         fun onDismissed() = Unit
@@ -87,6 +88,8 @@ class DashboardSettings(
         private const val TOGGLE_HEIGHT = 28f
         private const val CHECKBOX_SIZE = 22f
         private const val GOOGLE_STATUS_BOX_HEIGHT = 122f
+        private const val MODEL_SLOT_HEIGHT = 36f
+        private const val MODEL_SLOT_GAP = 6f
 
         // Angle threshold range (degrees)
         const val MIN_ANGLE_THRESHOLD = 0f
@@ -95,7 +98,7 @@ class DashboardSettings(
     }
 
     // View mode
-    private enum class ViewMode { MAIN, HEADSUP, GOOGLE, MORE }
+    private enum class ViewMode { MAIN, HEADSUP, GOOGLE, MORE, GEMINI_MODELS }
     private var currentView = ViewMode.MAIN
     private enum class MainButton { HEADSUP, GOOGLE, APPEARANCE, SHORTCUTS, MORE }
     private data class MainButtonSpec(val id: MainButton, val rect: RectF = RectF())
@@ -157,6 +160,15 @@ class DashboardSettings(
     var geminiConfigured = false
     var geminiReady = false
     var geminiModelLabel = "Recommended - automatic"
+
+    /** One entry of the Gemini model page: a model, or the recommended choice (null id). */
+    data class GeminiModelChoice(val id: String?, val label: String)
+
+    /** The Gemini model page's entries: the recommended choice first, then every model Google lists for the key. */
+    var geminiModelChoices: List<GeminiModelChoice> = emptyList()
+
+    /** The model the user picked; null while the recommended model is chosen automatically. */
+    var geminiSelectedModelId: String? = null
     var geminiDetail = "Paste an API key to enable voice"
 
     var handler: DashboardSettingsHandler? = null
@@ -265,6 +277,10 @@ class DashboardSettings(
     private val geminiModelButtonRect = RectF()
     private val geminiRemoveButtonRect = RectF()
 
+    // Gemini model page: the slots of the current page, and which page of the list is shown.
+    private val geminiModelSlotRects = mutableListOf<RectF>()
+    private var geminiModelPage = 0
+
     // State - which slider is being dragged
     private enum class ActiveSlider { NONE, BRIGHTNESS, HEAD_UP_TIME, WAKE_DURATION, ANGLE_THRESHOLD }
     private var activeSlider = ActiveSlider.NONE
@@ -356,6 +372,8 @@ class DashboardSettings(
         textAlign = Paint.Align.CENTER
         isFakeBoldText = true
     }
+
+    private val modelTextPaint = Paint(buttonTextPaint).apply { textSize = 15f }
 
     private val googleStatusBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = "#2A2A2A".toColorInt()
@@ -449,6 +467,7 @@ class DashboardSettings(
             ViewMode.HEADSUP -> HEADSUP_MENU_HEIGHT
             ViewMode.GOOGLE -> GOOGLE_MENU_HEIGHT
             ViewMode.MORE -> MORE_MENU_HEIGHT
+            ViewMode.GEMINI_MODELS -> GOOGLE_MENU_HEIGHT
         }
 
         // Center the menu
@@ -568,6 +587,27 @@ class DashboardSettings(
                     backButtonTop + CLOSE_BUTTON_SIZE
                 )
             }
+            ViewMode.GEMINI_MODELS -> {
+                val backButtonLeft = menuRect.left + CLOSE_BUTTON_MARGIN
+                val backButtonTop = menuRect.top + CLOSE_BUTTON_MARGIN
+                backButtonRect.set(
+                    backButtonLeft,
+                    backButtonTop,
+                    backButtonLeft + CLOSE_BUTTON_SIZE,
+                    backButtonTop + CLOSE_BUTTON_SIZE
+                )
+                // Two columns of model buttons, as many rows as the page holds.
+                val slotsTop = menuRect.top + 74f
+                val slotsBottom = menuRect.bottom - 16f
+                val rows = ((slotsBottom - slotsTop + MODEL_SLOT_GAP) / (MODEL_SLOT_HEIGHT + MODEL_SLOT_GAP)).toInt().coerceAtLeast(1)
+                val columnWidth = (trackRight - trackLeft - MODEL_SLOT_GAP) / 2f
+                geminiModelSlotRects.clear()
+                for (column in 0 until 2) for (row in 0 until rows) {
+                    val slotLeft = trackLeft + column * (columnWidth + MODEL_SLOT_GAP)
+                    val slotTop = slotsTop + row * (MODEL_SLOT_HEIGHT + MODEL_SLOT_GAP)
+                    geminiModelSlotRects += RectF(slotLeft, slotTop, slotLeft + columnWidth, slotTop + MODEL_SLOT_HEIGHT)
+                }
+            }
             else -> {
                 val backButtonLeft = menuRect.left + CLOSE_BUTTON_MARGIN
                 val backButtonTop = menuRect.top + CLOSE_BUTTON_MARGIN
@@ -683,6 +723,30 @@ class DashboardSettings(
         updateLayout()
     }
 
+    private fun showGeminiModels() {
+        currentView = ViewMode.GEMINI_MODELS
+        geminiModelPage = 0
+        updateLayout()
+    }
+
+    /**
+     * The model page's entries for [page], in slot order. When the list doesn't fit, the last slot of
+     * each page is "More", which shows the next page (the last page leads back to the first).
+     */
+    private fun geminiModelPageEntries(page: Int): List<GeminiModelChoice?> {
+        val capacity = geminiModelSlotRects.size
+        if (geminiModelChoices.size <= capacity) return geminiModelChoices
+        val perPage = (capacity - 1).coerceAtLeast(1)
+        return geminiModelChoices.drop(page * perPage).take(perPage) + listOf(null)
+    }
+
+    private fun geminiModelPageCount(): Int {
+        val capacity = geminiModelSlotRects.size
+        if (geminiModelChoices.size <= capacity) return 1
+        val perPage = (capacity - 1).coerceAtLeast(1)
+        return (geminiModelChoices.size + perPage - 1) / perPage
+    }
+
     /**
      * Switch back to the main menu.
      */
@@ -711,6 +775,20 @@ class DashboardSettings(
             ViewMode.HEADSUP -> drawHeadsUpSubmenu(canvas)
             ViewMode.GOOGLE -> drawGoogleSubmenu(canvas)
             ViewMode.MORE -> drawMoreSubmenu(canvas)
+            ViewMode.GEMINI_MODELS -> drawGeminiModels(canvas)
+        }
+    }
+
+    /** The Gemini model page: each model a button, the one in use highlighted. */
+    private fun drawGeminiModels(canvas: Canvas) {
+        canvas.drawText("Gemini model", menuRect.centerX(), menuRect.top + 45f, titlePaint)
+        drawBackButton(canvas)
+        geminiModelPageEntries(geminiModelPage).forEachIndexed { index, choice ->
+            val rect = geminiModelSlotRects.getOrNull(index) ?: return@forEachIndexed
+            val selected = choice != null && choice.id == geminiSelectedModelId
+            canvas.drawRoundRect(rect, BUTTON_CORNER_RADIUS, BUTTON_CORNER_RADIUS, if (selected) buttonPaint else secondaryButtonPaint)
+            val label = choice?.label ?: "More (${geminiModelPage + 1}/${geminiModelPageCount()})"
+            canvas.drawText(fitText(label, modelTextPaint, rect.width() - 12f), rect.centerX(), rect.centerY() + 5f, modelTextPaint)
         }
     }
 
@@ -1454,11 +1532,28 @@ class DashboardSettings(
                 return true
             }
             if (geminiConfigured && geminiModelButtonRect.contains(x, y)) {
-                handler?.onCycleGeminiModel()
+                showGeminiModels()
                 return true
             }
             if (geminiConfigured && geminiRemoveButtonRect.contains(x, y)) {
                 handler?.onRemoveGeminiKey()
+                return true
+            }
+        } else if (currentView == ViewMode.GEMINI_MODELS) {
+            if (backButtonRect.contains(x, y)) {
+                showGoogleSubmenu()
+                return true
+            }
+            val entries = geminiModelPageEntries(geminiModelPage)
+            val index = geminiModelSlotRects.indexOfFirst { it.contains(x, y) }
+            if (index in entries.indices) {
+                val choice = entries[index]
+                if (choice == null) {
+                    geminiModelPage = (geminiModelPage + 1) % geminiModelPageCount()
+                } else {
+                    handler?.onSelectGeminiModel(choice.id)
+                    showGoogleSubmenu()
+                }
                 return true
             }
         } else {

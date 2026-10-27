@@ -27,4 +27,21 @@ class AssistantModelPolicyTest {
         assertFalse(AssistantModelPolicy.isGeneralGeminiModel("gemini-3.5-flash-lite-live"))
         assertTrue(AssistantModelPolicy.isGeneralGeminiModel("gemini-3.5-flash-lite"))
     }
+
+    @Test
+    fun `a retired model is replaced by the newest of its own family`() {
+        val models = listOf(
+            "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite", "gemini-3.5-flash",
+            "gemini-3.5-flash-lite", "gemini-3.10-flash", "gemini-3.8-flash", "gemini-4-argon"
+        ).map { AssistantModel(it, it) }
+
+        assertEquals("flash", AssistantModelPolicy.family("models/gemini-2.5-flash"))
+        assertEquals("flash-lite", AssistantModelPolicy.family("gemini-3.5-flash-lite"))
+        assertEquals(null, AssistantModelPolicy.family("gemini-omni"))
+        assertEquals(
+            listOf("gemini-3.10-flash", "gemini-3.8-flash", "gemini-3.5-flash", "gemini-2.5-flash"),
+            AssistantModelPolicy.sameFamilyNewestFirst(models, "gemini-2.5-flash").map { it.id }
+        )
+        assertEquals(listOf("gemini-2.5-pro"), AssistantModelPolicy.sameFamilyNewestFirst(models, "gemini-2.5-pro").map { it.id })
+    }
 }

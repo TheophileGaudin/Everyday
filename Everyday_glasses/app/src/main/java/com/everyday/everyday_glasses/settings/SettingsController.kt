@@ -365,9 +365,11 @@ class SettingsController(
         assistantDetail = detail
         dashboardSettings?.apply {
             geminiConfigured = configuration != null
-            geminiReady = detail == "Gemini ready"
+            geminiReady = detail.startsWith("Gemini ready")
             geminiModelLabel = modelLabel(configuration)
             geminiDetail = detail
+            geminiModelChoices = modelChoices(configuration, models)
+            geminiSelectedModelId = selectedModelId(configuration)
         }
         notifyTransientContentChanged()
     }
@@ -379,13 +381,17 @@ class SettingsController(
         else -> configuration.modelId.removePrefix("gemini-")
     }
 
-    private fun cycleAssistantModel() {
-        val current = assistantConfiguration ?: return
-        val choices = listOf<String?>(null) + assistantModels.map { it.id }
-        val currentChoice: String? = if (current.selectionMode == AssistantModelSelectionMode.AUTO_RECOMMENDED) null else current.modelId
-        val next = choices[(choices.indexOf(currentChoice).coerceAtLeast(0) + 1) % choices.size]
-        geminiListener?.onSelectGeminiModel(next)
+    /** The model page: the recommended choice (showing the model it picks now), then every model Google lists. */
+    private fun modelChoices(configuration: AssistantConfiguration?, models: List<AssistantModel>): List<DashboardSettings.GeminiModelChoice> {
+        val automatic = configuration?.takeIf { it.selectionMode == AssistantModelSelectionMode.AUTO_RECOMMENDED }
+            ?.let { "Auto (${it.modelId.removePrefix("gemini-")})" } ?: "Recommended (auto)"
+        return listOf(DashboardSettings.GeminiModelChoice(null, automatic)) +
+            models.map { DashboardSettings.GeminiModelChoice(it.id, it.id.removePrefix("gemini-")) }
     }
+
+    /** The model the user picked; null while the recommended model is chosen automatically. */
+    private fun selectedModelId(configuration: AssistantConfiguration?): String? =
+        configuration?.takeIf { it.selectionMode == AssistantModelSelectionMode.USER_SELECTED }?.modelId
 
     private fun createDashboardSettings(screenWidth: Float, screenHeight: Float) {
         dashboardSettings = DashboardSettings(resources, screenWidth, screenHeight).apply {
@@ -398,9 +404,11 @@ class SettingsController(
             smartAlignmentEnabled = isSmartAlignmentEnabled()
             googleAuthState = this@SettingsController.googleAuthState
             geminiConfigured = assistantConfiguration != null
-            geminiReady = assistantDetail == "Gemini ready"
+            geminiReady = assistantDetail.startsWith("Gemini ready")
             geminiModelLabel = modelLabel(assistantConfiguration)
             geminiDetail = assistantDetail
+            geminiModelChoices = modelChoices(assistantConfiguration, assistantModels)
+            geminiSelectedModelId = selectedModelId(assistantConfiguration)
             setUnitSystemMode(this@SettingsController.unitSystemMode, notify = false)
 
             handler = object : DashboardSettings.DashboardSettingsHandler {
@@ -465,8 +473,8 @@ class SettingsController(
                     this@SettingsController.geminiListener?.onRemoveGeminiKey()
                 }
 
-                override fun onCycleGeminiModel() {
-                    cycleAssistantModel()
+                override fun onSelectGeminiModel(modelId: String?) {
+                    this@SettingsController.geminiListener?.onSelectGeminiModel(modelId)
                 }
 
                 override fun onGrantCalendarAccess() {

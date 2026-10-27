@@ -376,6 +376,7 @@ private var assistantStatus: AssistantStatus? = null
 
                 override fun onAssistantStatusReceived(status: com.everyday.shared.transport.AssistantStatus) {
                     this@MainActivity.runOnUiThread {
+                    showAssistantErrorToast(status)
                     assistantStatus = status
                     if (status.sessionId == assistantSessionId && status.state != AssistantSessionState.LISTENING) {
                         assistantHandler.removeCallbacks(assistantKeepalive)
@@ -539,6 +540,25 @@ private var assistantStatus: AssistantStatus? = null
         if (::dataSyncCoordinator.isInitialized) {
             dataSyncCoordinator.onForeground()
         }
+    }
+
+    /**
+     * Android lets the app read the clipboard only while it's in front: send it to the glasses then,
+     * so text copied in another app (an API key, say) can be pasted there.
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && clipboardManager != null) onClipboardChanged()
+    }
+
+    /** A voice assistant error shows as a toast with its short reason ("HTTP 404: ..."), once per error. */
+    private fun showAssistantErrorToast(status: AssistantStatus) {
+        if (status.state != AssistantSessionState.ERROR) return
+        val detail = status.detail ?: "Unknown error"
+        val previous = assistantStatus
+        if (previous?.state == AssistantSessionState.ERROR && previous.detail == detail && previous.sessionId == status.sessionId) return
+        fileLog("Voice assistant error: $detail")
+        Toast.makeText(this, "Voice assistant: $detail", Toast.LENGTH_LONG).show()
     }
 
     private fun handleIntent(intent: Intent?) {
