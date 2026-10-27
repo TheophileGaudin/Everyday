@@ -5,8 +5,15 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-/** Phone-side OSM proxy for glasses that have Bluetooth but no direct internet. */
+/**
+ * Phone-side OSM proxy for glasses that have Bluetooth but no direct internet. Overpass first; when
+ * it fails, OpenFreeMap's vector tiles ([OpenFreeMapSource]), and Overpass is skipped for a few
+ * minutes so each refresh doesn't wait for its timeouts.
+ */
 object MapDataProvider {
+    private const val OVERPASS_RETRY_AFTER_MS = 5 * 60 * 1000L
+    @Volatile private var overpassDownUntilMs = 0L
+
     fun fetch(
         lat: Double,
         lon: Double,
@@ -44,12 +51,49 @@ object MapDataProvider {
             ($poiQuery
             );out center;
         """.trimIndent()
+        val requests = tileRequests(poiMode, poiCategories, poiRadiusM, importantCategories, importantRadiiM, normalCategories)
+        if (System.currentTimeMillis() < overpassDownUntilMs) return OpenFreeMapSource.fetch(lat, lon, requests)
         var failure: Throwable? = null
-        for (endpoint in listOf("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")) {
+        for (endpoint in OVERPASS_ENDPOINTS) {
             try { return parse(post(endpoint, q), lat, lon) } catch (t: Throwable) { failure = t }
         }
-        throw failure ?: IllegalStateException("No Overpass endpoint")
+        overpassDownUntilMs = System.currentTimeMillis() + OVERPASS_RETRY_AFTER_MS
+        return try {
+            OpenFreeMapSource.fetch(lat, lon, requests)
+        } catch (t: Throwable) {
+            failure?.let(t::addSuppressed)
+            throw t
+        }
     }
+
+    /** The public Overpass servers tried in turn. */
+    val OVERPASS_ENDPOINTS = listOf("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
+
+    /** The same places as the Overpass query, as tile requests: the category ids and their radii. */
+    private fun tileRequests(
+        poiMode: String?,
+        poiCategories: Set<String>,
+        poiRadiusM: Int?,
+        importantCategories: Set<String>,
+        importantRadiiM: Map<String, Int>,
+        normalCategories: Set<String>
+    ): List<OpenFreeMapSource.PoiRequest> = when {
+        poiMode.equals("DEFAULT", ignoreCase = true) && (importantCategories.isNotEmpty() || normalCategories.isNotEmpty()) ->
+            importantCategories.map { OpenFreeMapSource.PoiRequest(it, importantRadiiM[it] ?: DEFAULT_IMPORTANT_RADIUS_M) } +
+                normalCategories.map { OpenFreeMapSource.PoiRequest(it, DEFAULT_NORMAL_RADIUS_M) }
+        poiCategories.isNotEmpty() && poiRadiusM != null -> poiCategories.map { OpenFreeMapSource.PoiRequest(it, poiRadiusM) }
+        else -> LEGACY_DEFAULT_PLACES
+    }
+
+    /** The legacy default query's places and radii. */
+    private val LEGACY_DEFAULT_PLACES = listOf(
+        OpenFreeMapSource.PoiRequest("station", 8_000),
+        OpenFreeMapSource.PoiRequest("supermarket", 1_700),
+        OpenFreeMapSource.PoiRequest("school", 1_700),
+    ) + listOf(
+        "hospital", "police", "bus_station", "ferry_terminal", "place_of_worship", "cafe", "restaurant",
+        "pharmacy", "fuel", "library", "marketplace", "historic", "shop", "tourism"
+    ).map { OpenFreeMapSource.PoiRequest(it, DEFAULT_NORMAL_RADIUS_M) }
 
     private fun buildDefaultPoiQuery(
         lat: Double,

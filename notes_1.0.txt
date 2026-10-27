@@ -10,6 +10,7 @@ Completed port of x3player in file browser
 Added turn by turn navigation in map widget
 Added POI control settings in map widget
 Added RSS feed control settings in news widget
+Added OpenFreeMap fallback when Overpass servers are unavailable for map/directions
 
 Bugfix
 

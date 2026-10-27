@@ -2,10 +2,8 @@ package com.everyday.everyday_phone
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.app.AlertDialog
 import android.content.ClipboardManager
-import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
@@ -48,11 +46,14 @@ import com.everyday.shared.transport.AssistantSessionState
 import com.everyday.shared.transport.AssistantStatus
 import java.io.ByteArrayOutputStream
 import java.util.UUID
+import androidx.core.net.toUri
+import androidx.core.graphics.scale
+import androidx.core.content.edit
 
 /**
  * Phone app with trackpad for cursor control on glasses.
  * Shows a soft keyboard when a text field is focused on the glasses.
- * Can mirror phone screen to glasses over WiFi.
+ * Can mirror phone screen to glasses over Wi-Fi.
  */
 class MainActivity : AppCompatActivity() {
     
@@ -180,10 +181,10 @@ private var assistantStatus: AssistantStatus? = null
             // Try to show in UI (may not work if UI thread crashed)
             try {
                 runOnUiThread {
-                    android.widget.Toast.makeText(
+                    Toast.makeText(
                         this,
                         "Crash: ${throwable.message}",
-                        android.widget.Toast.LENGTH_LONG
+                        Toast.LENGTH_LONG
                     ).show()
                 }
             } catch (e: Exception) {}
@@ -368,13 +369,13 @@ private var assistantStatus: AssistantStatus? = null
             }
 
             experienceControlListener = object : RfcommServer.ExperienceControlListener {
-                override fun onSubtitleControlRequested(control: com.everyday.shared.sync.SubtitleControl) {
+                override fun onSubtitleControlRequested(control: SubtitleControl) {
                     this@MainActivity.runOnUiThread {
                         phoneSubtitleCoordinator?.onControl(control)
                     }
                 }
 
-                override fun onAssistantStatusReceived(status: com.everyday.shared.transport.AssistantStatus) {
+                override fun onAssistantStatusReceived(status: AssistantStatus) {
                     this@MainActivity.runOnUiThread {
                     showAssistantErrorToast(status)
                     assistantStatus = status
@@ -474,15 +475,15 @@ private var assistantStatus: AssistantStatus? = null
         
         // Check for overlay permission to allow background starts
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            android.widget.Toast.makeText(
+            Toast.makeText(
                 this,
                 "Please grant 'Display over other apps' to allow background mirroring",
-                android.widget.Toast.LENGTH_LONG
+                Toast.LENGTH_LONG
             ).show()
             
             val intent = Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")
+                "package:$packageName".toUri()
             )
             startActivity(intent)
         }
@@ -591,7 +592,7 @@ private var assistantStatus: AssistantStatus? = null
         if (intent?.action == ACTION_START_MIRROR) {
             fileLog("Received start mirror intent")
             // Cancel notification
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            val notificationManager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
             notificationManager.cancel(REQUEST_NOTIFICATION_ID)
             
             // Start mirroring
@@ -692,7 +693,7 @@ private var assistantStatus: AssistantStatus? = null
     }
 
     private fun hasInternetConnection(): Boolean {
-        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
         return connectivityManager.allNetworks.any { network ->
             val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return@any false
             capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
@@ -766,7 +767,7 @@ private var assistantStatus: AssistantStatus? = null
                 val purpose = pendingProjectionPurpose
                 pendingProjectionPurpose = ProjectionPurpose.NONE
 
-                if (resultCode == Activity.RESULT_OK && data != null) {
+                if (resultCode == RESULT_OK && data != null) {
                     fileLog("Starting foreground service...")
                     val needsAudioCapture = purpose == ProjectionPurpose.SUBTITLE
                     if (!ScreenCaptureService.start(this, includeAudioCapture = needsAudioCapture)) {
@@ -783,7 +784,7 @@ private var assistantStatus: AssistantStatus? = null
                     // Android requires the typed foreground service to exist before
                     // getMediaProjection(), and stale/null service restarts are ignored
                     // inside ScreenCaptureService.
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    Handler(Looper.getMainLooper()).postDelayed({
                         try {
                             fileLog("Getting MediaProjection...")
                             if (screenStreamServer?.onPermissionResult(resultCode, data) == true) {
@@ -833,7 +834,7 @@ private var assistantStatus: AssistantStatus? = null
                 // DEBUG: coordsText.text = "Error: ${e.message}"
             }
         } else if (requestCode == REQUEST_IMAGE_PICKER) {
-            if (resultCode == Activity.RESULT_OK && data?.data != null) {
+            if (resultCode == RESULT_OK && data?.data != null) {
                 handleSelectedImage(data.data!!)
             }
         }
@@ -999,7 +1000,7 @@ private var assistantStatus: AssistantStatus? = null
     private fun clearLinkInputFocus() {
         if (!::linkInput.isInitialized) return
         linkInput.clearFocus()
-        val inputMethodManager = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        val inputMethodManager = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         inputMethodManager.hideSoftInputFromWindow(linkInput.windowToken, 0)
     }
 
@@ -1096,7 +1097,7 @@ private var assistantStatus: AssistantStatus? = null
                     val scale = maxDimension.toFloat() / maxOf(originalBitmap.width, originalBitmap.height)
                     val newWidth = (originalBitmap.width * scale).toInt()
                     val newHeight = (originalBitmap.height * scale).toInt()
-                    Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true).also {
+                    originalBitmap.scale(newWidth, newHeight).also {
                         if (it != originalBitmap) originalBitmap.recycle()
                     }
                 } else {
@@ -1166,7 +1167,7 @@ private var assistantStatus: AssistantStatus? = null
             }
         }
 
-        // Location is needed for WiFi Direct on older Android versions
+        // Location is needed for Wi-Fi Direct on older Android versions
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             != PackageManager.PERMISSION_GRANTED) {
             permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -1397,7 +1398,7 @@ private var assistantStatus: AssistantStatus? = null
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             }
             
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            val notificationManager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
             notificationManager.createNotificationChannel(channel)
         }
         
@@ -1413,7 +1414,7 @@ private var assistantStatus: AssistantStatus? = null
             .setContentIntent(pendingIntent)
             
         // Show notification
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
         notificationManager.notify(REQUEST_NOTIFICATION_ID, builder.build())
         
         // Also try direct start (best effort)
@@ -1435,7 +1436,7 @@ private var assistantStatus: AssistantStatus? = null
 
     /** Remote control from the glasses needs the accessibility service: a notification opens its settings. */
     private fun showRemoteControlSetupNotification() {
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        val manager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             manager.createNotificationChannel(
                 android.app.NotificationChannel(
@@ -1529,7 +1530,7 @@ private var assistantStatus: AssistantStatus? = null
     // ==================== Clipboard Monitoring ====================
     
     private fun setupClipboardMonitoring() {
-        clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboardManager = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
         clipboardManager?.addPrimaryClipChangedListener(clipboardListener)
         fileLog("Clipboard monitoring started")
     }
@@ -1616,7 +1617,7 @@ private var assistantStatus: AssistantStatus? = null
 
     private fun maybePromptNotificationAccess() {
         if (PhoneNotificationRepository.isListenerEnabled(this)) return
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         if (prefs.getBoolean(KEY_NOTIFICATION_ACCESS_PROMPT_DISMISSED, false)) return
 
         AlertDialog.Builder(this)
@@ -1626,7 +1627,7 @@ private var assistantStatus: AssistantStatus? = null
                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
             .setNegativeButton("Not now") { _, _ ->
-                prefs.edit().putBoolean(KEY_NOTIFICATION_ACCESS_PROMPT_DISMISSED, true).apply()
+                prefs.edit { putBoolean(KEY_NOTIFICATION_ACCESS_PROMPT_DISMISSED, true) }
             }
             .show()
     }
@@ -1659,7 +1660,7 @@ private var assistantStatus: AssistantStatus? = null
             }
 
             REQUEST_WIFI_DIRECT_PERMISSIONS -> {
-                // WiFi Direct permissions - initialize even if denied (will just not work as fallback)
+                // Wi-Fi Direct permissions - initialize even if denied (will just not work as fallback)
                 initializeWifiDirect()
             }
 

@@ -7,6 +7,8 @@ import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.everyday.shared.sync.MapDataProvider
+import com.everyday.shared.sync.OpenFreeMapSource
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -14,7 +16,10 @@ import java.net.URLEncoder
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Small, dependency-free OpenStreetMap/Overpass cache used by the glasses map. */
+/**
+ * Small, dependency-free OpenStreetMap cache used by the glasses map: Overpass first, OpenFreeMap's
+ * vector tiles when Overpass fails (it is then skipped for a few minutes).
+ */
 class MapRoadRepository(
     context: Context,
     private val changed: (List<MapRoad>, List<MapPoi>) -> Unit,
@@ -31,6 +36,7 @@ class MapRoadRepository(
     @Volatile private var requestedConfig = PoiDisplayConfig.DEFAULT
     private var fetchedConfig = PoiDisplayConfig.DEFAULT
     private var preferPhoneProxyUntilMs = 0L
+    @Volatile private var overpassDownUntilMs = 0L
     private var lastPhoneProxyRequestMs = 0L
     @Volatile private var pendingRefresh: PendingRefresh? = null
 
@@ -171,11 +177,29 @@ class MapRoadRepository(
             );
             out center;
         """.trimIndent()
+        if (System.currentTimeMillis() < overpassDownUntilMs) return fetchTiles(c, config)
         var failure: Throwable? = null
-        for (endpoint in listOf("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")) {
+        for (endpoint in MapDataProvider.OVERPASS_ENDPOINTS) {
             try { return request(endpoint, q) } catch (t: Throwable) { failure = t }
         }
-        throw failure ?: IllegalStateException("No Overpass endpoint")
+        Log.w(TAG, "Overpass failed (${failure?.message}); using OpenFreeMap tiles for ${OVERPASS_RETRY_AFTER_MS / 60_000} min")
+        overpassDownUntilMs = System.currentTimeMillis() + OVERPASS_RETRY_AFTER_MS
+        return fetchTiles(c, config)
+    }
+
+    /** The same roads and places from OpenFreeMap's vector tiles. */
+    private fun fetchTiles(c: MapGeoPoint, config: PoiDisplayConfig): Pair<List<MapRoad>, List<MapPoi>> {
+        val requests = when {
+            config.isDefault -> LEGACY_DEFAULT_PLACES
+            config.isDefaultMode ->
+                config.importantCategories.mapNotNull { category -> config.importantRadiiM[category]?.let { OpenFreeMapSource.PoiRequest(category, it) } } +
+                    config.normalCategories.map { OpenFreeMapSource.PoiRequest(it, PoiDisplayConfig.DEFAULT_RADIUS_M) }
+            else -> config.categories.map { OpenFreeMapSource.PoiRequest(it, config.radiusM) }
+        }
+        val snapshot = OpenFreeMapSource.fetch(c.lat, c.lon, requests)
+        val roads = snapshot.roads.map { road -> MapRoad(road.id, road.highway, road.name, road.points.map { MapGeoPoint(it.lat, it.lon) }) }
+        val pois = snapshot.pois.map { poi -> MapPoi(poi.id, poi.name, poi.category, mapPoiTier(poi.category), MapGeoPoint(poi.point.lat, poi.point.lon)) }
+        return roads to pois
     }
 
     private fun buildDefaultModePoiQuery(c: MapGeoPoint, config: PoiDisplayConfig): String {
@@ -246,5 +270,16 @@ class MapRoadRepository(
 
     private fun distance(a: MapGeoPoint, b: MapGeoPoint): Float = FloatArray(1).also { Location.distanceBetween(a.lat, a.lon, b.lat, b.lon, it) }[0]
 
-    companion object { private const val TAG = "MapRoadRepository" }
+    companion object {
+        private const val TAG = "MapRoadRepository"
+        private const val OVERPASS_RETRY_AFTER_MS = 5 * 60 * 1000L
+
+        /** The legacy default query's places and radii (stations 8 km, supermarkets and schools 1.7 km, others 400 m). */
+        private val LEGACY_DEFAULT_PLACES = listOf(
+            OpenFreeMapSource.PoiRequest(MapPoiCategoryCatalog.STATION, 8_000),
+            OpenFreeMapSource.PoiRequest(MapPoiCategoryCatalog.SUPERMARKET, 1_700),
+            OpenFreeMapSource.PoiRequest(MapPoiCategoryCatalog.SCHOOL, 1_700),
+        ) + (MapPoiCategoryCatalog.supportedIds - setOf(MapPoiCategoryCatalog.STATION, MapPoiCategoryCatalog.SUPERMARKET, MapPoiCategoryCatalog.SCHOOL))
+            .map { OpenFreeMapSource.PoiRequest(it, 400) }
+    }
 }
