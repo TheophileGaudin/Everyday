@@ -1,6 +1,7 @@
 package com.everyday.everyday_glasses.widgets.map
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -13,7 +14,10 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import androidx.core.graphics.createBitmap
 import androidx.core.graphics.withClip
+import androidx.core.graphics.withSave
+import androidx.core.graphics.withTranslation
 import com.everyday.everyday_glasses.interaction.user_input.TextEditAction
 import com.everyday.everyday_glasses.interaction.user_input.TextZone
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
@@ -86,7 +90,9 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.Executors
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.min
 import kotlin.math.round
 import kotlin.math.roundToInt
@@ -234,10 +240,12 @@ class MapWidget(
                 request: DestinationSearchRequest,
                 reason: DestinationSearchFallbackReason
             ) {
+                Log.d(TAG, "Destination search \"${request.query}\": searching on the glasses ($reason)")
                 runLocalDestinationFallback(request)
             }
 
             override fun onDestinationSearchFailure(request: DestinationSearchRequest, error: DestinationSearchError?) {
+                Log.d(TAG, "Destination search \"${request.query}\" failed: ${error?.code ?: "timeout"} ${error?.message.orEmpty()}")
                 navigationMain.post {
                     if (navigationState.status == NavigationStatus.SEARCHING && navigationState.query == request.query) {
                         finishNavigationFailure(error?.message ?: "Destination search timed out; try again.", null)
@@ -360,7 +368,7 @@ class MapWidget(
         updatePoiSelection()
         repository.refresh(MapGeoPoint(value.latitude, value.longitude), poiDisplayConfig)
         updateLiveGuidance(value)
-        invalidate?.invoke()
+        if (!isMinimized) invalidate?.invoke()
     }
 
     /** Retries through the phone after its RFCOMM connection becomes available. */
@@ -457,6 +465,7 @@ class MapWidget(
         addressKeyboard.hide()
         setAddressFocus(false)
         poseController.stop()
+        roadLayer = null
     }
 
     /**
@@ -466,6 +475,7 @@ class MapWidget(
      * every sensor sample while preserving the map's absolute heading.
      */
     private fun requestPoseRedraw() {
+        if (isMinimized) return
         val candidateHeading = latestPoseHeading
         if (candidateHeading.isNaN()) return
         if (!lastRedrawnHeading.isNaN() && angularDistanceDeg(candidateHeading, lastRedrawnHeading) < POSE_HEADING_INVALIDATION_THRESHOLD_DEG) {
@@ -1574,8 +1584,19 @@ class MapWidget(
 
     private fun drawTopDown(canvas: Canvas, loc: Location, cx: Float, cy: Float, radius: Float, pendingLabels: MutableList<PoiLabel>) {
         val mapRadiusM = displayRadiusM()
-        for (r in roads) drawRoad(canvas, r, loc, cx, cy, radius, mapRadiusM)
-        drawNavigationRoute(canvas, loc, cx, cy, radius, mapRadiusM)
+        val scale = radius / mapRadiusM
+        val here = MapGeoPoint(loc.latitude, loc.longitude)
+        val layer = currentRoadLayer(here, radius, scale)
+        val origin = layerOrigin ?: return
+        canvas.withSave {
+            // Heading-up and centred on the user: the pre-drawn layer is only moved and rotated.
+            translate(cx, cy)
+            rotate(-heading)
+            translate(-eastM(origin, here) * scale, northM(origin, here) * scale)
+            drawBitmap(layer, -layer.width / 2f, -layer.height / 2f, layerPaint)
+            drawNavigationRoute(this, origin, scale)
+        }
+        drawNavigationDestination(canvas, loc, cx, cy, radius, mapRadiusM)
         for (p in poiSelection.visibleInMap.filter { distance(loc, it.point) <= mapRadiusM }) {
             val q = mapPoint(loc, p.point, cx, cy, radius, mapRadiusM) ?: continue
             val important = p.tier != MapPoiTier.NORMAL
@@ -1586,8 +1607,7 @@ class MapWidget(
         }
         // Screen-stable forward pointer, identical in orientation to MapTest:
         // geometry rotates around it while forward remains at the screen top.
-        val marker = Path().apply { moveTo(cx, cy-11); lineTo(cx-7,cy+8); lineTo(cx,cy+4); lineTo(cx+7,cy+8); close() }
-        canvas.drawPath(marker, user)
+        canvas.withTranslation(cx, cy) { drawPath(userMarker, user) }
     }
 
     private fun drawNorthIndicator(canvas: Canvas, cx: Float, cy: Float, radius: Float) {
@@ -1599,66 +1619,115 @@ class MapWidget(
         canvas.drawText("N", x, baseline, northLabel)
     }
 
-    private fun drawRoad(canvas: Canvas, r: MapRoad, loc: Location, cx: Float, cy: Float, radius: Float, mapRadiusM: Float) {
-        val p = Path(); var started = false
-        for (point in r.points) { val q = mapPoint(loc, point, cx, cy, radius, mapRadiusM) ?: continue; if (!started) { p.moveTo(q.x,q.y); started=true } else p.lineTo(q.x,q.y) }
-        if (!started) return
-        val isMajor = r.highway in setOf("motorway","trunk","primary","secondary")
-        halo.strokeWidth = if (isMajor) 10f else 6f; canvas.drawPath(p, halo)
-        val paint = if (isMajor) major else road; paint.strokeWidth = if (isMajor) 4f else 2.5f; canvas.drawPath(p, paint)
+    // ==================== Roads, drawn once into a layer ====================
+    // Drawing hundreds of anti-aliased roads at a new angle on every frame is what made the map
+    // slow. They are drawn once, north-up, into an image a little larger than the map circle, and
+    // each frame only moves and rotates that image. It is drawn again when the map data, the zoom
+    // or the widget size change, or when walking brings the circle near its edge. The route, a
+    // single line that changes at every position during guidance, stays a path drawn on top.
+
+    private var roadLayer: Bitmap? = null
+    private var layerOrigin: MapGeoPoint? = null
+    private var layerScale = 0f
+    private var layerRoads: List<MapRoad>? = null
+    private var routePathsFor: List<List<GeoPoint>> = emptyList()
+    private val completedRoutePath = Path()
+    private val remainingRoutePath = Path()
+    private val layerPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val layerPath = Path()
+    private val userMarker = Path().apply { moveTo(0f, -11f); lineTo(-7f, 8f); lineTo(0f, 4f); lineTo(7f, 8f); close() }
+
+    /** The roads around [here], drawn at [scale] pixels per metre: the cached layer while it still covers the circle. */
+    private fun currentRoadLayer(here: MapGeoPoint, radius: Float, scale: Float): Bitmap {
+        val halfSize = ceil(radius * LAYER_COVERAGE).toInt()
+        val cached = roadLayer
+        val origin = layerOrigin
+        if (cached != null && origin != null && cached.width == halfSize * 2 && scale == layerScale && roads === layerRoads &&
+            hypot(eastM(origin, here), northM(origin, here)) * scale + radius <= halfSize
+        ) return cached
+        val started = SystemClock.elapsedRealtime()
+        val layer = cached?.takeIf { it.width == halfSize * 2 } ?: createBitmap(halfSize * 2, halfSize * 2)
+        layer.eraseColor(Color.TRANSPARENT)
+        Canvas(layer).withTranslation(halfSize.toFloat(), halfSize.toFloat()) {
+            for (r in roads) {
+                layerPath.rewind()
+                r.points.forEachIndexed { index, point -> addPathPoint(layerPath, index, here, point.lat, point.lon, scale) }
+                val isMajor = r.highway in MAJOR_HIGHWAYS
+                halo.strokeWidth = if (isMajor) 10f else 6f; drawPath(layerPath, halo)
+                val paint = if (isMajor) major else road; paint.strokeWidth = if (isMajor) 4f else 2.5f; drawPath(layerPath, paint)
+            }
+        }
+        roadLayer = layer
+        layerOrigin = here
+        layerScale = scale
+        layerRoads = roads
+        routePathsFor = emptyList()
+Log.d(TAG, "Map layer drawn: ${roads.size} roads, ${layer.width} px, ${SystemClock.elapsedRealtime() - started} ms")
+        return layer
     }
 
+    private fun currentRoutePolylines(): List<List<GeoPoint>> {
+        val route = navigationState.route ?: return emptyList()
+        val guidance = navigationState.guidance ?: return listOf(route.polyline.points)
+        return listOf(guidance.completedPolyline, guidance.remainingPolyline)
+    }
+
+    private fun addPathPoint(path: Path, index: Int, origin: MapGeoPoint, lat: Double, lon: Double, scale: Float) {
+        val x = eastM(origin, lat, lon) * scale
+        val y = -northM(origin, lat) * scale
+        if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+    }
+
+    /** Metres east of [origin]. Flat, which is exact enough across the map's few hundred metres. */
+    private fun eastM(origin: MapGeoPoint, lat: Double, lon: Double): Float =
+        ((lon - origin.lon) * METRES_PER_DEGREE * cos(Math.toRadians((origin.lat + lat) / 2))).toFloat()
+    private fun eastM(origin: MapGeoPoint, point: MapGeoPoint): Float = eastM(origin, point.lat, point.lon)
+    private fun northM(origin: MapGeoPoint, lat: Double): Float = ((lat - origin.lat) * METRES_PER_DEGREE).toFloat()
+    private fun northM(origin: MapGeoPoint, point: MapGeoPoint): Float = northM(origin, point.lat)
+
     private fun mapPoint(loc: Location, point: MapGeoPoint, cx: Float, cy: Float, radius: Float, mapRadiusM: Float = zoom.radiusM): PointF? {
-        val d = distance(loc, point); if (d > mapRadiusM * 1.2f) return null
-        val relative = Math.toRadians(compassRelativeBearingDeg(bearing(loc, point), heading).toDouble())
+        val here = MapGeoPoint(loc.latitude, loc.longitude)
+        val east = eastM(here, point)
+        val north = northM(here, point)
+        if (hypot(east, north) > mapRadiusM * 1.2f) return null
+        val headingRad = Math.toRadians(heading.toDouble())
+        val c = cos(headingRad).toFloat()
+        val s = sin(headingRad).toFloat()
         val scale = radius / mapRadiusM
-        return PointF(
-            cx + sin(relative).toFloat() * d * scale,
-            cy - cos(relative).toFloat() * d * scale
-        )
+        return PointF(cx + (east * c - north * s) * scale, cy - (east * s + north * c) * scale)
     }
 
     /** Navigation never changes the user's map zoom; off-screen destinations use an edge arrow. */
     private fun displayRadiusM(): Float = zoom.radiusM.coerceAtLeast(1f)
 
-    /** Route is painted after roads and before POIs/labels so guidance remains legible. */
-    private fun drawNavigationRoute(
-        canvas: Canvas,
-        loc: Location,
-        cx: Float,
-        cy: Float,
-        radius: Float,
-        mapRadiusM: Float
-    ) {
-        val route = navigationState.route ?: return
-        fun drawSegment(points: List<GeoPoint>, haloPaint: Paint, routePaint: Paint) {
-            if (points.isEmpty()) return
-            val path = Path()
-            var started = false
-            points.forEach { point ->
-                val q = mapPoint(loc, MapGeoPoint(point.lat, point.lon), cx, cy, radius, mapRadiusM)
-                    ?: return@forEach
-                if (!started) {
-                    path.moveTo(q.x, q.y)
-                    started = true
-                } else {
-                    path.lineTo(q.x, q.y)
-                }
-            }
-            if (started) {
-                haloPaint.strokeWidth = 13f
-                routePaint.strokeWidth = 6f
-                canvas.drawPath(path, haloPaint)
-                canvas.drawPath(path, routePaint)
+    /**
+     * Route is painted after roads and before POIs/labels so guidance remains legible, in the
+     * road layer's coordinates. With live guidance it is the walked part, then what remains;
+     * otherwise the whole route. Its paths are rebuilt only when the route or the layer changes.
+     */
+    private fun drawNavigationRoute(canvas: Canvas, origin: MapGeoPoint, scale: Float) {
+        val route = currentRoutePolylines()
+        if (route.size != routePathsFor.size || route.indices.any { route[it] !== routePathsFor[it] }) {
+            routePathsFor = route
+            completedRoutePath.rewind()
+            remainingRoutePath.rewind()
+            route.forEachIndexed { polylineIndex, points ->
+                val path = if (polylineIndex == route.lastIndex) remainingRoutePath else completedRoutePath
+                points.forEachIndexed { index, point -> addPathPoint(path, index, origin, point.lat, point.lon, scale) }
             }
         }
-        val guidance = navigationState.guidance
-        if (guidance != null) {
-            drawSegment(guidance.completedPolyline, navigationCompletedRouteHalo, navigationCompletedRoute)
-            drawSegment(guidance.remainingPolyline, navigationRouteHalo, navigationRoute)
-        } else {
-            drawSegment(route.polyline.points, navigationRouteHalo, navigationRoute)
+        fun drawSegment(path: Path, haloPaint: Paint, routePaint: Paint) {
+            if (path.isEmpty) return
+            haloPaint.strokeWidth = 13f
+            routePaint.strokeWidth = 6f
+            canvas.drawPath(path, haloPaint)
+            canvas.drawPath(path, routePaint)
         }
+        drawSegment(completedRoutePath, navigationCompletedRouteHalo, navigationCompletedRoute)
+        drawSegment(remainingRoutePath, navigationRouteHalo, navigationRoute)
+    }
+
+    private fun drawNavigationDestination(canvas: Canvas, loc: Location, cx: Float, cy: Float, radius: Float, mapRadiusM: Float) {
         val destination = navigationState.destination?.point
             ?.let { mapPoint(loc, it, cx, cy, radius, mapRadiusM) }
         destination?.let {
@@ -1675,10 +1744,11 @@ class MapWidget(
             pose,
             MapGeoPoint(loc.latitude, loc.longitude)
         )
+        val here = MapGeoPoint(loc.latitude, loc.longitude)
         for (r in roads) {
             val path = Path(); var started=false
             for (point in r.points) {
-                if (distance(loc, point) > zoom.radiusM) continue
+                if (hypot(eastM(here, point), northM(here, point)) > zoom.radiusM) continue
                 val projected = projection.projectGeo(point) ?: continue
                 val sx = c.left + projected.x
                 val sy = c.top + projected.y
@@ -2826,6 +2896,10 @@ class MapWidget(
         private const val POSE_FRAME_INTERVAL_MS = 16L
         private const val POSE_HEADING_INVALIDATION_THRESHOLD_DEG = 0.25f
         private const val MARGIN = 20.0f
+        private const val METRES_PER_DEGREE = 111_195.0
+        /** The road layer's half-width, in map radii: the circle can move this much less one radius before it is redrawn. */
+        private const val LAYER_COVERAGE = 1.6f
+private val MAJOR_HIGHWAYS = setOf("motorway", "trunk", "primary", "secondary")
     }
 }
 

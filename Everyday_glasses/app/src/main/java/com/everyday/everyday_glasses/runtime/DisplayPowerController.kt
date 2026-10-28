@@ -242,7 +242,11 @@ class DisplayPowerController(
     }
 
     private fun ensureVisibleWakeState(reason: String) {
-        activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Runs on every touch. Setting a window flag, even one already set, makes Android lay
+        // the whole window out again through the system (about 18 ms a frame on the glasses).
+        if (activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON == 0) {
+            activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
         acquireWakeLock()
 
         val recoveredStaleMask = callbacks.ensureVisibleWakeState()

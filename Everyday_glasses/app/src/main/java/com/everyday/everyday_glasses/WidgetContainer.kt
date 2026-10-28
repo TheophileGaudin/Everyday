@@ -1195,6 +1195,7 @@ for (widget in registry.allWidgets()) {if (widget.onDoubleTapAnywhere()) return 
 
         // Hover controls live above every widget, including fullscreen ones, so they
         // always receive hover updates whenever the cursor is visible.
+        val somethingWasHovered = hoveredWidget != null || hoverControlsLayer.ownsHover
         hoverControlsLayer.updateHover(cx, cy)
 
         if (hoverControlsLayer.ownsHover) {clearWidgetHoverStates(); if (!isTransitioningDisplayState) {invalidateHoverVisuals()}; return}
@@ -1221,6 +1222,9 @@ for (widget in registry.allWidgets()) {if (widget.onDoubleTapAnywhere()) return 
                     widget.updateHover(Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY)
                 }
             }
+            // Over empty dashboard, with nothing hovered before either, no highlight changed:
+            // only the cursor moves, and it draws itself.
+            if (target == null && !somethingWasHovered) return
         }
 
         if (!isTransitioningDisplayState) {

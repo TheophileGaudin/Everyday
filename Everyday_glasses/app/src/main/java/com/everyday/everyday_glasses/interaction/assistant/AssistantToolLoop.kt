@@ -92,7 +92,8 @@ class AssistantToolLoop(
                 textPresented = textPresented || (call.name == "present_text" && result.success)
                 browserTaskCompleted = browserTaskCompleted ||
                     (call.name == "run_browser_task" && result.success)
-                AssistantDiagnostics.debug(TAG, "result round=$round name=${call.name} success=${result.success} code=${result.code}")
+                AssistantDiagnostics.debug(TAG, "result round=$round name=${call.name} success=${result.success} code=${result.code}" +
+                    if (result.success) "" else " message=${result.message.take(200)}")
                 results += call to result
             }
 
