@@ -8,7 +8,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import android.view.WindowManager
 
@@ -56,6 +60,8 @@ class DisplayPowerController(
     companion object {
         private const val TAG = "DisplayPowerController"
         private const val WAKE_LOCK_TAG = "Everyday_glasses::DisplayWakeLock"
+        private const val DEFAULT_SCREEN_OFF_TIMEOUT_MS = 30_000L
+        private const val POWER_BUTTON_REWAKE_DELAY_MS = 400L
     }
 
     // ---------------------------------------------------------------------
@@ -75,6 +81,9 @@ class DisplayPowerController(
     private var started = false
     private var released = false
     private var activeTransitionReason = "display_state_change"
+    /** When the content was last masked (internal OFF) while the screen itself stayed on; 0 otherwise. */
+    private var maskedAtMs = 0L
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     var isTransitioningDisplayState: Boolean = false
         private set
@@ -186,6 +195,7 @@ class DisplayPowerController(
     fun release() {
         if (released) return
         released = true
+        mainHandler.removeCallbacksAndMessages(null)
 
         screenStateReceiver?.let { receiver ->
             runCatching { activity.unregisterReceiver(receiver) }
@@ -217,13 +227,12 @@ class DisplayPowerController(
             when (state) {
                 WakeSleepManager.DisplayState.OFF -> {
                     callbacks.applyDisplayState(state)
-                    activity.window.clearFlags(
-                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-                    )
                     releaseWakeLock()
+                    startMaskWindow()
                 }
 
                 WakeSleepManager.DisplayState.WAKE -> {
+                    cancelMaskWindow()
                     activity.window.addFlags(
                         WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
                     )
@@ -266,16 +275,62 @@ class DisplayPowerController(
 
         screenStateReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent?.action == Intent.ACTION_SCREEN_ON) {
-                    handlePhysicalScreenOn("screen_on_broadcast")
+                when (intent?.action) {
+                    Intent.ACTION_SCREEN_ON -> handlePhysicalScreenOn("screen_on_broadcast")
+                    Intent.ACTION_SCREEN_OFF -> handlePhysicalScreenOff()
                 }
             }
         }
 
         activity.registerReceiver(
             screenStateReceiver,
-            IntentFilter(Intent.ACTION_SCREEN_ON)
+            IntentFilter(Intent.ACTION_SCREEN_ON).apply { addAction(Intent.ACTION_SCREEN_OFF) }
         )
+    }
+
+    // ---------------------------------------------------------------------
+    // Masked content and the power button
+    // ---------------------------------------------------------------------
+    // Masking the content (OFF, e.g. when a head-up wake ends) leaves the screen lit, so a press of
+    // the power button would only switch it off, and showing content again would take a second
+    // press. For one system screen timeout after masking, the app keeps the screen on itself: the
+    // system cannot time it out, so a screen going off then can only be that press, and the
+    // content is shown instead. Afterwards the screen is left to the system timeout as before.
+
+    private val endMaskWindow = Runnable {
+        maskedAtMs = 0L
+        if (wakeSleepManager?.state == WakeSleepManager.DisplayState.OFF) {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            Log.d(TAG, "Masked for a full screen timeout; the screen is left to the system")
+        }
+    }
+
+    private fun startMaskWindow() {
+        mainHandler.removeCallbacks(endMaskWindow)
+        maskedAtMs = SystemClock.elapsedRealtime()
+        val systemTimeoutMs = Settings.System.getLong(
+            activity.contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, DEFAULT_SCREEN_OFF_TIMEOUT_MS
+        )
+        mainHandler.postDelayed(endMaskWindow, systemTimeoutMs)
+    }
+
+    private fun cancelMaskWindow() {
+        mainHandler.removeCallbacks(endMaskWindow)
+        maskedAtMs = 0L
+    }
+
+    private fun handlePhysicalScreenOff() {
+        val manager = wakeSleepManager ?: return
+        val maskedAt = maskedAtMs
+        if (manager.state != WakeSleepManager.DisplayState.OFF || maskedAt == 0L) return
+        cancelMaskWindow()
+        Log.d(TAG, "Screen off ${SystemClock.elapsedRealtime() - maskedAt}ms into the mask: power button, showing content")
+        // A wake-up requested while the screen is still switching off is ignored: wait until it is off.
+        mainHandler.postDelayed({
+            if (!released && wakeSleepManager?.state == WakeSleepManager.DisplayState.OFF) {
+                transitionTo(WakeSleepManager.DisplayState.WAKE, "power_button_while_masked")
+            }
+        }, POWER_BUTTON_REWAKE_DELAY_MS)
     }
 
     private fun handlePhysicalScreenOn(reason: String) {

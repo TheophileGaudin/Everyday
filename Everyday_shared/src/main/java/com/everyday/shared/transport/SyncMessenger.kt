@@ -10,4 +10,10 @@ interface SyncMessenger {
     fun sendSyncSnapshot(snapshot: SyncSnapshot): Boolean
     fun sendSyncError(error: SyncError): Boolean
 
+    /**
+     * The phone's answer to an HTTP request it made for the glasses (see [HttpRelayPolicy]).
+     * Only the phone sends it (RfcommServer, PhoneDataSyncCoordinator), so the glasses project
+     * sees it as unused: it is not.
+     */
+    fun sendHttpRelayResponse(response: TransportMessage.HttpRelayResponse): Boolean = false
 }

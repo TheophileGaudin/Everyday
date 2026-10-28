@@ -1630,7 +1630,8 @@ class MapWidget(
     private var layerOrigin: MapGeoPoint? = null
     private var layerScale = 0f
     private var layerRoads: List<MapRoad>? = null
-    private var routePathsFor: List<List<GeoPoint>> = emptyList()
+    /** The route the route paths were built for; null when they must be rebuilt, even for no route. */
+    private var routePathsFor: List<List<GeoPoint>>? = null
     private val completedRoutePath = Path()
     private val remainingRoutePath = Path()
     private val layerPaint = Paint(Paint.FILTER_BITMAP_FLAG)
@@ -1661,7 +1662,7 @@ class MapWidget(
         layerOrigin = here
         layerScale = scale
         layerRoads = roads
-        routePathsFor = emptyList()
+        routePathsFor = null
 Log.d(TAG, "Map layer drawn: ${roads.size} roads, ${layer.width} px, ${SystemClock.elapsedRealtime() - started} ms")
         return layer
     }
@@ -1707,7 +1708,8 @@ Log.d(TAG, "Map layer drawn: ${roads.size} roads, ${layer.width} px, ${SystemClo
      */
     private fun drawNavigationRoute(canvas: Canvas, origin: MapGeoPoint, scale: Float) {
         val route = currentRoutePolylines()
-        if (route.size != routePathsFor.size || route.indices.any { route[it] !== routePathsFor[it] }) {
+        val built = routePathsFor
+        if (built == null || route.size != built.size || route.indices.any { route[it] !== built[it] }) {
             routePathsFor = route
             completedRoutePath.rewind()
             remainingRoutePath.rewind()

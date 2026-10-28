@@ -43,6 +43,8 @@ abstract class BaseWidget(
 ) : WidgetLifecycle {
     companion object {
         private const val TAG = "BaseWidget"
+        /** A minimized widget away from the cursor: about a third of full brightness. */
+        private const val MINIMIZED_IDLE_ALPHA = 90
 
         // Common sizes for all widgets
         const val BORDER_WIDTH = WidgetTheme.Size.BORDER_WIDTH
@@ -1166,14 +1168,18 @@ abstract class BaseWidget(
         drawCloseButton(canvas)
     }
 
+    private val minimizedIdleBorderPaint by lazy { Paint(hoverBorderPaint).apply { alpha = MINIMIZED_IDLE_ALPHA } }
+    private val minimizedIdleTextPaint by lazy { Paint(minimizeTextPaint).apply { alpha = MINIMIZED_IDLE_ALPHA } }
+
     /**
-     * Draw the minimized widget (small square).
+     * Draw the minimized widget (small square): faint, so it can be found again, and lit under
+     * the cursor.
      */
     fun drawMinimized(canvas: Canvas) {
-        if (!isHovering()) return
-
-        canvas.drawRect(widgetBounds, backgroundPaint)
-        canvas.drawRect(widgetBounds, hoverBorderPaint)
+        val hovering = isHovering()
+        if (hovering) canvas.drawRect(widgetBounds, backgroundPaint)
+        canvas.drawRect(widgetBounds, if (hovering) hoverBorderPaint else minimizedIdleBorderPaint)
+        val textPaint = if (hovering) minimizeTextPaint else minimizedIdleTextPaint
 
         val fm = minimizeTextPaint.fontMetrics
         val textHeight = fm.descent - fm.ascent
@@ -1183,7 +1189,7 @@ abstract class BaseWidget(
             minimizeLabel,
             widgetBounds.centerX(),
             widgetBounds.centerY() + textOffset,
-            minimizeTextPaint
+            textPaint
         )
     }
 

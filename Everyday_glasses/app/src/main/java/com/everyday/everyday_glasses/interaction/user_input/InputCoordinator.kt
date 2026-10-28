@@ -32,7 +32,8 @@ class InputCoordinator(
         private const val TAP_MAX_DISTANCE = 50f
         private const val TAP_MAX_DURATION = 300L
         private const val DOUBLE_TAP_TIMEOUT_MS = 300L
-    }
+        private const val WAKE_TOUCH_MAX_MS = 2_000L
+}
 
     private val handler = Handler(Looper.getMainLooper())
     private var lastPointerCount = 1
@@ -45,6 +46,8 @@ class InputCoordinator(
     private var templeTotalDistance = 0f
     private var lastTempleTapTime = 0L
     private var pendingTempleTap: Runnable? = null
+    /** When the touch that woke the display began; until that finger lifts it presses and taps nothing. */
+    private var wakeTouchStartedAt = 0L
 
     private fun markUserInput(kind: UserInputKind) {
         userInputActivity.onUserInput(kind)
@@ -176,8 +179,7 @@ class InputCoordinator(
                 MotionEvent.ACTION_DOWN, MotionEvent.ACTION_HOVER_ENTER -> {
                     markUserInput(UserInputKind.GLASSES_DOWN)
                     Log.d(TAG, "Temple touch detected while sleeping - waking up")
-                    wakeDisplay()
-                    resetTempleTracking(event.x, event.y)
+                    wakeFromTemple(event.x, event.y)
                 }
             }
             return true
@@ -190,6 +192,7 @@ class InputCoordinator(
             MotionEvent.ACTION_HOVER_ENTER -> {
                 markUserInput(UserInputKind.GLASSES_DOWN)
                 resetTempleTracking(event.x, event.y)
+                if (isWakeTouch()) return true
                 Log.d(TAG, "Temple DOWN/ENTER at ($templeDownX, $templeDownY)")
                 handlePointerDown(1)
                 return true
@@ -202,6 +205,7 @@ class InputCoordinator(
             MotionEvent.ACTION_UP,
             MotionEvent.ACTION_HOVER_EXIT -> {
                 markUserInput(UserInputKind.GLASSES_UP)
+                if (endWakeTouch()) return true
                 val currentTime = System.currentTimeMillis()
                 val duration = currentTime - templeDownTime
                 val timeSinceLastMove = currentTime - lastTempleMovementTime
@@ -222,8 +226,7 @@ class InputCoordinator(
             if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                 markUserInput(UserInputKind.GLASSES_DOWN)
                 Log.d(TAG, "Touch detected while sleeping - waking up")
-                wakeDisplay()
-                resetTempleTracking(event.x, event.y)
+                wakeFromTemple(event.x, event.y)
             }
             return true
         }
@@ -234,6 +237,7 @@ class InputCoordinator(
             MotionEvent.ACTION_DOWN -> {
                 markUserInput(UserInputKind.GLASSES_DOWN)
                 resetTempleTracking(event.x, event.y)
+                if (isWakeTouch()) return true
                 Log.d(TAG, "Trackpad DOWN at ($templeDownX, $templeDownY) pointerCount=${event.pointerCount}")
                 handlePointerDown(event.pointerCount)
                 return true
@@ -256,6 +260,7 @@ class InputCoordinator(
             }
             MotionEvent.ACTION_UP -> {
                 markUserInput(UserInputKind.GLASSES_UP)
+                if (endWakeTouch()) return true
                 val currentTime = System.currentTimeMillis()
                 val duration = currentTime - templeDownTime
                 handlePointerUp()
@@ -401,6 +406,29 @@ class InputCoordinator(
             }
             handler.postDelayed(pendingTempleTap!!, DOUBLE_TAP_TIMEOUT_MS)
         }
+    }
+
+    /** A touch on the sleeping display only wakes it: its press and its tap are ignored until it lifts. */
+    private fun wakeFromTemple(x: Float, y: Float) {
+        wakeDisplay()
+        resetTempleTracking(x, y)
+        wakeTouchStartedAt = System.currentTimeMillis()
+    }
+
+    /** True while the touch that woke the display is still down (bounded, in case its lift is lost). */
+    private fun isWakeTouch(): Boolean {
+        if (wakeTouchStartedAt == 0L) return false
+        if (System.currentTimeMillis() - wakeTouchStartedAt <= WAKE_TOUCH_MAX_MS) return true
+        wakeTouchStartedAt = 0L
+        return false
+    }
+
+    /** The finger lifted: true when it was the touch that woke the display, which then taps nothing. */
+    private fun endWakeTouch(): Boolean {
+        val wasWakeTouch = isWakeTouch()
+        wakeTouchStartedAt = 0L
+        if (wasWakeTouch) Log.d(TAG, "Wake touch lifted - no tap")
+        return wasWakeTouch
     }
 
     private fun resetTempleTracking(x: Float, y: Float) {

@@ -476,7 +476,7 @@ private var assistantStatus: AssistantStatus? = null
         checkWifiDirectPermissions()
         
         // Check for overlay permission to allow background starts
-        if (Settings.canDrawOverlays(this)) {
+        if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(
                 this,
                 "Please grant 'Display over other apps' to allow background mirroring",
