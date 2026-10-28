@@ -32,14 +32,30 @@ sealed interface TextEditAction {
     class Changed(val content: CharSequence) : TextEditAction
     /** Enter was pressed in a FIELD. */
     class Submitted(val text: String) : TextEditAction
-    /** An AREA's font size, wrap or columns changed on its [TextZone.layout]. */
+    /** An AREA's font size, wrap or columns changed on its [TextZone.layout], or its [TextZone.frame]. */
     object LayoutChanged : TextEditAction
     /** The zone lost focus. */
     object Released : TextEditAction
 }
 
 /**
- * Any UI component region that accepts typed text. The owner provides where the zone is and what
+ * The background and border of a text AREA whose owner offers them; the owner draws them. A null
+ * [backgroundColor] is transparent, a [borderWidth] of 0 draws no border.
+ */
+class TextZoneFrame(backgroundColor: Int? = null, borderWidth: Float = 0f) {
+    var backgroundColor: Int? = backgroundColor
+    var borderWidth: Float = borderWidth.coerceIn(0f, MAX_BORDER_WIDTH)
+        set(value) {
+            field = value.coerceIn(0f, MAX_BORDER_WIDTH)
+        }
+
+    companion object {
+        const val MAX_BORDER_WIDTH = 6f
+    }
+}
+
+/**
+ * Any UI component region that accepts typed text.The owner provides where the zone is and what
  * it currently holds; while focused, the controller owns editing and drawing of the text, and
  * hands results back through [onTextEditAction].
  */
@@ -60,6 +76,9 @@ interface TextZone {
 
     /** Display settings of an AREA, shared with its owner's unfocused rendering. */
     val layout: TextZoneLayout? get() = null
+
+    /** The AREA's background and border, when its owner lets the user change them in the formatting menu. */
+    val frame: TextZoneFrame? get() = null
 
     /** Committed content that editing starts from. */
     fun content(): CharSequence
@@ -601,6 +620,8 @@ internal class TextEditingController(
                 override fun setFontSize(size: Float) = updateAreaLayout { it.textSize = size.coerceIn(12f, 72f) }
                 override fun setTextWrap(enabled: Boolean) = updateAreaLayout { it.wrap = enabled }
                 override fun setColumns(columns: Int) = updateAreaLayout { it.columns = columns }
+                override fun setFrameBackground(color: Int?) = updateAreaFrame { it.backgroundColor = color }
+                override fun setFrameBorderWidth(width: Float) = updateAreaFrame { it.borderWidth = width }
                 override fun setBold(enabled: Boolean) = toggleStyle(Typeface.BOLD)
                 override fun setItalic(enabled: Boolean) = toggleStyle(Typeface.ITALIC)
                 override fun setUnderline(enabled: Boolean) = toggleUnderline()
@@ -672,7 +693,7 @@ internal class TextEditingController(
         val s = session?.takeIf { it.isArea } ?: return
         textEditMenu?.dismiss()
         val bounds = s.zone.bounds
-        formattingMenu?.show(bounds.centerX(), bounds.top - 20f, s.layout.textSize, s.layout.wrap, s.layout.columns)
+        formattingMenu?.show(bounds.centerX(), bounds.top - 20f, s.layout.textSize, s.layout.wrap, s.layout.columns, s.zone.frame)
         formattingMenu?.apply {
             isBold = isStyleActive(s, Typeface.BOLD)
             isItalic = isStyleActive(s, Typeface.ITALIC)
@@ -793,6 +814,15 @@ internal class TextEditingController(
         val s = session?.takeIf { it.isArea } ?: return
         classified(s) {
             change(s.layout)
+            s.zone.onTextEditAction(TextEditAction.LayoutChanged)
+        }
+    }
+
+    private fun updateAreaFrame(change: (TextZoneFrame) -> Unit) {
+        val s = session?.takeIf { it.isArea } ?: return
+        val frame = s.zone.frame ?: return
+        classified(s) {
+            change(frame)
             s.zone.onTextEditAction(TextEditAction.LayoutChanged)
         }
     }

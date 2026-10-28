@@ -89,6 +89,19 @@ class WidgetDocumentTest {
     }
 
     @Test
+    fun `a text box keeps its frame, and one saved before frames existed has none`() {
+        val black = 0xFF000000.toInt()
+        val framed = TextWidgetState(1f, 2f, 100f, 80f, "text", frameBackgroundColor = black, frameBorderWidth = 2f)
+        assertEquals(framed, TextWidgetState.Codec.fromJson(TextWidgetState.Codec.toJson(framed)))
+
+        val older = TextWidgetState.Codec.toJson(TextWidgetState(1f, 2f, 100f, 80f, "text"))
+        assertEquals(false, older.has("frameBackgroundColor") || older.has("frameBorderWidth"))
+        val restored = TextWidgetState.Codec.fromJson(older)
+        assertEquals(null, restored?.frameBackgroundColor)
+        assertEquals(0f, restored?.frameBorderWidth)
+    }
+
+    @Test
     fun `unknown and malformed records are ignored without dropping valid records`() {
         val valid = dashboardOf(
             TextBoxPlugin.TYPE,

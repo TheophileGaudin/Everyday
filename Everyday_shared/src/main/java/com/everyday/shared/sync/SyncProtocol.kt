@@ -201,7 +201,13 @@ object SyncProtocol {
         )
     }
 
-    private fun LocationFix.toJson(): JSONObject {
+    /**
+     * A fix's [LocationFix.timestampMs] is on the sender's clock, and the phone's and the glasses'
+     * clocks can be seconds apart (the glasses without Wi-Fi never correct theirs). So the fix also
+     * says when it was sent, on that same clock, and the reader turns its age into a timestamp on
+     * its own clock: freshness never compares the two clocks.
+     */
+    private fun LocationFix.toJson(nowMs: Long = System.currentTimeMillis()): JSONObject {
         return JSONObject()
             .put("lat", lat)
             .put("lon", lon)
@@ -210,9 +216,15 @@ object SyncProtocol {
             .putNullable("speedMps", speedMps)
             .put("quality", quality.name)
             .put("timestampMs", timestampMs)
+            .put("sentAtMs", nowMs)
     }
 
-    private fun JSONObject.toLocationFix(): LocationFix {
+    private fun JSONObject.toLocationFix(nowMs: Long = System.currentTimeMillis()): LocationFix {
+        val sentTimestampMs = getLong("timestampMs")
+        // Without sentAtMs (an older sender) the timestamp is taken as it is, as before.
+        val timestampMs = optLongOrNull("sentAtMs")
+            ?.let { sentAtMs -> nowMs - (sentAtMs - sentTimestampMs).coerceAtLeast(0L) }
+            ?: sentTimestampMs
         return LocationFix(
             lat = getDouble("lat"),
             lon = getDouble("lon"),
@@ -220,7 +232,7 @@ object SyncProtocol {
             bearingDeg = optDoubleOrNull("bearingDeg")?.toFloat(),
             speedMps = optDoubleOrNull("speedMps")?.toFloat(),
             quality = LocationFixQuality.valueOf(getString("quality")),
-            timestampMs = getLong("timestampMs")
+            timestampMs = timestampMs
         )
     }
 

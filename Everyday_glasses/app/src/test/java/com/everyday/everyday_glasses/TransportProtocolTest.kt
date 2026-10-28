@@ -15,6 +15,7 @@ import com.everyday.shared.sync.SyncChannel
 import com.everyday.shared.sync.SyncError
 import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot
+import com.everyday.shared.sync.usableSpeedMps
 import com.everyday.shared.transport.PointerAction
 import com.everyday.shared.transport.AssistantControl
 import com.everyday.shared.transport.AssistantControlAction
@@ -107,8 +108,38 @@ class TransportProtocolTest {
         messages.forEach { message ->
             val decoded = TransportProtocol.decode(TransportProtocol.encode(message))
             assertTrue("Failed round trip for ${message.kind}: $decoded", decoded is TransportDecodeResult.Success)
-            assertEquals(message, (decoded as TransportDecodeResult.Success).message)
+            val actual = (decoded as TransportDecodeResult.Success).message
+            val sentFix = (message as? TransportMessage.SyncSnapshotMessage)?.snapshot?.location
+            val readFix = (actual as? TransportMessage.SyncSnapshotMessage)?.snapshot?.location
+            if (sentFix != null && readFix != null) {
+                // A fix's timestamp is re-expressed on the reader's clock: equal up to the encoding time.
+                assertTrue(kotlin.math.abs(readFix.timestampMs - sentFix.timestampMs) < 1_000L)
+                assertEquals(message, TransportMessage.SyncSnapshotMessage(
+                    actual.snapshot.copy(location = readFix.copy(timestampMs = sentFix.timestampMs))
+                ))
+            } else {
+                assertEquals(message, actual)
+            }
         }
+    }
+
+    @Test
+    fun `a location fix keeps its age when the phone's and glasses' clocks differ`() {
+        val now = System.currentTimeMillis()
+        val fix = LocationFix(52.6, 1.3, 5f, null, 1.4f, LocationFixQuality.VALID, timestampMs = now - 2_000L)
+        val encoded = TransportProtocol.encode(TransportMessage.SyncSnapshotMessage(SyncSnapshot(location = fix)))
+
+        // The phone's clock 15 s behind the glasses' (as on a day without Wi-Fi): both its times shift.
+        val envelope = org.json.JSONObject(encoded)
+        val location = envelope.getJSONObject("payload").getJSONObject("location")
+        location.put("timestampMs", location.getLong("timestampMs") - 15_000L)
+        location.put("sentAtMs", location.getLong("sentAtMs") - 15_000L)
+
+        val read = (TransportProtocol.decode(envelope.toString()) as TransportDecodeResult.Success).message
+        val readFix = (read as TransportMessage.SyncSnapshotMessage).snapshot.location!!
+        val ageMs = System.currentTimeMillis() - readFix.timestampMs
+        assertTrue("age $ageMs ms", ageMs in 2_000L until 3_000L)
+        assertEquals(1.4f, readFix.usableSpeedMps())
     }
 
     @Test

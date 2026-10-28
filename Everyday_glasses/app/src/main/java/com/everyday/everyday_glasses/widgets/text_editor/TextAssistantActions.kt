@@ -29,7 +29,10 @@ internal class TextAssistantActions(
 
     private fun presentOnUi(request: AssistantTextPresentationRequest): AssistantToolExecution {
         val targeted = request.targetWidgetId?.let(findTextWidget)
-        val widget = targeted ?: createTextWidget()
+        val widget = targeted ?: createTextWidget()?.also {
+            // An answer in a new box reads as a clean toast; a box the user made keeps its own look.
+            it.setFrame(TextBoxWidget.ASSISTANT_FRAME_BACKGROUND, TextBoxWidget.ASSISTANT_FRAME_BORDER)
+        }
         ?: return failure("Text widget could not be created")
         widget.setAssistantContent(AssistantTextContentFormatter.render(request.content, request.sources))
         clearEditing(widget)

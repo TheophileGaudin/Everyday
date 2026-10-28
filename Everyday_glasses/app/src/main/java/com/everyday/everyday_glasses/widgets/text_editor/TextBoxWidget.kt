@@ -18,6 +18,7 @@ import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
 import com.everyday.everyday_glasses.interaction.user_input.TextEditAction
 import com.everyday.everyday_glasses.interaction.user_input.TextZone
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneKind
+import com.everyday.everyday_glasses.interaction.user_input.TextZoneFrame
 import com.everyday.everyday_glasses.interaction.user_input.TextZoneLayout
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
@@ -68,6 +69,13 @@ class TextBoxWidget(
         // Scrolling
         private const val SCROLL_SENSITIVITY = 0.5f
         private const val SCROLLBAR_WIDTH_RATIO = 0.10f
+
+        /** Space between a frame's border and the text. */
+        private const val FRAME_PADDING = 8f
+
+        /** The assistant's answers: a black panel (it hides what is behind on the glasses) with a white border. */
+        const val ASSISTANT_FRAME_BACKGROUND = android.graphics.Color.BLACK
+        const val ASSISTANT_FRAME_BORDER = 2f
     }
 
     // ==================== Extended State ====================
@@ -118,13 +126,27 @@ class TextBoxWidget(
     //expose the count of columns
     fun getColumnCount(): Int = textLayout.columns
 
+    /** Background and border, set from the formatting menu; none by default, the assistant's answers get one. */
+    private val frame = TextZoneFrame()
+
+    val frameBackgroundColor: Int? get() = frame.backgroundColor
+    val frameBorderWidth: Float get() = frame.borderWidth
+
+    fun setFrame(backgroundColor: Int?, borderWidth: Float) {
+        frame.backgroundColor = backgroundColor
+        frame.borderWidth = borderWidth
+        notifyTransientChange()
+    }
+
+    private val isFramed: Boolean get() = frame.backgroundColor != null || frame.borderWidth > 0f
+
     private val textBounds = RectF()
 
     /** The rich text area, edited through the shared text editing controller. */
     val textZone: TextZone = object : TextZone {
         override val kind = TextZoneKind.AREA
 
-        // The content area above the glasses keyboard, when it is shown.
+        // The content area above the glasses keyboard, when it is shown; inset inside a frame.
         override val bounds: RectF
             get() = textBounds.apply {
                 set(
@@ -133,14 +155,17 @@ class TextBoxWidget(
                     contentBounds.right,
                     contentBounds.bottom - keyboardOverlay.getHeight()
                 )
+                if (isFramed) inset(FRAME_PADDING + frame.borderWidth, FRAME_PADDING + frame.borderWidth)
             }
 
         override val layout: TextZoneLayout get() = textLayout
 
+        override val frame: TextZoneFrame get() = this@TextBoxWidget.frame
+
         override fun content(): CharSequence = richText
 
         override fun persistentState(): Any =
-            listOf(getHtmlContent(), textFontSize, isTextWrap, getColumnCount())
+            listOf(getHtmlContent(), textFontSize, isTextWrap, getColumnCount(), frame.backgroundColor, frame.borderWidth)
 
         override fun onTextEditAction(action: TextEditAction) {
             if (action is TextEditAction.Changed) richText = SpannableStringBuilder(action.content)
@@ -166,6 +191,12 @@ class TextBoxWidget(
         style = Paint.Style.STROKE
         strokeWidth = BORDER_WIDTH
         color = WidgetTheme.ColorValue.focusedBorder
+    }
+
+    private val frameFillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val frameBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.WHITE
     }
 
     private val hintPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -501,8 +532,20 @@ class TextBoxWidget(
 
         val focused = isFocused()
 
-        // Background
+        // Background, then the frame's own background and border when it has them
         canvas.drawRoundRect(widgetBounds, 8f, 8f, backgroundPaint)
+        frame.backgroundColor?.let { color ->
+            frameFillPaint.color = color
+            canvas.drawRoundRect(widgetBounds, 8f, 8f, frameFillPaint)
+        }
+        if (frame.borderWidth > 0f) {
+            frameBorderPaint.strokeWidth = frame.borderWidth
+            val half = frame.borderWidth / 2f
+            canvas.drawRoundRect(
+                widgetBounds.left + half, widgetBounds.top + half, widgetBounds.right - half, widgetBounds.bottom - half,
+                8f, 8f, frameBorderPaint
+            )
+        }
 
         if (shouldShowBorder()) {
             val borderP = if (focused) focusedBorderPaint else hoverBorderPaint
@@ -596,6 +639,7 @@ class TextBoxPlugin(
             widget.setFontSize(state.fontSize)
             widget.setTextWrap(state.isTextWrap)
             widget.setColumns(state.columnCount)
+            widget.setFrame(state.frameBackgroundColor, state.frameBorderWidth)
         }
         return widget
     }
@@ -609,6 +653,8 @@ class TextBoxPlugin(
             fontSize = widget.textFontSize,
             isTextWrap = widget.isTextWrap,
             columnCount = widget.getColumnCount(),
+            frameBackgroundColor = widget.frameBackgroundColor,
+            frameBorderWidth = widget.frameBorderWidth,
             isMinimized = c.isMinimized,
             isFullscreen = c.isFullscreen,
             savedMinX = c.savedMinX, savedMinY = c.savedMinY,
@@ -702,7 +748,7 @@ class TextBoxPlugin(
     }
 }
 
-/** What a saved dashboard keeps of a text box: its content, font size, wrapping and columns. */
+/** What a saved dashboard keeps of a text box: its content, font size, wrapping, columns and frame. */
 data class TextWidgetState(
     override val x: Float,
     override val y: Float,
@@ -713,6 +759,9 @@ data class TextWidgetState(
     val fontSize: Float = 28f,
     val isTextWrap: Boolean = true,
     val columnCount: Int = 1,
+    /** The frame's background colour (ARGB), null for transparent; and its border width, 0 for none. */
+    val frameBackgroundColor: Int? = null,
+    val frameBorderWidth: Float = 0f,
     override val isMinimized: Boolean = false,
     override val isFullscreen: Boolean = false,
     override val savedMinX: Float = 0f,
@@ -730,6 +779,8 @@ data class TextWidgetState(
             put("fontSize", state.fontSize.toDouble())
             put("isTextWrap", state.isTextWrap)
             put("columnCount", state.columnCount)
+            state.frameBackgroundColor?.let { put("frameBackgroundColor", it) }
+            if (state.frameBorderWidth > 0f) put("frameBorderWidth", state.frameBorderWidth.toDouble())
         }
 
         override fun fromJson(payload: JSONObject): TextWidgetState? {
@@ -747,6 +798,8 @@ data class TextWidgetState(
                     fontSize = payload.optDouble("fontSize", 28.0).toFloat(),
                     isTextWrap = payload.optBoolean("isTextWrap", true),
                     columnCount = payload.optInt("columnCount", 1).coerceIn(1, 3),
+                    frameBackgroundColor = if (payload.has("frameBackgroundColor")) payload.optInt("frameBackgroundColor") else null,
+                    frameBorderWidth = payload.optDouble("frameBorderWidth", 0.0).toFloat(),
                     isMinimized = c.isMinimized,
                     isFullscreen = c.isFullscreen,
                     savedMinX = c.savedMinX, savedMinY = c.savedMinY,

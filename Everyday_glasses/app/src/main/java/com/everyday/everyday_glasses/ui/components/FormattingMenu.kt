@@ -8,6 +8,7 @@ import android.graphics.Typeface
 import android.util.Log
 import kotlin.math.sqrt
 import androidx.core.graphics.toColorInt
+import com.everyday.everyday_glasses.interaction.user_input.TextZoneFrame
 
 /**
  * A floating formatting toolbar for text editing.
@@ -42,6 +43,14 @@ class FormattingMenu(
         private const val MIN_FONT_SIZE = 12f
         private const val MAX_FONT_SIZE = 72f
         private const val FONT_SIZE_STEP = 2f
+
+        // Background and border rows, for text areas that offer a frame
+        private const val FRAME_LABEL_WIDTH = 84f
+        private const val SWATCH_SIZE = 26f
+        /** None (transparent), black, dark grey, dark blue, dark green: dark, so text stays readable. */
+        private val FRAME_COLORS: List<Int?> = listOf(
+            null, Color.BLACK, "#2A2A2E".toColorInt(), "#14213D".toColorInt(), "#123528".toColorInt()
+        )
     }
     
     // State
@@ -93,6 +102,13 @@ class FormattingMenu(
     private val col1ButtonRect = RectF()
     private val col2ButtonRect = RectF()
     private val col3ButtonRect = RectF()
+
+    /** The text area's frame when it offers one: the menu then shows its background and border rows. */
+    private var frame: TextZoneFrame? = null
+    private val swatchRects = List(FRAME_COLORS.size) { RectF() }
+    private val borderMinusRect = RectF()
+    private val borderValueRect = RectF()
+    private val borderPlusRect = RectF()
 
 
     // Callbacks
@@ -182,11 +198,12 @@ class FormattingMenu(
      * @param currentFontSize The current font size at cursor position
      * @param currentWrap Whether text wrap is currently enabled
      */
-    fun show(x: Float, y: Float, currentFontSize: Float, currentWrap: Boolean, columns: Int = 1) {
+    fun show(x: Float, y: Float, currentFontSize: Float, currentWrap: Boolean, columns: Int = 1, frame: TextZoneFrame? = null) {
         fontSize = currentFontSize
         isTextWrap = currentWrap
         currentColumns = columns
-        
+        this.frame = frame
+
         // Reset formatting state (these will be set by the widget based on selection/cursor)
         isBold = false
         isItalic = false
@@ -194,8 +211,9 @@ class FormattingMenu(
         isBulletList = false
         isNumberedList = false
         
-        // Calculate menu height (3 rows of buttons + title bar + padding)
-        menuHeight = TITLE_HEIGHT + (BUTTON_SIZE + BUTTON_SPACING) * 3 + PADDING * 4
+        // Calculate menu height (3 rows of buttons, 2 more for a frame, + title bar + padding)
+        val rows = if (frame != null) 5 else 3
+        menuHeight = TITLE_HEIGHT + (BUTTON_SIZE + BUTTON_SPACING) * rows + PADDING * 4
 
         // Position menu above the invocation point
         menuX = (x - MENU_WIDTH / 2).coerceIn(0f, screenWidth - MENU_WIDTH)
@@ -291,6 +309,24 @@ class FormattingMenu(
 
         col3ButtonRect.set(buttonX, rowY, buttonX + BUTTON_SIZE, rowY + BUTTON_SIZE)
 
+        if (frame == null) return
+        // Row 4: Background swatches
+        rowY += BUTTON_SIZE + BUTTON_SPACING
+        buttonX = menuX + PADDING + FRAME_LABEL_WIDTH
+        val swatchTop = rowY + (BUTTON_SIZE - SWATCH_SIZE) / 2
+        swatchRects.forEach { rect ->
+            rect.set(buttonX, swatchTop, buttonX + SWATCH_SIZE, swatchTop + SWATCH_SIZE)
+            buttonX += SWATCH_SIZE + BUTTON_SPACING
+        }
+
+        // Row 5: Border width
+        rowY += BUTTON_SIZE + BUTTON_SPACING
+        buttonX = menuX + PADDING + FRAME_LABEL_WIDTH
+        borderMinusRect.set(buttonX, rowY, buttonX + BUTTON_SIZE, rowY + BUTTON_SIZE)
+        buttonX += BUTTON_SIZE + 2f
+        borderValueRect.set(buttonX, rowY, buttonX + FONT_SIZE_INPUT_WIDTH, rowY + BUTTON_SIZE)
+        buttonX += FONT_SIZE_INPUT_WIDTH + 2f
+        borderPlusRect.set(buttonX, rowY, buttonX + BUTTON_SIZE, rowY + BUTTON_SIZE)
     }
     
     /**
@@ -314,6 +350,10 @@ class FormattingMenu(
             col1ButtonRect.contains(px, py) -> "col1"
             col2ButtonRect.contains(px, py) -> "col2"
             col3ButtonRect.contains(px, py) -> "col3"
+            frame != null && borderMinusRect.contains(px, py) -> "borderMinus"
+            frame != null && borderPlusRect.contains(px, py) -> "borderPlus"
+            frame != null && swatchRects.any { it.contains(px, py) } ->
+                "swatch${swatchRects.indexOfFirst { it.contains(px, py) }}"
             else -> null
         }
     }
@@ -491,6 +531,13 @@ class FormattingMenu(
                 return true
             }
         }
+        val frame = frame ?: return true
+        val swatch = swatchRects.indexOfFirst { it.contains(px, py) }
+        when {
+            swatch >= 0 -> formattingHandler?.setFrameBackground(FRAME_COLORS[swatch])
+            borderMinusRect.contains(px, py) -> formattingHandler?.setFrameBorderWidth(frame.borderWidth - 1f)
+            borderPlusRect.contains(px, py) -> formattingHandler?.setFrameBorderWidth(frame.borderWidth + 1f)
+        }
         
         return true  // Consume tap on menu area
     }
@@ -621,6 +668,64 @@ class FormattingMenu(
         drawColumnButton(canvas, col1ButtonRect, 1, currentColumns == 1, hoveredButton == "col1")
         drawColumnButton(canvas, col2ButtonRect, 2, currentColumns == 2, hoveredButton == "col2")
         drawColumnButton(canvas, col3ButtonRect, 3, currentColumns == 3, hoveredButton == "col3")
+
+        frame?.let { drawFrameRows(canvas, it) }
+    }
+
+    /** Rows 4 and 5: the background swatches (the current one ringed) and the border width. */
+    private fun drawFrameRows(canvas: Canvas, frame: TextZoneFrame) {
+        val labelOffset = -(frameLabelPaint.descent() + frameLabelPaint.ascent()) / 2
+        canvas.drawText("Background", menuX + PADDING, swatchRects[0].centerY() + labelOffset, frameLabelPaint)
+        swatchRects.forEachIndexed { index, rect ->
+            val color = FRAME_COLORS[index]
+            if (color == null) {
+                canvas.drawRoundRect(rect, 4f, 4f, buttonPaint)
+                canvas.drawLine(rect.left + 5f, rect.bottom - 5f, rect.right - 5f, rect.top + 5f, swatchNonePaint)
+            } else {
+                swatchFillPaint.color = color
+                canvas.drawRoundRect(rect, 4f, 4f, swatchFillPaint)
+            }
+            val ring = when {
+                frame.backgroundColor == color -> swatchSelectedPaint
+                hoveredButton == "swatch$index" -> swatchHoverPaint
+                else -> swatchOutlinePaint
+            }
+            canvas.drawRoundRect(rect, 4f, 4f, ring)
+        }
+
+        canvas.drawText("Border", menuX + PADDING, borderValueRect.centerY() + labelOffset, frameLabelPaint)
+        drawButton(canvas, borderMinusRect, "−", false, hoveredButton == "borderMinus", textPaint)
+        canvas.drawRoundRect(borderValueRect, 4f, 4f, inputBackgroundPaint)
+        canvas.drawText(
+            frame.borderWidth.toInt().toString(),
+            borderValueRect.centerX(),
+            borderValueRect.centerY() - (textPaint.descent() + textPaint.ascent()) / 2,
+            textPaint
+        )
+        drawButton(canvas, borderPlusRect, "+", false, hoveredButton == "borderPlus", textPaint)
+    }
+
+    private val frameLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = "#AAAACC".toColorInt()
+        textSize = 15f
+    }
+    private val swatchFillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val swatchOutlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1f
+        color = "#5a5a7e".toColorInt()
+    }
+    private val swatchHoverPaint = Paint(swatchOutlinePaint).apply {
+        strokeWidth = 2f
+        color = "#AAAACC".toColorInt()
+    }
+    private val swatchSelectedPaint = Paint(swatchOutlinePaint).apply {
+        strokeWidth = 2.5f
+        color = Color.WHITE
+    }
+    private val swatchNonePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        strokeWidth = 2f
+        color = "#CC5555".toColorInt()
     }
     
     /**

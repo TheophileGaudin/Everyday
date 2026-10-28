@@ -24,6 +24,10 @@ interface TextFormattingHandler {
     fun setBulletList(enabled: Boolean)
     fun setNumberedList(enabled: Boolean)
     fun setColumns(columns: Int)
+    /** The text area's background colour; null for transparent. */
+    fun setFrameBackground(color: Int?)
+    /** The text area's border width; 0 for none. */
+    fun setFrameBorderWidth(width: Float)
     fun onMenuDismissed()
 }
 
