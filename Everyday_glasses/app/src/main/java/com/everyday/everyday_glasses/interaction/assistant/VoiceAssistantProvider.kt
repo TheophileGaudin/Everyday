@@ -1,7 +1,5 @@
 package com.everyday.everyday_glasses.interaction.assistant
 
-import com.everyday.everyday_glasses.interaction.assistant.AssistantOutputPolicy
-import com.everyday.everyday_glasses.interaction.assistant.AssistantSource
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -21,7 +19,7 @@ data class AssistantToolDefinition(
 data class AssistantToolCall(val id: String, val name: String, val arguments: JSONObject)
 
 /** A video file a tool hands to the model to watch (the provider uploads it). */
-data class AssistantVideo(val file: java.io.File, val mimeType: String = "video/mp4")
+data class AssistantVideo(val file: File, val mimeType: String = "video/mp4")
 
 data class AssistantToolExecution(
     val success: Boolean,

@@ -235,7 +235,7 @@ private var latestPhoneBatteryPercent = -1
         if (released || !rfcommClient.isConnected()) return false
         val chunkBytes = TransportMessage.MediaChunk.MAX_BYTES
         val count = ((file.length() + chunkBytes - 1) / chunkBytes).toInt().coerceAtLeast(1)
-        val transferId = java.util.UUID.randomUUID().toString()
+        val transferId = UUID.randomUUID().toString()
         val copy = java.io.File(file.parentFile, "$transferId.part").also { file.copyTo(it, overwrite = true) }
         mediaSender.execute {
             try {
@@ -258,7 +258,7 @@ private var latestPhoneBatteryPercent = -1
                             Log.w(TAG, "Copy of $fileName to the phone stopped at piece $index of $count")
                             return@execute
                         }
-                        sent.await(MEDIA_CHUNK_TIMEOUT_S, java.util.concurrent.TimeUnit.SECONDS)
+                        sent.await(MEDIA_CHUNK_TIMEOUT_S, TimeUnit.SECONDS)
                     }
                 }
                 Log.d(TAG, "Copied $fileName to the phone ($count pieces)")
