@@ -48,9 +48,11 @@
         tools:ignore="AllFilesAccessPolicy,ScopedStorage" />
     <!-- Android 13+ granular media permissions -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"
-        tools:ignore="PhotoAndVideoPolicy,SelectedPhotoAccess" />
+        tools:ignore="PhotoAndVideoPolicy" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"
         tools:ignore="PhotoAndVideoPolicy" />
+    <!-- Android 14+ partial photo access; the glasses run Android 12, where it changes nothing. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <!-- The assistant's camera: a look at what the wearer faces, photos and videos on request. -->
     <uses-permission android:name="android.permission.CAMERA" />

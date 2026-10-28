@@ -44,45 +44,19 @@ interface AssistantTextPresenter {
  * their own access to the dashboard in [WidgetContext]. The dashboard holds one of these; the
  * activity hands it to the assistant's coordinators.
  */
-internal class AssistantDashboardAccess : BrowserRoutingHost {
-    private val services: WidgetContext
-    private val plugins: List<WidgetPlugin>
-    private val registry: WidgetRegistry
-    private val commands: AppCommandRegistry
-    private val isCommandAvailable: (CommandAvailability) -> Boolean
-    private val executeCommand: (AppCommandInvocation) -> AppCommandResult
-    private val activeLayoutName: () -> String?
-    private val drawAboveNativeViews: () -> Unit
-
-    constructor(
-        services: WidgetContext,
-        plugins: List<WidgetPlugin>,
-        registry: WidgetRegistry,
-        commands: AppCommandRegistry,
-        isCommandAvailable: (CommandAvailability) -> Boolean,
-        executeCommand: (AppCommandInvocation) -> AppCommandResult,
-        activeLayoutName: () -> String?,
-        drawAboveNativeViews: () -> Unit,
-        notifyPersistentChange: () -> Unit
-    ) {
-        this.services = services
-        this.plugins = plugins
-        this.registry = registry
-        this.commands = commands
-        this.isCommandAvailable = isCommandAvailable
-        this.executeCommand = executeCommand
-        this.activeLayoutName = activeLayoutName
-        this.drawAboveNativeViews = drawAboveNativeViews
-        this.approvalOverlay = PageAgentApprovalOverlay(notifyPersistentChange)
-        this.contributions = plugins
-            .filterIsInstance<AssistantContribution>()
-            .associateBy { (it as WidgetPlugin).lifecycle.descriptor.type }
-        this.textPresenter = plugins.filterIsInstance<AssistantTextPresenter>().singleOrNull()
-        this.browsers = plugins.filterIsInstance<BrowserRoutingHost>().singleOrNull()
-    }
-
+internal class AssistantDashboardAccess(
+    private val services: WidgetContext,
+    plugins: List<WidgetPlugin>,
+    private val registry: WidgetRegistry,
+    private val commands: AppCommandRegistry,
+    private val isCommandAvailable: (CommandAvailability) -> Boolean,
+    private val executeCommand: (AppCommandInvocation) -> AppCommandResult,
+    private val activeLayoutName: () -> String?,
+    private val drawAboveNativeViews: () -> Unit,
+    notifyPersistentChange: () -> Unit,
+) : BrowserRoutingHost {
     /** The Page Agent's "allow this action?" popup; the dashboard draws it and gives it taps. */
-    val approvalOverlay: PageAgentApprovalOverlay
+    val approvalOverlay = PageAgentApprovalOverlay(notifyPersistentChange)
 
     private var browserRouting: BrowserRoutingCoordinator? = null
     /** How web search reaches the internet when the glasses have none; the activity sets it before the first search. */
@@ -90,9 +64,11 @@ internal class AssistantDashboardAccess : BrowserRoutingHost {
     /** The glasses' camera, for looks, photos and videos; the activity sets it. */
     var camera: AssistantCamera? = null
     private val webSearch by lazy { WebSearchSemanticToolHandler(DuckDuckGoWebSearchProvider(internet)) }
-    private val contributions: Map<WidgetTypeId, AssistantContribution>
-    private val textPresenter: AssistantTextPresenter?
-    private val browsers: BrowserRoutingHost?
+    private val contributions: Map<WidgetTypeId, AssistantContribution> = plugins
+        .filterIsInstance<AssistantContribution>()
+        .associateBy { (it as WidgetPlugin).lifecycle.descriptor.type }
+    private val textPresenter: AssistantTextPresenter? = plugins.filterIsInstance<AssistantTextPresenter>().singleOrNull()
+    private val browsers: BrowserRoutingHost? = plugins.filterIsInstance<BrowserRoutingHost>().singleOrNull()
     private val uiContextCapture by lazy {
         AssistantUiContextCapture(
             registry = registry,

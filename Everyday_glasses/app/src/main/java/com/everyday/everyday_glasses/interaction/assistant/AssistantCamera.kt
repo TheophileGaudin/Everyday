@@ -16,15 +16,16 @@ import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
-import android.media.ExifInterface
 import android.media.ImageReader
 import android.media.MediaRecorder
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.provider.MediaStore
 import android.util.Log
 import android.util.Size
 import android.view.Surface
+import androidx.exifinterface.media.ExifInterface
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -32,7 +33,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 
 /**
@@ -79,7 +79,9 @@ class AssistantCamera(
         val file = workingFile(name)
         withCamera { device, handler, characteristics ->
             val size = videoSize(characteristics)
-            val recorder = MediaRecorder(appContext).apply {
+            val recorder = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(appContext) else {
+                @Suppress("DEPRECATION") MediaRecorder()
+            }).apply {
                 setAudioSource(MediaRecorder.AudioSource.MIC)
                 setVideoSource(MediaRecorder.VideoSource.SURFACE)
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
@@ -220,21 +222,26 @@ class AssistantCamera(
 
     private fun openSession(device: CameraDevice, surfaces: List<Surface>, handler: Handler): CameraCaptureSession {
         val ready = CompletableFuture<CameraCaptureSession>()
-        val executor = Executor { handler.post(it) }
-        device.createCaptureSession(SessionConfiguration(
-            SessionConfiguration.SESSION_REGULAR,
-            surfaces.map(::OutputConfiguration),
-            executor,
-            object : CameraCaptureSession.StateCallback() {
-                override fun onConfigured(session: CameraCaptureSession) {
-                    ready.complete(session)
-                }
-
-                override fun onConfigureFailed(session: CameraCaptureSession) {
-                    ready.completeExceptionally(IllegalStateException("The camera could not be configured"))
-                }
+        val callback = object : CameraCaptureSession.StateCallback() {
+            override fun onConfigured(session: CameraCaptureSession) {
+                ready.complete(session)
             }
-        ))
+
+            override fun onConfigureFailed(session: CameraCaptureSession) {
+                ready.completeExceptionally(IllegalStateException("The camera could not be configured"))
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            device.createCaptureSession(SessionConfiguration(
+                SessionConfiguration.SESSION_REGULAR,
+                surfaces.map(::OutputConfiguration),
+                { handler.post(it) },
+                callback
+            ))
+        } else {
+            @Suppress("DEPRECATION")
+            device.createCaptureSession(surfaces, callback, handler)
+        }
         return ready.get(CAPTURE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
     }
 
