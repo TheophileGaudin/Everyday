@@ -15,5 +15,6 @@ interface SyncMessenger {
      * Only the phone sends it (RfcommServer, PhoneDataSyncCoordinator), so the glasses project
      * sees it as unused: it is not.
      */
+    @Suppress("unused")
     fun sendHttpRelayResponse(response: TransportMessage.HttpRelayResponse): Boolean = false
 }
