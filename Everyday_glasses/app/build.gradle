@@ -73,6 +73,12 @@ android {
         // APIs are not exercised, so Android framework stubs may safely return default values.
         unitTests.returnDefaultValues = true
     }
+
+    lint {
+        // The SDK levels and library versions are fitted to the glasses and this toolchain on
+        // purpose: don't flag newer ones. Upgrading them is a planned, tested change, not a warning fix.
+        disable 'GradleDependency', 'NewerVersionAvailable', 'OldTargetApi'
+    }
 }
 
 dependencies {
