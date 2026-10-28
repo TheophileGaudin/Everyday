@@ -1,6 +1,9 @@
 package com.everyday.everyday_phone
 
+import android.annotation.SuppressLint
 import android.app.Activity
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothServerSocket
 import android.content.Context
 import android.content.Intent
 import android.hardware.display.DisplayManager
@@ -17,11 +20,12 @@ import android.util.DisplayMetrics
 import android.view.Surface
 import android.view.WindowManager
 import android.widget.Toast
+import com.everyday.shared.transport.TransportMessage
+import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetAddress
 import java.net.NetworkInterface
 import java.net.ServerSocket
-import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -62,7 +66,12 @@ class ScreenStreamServer(private val context: Context) {
         private const val ORIENTED_CAPTURE_LONG_SIDE = 848
         private const val FRAME_RATE = 30
         private const val BIT_RATE = 1_000_000  // 1 Mbps
-        
+        /** Over Bluetooth (a Wi-Fi radio is off): what its ~1-2 Mbit/s can carry beside the app's messages. */
+        private const val BLUETOOTH_FRAME_RATE = 15
+        private const val BLUETOOTH_BIT_RATE = 400_000
+        /** Fewer full frames over Bluetooth, so its small budget can sharpen a still screen between them. */
+        private const val BLUETOOTH_I_FRAME_INTERVAL_S = 4
+
         // Request code for MediaProjection permission
         const val REQUEST_MEDIA_PROJECTION = 1001
     }
@@ -88,9 +97,21 @@ class ScreenStreamServer(private val context: Context) {
     
     // Network
     private var serverSocket: ServerSocket? = null
-    private var clientSocket: Socket? = null
+    private var bluetoothServerSocket: BluetoothServerSocket? = null
+    private var currentClient: Client? = null
     private var outputStream: OutputStream? = null
-    
+    /** One glasses connection is served at a time; a newer one closes the older first. */
+    private val serveLock = Any()
+
+    /** The glasses, connected over TCP (Wi-Fi Direct or a shared Wi-Fi) or the Bluetooth mirror channel. */
+    private class Client(
+        val label: String,
+        val input: InputStream,
+        val output: OutputStream,
+        val overBluetooth: Boolean,
+        val close: () -> Unit,
+    )
+
     // Screen metrics
     private var screenDensity = 1
     
@@ -367,7 +388,12 @@ class ScreenStreamServer(private val context: Context) {
             name = "ScreenStreamServer"
             start()
         }
-        
+        Thread { runBluetoothServer() }.apply {
+            name = "ScreenStreamBluetooth"
+            isDaemon = true
+            start()
+        }
+
         fileLog("Stream server started")
         handler.post { streamingListener?.onStreamStatusChanged("Server started on port $STREAM_PORT") }
     }
@@ -495,7 +521,7 @@ class ScreenStreamServer(private val context: Context) {
         
         // Close the client socket - this will cause the streaming loop to exit cleanly
         try {
-            clientSocket?.close()
+            currentClient?.close?.invoke()
             fileLog("Client socket closed successfully")
         } catch (e: Exception) {
             fileLog("Error closing client socket: ${e.message}")
@@ -515,11 +541,13 @@ class ScreenStreamServer(private val context: Context) {
 
         stopCapture(releaseDisplay = true)
 
-        try { clientSocket?.close() } catch (e: Exception) {}
+        try { currentClient?.close?.invoke() } catch (e: Exception) {}
         try { serverSocket?.close() } catch (e: Exception) {}
-        
-        clientSocket = null
+        try { bluetoothServerSocket?.close() } catch (e: Exception) {}
+
+        currentClient = null
         serverSocket = null
+        bluetoothServerSocket = null
         outputStream = null
         
         handler.post { 
@@ -618,12 +646,55 @@ class ScreenStreamServer(private val context: Context) {
             handler.post { streamingListener?.onStreamStatusChanged("Waiting for glasses on port $STREAM_PORT") }
             
             while (isRunning.get()) {
-                try {
-                    // Wait for client connection
-                    val socket = serverSocket?.accept() ?: break
-                    fileLog("Client connected from ${socket.inetAddress}")
-                    handler.post { streamingListener?.onStreamStatusChanged("Glasses connected: ${socket.inetAddress}") }
-                    
+                val socket = serverSocket?.accept() ?: break
+                // Configure socket for low latency
+                socket.tcpNoDelay = true
+                socket.sendBufferSize = 65536
+                serve(Client("${socket.inetAddress}", socket.getInputStream(), socket.getOutputStream(), overBluetooth = false) {
+                    runCatching { socket.close() }
+                })
+            }
+
+        } catch (e: Exception) {
+            if (isRunning.get()) {
+                fileLog("Server error: ${e.message}")
+                setError("Server: ${e.message}")
+            }
+        }
+
+        fileLog("Server stopped")
+    }
+
+    /**
+     * The same stream on the phone's Bluetooth mirror channel, for glasses that can't use Wi-Fi
+     * (theirs or the phone's is off). Slower: [startCapture] sets the encoder lower for it.
+     */
+    @SuppressLint("MissingPermission")
+    private fun runBluetoothServer() {
+        try {
+            val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter ?: return
+            bluetoothServerSocket = adapter.listenUsingRfcommWithServiceRecord("Everyday mirror", TransportMessage.MirrorState.BLUETOOTH_UUID)
+            fileLog("Mirror also listening on Bluetooth")
+            while (isRunning.get()) {
+                val socket = bluetoothServerSocket?.accept() ?: break
+                serve(Client("Bluetooth", socket.inputStream, socket.outputStream, overBluetooth = true) {
+                    runCatching { socket.close() }
+                })
+            }
+        } catch (e: Exception) {
+            if (isRunning.get()) fileLog("Bluetooth mirror server ended: ${e.message}")
+        }
+    }
+
+    /** Streams to [client] until it disconnects. A newer connection closes this one and waits its turn. */
+    private fun serve(client: Client) {
+        currentClient?.close?.invoke()
+        synchronized(serveLock) {
+            if (!isRunning.get()) { client.close(); return }
+            try {
+                    fileLog("Client connected: ${client.label}")
+                    handler.post { streamingListener?.onStreamStatusChanged("Glasses connected: ${client.label}") }
+
                     // Use the manually set orientation (currentIsLandscape)
                     val captureWidth = getCaptureWidth(currentIsLandscape)
                     val captureHeight = getCaptureHeight(currentIsLandscape)
@@ -635,69 +706,56 @@ class ScreenStreamServer(private val context: Context) {
                         Toast.makeText(context, "Client connected: $orientationStr ${captureWidth}x${captureHeight}", Toast.LENGTH_SHORT).show()
                     }
                     
-                    // Configure socket for low latency
-                    socket.tcpNoDelay = true
-                    socket.sendBufferSize = 65536
-                    
-                    // Close previous client if any
-                    try { clientSocket?.close() } catch (e: Exception) {}
-                    
-                    clientSocket = socket
-                    outputStream = socket.getOutputStream()
-                    
+                    currentClient = client
+                    outputStream = client.output
+
                     isStreaming.set(true)
                     handler.post { streamingListener?.onStreamingStateChanged(true) }
-                    startInputReader(socket, captureWidth, captureHeight)
+                    startInputReader(client.input, captureWidth, captureHeight)
 
                     // Start capture and encoding with current orientation
-                    if (!startCapture(captureWidth, captureHeight)) {
+                    if (!startCapture(captureWidth, captureHeight, client.overBluetooth)) {
                         fileLog("startCapture failed, closing connection")
                         handler.post {
                             Toast.makeText(context, "Failed to start capture with ${captureWidth}x${captureHeight}", Toast.LENGTH_LONG).show()
                         }
                         isStreaming.set(false)
-                        continue  // Go back to waiting for next connection
+                        client.close()
+                        return
                     }
-                    
+
                     // Stream until disconnected
                     streamToClient()
-                    
-                } catch (e: Exception) {
-                    if (isRunning.get()) {
-                        fileLog("Client error: ${e.message}")
-                        // Don't report as error if it was just a socket close for orientation change
-                        if (e.message?.contains("closed") != true) {
-                            setError("Client: ${e.message}")
-                        }
+
+            } catch (e: Exception) {
+                if (isRunning.get()) {
+                    fileLog("Client error: ${e.message}")
+                    // Don't report as error if it was just a socket close for orientation change
+                    if (e.message?.contains("closed") != true) {
+                        setError("Client: ${e.message}")
                     }
                 }
-                
-                // Clean up after client disconnect
-                isStreaming.set(false)
-                
-                handler.post { 
-                    streamingListener?.onStreamingStateChanged(false)
-                    streamingListener?.onStreamStatusChanged("Glasses disconnected. Frames sent: ${framesSent.get()}")
-                }
-                stopCapture()
-                
-                try { clientSocket?.close() } catch (e: Exception) {}
-                clientSocket = null
+            }
+
+            // Clean up after client disconnect
+            isStreaming.set(false)
+
+            handler.post {
+                streamingListener?.onStreamingStateChanged(false)
+                streamingListener?.onStreamStatusChanged("Glasses disconnected. Frames sent: ${framesSent.get()}")
+            }
+            stopCapture()
+
+            client.close()
+            if (currentClient === client) {
+                currentClient = null
                 outputStream = null
             }
-            
-        } catch (e: Exception) {
-            if (isRunning.get()) {
-                fileLog("Server error: ${e.message}")
-                setError("Server: ${e.message}")
-            }
         }
-        
-        fileLog("Server stopped")
     }
-    
-    private fun startCapture(captureWidth: Int, captureHeight: Int): Boolean {
-        fileLog("Starting capture: ${captureWidth}x${captureHeight}")
+
+    private fun startCapture(captureWidth: Int, captureHeight: Int, overBluetooth: Boolean): Boolean {
+        fileLog("Starting capture: ${captureWidth}x${captureHeight}${if (overBluetooth) " for Bluetooth" else ""}")
         handler.post { streamingListener?.onStreamStatusChanged("Starting capture ${captureWidth}x${captureHeight}") }
         
         try {
@@ -705,9 +763,9 @@ class ScreenStreamServer(private val context: Context) {
             fileLog("Creating encoder format...")
             val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, captureWidth, captureHeight).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-                setInteger(MediaFormat.KEY_BIT_RATE, BIT_RATE)
-                setInteger(MediaFormat.KEY_FRAME_RATE, FRAME_RATE)
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                setInteger(MediaFormat.KEY_BIT_RATE, if (overBluetooth) BLUETOOTH_BIT_RATE else BIT_RATE)
+                setInteger(MediaFormat.KEY_FRAME_RATE, if (overBluetooth) BLUETOOTH_FRAME_RATE else FRAME_RATE)
+                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, if (overBluetooth) BLUETOOTH_I_FRAME_INTERVAL_S else 1)
                 
                 // Low latency settings
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -893,10 +951,10 @@ class ScreenStreamServer(private val context: Context) {
      * frame ([captureWidth] x [captureHeight]). Each is mapped to the phone screen and played by
      * [MirrorControlService].
      */
-    private fun startInputReader(socket: Socket, captureWidth: Int, captureHeight: Int) {
+    private fun startInputReader(input: InputStream, captureWidth: Int, captureHeight: Int) {
         Thread {
             try {
-                socket.getInputStream().bufferedReader().forEachLine { line ->
+                input.bufferedReader().forEachLine { line ->
                     val input = runCatching { org.json.JSONObject(line) }.getOrNull() ?: return@forEachLine
                     handler.post { playInput(input, captureWidth, captureHeight) }
                 }

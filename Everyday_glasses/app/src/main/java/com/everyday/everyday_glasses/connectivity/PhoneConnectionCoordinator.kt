@@ -9,6 +9,8 @@ import android.os.Looper
 import android.util.Log
 import com.everyday.everyday_glasses.auth_permissions.GoogleAccountSummary
 import com.everyday.everyday_glasses.auth_permissions.GooglePhoneAuthStatus
+import com.everyday.everyday_glasses.runtime.MirrorWifiOff
+import com.everyday.everyday_glasses.runtime.PhoneMirror
 import com.everyday.shared.sync.SubtitleControl
 import com.everyday.shared.sync.SubtitleStatus
 import com.everyday.shared.sync.SubtitleTranscript
@@ -64,7 +66,7 @@ interface PhoneConnectionCallbacks {
 
     fun onImageReceived(imageData: ByteArray, fileName: String)
     fun onOpenBrowserRequested(address: String)
-    fun onMirroringChanged(enabled: Boolean, ip: String?)
+    fun onMirroringChanged(mirror: PhoneMirror)
 
     fun onGoogleAuthStateReceived(
         status: GooglePhoneAuthStatus,
@@ -108,6 +110,8 @@ class PhoneConnectionCoordinator(
 
         /** How long the glasses try to join the phone's group before falling back to the shared Wi-Fi network. */
         private const val GROUP_JOIN_TIMEOUT_MS = 15_000L
+        /** A piece of a photo or video not written in this time ends its copy to the phone. */
+        private const val MEDIA_CHUNK_TIMEOUT_S = 60L
 
         /** How long a request made through the phone may take (the phone's own timeouts are shorter). */
         private const val PHONE_INTERNET_TIMEOUT_MS = 120_000L
@@ -155,16 +159,16 @@ class PhoneConnectionCoordinator(
     /** True while the glasses are in a group they joined for mirroring, so they leave it when it stops. */
     private var joinedMirrorGroup = false
 
+    /** The phone's running mirror, to move it to Wi-Fi Direct when the glasses' Wi-Fi comes back. */
+    private var currentMirror: TransportMessage.MirrorState? = null
+
+    /** True while the mirror streams over Bluetooth because the glasses' Wi-Fi is off. */
+    private var mirrorWaitsForGlassesWifi = false
+
     private val groupJoinTimeout = Runnable {
         val mirror = pendingMirror ?: return@Runnable
         pendingMirror = null
-        val lanIp = mirror.lanIp
-        if (lanIp != null) {
-            Log.w(TAG, "Wi-Fi Direct join timed out; streaming over Wi-Fi from $lanIp")
-            callbacks.onMirroringChanged(true, lanIp)
-        } else {
-            Log.w(TAG, "Wi-Fi Direct join timed out and there is no Wi-Fi fallback")
-        }
+        fallBack(mirror, "Wi-Fi Direct join timed out")
     }
 private var latestPhoneBatteryPercent = -1
     private var initialized = false
@@ -199,6 +203,7 @@ private var latestPhoneBatteryPercent = -1
         if (released) return
         released = true
 
+        mediaSender.shutdownNow()
         rfcommClient.release()
         wifiDirectClient?.let { client ->
             // Detach before release because WifiDirectClient can already have queued
@@ -219,6 +224,54 @@ private var latestPhoneBatteryPercent = -1
     fun sendTextFieldFocus(focused: Boolean, fieldId: String? = null): Boolean =
         rfcommClient.sendTextFieldFocus(focused, fieldId)
 
+    /** Copies photos and videos to the phone one at a time, in the background. */
+    private val mediaSender = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    /**
+     * Copies a photo or video taken on the glasses to the phone's gallery, in pieces written one
+     * after another so the app's other messages keep flowing. False when the phone isn't connected.
+     */
+    fun sendMediaToPhone(file: java.io.File, fileName: String, mimeType: String): Boolean {
+        if (released || !rfcommClient.isConnected()) return false
+        val chunkBytes = TransportMessage.MediaChunk.MAX_BYTES
+        val count = ((file.length() + chunkBytes - 1) / chunkBytes).toInt().coerceAtLeast(1)
+        val transferId = java.util.UUID.randomUUID().toString()
+        val copy = java.io.File(file.parentFile, "$transferId.part").also { file.copyTo(it, overwrite = true) }
+        mediaSender.execute {
+            try {
+                copy.inputStream().use { input ->
+                    val buffer = ByteArray(chunkBytes)
+                    for (index in 0 until count) {
+                        // Fills the buffer (readNBytes would, but only from Android 13; the glasses run 12).
+                        var read = 0
+                        while (read < chunkBytes) {
+                            val n = input.read(buffer, read, chunkBytes - read)
+                            if (n < 0) break
+                            read += n
+                        }
+                        val sent = java.util.concurrent.CountDownLatch(1)
+                        val chunk = TransportMessage.MediaChunk(
+                            transferId, fileName, mimeType, index, count,
+                            android.util.Base64.encodeToString(buffer, 0, read, android.util.Base64.NO_WRAP)
+                        )
+                        if (released || !rfcommClient.sendMediaChunk(chunk) { sent.countDown() }) {
+                            Log.w(TAG, "Copy of $fileName to the phone stopped at piece $index of $count")
+                            return@execute
+                        }
+                        sent.await(MEDIA_CHUNK_TIMEOUT_S, java.util.concurrent.TimeUnit.SECONDS)
+                    }
+                }
+                Log.d(TAG, "Copied $fileName to the phone ($count pieces)")
+            } catch (e: Throwable) {
+                // Never let a background copy take the app down.
+                Log.w(TAG, "Copy of $fileName to the phone failed: ${e.message}")
+            } finally {
+                copy.delete()
+            }
+        }
+        return true
+    }
+
     fun sendMirrorRequest(start: Boolean): Boolean {
         if (!start) cancelPendingMirror()
         return if (!released) rfcommClient.sendMirrorRequest(start) else false
@@ -235,9 +288,9 @@ private var latestPhoneBatteryPercent = -1
     /** Falls back to the shared Wi-Fi network, if any, when the user declines the permission request. */
     fun onWifiDirectPermissionDenied() {
         if (released) return
-        val lanIp = pendingMirror?.lanIp
+        val mirror = pendingMirror
         cancelPendingMirror()
-        if (lanIp != null) callbacks.onMirroringChanged(true, lanIp)
+        mirror?.let { fallBack(it, "Wi-Fi Direct permission denied") }
     }
 
     fun requestClipboard(): Boolean =
@@ -541,37 +594,47 @@ private var latestPhoneBatteryPercent = -1
     /**
      * The phone started, moved or stopped its mirror. With its Wi-Fi Direct group's credentials, the
      * glasses join the group and stream from the phone there; if that fails or takes longer than
-     * [GROUP_JOIN_TIMEOUT_MS], they stream over the shared Wi-Fi network when the phone gave one.
-     * Without credentials (an older phone app), they find the phone by peer discovery as before.
+     * [GROUP_JOIN_TIMEOUT_MS], they [fallBack]. Without credentials (an older phone app), they find
+     * the phone by peer discovery as before. With either device's Wi-Fi off, they stream over
+     * Bluetooth, and move to Wi-Fi Direct when the glasses' Wi-Fi comes back.
      */
     private fun handleMirrorStateChanged(state: TransportMessage.MirrorState) {
         if (released) return
         Log.d(
             TAG,
             "Mirror state changed: enabled=${state.enabled}, ip=${state.ip}, wifiDirect=${state.wifiDirect}, " +
-                "group=${state.networkName}, lan=${state.lanIp}"
+                "group=${state.networkName}, lan=${state.lanIp}, bluetooth=${state.bluetooth}"
         )
         cancelPendingMirror()
+        mirrorWaitsForGlassesWifi = false
+        currentMirror = state.takeIf { it.enabled }
         val ip = state.ip
-        if (!state.enabled || ip.isNullOrBlank()) {
+        if (!state.enabled) {
             leaveMirrorGroup()
-            callbacks.onMirroringChanged(false, null)
+            callbacks.onMirroringChanged(PhoneMirror(false, null))
+            return
+        }
+        if (ip.isNullOrBlank()) {
+            streamOverBluetooth(state, MirrorWifiOff.PHONE)
             return
         }
         if (!state.wifiDirect) {
-            callbacks.onMirroringChanged(true, ip)
+            fallBack(state, "the phone offers no Wi-Fi Direct group")
             return
         }
 
         val client = wifiDirectClient
         if (client == null) {
-            Log.e(TAG, "Wi-Fi Direct client is unavailable")
-            state.lanIp?.let { callbacks.onMirroringChanged(true, it) }
+            fallBack(state, "Wi-Fi Direct client is unavailable")
+            return
+        }
+        if (!client.isWifiDirectEnabled && state.bluetooth) {
+            streamOverBluetooth(state, MirrorWifiOff.GLASSES)
             return
         }
         if (client.isConnected && client.groupOwnerAddress == ip) {
             Log.d(TAG, "Already in the phone's group; enabling mirroring")
-            callbacks.onMirroringChanged(true, ip)
+            callbacks.onMirroringChanged(PhoneMirror(true, ip))
             return
         }
         pendingMirror = state
@@ -590,7 +653,7 @@ private var latestPhoneBatteryPercent = -1
         }
         if (!started) {
             pendingMirror = null
-            state.lanIp?.let { callbacks.onMirroringChanged(true, it) }
+            fallBack(state, "Wi-Fi Direct could not start")
             return
         }
         handler.postDelayed(groupJoinTimeout, GROUP_JOIN_TIMEOUT_MS)
@@ -614,21 +677,64 @@ private var latestPhoneBatteryPercent = -1
         cancelPendingMirror()
         val ip = mirror.ip ?: groupOwnerIp
         Log.d(TAG, "Wi-Fi Direct ready; streaming from $ip")
-        callbacks.onMirroringChanged(true, ip)
+        callbacks.onMirroringChanged(PhoneMirror(true, ip))
     }
 
-    /** The Wi-Fi Direct link failed: stream over the shared Wi-Fi network if the phone gave one. */
+    /** The Wi-Fi Direct link failed. */
     private fun onMirrorLinkFailed(reason: String) {
         val mirror = pendingMirror ?: return
         cancelPendingMirror()
-        val lanIp = mirror.lanIp
-        Log.w(TAG, "Wi-Fi Direct failed ($reason); Wi-Fi fallback: $lanIp")
-        if (lanIp != null) callbacks.onMirroringChanged(true, lanIp)
+        fallBack(mirror, "Wi-Fi Direct failed ($reason)")
     }
+
+    /**
+     * Wi-Fi Direct can't be used: stream over the shared Wi-Fi network when the glasses are on one
+     * (the phone's address there can't be reached otherwise), else over Bluetooth.
+     */
+    private fun fallBack(mirror: TransportMessage.MirrorState, reason: String) {
+        val lanIp = mirror.lanIp ?: mirror.ip?.takeIf { !mirror.wifiDirect }
+        when {
+            lanIp != null && glassesOnWifiNetwork() -> {
+                Log.w(TAG, "$reason; streaming over Wi-Fi from $lanIp")
+                callbacks.onMirroringChanged(PhoneMirror(true, lanIp))
+            }
+            mirror.bluetooth -> {
+                Log.w(TAG, "$reason; streaming over Bluetooth")
+                val glassesWifiOff = wifiDirectClient?.isWifiDirectEnabled == false
+                streamOverBluetooth(mirror, if (glassesWifiOff) MirrorWifiOff.GLASSES else null)
+            }
+            lanIp != null -> {
+                Log.w(TAG, "$reason; trying Wi-Fi from $lanIp")
+                callbacks.onMirroringChanged(PhoneMirror(true, lanIp))
+            }
+            else -> Log.w(TAG, "$reason, and the phone offers no other way")
+        }
+    }
+
+    /** Streams from the phone over Bluetooth; [wifiOff] is the device whose Wi-Fi would make it faster. */
+    private fun streamOverBluetooth(mirror: TransportMessage.MirrorState, wifiOff: MirrorWifiOff?) {
+        val address = rfcommClient.connectedPhoneAddress
+        if (!mirror.bluetooth || address == null) {
+            Log.w(TAG, "Mirror can't use Bluetooth (offered=${mirror.bluetooth}, phone=${address != null})")
+            return
+        }
+        mirrorWaitsForGlassesWifi = wifiOff == MirrorWifiOff.GLASSES
+        Log.d(TAG, "Mirror over Bluetooth (Wi-Fi off: $wifiOff)")
+        callbacks.onMirroringChanged(PhoneMirror(true, null, bluetoothAddress = address, wifiOff = wifiOff))
+    }
+
+    private fun glassesOnWifiNetwork(): Boolean =
+        connectivity?.getNetworkCapabilities(connectivity.activeNetwork)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
 
     private fun initializeWifiDirect() {
         wifiDirectClient = WifiDirectClient(appContext).apply {
             connectionListener = object : WifiDirectConnectionListener {
+                override fun onStateChanged(enabled: Boolean) {
+                    if (released || !enabled || !mirrorWaitsForGlassesWifi) return
+                    Log.d(TAG, "The glasses' Wi-Fi is back: moving the mirror to Wi-Fi Direct")
+                    currentMirror?.let(::handleMirrorStateChanged)
+                }
+
                 override fun onConnected(groupOwnerIp: String) {
                     if (released) return
                     Log.d(TAG, "Wi-Fi Direct connected, group owner: $groupOwnerIp")

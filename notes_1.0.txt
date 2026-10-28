@@ -3,14 +3,13 @@ New voice control agent
 -> Create a Gemini API key in Google AI Studio, copy it on your phone, then paste it in the glasses' Gemini settings.
 -> Uses the Gemini API free tier: no charges as long as billing stays disabled on the key's project. If you hit the free limits, the agent stops with an error until they reset.
 -> Push-to-talk (phone button or glasses): it doesn't talk back, it acts and shows short text answers if needed.
--> Can search the web, show/hide widgets, change what they display, use the browser, and start or stop walking navigation on the map.
+-> Can take picture/movies/analyze what you see, search the web, show/hide widgets, change what they display, use the browser, and start or stop walking navigation on the map.
 -> Works on the glasses' Wi-Fi or through your phone's internet (4G or Wi-Fi), without the RayNeo app.
 -> Automatic model choice: the newest Flash-Lite model, efficient and generous on the free tier. You can select a stronger model manually for complex requests; Flash-Lite handles almost all everyday requests.
 
-New features
+New feature
 
-Added remote control of phone from screen mirror
-Added page agent in browser (default Flash class of Gemini models, others can be selected)
+Added remote control of phone from screen mirror (taps and swipes). Will be easier with Wi-Fi direct mirroring (Wi Fi on in both phone and glasses, no need for hotspot)
 
 Improvement
 
@@ -19,6 +18,7 @@ Added turn by turn navigation in map widget
 Added POI control settings in map widget
 Added RSS feed control settings in news widget
 Added OpenFreeMap fallback when Overpass servers are unavailable for map/directions
+Mirroring flow clarified: both phone and glasses with wifi radio on (wifi button switched on, no need to connect to specific network), wifi direct path (fast), either off or both, bluetooth fallback path (slower).
 
 Bugfix
 

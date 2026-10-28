@@ -39,6 +39,7 @@ import com.everyday.everyday_glasses.headup_wake.HeadUpSessionController
 import com.everyday.everyday_glasses.headup_wake.HeadUpWakeManager
 import com.everyday.everyday_glasses.headup_wake.WakeRequestListener
 import com.everyday.everyday_glasses.interaction.assistant.AssistantAudioRecorder
+import com.everyday.everyday_glasses.interaction.assistant.AssistantCamera
 import com.everyday.everyday_glasses.interaction.assistant.AssistantConfiguration
 import com.everyday.everyday_glasses.interaction.assistant.AssistantModel
 import com.everyday.everyday_glasses.interaction.assistant.AssistantNetworkLease
@@ -329,7 +330,14 @@ class MainActivity : AppCompatActivity() {
         val assistantPreferences = AssistantPreferencesStore(this)
         assistantNetworkLease = AssistantNetworkLease(this)
         widgetContainer.assistant.internet = assistantInternet
-        browserRoutingCoordinator = BrowserRoutingCoordinator(
+        widgetContainer.assistant.camera = AssistantCamera(
+            context = this,
+            hasPermission = { ::permissionCoordinator.isInitialized && permissionCoordinator.hasCameraPermission() },
+            requestPermission = { runOnUiThread { if (::permissionCoordinator.isInitialized) permissionCoordinator.requestCameraPermission() } },
+            sendToPhone = { file, name, mimeType -> phoneConnectionOrNull()?.sendMediaToPhone(file, name, mimeType) == true },
+            wakeScreen = { runOnUiThread { if (::displayPowerController.isInitialized) displayPowerController.wakeScreen("assistant_camera") } },
+        )
+browserRoutingCoordinator = BrowserRoutingCoordinator(
             pageAgent = PageAgentCoordinator.usingPreferences(
                 preferences = assistantPreferences,
                 provider = GeminiPageAgentProvider(assistantInternet)
@@ -759,7 +767,7 @@ class MainActivity : AppCompatActivity() {
                 override fun onClipboardReceived(clipboardContent: String)                      {Log.d(TAG, "Phone clipboard updated: chars=${clipboardContent.length}"); widgetContainer.setPhoneClipboard(clipboardContent); if (pendingGeminiKeyPaste) {handler.removeCallbacks(pasteHeldClipboard); pasteGeminiKey(clipboardContent)}}
                 override fun onImageReceived(imageData: ByteArray, fileName: String)            {Log.d(TAG, "Image received from phone: $fileName (${imageData.size} bytes)"); widgetContainer.appData.publish(AppChannels.phoneImage, PhoneImage(imageData, fileName))}
                 override fun onOpenBrowserRequested(address: String)                            {Log.d(TAG, "Open browser requested from phone: ${address.take(80)}") ; widgetContainer.appData.publish(AppChannels.phoneOpenAddress, address)}
-                override fun onMirroringChanged(enabled: Boolean, ip: String?)                  {widgetContainer.appData.publish(AppChannels.mirroring, PhoneMirror(enabled, ip))}
+                override fun onMirroringChanged(mirror: PhoneMirror)                             {widgetContainer.appData.publish(AppChannels.mirroring, mirror)}
                 override fun onGoogleAuthStateReceived(
                     status: GooglePhoneAuthStatus,
                     account: GoogleAccountSummary?,

@@ -200,6 +200,10 @@ class RfcommClient(
     fun requestClipboard(): Boolean =
         enqueueMessage(TransportMessage.ClipboardRequest, "request clipboard")
 
+    /** Sends one piece of a photo or video for the phone's gallery; [onSent] runs once it is written. */
+    fun sendMediaChunk(chunk: TransportMessage.MediaChunk, onSent: () -> Unit): Boolean =
+        enqueueMessage(chunk, "send media to the phone", onSent)
+
     /** Asks the phone to make an HTTP request for the glasses' assistant. */
     fun sendHttpRelayRequest(request: TransportMessage.HttpRelayRequest): Boolean =
         enqueueMessage(request, "relay assistant request")
@@ -429,6 +433,10 @@ class RfcommClient(
             }
         }.start()
     }
+
+    /** The Bluetooth address of the phone while connected to it: the mirror can stream from it too. */
+    val connectedPhoneAddress: String?
+        get() = runCatching { socket?.takeIf { it.isConnected }?.remoteDevice?.address }.getOrNull()
 
     // Suppress warning because we checked hasPermissions() in start()
     @SuppressLint("MissingPermission")

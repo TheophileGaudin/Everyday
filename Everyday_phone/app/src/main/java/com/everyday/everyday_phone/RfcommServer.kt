@@ -71,6 +71,8 @@ class RfcommServer(private val context: Context) : SyncMessenger, PhoneRouteTran
         fun onDestinationSearchCancellationReceived(cancellation: com.everyday.shared.transport.DestinationSearchCancellation) = Unit
         /** The glasses have no internet: they ask the phone to make this request (their voice assistant's). */
         fun onHttpRelayRequested(request: TransportMessage.HttpRelayRequest) = Unit
+        /** A piece of a photo or video taken on the glasses, to keep in the phone's gallery too. */
+        fun onMediaChunkReceived(chunk: TransportMessage.MediaChunk) = Unit
     }
 
     /** Receives controls for interactive glasses experiences. */
@@ -658,6 +660,7 @@ class RfcommServer(private val context: Context) : SyncMessenger, PhoneRouteTran
                 experienceControlListener?.onAssistantStatusReceived(message.status)
             }
             is TransportMessage.HttpRelayRequest -> dataRequestListener?.onHttpRelayRequested(message)
+            is TransportMessage.MediaChunk -> dataRequestListener?.onMediaChunkReceived(message)
 else -> fileLog("RX unexpected kind=${message.kind} for phone endpoint")
         }
     }

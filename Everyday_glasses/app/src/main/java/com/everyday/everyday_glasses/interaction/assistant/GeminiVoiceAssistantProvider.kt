@@ -31,7 +31,6 @@ class GeminiVoiceAssistantProvider(
         private const val UPLOAD_ROOT = "https://generativelanguage.googleapis.com/upload/v1beta/files"
         private const val INLINE_LIMIT_BYTES = 14L * 1024L * 1024L
         private val JSON = "application/json; charset=utf-8".toMediaType()
-        private val AAC = "audio/aac".toMediaType()
 
     }
 
@@ -147,7 +146,7 @@ class GeminiVoiceAssistantProvider(
                 .put("type", "function_result")
                 .put("name", call.name)
                 .put("call_id", call.id)
-                .put("result", toolResultContent(execution)))
+                .put("result", toolResultContent(apiKey, execution)))
         }
         val body = JSONObject()
             .put("model", modelId)
@@ -167,15 +166,27 @@ class GeminiVoiceAssistantProvider(
         }
     }
 
-    private fun uploadFile(apiKey: String, file: File): AssistantUploadedFile {
-        val startBody = JSONObject().put("file", JSONObject().put("display_name", "Everyday voice command"))
+    /** Videos tools uploaded this session: they stay in the conversation's history until it ends. */
+    private val toolUploads = java.util.concurrent.ConcurrentLinkedQueue<String>()
+
+    override fun deleteToolUploads(apiKey: String) {
+        generateSequence { toolUploads.poll() }.forEach { deleteUploadedFile(apiKey, it) }
+    }
+
+    private fun uploadFile(
+        apiKey: String,
+        file: File,
+        mimeType: String = "audio/aac",
+        displayName: String = "Everyday voice command",
+    ): AssistantUploadedFile {
+        val startBody = JSONObject().put("file", JSONObject().put("display_name", displayName))
         val start = Request.Builder()
             .url(UPLOAD_ROOT)
             .apiKey(apiKey)
             .header("X-Goog-Upload-Protocol", "resumable")
             .header("X-Goog-Upload-Command", "start")
             .header("X-Goog-Upload-Header-Content-Length", file.length().toString())
-            .header("X-Goog-Upload-Header-Content-Type", "audio/aac")
+            .header("X-Goog-Upload-Header-Content-Type", mimeType)
             .post(startBody.toString().toRequestBody(JSON))
             .build()
         val uploadUrl = client.newCall(start).execute().use { response ->
@@ -187,7 +198,7 @@ class GeminiVoiceAssistantProvider(
             .header("Content-Length", file.length().toString())
             .header("X-Goog-Upload-Offset", "0")
             .header("X-Goog-Upload-Command", "upload, finalize")
-            .post(file.asRequestBody(AAC))
+            .post(file.asRequestBody(mimeType.toMediaType()))
             .build()
         val json = executeJson(upload)
         val item = json.optJSONObject("file") ?: error("Uploaded file metadata missing")
@@ -238,13 +249,18 @@ class GeminiVoiceAssistantProvider(
         return Base64.encodeToString(bytes.array(), Base64.NO_WRAP)
     }
 
-    private fun toolResultContent(execution: AssistantToolExecution): JSONArray = JSONArray().apply {
+    private fun toolResultContent(apiKey: String, execution: AssistantToolExecution): JSONArray = JSONArray().apply {
         put(JSONObject().put("type", "text").put("text", execution.toJson().toString()))
         execution.screenshots.forEach { screenshot ->
             put(JSONObject()
                 .put("type", "image")
                 .put("data", Base64.encodeToString(screenshot.bytes, Base64.NO_WRAP))
                 .put("mime_type", screenshot.mimeType))
+        }
+        execution.videos.forEach { video ->
+            val uploaded = uploadFile(apiKey, video.file, video.mimeType, "Everyday video")
+            toolUploads.add(uploaded.name)
+            put(JSONObject().put("type", "video").put("uri", uploaded.uri).put("mime_type", video.mimeType))
         }
     }
 

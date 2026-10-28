@@ -3,6 +3,8 @@
 // is migrated and performance-tested on the glasses.
 package com.everyday.everyday_glasses.widgets.phone_screen_mirror
 
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -33,6 +35,8 @@ import com.everyday.everyday_glasses.persistence.WidgetDocument
 import com.everyday.everyday_glasses.runtime.WidgetContext
 import com.everyday.everyday_glasses.runtime.WidgetPlugin
 import com.everyday.everyday_glasses.runtime.AppChannels
+import com.everyday.everyday_glasses.runtime.MirrorWifiOff
+import com.everyday.everyday_glasses.runtime.PhoneMirror
 import com.everyday.everyday_glasses.runtime.WidgetCommand
 import com.everyday.everyday_glasses.runtime.WidgetDescriptor
 import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
@@ -43,7 +47,9 @@ import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets._common.BaseWidget
 import com.everyday.everyday_glasses.widgets._common.WidgetInteractionState
 import com.everyday.everyday_glasses.widgets._common.WidgetTheme
+import com.everyday.shared.transport.TransportMessage
 import java.io.InputStream
+import java.io.OutputStream
 import java.net.Socket
 import java.net.SocketTimeoutException
 import java.util.concurrent.Executors
@@ -72,7 +78,10 @@ class ScreenMirrorWidget(
         private const val MIN_HEIGHT = MIN_WIDGET_SIZE
         private const val STREAM_PORT = 5050
         private const val RECONNECT_DELAY_MS = 1000L
-        private const val BLACK_THRESHOLD = 20
+        private const val STREAM_STOP_WAIT_MS = 1_500L
+/** How long "slow: Bluetooth" stays up after the mirror moves to Bluetooth; it also shows under the cursor. */
+        private const val BLUETOOTH_NOTICE_MS = 8_000L
+private const val BLACK_THRESHOLD = 20
 
         private const val TARGET_DISPLAY_FPS = 15
         private const val MIN_FRAME_INTERVAL_MS = 1000L / TARGET_DISPLAY_FPS
@@ -95,9 +104,21 @@ class ScreenMirrorWidget(
     private val errorTimestamp = AtomicLong(0)
 
     private var mirroringEnabled = false
-    private var phoneIpAddress: String? = null
 
-    private var streamSocket: Socket? = null
+    /** Where the stream comes from: the phone over Wi-Fi, or over Bluetooth. */
+    private sealed interface StreamSource {
+        data class Wifi(val ip: String) : StreamSource
+        data class Bluetooth(val address: String) : StreamSource
+    }
+    private var streamSource: StreamSource? = null
+
+    /** The device whose Wi-Fi is off while the mirror is on Bluetooth, and since when, for the notice. */
+    private var bluetoothBecauseWifiOff: MirrorWifiOff? = null
+    private var bluetoothNoticeSinceMs = 0L
+
+    /** The open stream (a TCP or Bluetooth socket) and where the phone touches go back. */
+    private var streamConnection: java.io.Closeable? = null
+    private var streamOutput: OutputStream? = null
     private var inputStream: InputStream? = null
     private val isStreaming = AtomicBoolean(false)
     private var streamThread: Thread? = null
@@ -162,6 +183,12 @@ private var lastContentBoundsDetectionMs = 0L
         textSize = 20f
         textAlign = Paint.Align.CENTER
     }
+    private val noticeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = WidgetTheme.ColorValue.warningText
+        textSize = 13f
+        textAlign = Paint.Align.CENTER
+    }
+    private val noticeBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(200, 0, 0, 0) }
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true }
 
     // Run/Pause button paints
@@ -432,17 +459,31 @@ private var lastContentBoundsDetectionMs = 0L
         handler.post { listener?.onMediaStateChanged(isActive) }
     }
 
-    fun setMirroringEnabled(enabled: Boolean, phoneIp: String? = null) {
-        Log.d(TAG, "setMirroringEnabled: $enabled, ip=$phoneIp")
-        mirroringEnabled = enabled
-        phoneIpAddress = phoneIp
+    /** The phone's mirror started, moved (Bluetooth to Wi-Fi or back) or stopped. */
+    fun setMirroring(mirror: PhoneMirror?) {
+        val source = when {
+            mirror == null || !mirror.enabled -> null
+            mirror.phoneIp != null -> StreamSource.Wifi(mirror.phoneIp)
+            mirror.bluetoothAddress != null -> StreamSource.Bluetooth(mirror.bluetoothAddress)
+            else -> null
+        }
+        Log.d(TAG, "setMirroring: $source (Wi-Fi off: ${mirror?.wifiOff})")
+        mirroringEnabled = source != null
         clearError()
+        val wifiOff = mirror?.wifiOff.takeIf { source is StreamSource.Bluetooth }
+        if (wifiOff != null && wifiOff != bluetoothBecauseWifiOff) {
+            bluetoothNoticeSinceMs = System.currentTimeMillis()
+            handler.postDelayed({ notifyTransientChange() }, BLUETOOTH_NOTICE_MS)
+        }
+        bluetoothBecauseWifiOff = wifiOff
 
-        if (enabled && phoneIp != null) {
-            startStreaming(phoneIp)
-        } else {
+        if (source == null) {
             stopStreaming()
             updateStreamState(StreamState.DISABLED)
+        } else if (source != streamSource) {
+            // A new way to the phone (Bluetooth to Wi-Fi Direct, say) replaces the running stream.
+            stopStreaming()
+            startStreaming(source)
         }
         dispatchMediaStateIfChanged()
     }
@@ -572,14 +613,13 @@ private var lastContentBoundsDetectionMs = 0L
 
     /** Sends one touch event to the phone: {"a":action,"x":..,"y":..} in fractions of the frame. */
     private fun sendInput(action: String, frame: Pair<Float, Float>, dy: Float = 0f) {
-        val socket = streamSocket ?: return
+        val out = streamOutput ?: return
         if (action != "move") Log.d(TAG, "Phone touch $action at $frame")
         val line = JSONObject().put("a", action).put("x", frame.first.toDouble()).put("y", frame.second.toDouble())
             .apply { if (dy != 0f) put("dy", dy.toDouble()) }
             .toString() + "\n"
         inputWriter.execute {
             try {
-                val out = socket.getOutputStream()
                 out.write(line.toByteArray())
                 out.flush()
             } catch (e: Exception) {
@@ -624,9 +664,10 @@ private var lastContentBoundsDetectionMs = 0L
         return true
     }
 
-    private fun startStreaming(ip: String) {
+    private fun startStreaming(source: StreamSource) {
         if (isStreaming.get()) return
 
+        streamSource = source
         isStreaming.set(true)
         updateStreamState(StreamState.CONNECTING)
         clearError()
@@ -639,13 +680,7 @@ private var lastContentBoundsDetectionMs = 0L
         streamThread = Thread {
             while (isStreaming.get()) {
                 try {
-                    Log.d(TAG, "Connecting to $ip:$STREAM_PORT")
-                    streamSocket = Socket(ip, STREAM_PORT).apply {
-                        soTimeout = 5000
-                        tcpNoDelay = true
-                        receiveBufferSize = 65536
-                    }
-                    inputStream = streamSocket?.getInputStream()
+                    openStream(source)
 
                     Log.d(TAG, "Connected to stream server")
                     updateStreamState(StreamState.STREAMING)
@@ -666,8 +701,9 @@ private var lastContentBoundsDetectionMs = 0L
                 }
 
                 releaseDecoder()
-                try { streamSocket?.close() } catch (_: Exception) {}
-                streamSocket = null
+                try { streamConnection?.close() } catch (_: Exception) {}
+                streamConnection = null
+                streamOutput = null
                 inputStream = null
 
                 if (isStreaming.get()) {
@@ -685,14 +721,46 @@ private var lastContentBoundsDetectionMs = 0L
         }
     }
 
+    /** Connects to the phone's stream: its TCP port over Wi-Fi, or its Bluetooth mirror channel. */
+    @SuppressLint("MissingPermission")
+    private fun openStream(source: StreamSource) {
+        when (source) {
+            is StreamSource.Wifi -> {
+                Log.d(TAG, "Connecting to ${source.ip}:$STREAM_PORT")
+                val socket = Socket(source.ip, STREAM_PORT).apply {
+                    soTimeout = 5000
+                    tcpNoDelay = true
+                    receiveBufferSize = 65536
+                }
+                streamConnection = socket
+                streamOutput = socket.getOutputStream()
+                inputStream = socket.getInputStream()
+            }
+            is StreamSource.Bluetooth -> {
+                Log.d(TAG, "Connecting over Bluetooth to ${source.address}")
+                val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
+                val socket = adapter.getRemoteDevice(source.address)
+                    .createRfcommSocketToServiceRecord(TransportMessage.MirrorState.BLUETOOTH_UUID)
+                streamConnection = socket
+                socket.connect()
+                streamOutput = socket.outputStream
+                inputStream = socket.inputStream
+            }
+        }
+    }
+
     private fun stopStreaming() {
         isStreaming.set(false)
+        streamSource = null
         phoneTouchActive = false
         shownWidgetRect.setEmpty()
-        try { streamSocket?.close() } catch (_: Exception) {}
-        streamSocket = null
+        try { streamConnection?.close() } catch (_: Exception) {}
+        streamConnection = null
+        streamOutput = null
         inputStream = null
         streamThread?.interrupt()
+        // The old stream thread must finish releasing its decoder before a new stream makes one.
+        streamThread?.takeIf { it !== Thread.currentThread() }?.join(STREAM_STOP_WAIT_MS)
         streamThread = null
         releaseDecoder()
         releaseRenderScriptBuffers()
@@ -1116,6 +1184,7 @@ private var lastContentBoundsDetectionMs = 0L
         if (streamState == StreamState.CONNECTING) {
             canvas.drawText("Reconnecting...", widgetBounds.centerX(), widgetBounds.centerY(), connectingTextPaint)
         }
+        drawBluetoothNotice(canvas)
 
         if (shouldShowBorder()) {
             val borderP = when {
@@ -1129,6 +1198,19 @@ private var lastContentBoundsDetectionMs = 0L
             drawRunPauseButton(canvas)
             drawResizeHandle(canvas)
         }
+    }
+
+    /** "Slow: Bluetooth", and whose Wi-Fi to switch on: for a while after the move, and under the cursor. */
+    private fun drawBluetoothNotice(canvas: Canvas) {
+        val wifiOff = bluetoothBecauseWifiOff ?: return
+        val recent = System.currentTimeMillis() - bluetoothNoticeSinceMs < BLUETOOTH_NOTICE_MS
+        if (!recent && !isHovering()) return
+        val action = if (wifiOff == MirrorWifiOff.GLASSES) "Turn on the glasses' Wi-Fi" else "Turn on the phone's Wi-Fi"
+        val lineHeight = noticeTextPaint.textSize + 4f
+        val bottom = contentBounds.bottom - 6f
+        canvas.drawRect(contentBounds.left, bottom - lineHeight * 2 - 6f, contentBounds.right, bottom + 2f, noticeBackgroundPaint)
+        canvas.drawText("Slow: Bluetooth", contentBounds.centerX(), bottom - lineHeight - 2f, noticeTextPaint)
+        canvas.drawText(action, contentBounds.centerX(), bottom - 2f, noticeTextPaint)
     }
 
     private fun drawRunPauseButton(canvas: Canvas) {
@@ -1253,18 +1335,18 @@ class MirrorPlugin(
         },
     )
 
-    /** Where the phone's running mirror streams from; null when there is none (or the phone is away). */
-    private var liveMirrorIp: String? = null
+    /** The phone's running mirror and where it streams from; null when there is none (or the phone is away). */
+    private var liveMirror: PhoneMirror? = null
 
     init {
-        services.appData.subscribe(AppChannels.mirroring) { mirror -> setMirroringEnabled(mirror.enabled, mirror.phoneIp) }
-        services.appData.subscribe(AppChannels.phoneConnected) { connected -> if (!connected) setMirroringEnabled(false, null) }
+        services.appData.subscribe(AppChannels.mirroring) { mirror -> setMirroring(mirror) }
+        services.appData.subscribe(AppChannels.phoneConnected) { connected -> if (!connected) setMirroring(null) }
     }
 
-    private fun setMirroringEnabled(enabled: Boolean, phoneIp: String?) {
-        liveMirrorIp = phoneIp.takeIf { enabled }
+    private fun setMirroring(mirror: PhoneMirror?) {
+        liveMirror = mirror?.takeIf { it.enabled }
         services.withTransientChanges {
-            current()?.setMirroringEnabled(enabled, phoneIp)
+            current()?.setMirroring(liveMirror)
             current()?.refreshDisplayVisibility()
             refreshBrightnessRules()
             services.notifyTransientChange()
@@ -1305,7 +1387,7 @@ class MirrorPlugin(
         }
         widget.refreshDisplayVisibility()
         // A mirror already running when the widget opens: start showing it.
-        liveMirrorIp?.let { widget.setMirroringEnabled(true, it) }
+        liveMirror?.let { widget.setMirroring(it) }
     }
 
     /** The phone screen mirror as a widget type: its id, its descriptor, how it is saved, and its plugin. */

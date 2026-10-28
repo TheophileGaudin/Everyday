@@ -368,6 +368,10 @@ private var assistantStatus: AssistantStatus? = null
                 override fun onHttpRelayRequested(request: com.everyday.shared.transport.TransportMessage.HttpRelayRequest) {
                     dataSyncCoordinator.onHttpRelayRequest(request)
                 }
+
+                override fun onMediaChunkReceived(chunk: com.everyday.shared.transport.TransportMessage.MediaChunk) {
+                    dataSyncCoordinator.onMediaChunk(chunk)
+                }
             }
 
             experienceControlListener = object : RfcommServer.ExperienceControlListener {
@@ -512,6 +516,7 @@ private var assistantStatus: AssistantStatus? = null
 
                 override fun onStateChanged(enabled: Boolean) {
                     fileLog("WiFi Direct enabled: $enabled")
+                    if (::transportManager.isInitialized) transportManager.onWifiDirectStateChanged(enabled)
                 }
             }
 

@@ -49,6 +49,7 @@ class PermissionCoordinator(
         private const val REQUEST_STORAGE_PERMISSION = 2
         private const val REQUEST_ASSISTANT_AUDIO_PERMISSION = 3
         private const val REQUEST_WIFI_DIRECT_PERMISSION = 4
+        private const val REQUEST_CAMERA_PERMISSION = 5
     }
 
     private var openFileBrowserAfterAllFilesGrant = false
@@ -83,6 +84,15 @@ class PermissionCoordinator(
 
     fun hasMicrophonePermission(): Boolean =
         hasPermission(Manifest.permission.RECORD_AUDIO)
+
+    fun hasCameraPermission(): Boolean =
+        hasPermission(Manifest.permission.CAMERA)
+
+    /** Asks once for the camera, for the assistant; the user asks the assistant again once allowed. */
+    fun requestCameraPermission() {
+        if (released) return
+        ActivityCompat.requestPermissions(activity, arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA_PERMISSION)
+    }
 
     /**
      * Preserves the current file-browser access policy.

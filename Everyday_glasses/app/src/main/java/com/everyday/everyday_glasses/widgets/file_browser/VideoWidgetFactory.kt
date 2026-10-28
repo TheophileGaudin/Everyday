@@ -2,8 +2,18 @@ package com.everyday.everyday_glasses.widgets.file_browser
 
 import android.content.Context
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
+import com.everyday.everyday_glasses.interaction.assistant.AssistantContribution
+import com.everyday.everyday_glasses.interaction.assistant.AssistantSemanticToolHandler
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolDefinition
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecution
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionCodes
+import com.everyday.everyday_glasses.interaction.assistant.AssistantToolExecutionContext
+import com.everyday.everyday_glasses.interaction.assistant.AssistantVideo
+import com.everyday.everyday_glasses.interaction.assistant.assistantCompletedFuture
 import com.everyday.everyday_glasses.persistence.DashboardPersistence
 import com.everyday.everyday_glasses.persistence.WidgetCaptureRestore
 import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
@@ -18,6 +28,9 @@ import com.everyday.everyday_glasses.runtime.WidgetType
 import com.everyday.everyday_glasses.runtime.WidgetTypeId
 import com.everyday.everyday_glasses.widgets.file_browser.video_backend.VideoQueueRepository
 import org.json.JSONObject
+import java.io.File
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 
 /** Constructs VideoWidget instances with their shared queue and playback callback. */
 internal class VideoWidgetFactory(
@@ -52,10 +65,10 @@ internal class VideoWidgetFactory(
         }
     }
 }
-/** Puts local videos on the dashboard; a new one opens fullscreen and plays. */
+/** Puts local videos on the dashboard; a new one opens fullscreen and plays. The assistant can watch the open one. */
 class VideoPlugin(
     private val services: WidgetContext,
-) : WidgetPlugin {
+) : WidgetPlugin, AssistantContribution {
     private val context: Context get() = services.androidContext
     private val rootLayout: () -> ViewGroup? = { services.rootLayout }
     private val containerView: View get() = services.dashboardView
@@ -105,6 +118,51 @@ class VideoPlugin(
             savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
             isPinned = c.isPinned
         )
+    }
+
+    // ==================== The assistant watches the open video ====================
+
+    override fun assistantTools(): List<AssistantSemanticToolHandler> = listOf(object : AssistantSemanticToolHandler {
+        override val definition = AssistantToolDefinition(
+            name = "analyze_open_video",
+            description = "Watch the video open in the glasses' video player, to describe it or answer questions " +
+                "about it, when the user asks about the video they are watching or have open. Then answer with present_text.",
+            parameters = JSONObject().put("type", "object").put("properties", JSONObject())
+        )
+
+        override val isAdvertised: Boolean get() = openVideo() != null
+
+        override fun validate(arguments: JSONObject): Result<Unit> = Result.success(Unit)
+
+        override fun execute(arguments: JSONObject, context: AssistantToolExecutionContext): CompletableFuture<AssistantToolExecution> {
+            val video = openVideo() ?: return assistantCompletedFuture(
+                AssistantToolExecution(false, AssistantToolExecutionCodes.EXECUTION_FAILED, "No video is open")
+            )
+            val resolver = this@VideoPlugin.context.contentResolver
+            val mimeType = resolver.getType(video.first) ?: "video/mp4"
+            val file = File(this@VideoPlugin.context.cacheDir, "assistant_open_video").apply { delete() }
+            resolver.openInputStream(video.first)?.use { input ->
+                file.outputStream().use { input.copyTo(it) }
+            } ?: return assistantCompletedFuture(
+                AssistantToolExecution(false, AssistantToolExecutionCodes.EXECUTION_FAILED, "The video can't be read")
+            )
+            return assistantCompletedFuture(AssistantToolExecution(
+                true, AssistantToolExecutionCodes.SUCCESS, "The open video: ${video.second}",
+                videos = listOf(AssistantVideo(file, mimeType)), groundingEvidence = true
+            ))
+        }
+    })
+
+    /** The video the user means: the fullscreen one, else the latest opened; read on the main thread. */
+    private fun openVideo(): Pair<Uri, String>? {
+        val read = {
+            val videos = services.widgets(TYPE).filterIsInstance<VideoWidget>()
+            (videos.firstOrNull { it.isFullscreen } ?: videos.lastOrNull())?.let { it.contentUri to it.displayName }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) return read()
+        val result = CompletableFuture<Pair<Uri, String>?>()
+        Handler(Looper.getMainLooper()).post { result.complete(read()) }
+        return runCatching { result.get(2, TimeUnit.SECONDS) }.getOrNull()
     }
 
     // The player's native views go into the root layout, which exists once the dashboard is attached.

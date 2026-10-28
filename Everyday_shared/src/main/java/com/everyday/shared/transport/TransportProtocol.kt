@@ -90,7 +90,9 @@ sealed class TransportMessage(val kind: String) {
      * The phone's mirror session. [ip] is where the glasses stream from: the phone's own Wi-Fi Direct
      * group ([wifiDirect]), which the glasses join with [networkName] and [passphrase], or the phone's
      * address on a shared Wi-Fi network. [lanIp], when set, is that shared-network address, a fallback
-     * when the glasses can't join the group.
+     * when the glasses can't join the group. With [bluetooth] the phone also serves the same stream,
+     * slower, on its Bluetooth channel [BLUETOOTH_UUID]: the way left when either device's Wi-Fi is
+     * off, and the only one when [ip] is null (the phone's Wi-Fi is off).
      */
     data class MirrorState(
         val enabled: Boolean,
@@ -100,7 +102,13 @@ sealed class TransportMessage(val kind: String) {
         val networkName: String? = null,
         val passphrase: String? = null,
         val lanIp: String? = null,
-    ) : TransportMessage("mirror.state")
+        val bluetooth: Boolean = false,
+    ) : TransportMessage("mirror.state") {
+        companion object {
+            /** The Bluetooth service the phone streams its mirror on, beside the app's message channel. */
+            val BLUETOOTH_UUID: java.util.UUID = java.util.UUID.fromString("5c1e7a52-3f0b-4d39-9a51-6e0f2b8a91d4")
+        }
+    }
     data class TextFieldFocus(val focused: Boolean, val fieldId: String? = null) : TransportMessage("text_field.focus")
     object GoogleAuthRequest : TransportMessage("google_auth.request")
     object GoogleAuthDisconnect : TransportMessage("google_auth.disconnect")
@@ -124,6 +132,24 @@ sealed class TransportMessage(val kind: String) {
     data class AssistantControlMessage(val control: AssistantControl) : TransportMessage("assistant.control")
     data class AssistantStatusMessage(val status: AssistantStatus) : TransportMessage("assistant.status")
     data class Image(val fileName: String, val base64Data: String) : TransportMessage("file.image")
+
+    /**
+     * One piece of a photo or video taken on the glasses, for the phone to keep in its gallery too.
+     * Pieces of one [transferId] arrive in order, [index] 0 until [count] - 1; [base64Data] is at
+     * most [MAX_BYTES] of the file, so a large video never blocks the app's other messages for long.
+     */
+    data class MediaChunk(
+        val transferId: String,
+        val fileName: String,
+        val mimeType: String,
+        val index: Int,
+        val count: Int,
+        val base64Data: String,
+    ) : TransportMessage("file.media") {
+        companion object {
+            const val MAX_BYTES = 512 * 1024
+        }
+    }
     data class RouteRequestMessage(val request: RouteTransportRequest) : TransportMessage("route.request")
     data class RouteResultMessage(val result: RouteTransportResult) : TransportMessage("route.result")
     data class RouteErrorMessage(val error: RouteTransportError) : TransportMessage("route.error")
@@ -230,7 +256,8 @@ object TransportProtocol {
         "mirror.state" -> {
             val enabled = payload.requiredBoolean("enabled")
             val ip = payload.optionalString("ip")
-            if (enabled && ip.isNullOrBlank()) throw InvalidPayload("enabled mirror missing ip")
+            val bluetooth = payload.optionalBoolean("bluetooth") ?: false
+            if (enabled && ip.isNullOrBlank() && !bluetooth) throw InvalidPayload("enabled mirror missing ip")
             TransportMessage.MirrorState(
                 enabled = enabled,
                 ip = ip,
@@ -239,6 +266,7 @@ object TransportProtocol {
                 networkName = payload.optionalString("networkName"),
                 passphrase = payload.optionalString("passphrase"),
                 lanIp = payload.optionalString("lanIp"),
+                bluetooth = bluetooth,
             )
         }
         "text_field.focus" -> TransportMessage.TextFieldFocus(
@@ -340,6 +368,14 @@ object TransportProtocol {
                 AssistantStatus(configured, ready, state, sessionId, origin, detail, timestampMs)
             )
         }
+        "file.media" -> TransportMessage.MediaChunk(
+            transferId = payload.requiredString("transferId"),
+            fileName = payload.requiredString("fileName"),
+            mimeType = payload.requiredString("mimeType"),
+            index = payload.requiredLong("index").toInt(),
+            count = payload.requiredLong("count").toInt(),
+            base64Data = payload.requiredString("base64Data"),
+        ).also { if (it.index !in 0 until it.count) throw InvalidPayload("media chunk index out of range") }
         "file.image" -> {
             val base64Data = payload.requiredString("base64Data")
             if (base64Data.length % 4 != 0 || !base64Data.matches(Regex("[A-Za-z0-9+/]*={0,2}"))) {
@@ -384,6 +420,7 @@ object TransportProtocol {
         is TransportMessage.MirrorState -> JSONObject().put("enabled", enabled).putNullable("ip", ip)
             .putNullable("port", port).put("wifiDirect", wifiDirect)
             .putNullable("networkName", networkName).putNullable("passphrase", passphrase).putNullable("lanIp", lanIp)
+            .put("bluetooth", bluetooth)
         is TransportMessage.TextFieldFocus -> JSONObject().put("focused", focused).putNullable("fieldId", fieldId)
         TransportMessage.GoogleAuthRequest, TransportMessage.GoogleAuthDisconnect -> JSONObject()
         is TransportMessage.GoogleAuthState -> JSONObject().put("status", status.wireName)
@@ -412,6 +449,8 @@ object TransportProtocol {
             .putNullable("detail", status.detail)
             .put("timestampMs", status.timestampMs)
         is TransportMessage.Image -> JSONObject().put("fileName", fileName).put("base64Data", base64Data)
+        is TransportMessage.MediaChunk -> JSONObject().put("transferId", transferId).put("fileName", fileName)
+            .put("mimeType", mimeType).put("index", index).put("count", count).put("base64Data", base64Data)
         is TransportMessage.RouteRequestMessage -> RouteTransportProtocol.requestToJson(request)
         is TransportMessage.RouteResultMessage -> RouteTransportProtocol.resultToJson(result)
         is TransportMessage.RouteErrorMessage -> RouteTransportProtocol.errorToJson(error)

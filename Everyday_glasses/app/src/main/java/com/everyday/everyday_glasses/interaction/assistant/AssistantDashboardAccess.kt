@@ -61,6 +61,8 @@ internal class AssistantDashboardAccess(
     private var browserRouting: BrowserRoutingCoordinator? = null
     /** How web search reaches the internet when the glasses have none; the activity sets it before the first search. */
     var internet: okhttp3.Interceptor? = null
+    /** The glasses' camera, for looks, photos and videos; the activity sets it. */
+    var camera: AssistantCamera? = null
     private val webSearch by lazy { WebSearchSemanticToolHandler(DuckDuckGoWebSearchProvider(internet)) }
     private val contributions: Map<WidgetTypeId, AssistantContribution> = plugins
         .filterIsInstance<AssistantContribution>()
@@ -92,7 +94,7 @@ internal class AssistantDashboardAccess(
             webSearch,
             InspectUiSemanticToolHandler(),
             RequestScreenshotSemanticToolHandler(),
-        ) + contributions.values.flatMap { it.assistantTools() } +
+        ) + camera?.tools().orEmpty() + contributions.values.flatMap { it.assistantTools() } +
                 listOfNotNull(browserRouting?.let(::RunBrowserTaskSemanticToolHandler))
     )
 

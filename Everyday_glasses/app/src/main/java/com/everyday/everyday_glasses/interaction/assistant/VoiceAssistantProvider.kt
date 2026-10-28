@@ -20,13 +20,17 @@ data class AssistantToolDefinition(
 
 data class AssistantToolCall(val id: String, val name: String, val arguments: JSONObject)
 
+/** A video file a tool hands to the model to watch (the provider uploads it). */
+data class AssistantVideo(val file: java.io.File, val mimeType: String = "video/mp4")
+
 data class AssistantToolExecution(
     val success: Boolean,
     val code: String,
     val message: String,
     val screenshots: List<AssistantScreenshot> = emptyList(),
     val sources: List<AssistantSource> = emptyList(),
-    val groundingEvidence: Boolean = false
+    val groundingEvidence: Boolean = false,
+    val videos: List<AssistantVideo> = emptyList(),
 ) {
     val screenshot: AssistantScreenshot? get() = screenshots.firstOrNull()
 
@@ -110,4 +114,7 @@ interface VoiceAssistantProvider {
     ): Result<AssistantProviderTurn>
 
     fun deleteUploadedFile(apiKey: String, name: String)
+
+    /** Deletes what tools uploaded during the session (videos), once it is over. */
+    fun deleteToolUploads(apiKey: String) = Unit
 }

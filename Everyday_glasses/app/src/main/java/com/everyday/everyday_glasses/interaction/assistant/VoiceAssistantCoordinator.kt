@@ -504,6 +504,7 @@ class VoiceAssistantCoordinator(
                 }
             } finally {
                 uploadedFileName?.let { provider.deleteUploadedFile(config.apiKey, it) }
+                provider.deleteToolUploads(config.apiKey)
                 file.delete()
             }
         }

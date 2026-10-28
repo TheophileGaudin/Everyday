@@ -613,6 +613,74 @@ class PhoneDataSyncCoordinator(
         }
     }
 
+    // ==================== Photos and videos taken on the glasses ====================
+
+    /** The file being received from the glasses: its pieces are appended in order to a cache file. */
+    private class MediaTransfer(val id: String, val file: java.io.File, var nextIndex: Int)
+    private var mediaTransfer: MediaTransfer? = null
+
+    /**
+     * A piece of a photo or video taken on the glasses (the reader thread delivers them in order).
+     * The last piece puts the file in the phone's gallery, as DCIM/Everyday or Movies/Everyday.
+     */
+    fun onMediaChunk(chunk: TransportMessage.MediaChunk) {
+        val transfer = mediaTransfer?.takeIf { it.id == chunk.transferId }
+            ?: if (chunk.index == 0) {
+                mediaTransfer?.file?.delete()
+                MediaTransfer(chunk.transferId, java.io.File(appContext.cacheDir, "glasses_media_${chunk.transferId}"), 0)
+                    .also { mediaTransfer = it }
+            } else {
+                fileLog("Glasses media: piece ${chunk.index} of an unknown transfer, ignored")
+                return
+            }
+        if (chunk.index != transfer.nextIndex) {
+            fileLog("Glasses media: piece ${chunk.index} out of order (expected ${transfer.nextIndex}), dropped")
+            transfer.file.delete()
+            mediaTransfer = null
+            return
+        }
+        transfer.file.appendBytes(android.util.Base64.decode(chunk.base64Data, android.util.Base64.NO_WRAP))
+        transfer.nextIndex++
+        if (transfer.nextIndex < chunk.count) return
+        mediaTransfer = null
+        val saved = runCatching { saveToGallery(transfer.file, chunk.fileName, chunk.mimeType) }
+        transfer.file.delete()
+        saved.onSuccess {
+            fileLog("Glasses media saved: ${chunk.fileName} (${chunk.mimeType})")
+            val what = if (chunk.mimeType.startsWith("video/")) "Video" else "Photo"
+            mainHandler.post {
+                android.widget.Toast.makeText(appContext, "$what from the glasses saved", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }.onFailure { fileLog("Glasses media not saved: ${it.message}") }
+    }
+
+    private fun saveToGallery(file: java.io.File, fileName: String, mimeType: String) {
+        val video = mimeType.startsWith("video/")
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
+            // Before Android 10 the shared gallery needs a storage permission: keep it in the app's own pictures.
+            val dir = appContext.getExternalFilesDir(if (video) android.os.Environment.DIRECTORY_MOVIES else android.os.Environment.DIRECTORY_PICTURES)
+            file.copyTo(java.io.File(dir, fileName), overwrite = true)
+            return
+        }
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, if (video) "Movies/Everyday" else "DCIM/Everyday")
+            put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val collection = if (video) android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        else android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val resolver = appContext.contentResolver
+        val uri = resolver.insert(collection, values) ?: error("The gallery refused the file")
+        try {
+            resolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } } ?: error("Gallery file not writable")
+            resolver.update(uri, android.content.ContentValues().apply { put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+        } catch (e: Exception) {
+            resolver.delete(uri, null, null)
+            throw e
+        }
+    }
+
     // ==================== The glasses' assistant, through the phone's internet ====================
 
     private val relayClient by lazy {

@@ -47,6 +47,9 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- The assistant's camera: a look at what the wearer faces, photos and videos on request. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     
     <uses-feature android:name="android.hardware.bluetooth" android:required="true"/>
     <uses-feature android:name="android.hardware.wifi.direct" android:required="false" />

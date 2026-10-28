@@ -87,6 +87,7 @@ class WifiDirectClient(private val context: Context) {
                         val state = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1)
                         isWifiDirectEnabled = (state == WifiP2pManager.WIFI_P2P_STATE_ENABLED)
                         Log.d(TAG, "WiFi P2P enabled: $isWifiDirectEnabled")
+                        connectionListener?.onStateChanged(isWifiDirectEnabled)
                     }
 
                     WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> {
@@ -310,6 +311,8 @@ class WifiDirectClient(private val context: Context) {
 }
 
 interface WifiDirectConnectionListener {
+    /** The glasses' Wi-Fi (and so Wi-Fi Direct) was switched on or off. */
+    fun onStateChanged(enabled: Boolean) = Unit
     fun onConnected(groupOwnerIp: String) = Unit
     fun onDisconnected() = Unit
     fun onPeersAvailable(peers: List<WifiP2pDevice>) = Unit

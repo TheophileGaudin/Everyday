@@ -149,6 +149,19 @@ class DisplayPowerController(
         ensureVisibleWakeState(reason)
     }
 
+    /**
+     * Switches the physical screen on as well, even after the power button turned it off while the
+     * app held its wake lock: such a lock only wakes the screen when taken, so it is taken again.
+     */
+    fun wakeScreen(reason: String) {
+        if (!powerManager.isInteractive) {
+            Log.d(TAG, "Switching the screen on ($reason)")
+            releaseWakeLock()
+            acquireWakeLock()
+        }
+        wakeFromUserAction(reason)
+    }
+
     /** Wakes if needed and resets the inactivity timer. */
     fun onUserActivity() {
         wakeFromUserAction("user_activity")

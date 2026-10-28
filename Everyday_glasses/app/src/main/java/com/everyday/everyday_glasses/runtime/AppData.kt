@@ -82,7 +82,20 @@ class AppData {
 data class Place(val town: String, val countryCode: String)
 
 /** The phone's screen-mirroring state: whether it's on, and where to receive the stream. */
-data class PhoneMirror(val enabled: Boolean, val phoneIp: String?)
+/**
+ * The phone's mirror: streamed from [phoneIp] over Wi-Fi, or over Bluetooth from the phone at
+ * [bluetoothAddress] when Wi-Fi can't be used; [wifiOff] then says whose Wi-Fi, switched on, would
+ * make it faster (null when both are on but Wi-Fi Direct failed).
+ */
+data class PhoneMirror(
+    val enabled: Boolean,
+    val phoneIp: String?,
+    val bluetoothAddress: String? = null,
+    val wifiOff: MirrorWifiOff? = null,
+)
+
+/** The device whose Wi-Fi is off, keeping the mirror on Bluetooth. */
+enum class MirrorWifiOff { GLASSES, PHONE }
 
 /** An image the phone sent, as its bytes and its file name. */
 class PhoneImage(val data: ByteArray, val fileName: String)
