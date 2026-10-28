@@ -114,7 +114,7 @@ object SyncProtocol {
             .putNullable("newsSource", request.newsSource?.toJson())
     }
 
-    internal fun requestFromJson(root: JSONObject): SyncRequest? {
+    internal fun requestFromJson(root: JSONObject): SyncRequest {
         val channels = mutableSetOf<SyncChannel>()
         val items = root.optJSONArray("channels") ?: JSONArray()
         for (index in 0 until items.length()) {

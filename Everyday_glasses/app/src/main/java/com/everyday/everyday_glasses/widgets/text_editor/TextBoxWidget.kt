@@ -74,7 +74,7 @@ class TextBoxWidget(
         private const val FRAME_PADDING = 8f
 
         /** The assistant's answers: a black panel (it hides what is behind on the glasses) with a white border. */
-        const val ASSISTANT_FRAME_BACKGROUND = android.graphics.Color.BLACK
+        const val ASSISTANT_FRAME_BACKGROUND = Color.BLACK
         const val ASSISTANT_FRAME_BORDER = 2f
     }
 

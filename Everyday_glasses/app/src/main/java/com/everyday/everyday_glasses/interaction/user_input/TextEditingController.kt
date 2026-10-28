@@ -44,6 +44,7 @@ sealed interface TextEditAction {
  */
 class TextZoneFrame(backgroundColor: Int? = null, borderWidth: Float = 0f) {
     var backgroundColor: Int? = backgroundColor
+        get() = field
     var borderWidth: Float = borderWidth.coerceIn(0f, MAX_BORDER_WIDTH)
         set(value) {
             field = value.coerceIn(0f, MAX_BORDER_WIDTH)
