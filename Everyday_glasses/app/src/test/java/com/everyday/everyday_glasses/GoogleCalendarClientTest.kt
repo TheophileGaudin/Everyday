@@ -1,12 +1,15 @@
 package com.everyday.everyday_glasses
 
 import android.app.Activity
+import com.everyday.everyday_glasses.connectivity.GoogleCalendarClient
+import com.everyday.everyday_glasses.connectivity.GoogleCalendarEvent
+import com.everyday.everyday_glasses.connectivity.GoogleCalendarTransport
+import com.everyday.everyday_glasses.connectivity.GoogleCalendarUnauthorizedException
+import com.everyday.everyday_glasses.auth_permissions.GoogleCalendarTokenProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.Executor
-import java.util.concurrent.TimeUnit
 
 class GoogleCalendarClientTest {
     @Test
@@ -18,7 +21,7 @@ class GoogleCalendarClientTest {
         val client = GoogleCalendarClient(
             tokenProvider = tokenProvider,
             transport = transport,
-            executor = Executor { runnable -> runnable.run() },
+            executor = { runnable -> runnable.run() },
             resultPoster = { runnable -> runnable.run() }
         )
 
@@ -30,11 +33,15 @@ class GoogleCalendarClientTest {
             latch.countDown()
         }
 
-        assertTrue(latch.await(1, TimeUnit.SECONDS))
-        assertTrue(result!!.isSuccess)
+        val completedResult = requireNotNull(result)
+
+        assertTrue(completedResult.isSuccess)
         assertEquals(2, transport.callCount)
         assertEquals(listOf("stale-token"), tokenProvider.clearedTokens)
-        assertEquals("Event after retry", result!!.getOrThrow().single().summary)
+        assertEquals(
+            "Event after retry",
+            completedResult.getOrThrow().single().summary
+        )
     }
 }
 

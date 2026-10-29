@@ -1,5 +1,13 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.settings.LocationMeasurementSystem
+import com.everyday.everyday_glasses.settings.SessionLocationCountry
+import com.everyday.everyday_glasses.settings.TemperatureUnit
+import com.everyday.everyday_glasses.settings.SpeedUnit
+import com.everyday.everyday_glasses.settings.UnitDisplayFormatter
+import com.everyday.everyday_glasses.settings.UnitResolver
+import com.everyday.everyday_glasses.settings.UnitSettings
+import com.everyday.everyday_glasses.settings.UnitSystemMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -8,7 +16,7 @@ class UnitSettingsTest {
     @Test
     fun `auto defaults to SI without a location country`() {
         assertEquals(
-            SpeedometerWidget.SpeedUnit.KMH,
+            SpeedUnit.KMH,
             UnitResolver.speedUnit(UnitSystemMode.AUTO, null, null)
         )
         assertEquals(
@@ -20,7 +28,7 @@ class UnitSettingsTest {
     @Test
     fun `auto uses mixed UK conventions`() {
         assertEquals(
-            SpeedometerWidget.SpeedUnit.MPH,
+            SpeedUnit.MPH,
             UnitResolver.speedUnit(UnitSystemMode.AUTO, LocationMeasurementSystem.UK, null)
         )
         assertEquals(
@@ -32,7 +40,7 @@ class UnitSettingsTest {
     @Test
     fun `auto uses US conventions`() {
         assertEquals(
-            SpeedometerWidget.SpeedUnit.MPH,
+            SpeedUnit.MPH,
             UnitResolver.speedUnit(UnitSystemMode.AUTO, LocationMeasurementSystem.US, null)
         )
         assertEquals(
@@ -44,11 +52,11 @@ class UnitSettingsTest {
     @Test
     fun `display overrides take precedence over the global mode`() {
         assertEquals(
-            SpeedometerWidget.SpeedUnit.KMH,
+            SpeedUnit.KMH,
             UnitResolver.speedUnit(
                 UnitSystemMode.IMPERIAL,
                 LocationMeasurementSystem.US,
-                SpeedometerWidget.SpeedUnit.KMH
+                SpeedUnit.KMH
             )
         )
         assertEquals(
@@ -63,10 +71,10 @@ class UnitSettingsTest {
 
     @Test
     fun `display conversions preserve canonical inputs`() {
-        assertEquals(62.1371f, UnitDisplayFormatter.speedFromKmh(100f, SpeedometerWidget.SpeedUnit.MPH), 0.0001f)
+        assertEquals(62.1371f, UnitDisplayFormatter.speedFromKmh(100f, SpeedUnit.MPH), 0.0001f)
         assertEquals(32.0, UnitDisplayFormatter.temperatureFromCelsius(0.0, TemperatureUnit.FAHRENHEIT), 0.0001)
         assertEquals("-4°F", UnitDisplayFormatter.formatTemperature(-20.0, TemperatureUnit.FAHRENHEIT))
-        assertEquals("0.62 mph", UnitDisplayFormatter.formatSpeedThreshold(1f, SpeedometerWidget.SpeedUnit.MPH))
+        assertEquals("0.62 mph", UnitDisplayFormatter.formatSpeedThreshold(1f, SpeedUnit.MPH))
     }
 
     @Test

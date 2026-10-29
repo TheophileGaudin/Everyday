@@ -1,0 +1,42 @@
+New voice control agent
+
+-> Create a Gemini API key in Google AI Studio, copy it on your phone, then paste it in the glasses' Gemini settings.
+-> Uses the Gemini API free tier: no charges as long as billing stays disabled on the key's project. If you hit the free limits, the agent stops with an error until they reset.
+-> Push-to-talk (phone button or glasses): it doesn't talk back, it acts and shows short text answers if needed.
+-> Can take picture/movies/analyze what you see, search the web, show/hide widgets, change what they display, use the browser, and start or stop walking navigation on the map.
+-> Works on the glasses' Wi-Fi or through your phone's internet (4G or Wi-Fi), without the RayNeo app.
+-> Automatic model choice: the newest Flash-Lite model, efficient and generous on the free tier. You can select a stronger model manually for complex requests; Flash-Lite handles almost all everyday requests.
+
+New feature
+
+Added remote control of phone from screen mirror (taps and swipes). Will be easier with Wi-Fi direct mirroring (Wi Fi on in both phone and glasses, no need for hotspot)
+
+Improvements
+
+Completed port of x3player in file browser
+Added background color / border customization of text boxes
+Added turn by turn navigation in map widget
+Added POI control settings in map widget
+Added RSS feed control settings in news widget
+Added OpenFreeMap fallback when Overpass servers are unavailable for map/directions
+Mirroring flow clarified: both phone and glasses with wifi radio on (wifi button switched on, no need to connect to specific network), wifi direct path (fast), either off or both, bluetooth fallback path (slower).
+
+Bugfixes
+
+Added map data to the refresh button so any timeout can be exposed as an error message here.
+File browser is now persisted like any other widget
+Widgets no longer get highlighted when something is overlaid on the dashboard
+Fixed screen mirror requiring RayNeo phone app to run on top of Everyday phone companion app: now only the latter needed
+Screen now wakes up with just one press on power button after going to sleep mode from head up wake (previously 2 presses were needed)
+Speedometer no longer depends on sync between phone and glasses clock
+
+Efficiency optimizations
+
+Tiered binocular update notifications
+Localized map refreshing
+
+Refactor
+1. General codebase refactor: Codebase made navigable with subdirectories reflecting its different component roles.
+2. MainActivity (the core app class) WidgetContainer (the class for the dashboard) were god objects. A number of classes were extracted from them. 
+3. Modularized widget functionalities: now adding a widget to the codebase requires only a single addition into a list class (WidgetPlugins) on top of the widget files themselves.
+4. Text edition refactor: unification of text edition across fields from different UI components

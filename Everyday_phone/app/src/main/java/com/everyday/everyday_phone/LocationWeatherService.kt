@@ -18,10 +18,11 @@ import android.os.PowerManager
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import com.everyday.shared.sync.LocationName
-import com.everyday.shared.sync.SpeedSnapshot
+import com.everyday.shared.sync.LocationFix
+import com.everyday.shared.sync.LocationFixQuality
 import com.everyday.shared.sync.WeatherData
 import com.everyday.shared.sync.WeatherDataProvider
-import com.everyday.shared.sync.LocationWeatherSnapshot
+import com.everyday.shared.sync.WeatherSnapshot
 import com.google.android.gms.location.*
 import com.google.android.gms.tasks.CancellationTokenSource
 import java.util.concurrent.atomic.AtomicBoolean
@@ -36,6 +37,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 3. Keep cached payload fresh so the glasses can pull it on their own cadence
  */
 class LocationWeatherService : Service() {
+
+    /** Receives the cached phone data that should be synchronized to the glasses. */
+    interface Observer {
+        fun onLocationFixChanged(locationFix: LocationFix) = Unit
+        fun onWeatherSnapshotChanged(weatherSnapshot: WeatherSnapshot) = Unit
+    }
 
     companion object {
         private const val NOTIFICATION_ID = 1002
@@ -56,9 +63,7 @@ class LocationWeatherService : Service() {
         var instance: LocationWeatherService? = null
             private set
 
-        /** Live phone-location payload, including slower location-name/weather fields. */
-        var onLocationWeatherSnapshotChanged: ((LocationWeatherSnapshot) -> Unit)? = null
-        var onSpeedSnapshotChanged: ((SpeedSnapshot) -> Unit)? = null
+        var observer: Observer? = null
 
         fun start(context: Context) {
             // A live service is already receiving location updates. Restarting it
@@ -90,7 +95,7 @@ class LocationWeatherService : Service() {
     private var cachedAccuracyM: Float? = null
     private var cachedBearingDeg: Float? = null
     private var cachedSpeedMps: Float? = null
-    private var cachedSpeedSnapshot: SpeedSnapshot? = null
+    private var cachedLocationFix: LocationFix? = null
     private var previousSpeedLocation: Location? = null
     private var lastWeatherFetch: Long = 0
     private var lastGeocodeFetch: Long = 0
@@ -99,6 +104,16 @@ class LocationWeatherService : Service() {
 
     // Timestamp when the current payload was last updated (used to prevent stale data on glasses)
     private var payloadTimestamp: Long = 0
+    private val slowPayloadRefresh = object : Runnable {
+        override fun run() {
+            val lat = cachedLat
+            val lon = cachedLon
+            if (lat != null && lon != null) {
+                refreshCachedPayload(lat, lon, forceWeatherFetch = false)
+            }
+            mainHandler.postDelayed(this, if (lat == null || lon == null) 5_000L else 60_000L)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -111,6 +126,9 @@ class LocationWeatherService : Service() {
         setupLocationCallback()
         startForegroundNotification()
         startLocationUpdates()
+        // Forecast/place cadence is owned by this slow loop, not by the 1 Hz
+        // physical-location callback.
+        mainHandler.postDelayed(slowPayloadRefresh, 1_000L)
     }
 
     private fun acquireWakeLock() {
@@ -209,13 +227,13 @@ class LocationWeatherService : Service() {
     private fun processLocation(location: Location) {
         val lat = location.latitude
         val lon = location.longitude
-        val speedSnapshot = resolveSpeedSnapshot(location)
-        cachedSpeedSnapshot = speedSnapshot
-        cachedSpeedMps = if (speedSnapshot.qualityOk) speedSnapshot.speedMps else null
-        notifySpeedSnapshotChanged(speedSnapshot)
+        val locationFix = resolveLocationFix(location)
+        cachedLocationFix = locationFix
+        cachedSpeedMps = locationFix.speedMps.takeIf { locationFix.quality == LocationFixQuality.VALID }
+        observer?.onLocationFixChanged(locationFix)
         fileLog(
             "Processing location: $lat, $lon " +
-                    "speedMps=${cachedSpeedMps ?: "na"} quality=${speedSnapshot.qualityOk}"
+                    "speedMps=${cachedSpeedMps ?: "na"} quality=${locationFix.quality}"
         )
 
         cachedLat = lat
@@ -223,13 +241,6 @@ class LocationWeatherService : Service() {
         cachedAccuracyM = if (location.hasAccuracy()) location.accuracy else null
         cachedBearingDeg = if (location.hasBearing()) location.bearing else null
 
-        // Coordinates are live data, independent of the much slower weather and
-        // reverse-geocode cadence. Publish every accepted fused fix so a connected
-        // glasses map keeps moving while the phone UI is backgrounded or locked.
-        payloadTimestamp = location.time.takeIf { it > 0L } ?: System.currentTimeMillis()
-        notifySnapshotChanged()
-
-        refreshCachedPayload(lat, lon, forceWeatherFetch = false)
     }
 
     /**
@@ -258,7 +269,7 @@ class LocationWeatherService : Service() {
                 if (needsWeatherFetch) {
                     lastWeatherFetch = now
                     // Explicit force-refreshes can push immediately when fresh data arrives.
-                    fetchWeather(lat, lon, sendImmediately = forceWeatherFetch)
+                    fetchWeather(lat, lon)
                 }
             } finally {
                 payloadRefreshInFlight.set(false)
@@ -266,7 +277,8 @@ class LocationWeatherService : Service() {
         }.start()
     }
 
-    private fun resolveSpeedSnapshot(location: Location): SpeedSnapshot {
+    private fun resolveLocationFix(location: Location): LocationFix {
+        val timestampMs = location.time.takeIf { it > 0L } ?: System.currentTimeMillis()
         val ageMs = System.currentTimeMillis() - location.time
         val ageOk = ageMs in 0..MAX_ACCEPTABLE_SPEED_AGE_MS
         val accuracyOk = !location.hasAccuracy() || location.accuracy <= MAX_ACCEPTABLE_ACCURACY_M
@@ -277,27 +289,23 @@ class LocationWeatherService : Service() {
         val previous = previousSpeedLocation
         previousSpeedLocation = Location(location)
         if (validSensorMps != null) {
-            return SpeedSnapshot(
+            return LocationFix(
+                lat = location.latitude,
+                lon = location.longitude,
+                accuracyM = location.accuracy.takeIf { location.hasAccuracy() },
+                bearingDeg = location.bearing.takeIf { location.hasBearing() },
                 speedMps = validSensorMps,
-                qualityOk = true,
-                timestampMs = location.time.takeIf { it > 0L } ?: System.currentTimeMillis()
+                quality = LocationFixQuality.VALID,
+                timestampMs = timestampMs
             )
         }
         if (previous == null) {
-            return SpeedSnapshot(
-                speedMps = null,
-                qualityOk = false,
-                timestampMs = location.time.takeIf { it > 0L } ?: System.currentTimeMillis()
-            )
+            return location.toFix(null, qualityForInvalidFix(location, ageOk, accuracyOk), timestampMs)
         }
 
         val deltaTimeMs = location.time - previous.time
         if (deltaTimeMs !in MIN_SPEED_ESTIMATE_INTERVAL_MS..MAX_SPEED_ESTIMATE_INTERVAL_MS) {
-            return SpeedSnapshot(
-                speedMps = null,
-                qualityOk = false,
-                timestampMs = location.time.takeIf { it > 0L } ?: System.currentTimeMillis()
-            )
+            return location.toFix(null, qualityForInvalidFix(location, ageOk, accuracyOk), timestampMs)
         }
 
         val rawDistanceM = previous.distanceTo(location).coerceAtLeast(0f)
@@ -309,27 +317,40 @@ class LocationWeatherService : Service() {
         val validEstimatedMps = estimatedMps.takeIf {
             it.isFinite() && it in 0f..MAX_REASONABLE_SPEED_MPS && ageOk && accuracyOk
         }
-        return SpeedSnapshot(
+        return location.toFix(
             speedMps = validEstimatedMps,
-            qualityOk = validEstimatedMps != null,
-            timestampMs = location.time.takeIf { it > 0L } ?: System.currentTimeMillis()
+            quality = if (validEstimatedMps != null) LocationFixQuality.VALID
+                else qualityForInvalidFix(location, ageOk, accuracyOk),
+            timestampMs = timestampMs
         )
     }
 
-    private fun notifySpeedSnapshotChanged(snapshot: SpeedSnapshot? = cachedSpeedSnapshot) {
-        snapshot ?: return
-        onSpeedSnapshotChanged?.invoke(snapshot)
+    private fun qualityForInvalidFix(location: Location, ageOk: Boolean, accuracyOk: Boolean): LocationFixQuality = when {
+        !ageOk -> LocationFixQuality.STALE
+        !accuracyOk -> LocationFixQuality.INACCURATE
+        location.hasSpeed() -> LocationFixQuality.IMPLAUSIBLE
+        else -> LocationFixQuality.MISSING
     }
+
+    private fun Location.toFix(speedMps: Float?, quality: LocationFixQuality, timestampMs: Long) = LocationFix(
+        lat = latitude,
+        lon = longitude,
+        accuracyM = accuracy.takeIf { hasAccuracy() },
+        bearingDeg = bearing.takeIf { hasBearing() },
+        speedMps = speedMps,
+        quality = quality,
+        timestampMs = timestampMs
+    )
 
     private fun updateLocationCacheForRefresh(location: Location) {
         cachedLat = location.latitude
         cachedLon = location.longitude
         cachedAccuracyM = if (location.hasAccuracy()) location.accuracy else null
         cachedBearingDeg = if (location.hasBearing()) location.bearing else null
-        val speedSnapshot = resolveSpeedSnapshot(location)
-        cachedSpeedSnapshot = speedSnapshot
-        cachedSpeedMps = if (speedSnapshot.qualityOk) speedSnapshot.speedMps else null
-        notifySpeedSnapshotChanged(speedSnapshot)
+        val locationFix = resolveLocationFix(location)
+        cachedLocationFix = locationFix
+        cachedSpeedMps = locationFix.speedMps.takeIf { locationFix.quality == LocationFixQuality.VALID }
+        observer?.onLocationFixChanged(locationFix)
     }
 
     private fun geocodeLocation(lat: Double, lon: Double) {
@@ -339,31 +360,28 @@ class LocationWeatherService : Service() {
                 cachedCountryCode = locationName.countryCode
                 payloadTimestamp = System.currentTimeMillis()
                 fileLog("Geocoded: $cachedTown, countryCode=$cachedCountryCode, timestamp=$payloadTimestamp")
-                notifySnapshotChanged()
+                notifyWeatherSnapshotChanged()
             }
             .onFailure { e ->
                 fileLog("Geocoding failed: ${e.message}")
             }
     }
 
-    private fun fetchWeather(lat: Double, lon: Double, sendImmediately: Boolean = false) {
+    private fun fetchWeather(lat: Double, lon: Double) {
         WeatherDataProvider.fetchWeatherAsync(lat, lon) { weatherData ->
             if (weatherData != null) {
                 cachedWeatherData = weatherData
                 // Update payload timestamp when weather data changes
                 payloadTimestamp = System.currentTimeMillis()
                 fileLog("Weather fetched: temp=${weatherData.tempCurrent}°C, desc=${weatherData.weatherDescCurrent}, timestamp=$payloadTimestamp")
-                // Send to glasses after weather is updated, ensuring data is synchronized
-                if (sendImmediately) {
-                    notifySnapshotChanged()
-                }
+                notifyWeatherSnapshotChanged()
             } else {
                 fileLog("Weather fetch failed - callback returned null")
             }
         }
     }
 
-    fun forceUpdateDetailed(callback: (Result<LocationWeatherSnapshot>) -> Unit) {
+    fun forceUpdateDetailed(callback: (Result<WeatherSnapshot>) -> Unit) {
         fileLog("Detailed force update requested")
         val lat = cachedLat
         val lon = cachedLon
@@ -393,7 +411,7 @@ class LocationWeatherService : Service() {
             }
     }
 
-    private fun requestCurrentLocationForDetailedRefresh(callback: (Result<LocationWeatherSnapshot>) -> Unit) {
+    private fun requestCurrentLocationForDetailedRefresh(callback: (Result<WeatherSnapshot>) -> Unit) {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             != PackageManager.PERMISSION_GRANTED) {
             callback(Result.failure(SecurityException("Location permission is not granted")))
@@ -421,7 +439,7 @@ class LocationWeatherService : Service() {
             }
     }
 
-    private fun requestSingleLocationUpdateForDetailedRefresh(callback: (Result<LocationWeatherSnapshot>) -> Unit) {
+    private fun requestSingleLocationUpdateForDetailedRefresh(callback: (Result<WeatherSnapshot>) -> Unit) {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             != PackageManager.PERMISSION_GRANTED) {
             callback(Result.failure(SecurityException("Location permission is not granted")))
@@ -432,7 +450,7 @@ class LocationWeatherService : Service() {
         val completed = AtomicBoolean(false)
         lateinit var singleUpdateCallback: LocationCallback
 
-        fun finish(result: Result<LocationWeatherSnapshot>) {
+        fun finish(result: Result<WeatherSnapshot>) {
             if (!completed.compareAndSet(false, true)) return
             fusedLocationClient.removeLocationUpdates(singleUpdateCallback)
             callback(result)
@@ -484,7 +502,7 @@ class LocationWeatherService : Service() {
     private fun refreshCachedPayloadDetailed(
         lat: Double,
         lon: Double,
-        callback: (Result<LocationWeatherSnapshot>) -> Unit
+        callback: (Result<WeatherSnapshot>) -> Unit
     ) {
         Thread {
             val failures = mutableListOf<Throwable>()
@@ -514,9 +532,9 @@ class LocationWeatherService : Service() {
                 }
 
             payloadTimestamp = System.currentTimeMillis()
-            val snapshot = getCurrentLocationData()
+            val snapshot = getCurrentWeatherSnapshot()
             if (snapshot != null) {
-                onLocationWeatherSnapshotChanged?.invoke(snapshot)
+                observer?.onWeatherSnapshotChanged(snapshot)
             }
 
             if (failures.isEmpty()) {
@@ -533,7 +551,7 @@ class LocationWeatherService : Service() {
         }.start()
     }
 
-    private fun notifySnapshotChanged() {
+    private fun notifyWeatherSnapshotChanged() {
         val town = cachedTown
         val countryCode = cachedCountryCode
 
@@ -541,17 +559,14 @@ class LocationWeatherService : Service() {
         // payloadTimestamp == 0 means data hasn't been refreshed this session (stale from previous run)
         if (town != null && countryCode != null && payloadTimestamp > 0) {
             // Send full weather data with description and timestamp for proper icon display
-            onLocationWeatherSnapshotChanged?.invoke(
-                LocationWeatherSnapshot(
+            observer?.onWeatherSnapshotChanged(
+                WeatherSnapshot(
                     town = town,
                     countryCode = countryCode,
                     weather = cachedWeatherData,
-                    timestampMs = payloadTimestamp,
-                    lat = cachedLat,
-                    lon = cachedLon,
-                    accuracyM = cachedAccuracyM,
-                    bearingDeg = cachedBearingDeg,
-                    speedMps = cachedSpeedMps
+                    fetchedAtMs = payloadTimestamp,
+                    forecastLat = cachedLat,
+                    forecastLon = cachedLon
                 )
             )
             fileLog("Location/weather snapshot changed: $town, countryCode=$countryCode, timestamp=$payloadTimestamp")
@@ -564,29 +579,26 @@ class LocationWeatherService : Service() {
      * Get current cached location data. Used by RfcommServer for immediate sends.
      * Returns town, countryCode, full WeatherData, and timestamp for proper display.
      */
-    fun getCurrentLocationData(): LocationWeatherSnapshot? {
+    fun getCurrentWeatherSnapshot(): WeatherSnapshot? {
         val town = cachedTown ?: return null
         val countryCode = cachedCountryCode ?: return null
-        return LocationWeatherSnapshot(
+        return WeatherSnapshot(
             town = town,
             countryCode = countryCode,
             weather = cachedWeatherData,
-            timestampMs = payloadTimestamp,
-            lat = cachedLat,
-            lon = cachedLon,
-            accuracyM = cachedAccuracyM,
-            bearingDeg = cachedBearingDeg,
-            speedMps = cachedSpeedMps
+            fetchedAtMs = payloadTimestamp,
+            forecastLat = cachedLat,
+            forecastLon = cachedLon
         )
     }
 
-    fun getCurrentSpeedSnapshot(): SpeedSnapshot? = cachedSpeedSnapshot
+    fun getCurrentLocationFix(): LocationFix? = cachedLocationFix
 
     /**
      * Force an immediate weather/location update and send to glasses.
      * Called when glasses wake from sleep or reconnect.
      */
-    fun refreshLocationWeatherNow(forceWeatherFetch: Boolean) {
+    fun refreshWeatherNow(forceWeatherFetch: Boolean) {
         val now = System.currentTimeMillis()
         if (forceWeatherFetch && now - lastForcedPayloadRefreshMs < 30_000L) {
             fileLog("Ignoring duplicate forced location/weather refresh")
@@ -619,6 +631,7 @@ class LocationWeatherService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         fusedLocationClient.removeLocationUpdates(locationCallback)
+        mainHandler.removeCallbacksAndMessages(null)
         wakeLock?.let { if (it.isHeld) it.release() }
         instance = null
         fileLog("LocationWeatherService destroyed")

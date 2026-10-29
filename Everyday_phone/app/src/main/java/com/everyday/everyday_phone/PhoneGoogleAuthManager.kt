@@ -9,6 +9,9 @@ import android.os.Looper
 import android.util.Log
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
+import com.everyday.shared.sync.CalendarAccount
+import com.everyday.shared.sync.CalendarEventSnapshot
+import com.everyday.shared.sync.CalendarSnapshot
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.AuthorizationResult
 import com.google.android.gms.auth.api.identity.Identity
@@ -32,20 +35,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 data class PhoneGoogleAccountSummary(
     val email: String,
     val displayName: String? = null
-)
-
-data class PhoneCalendarEvent(
-    val id: String,
-    val summary: String,
-    val startIso: String,
-    val htmlLink: String? = null
-)
-
-data class PhoneGoogleCalendarSnapshot(
-    val account: PhoneGoogleAccountSummary,
-    val events: List<PhoneCalendarEvent>,
-    val fetchedAtMs: Long,
-    val staleAfterMs: Long
 )
 
 data class PhoneGoogleAuthState(
@@ -93,7 +82,7 @@ class PhoneGoogleAuthManager(context: Context) {
     )
 
     private var pendingOnStateChanged: ((PhoneGoogleAuthState) -> Unit)? = null
-    private var pendingOnSnapshotChanged: ((PhoneGoogleCalendarSnapshot?) -> Unit)? = null
+    private var pendingOnSnapshotChanged: ((CalendarSnapshot?) -> Unit)? = null
 
     fun loadState(): PhoneGoogleAuthState {
         val email = prefs.getString(KEY_EMAIL, null)
@@ -115,27 +104,27 @@ class PhoneGoogleAuthManager(context: Context) {
         }
     }
 
-    fun loadCachedSnapshot(): PhoneGoogleCalendarSnapshot? {
+    fun loadCachedSnapshot(): CalendarSnapshot? {
         val raw = prefs.getString(KEY_LAST_SNAPSHOT, null) ?: return null
         return runCatching {
             val root = JSONObject(raw)
             val accountJson = root.getJSONObject("account")
-            val account = PhoneGoogleAccountSummary(
+            val account = CalendarAccount(
                 email = accountJson.optString("email"),
                 displayName = accountJson.optString("displayName").takeIf { it.isNotBlank() }
             )
-            val events = mutableListOf<PhoneCalendarEvent>()
+            val events = mutableListOf<CalendarEventSnapshot>()
             val items = root.optJSONArray("events") ?: JSONArray()
             for (index in 0 until items.length()) {
                 val item = items.optJSONObject(index) ?: continue
-                events += PhoneCalendarEvent(
+                events += CalendarEventSnapshot(
                     id = item.optString("id"),
                     summary = item.optString("summary"),
                     startIso = item.optString("startIso"),
                     htmlLink = item.optString("htmlLink").takeIf { it.isNotBlank() }
                 )
             }
-            PhoneGoogleCalendarSnapshot(
+            CalendarSnapshot(
                 account = account,
                 events = events,
                 fetchedAtMs = root.optLong("fetchedAtMs", 0L),
@@ -148,7 +137,7 @@ class PhoneGoogleAuthManager(context: Context) {
         activity: Activity,
         launcher: ActivityResultLauncher<IntentSenderRequest>,
         onStateChanged: (PhoneGoogleAuthState) -> Unit,
-        onSnapshotChanged: (PhoneGoogleCalendarSnapshot?) -> Unit
+        onSnapshotChanged: (CalendarSnapshot?) -> Unit
     ) {
         pendingOnStateChanged = onStateChanged
         pendingOnSnapshotChanged = onSnapshotChanged
@@ -277,7 +266,7 @@ class PhoneGoogleAuthManager(context: Context) {
     }
 
     fun refreshSnapshotSilently(
-        callback: (Result<PhoneGoogleCalendarSnapshot>) -> Unit
+        callback: (Result<CalendarSnapshot>) -> Unit
     ) {
         val account = loadState().account
         if (account == null) {
@@ -465,7 +454,7 @@ class PhoneGoogleAuthManager(context: Context) {
         }
     }
 
-    private fun postSnapshotChanged(snapshot: PhoneGoogleCalendarSnapshot?) {
+    private fun postSnapshotChanged(snapshot: CalendarSnapshot?) {
         mainHandler.post {
             pendingOnSnapshotChanged?.invoke(snapshot)
         }
@@ -483,7 +472,9 @@ class PhoneGoogleAuthManager(context: Context) {
                         postStateChanged(
                             PhoneGoogleAuthState(
                                 status = PhoneGoogleAuthState.Status.AUTHORIZED,
-                                account = snapshot.account,
+                                account = snapshot.account?.let {
+                                    PhoneGoogleAccountSummary(it.email, it.displayName)
+                                },
                                 detail = AUTHORIZED_READY_DETAIL
                             )
                         )
@@ -597,7 +588,7 @@ class PhoneGoogleAuthManager(context: Context) {
     private fun fetchCalendarSnapshot(
         accessToken: String,
         account: PhoneGoogleAccountSummary
-    ): PhoneGoogleCalendarSnapshot {
+    ): CalendarSnapshot {
         val encodedTimeMin = URLEncoder.encode(currentUtcIso(), Charsets.UTF_8.name())
         val url = URL(
             "https://www.googleapis.com/calendar/v3/calendars/primary/events" +
@@ -625,13 +616,13 @@ class PhoneGoogleAuthManager(context: Context) {
 
             val root = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
             val items = root.optJSONArray("items") ?: JSONArray()
-            val events = mutableListOf<PhoneCalendarEvent>()
+            val events = mutableListOf<CalendarEventSnapshot>()
             for (index in 0 until items.length()) {
                 val item = items.optJSONObject(index) ?: continue
                 val start = item.optJSONObject("start")
                 val startIso = start?.optString("dateTime")?.takeIf { it.isNotBlank() }
                     ?: start?.optString("date").orEmpty()
-                events += PhoneCalendarEvent(
+                events += CalendarEventSnapshot(
                     id = item.optString("id"),
                     summary = item.optString("summary", "(No title)"),
                     startIso = startIso,
@@ -639,8 +630,8 @@ class PhoneGoogleAuthManager(context: Context) {
                 )
             }
 
-            return PhoneGoogleCalendarSnapshot(
-                account = account,
+            return CalendarSnapshot(
+                account = CalendarAccount(account.email, account.displayName),
                 events = events,
                 fetchedAtMs = System.currentTimeMillis(),
                 staleAfterMs = SNAPSHOT_STALE_AFTER_MS
@@ -653,7 +644,7 @@ class PhoneGoogleAuthManager(context: Context) {
     private fun fetchCalendarSnapshotWithRetry(
         accessToken: String,
         account: PhoneGoogleAccountSummary
-    ): PhoneGoogleCalendarSnapshot {
+    ): CalendarSnapshot {
         repeat(HTTP_REQUEST_MAX_ATTEMPTS) { attempt ->
             try {
                 return fetchCalendarSnapshot(accessToken, account)
@@ -727,15 +718,16 @@ class PhoneGoogleAuthManager(context: Context) {
             .apply()
     }
 
-    private fun saveSnapshot(snapshot: PhoneGoogleCalendarSnapshot) {
+    private fun saveSnapshot(snapshot: CalendarSnapshot) {
+        val account = snapshot.account ?: return
         val root = JSONObject().apply {
             put("fetchedAtMs", snapshot.fetchedAtMs)
             put("staleAfterMs", snapshot.staleAfterMs)
             put(
                 "account",
                 JSONObject().apply {
-                    put("email", snapshot.account.email)
-                    put("displayName", snapshot.account.displayName)
+                    put("email", account.email)
+                    put("displayName", account.displayName)
                 }
             )
             put(
@@ -758,7 +750,7 @@ class PhoneGoogleAuthManager(context: Context) {
     }
 
     private fun isSnapshotStale(
-        snapshot: PhoneGoogleCalendarSnapshot,
+        snapshot: CalendarSnapshot,
         nowMs: Long = System.currentTimeMillis()
     ): Boolean {
         val staleAfterMs = snapshot.staleAfterMs.takeIf { it > 0L } ?: SNAPSHOT_STALE_AFTER_MS
@@ -766,16 +758,16 @@ class PhoneGoogleAuthManager(context: Context) {
     }
 
     private fun finishSnapshotRefresh(
-        callback: (Result<PhoneGoogleCalendarSnapshot>) -> Unit,
-        result: Result<PhoneGoogleCalendarSnapshot>
+        callback: (Result<CalendarSnapshot>) -> Unit,
+        result: Result<CalendarSnapshot>
     ) {
         snapshotRefreshInFlight.set(false)
         postSnapshotRefreshResult(callback, result)
     }
 
     private fun postSnapshotRefreshResult(
-        callback: (Result<PhoneGoogleCalendarSnapshot>) -> Unit,
-        result: Result<PhoneGoogleCalendarSnapshot>
+        callback: (Result<CalendarSnapshot>) -> Unit,
+        result: Result<CalendarSnapshot>
     ) {
         mainHandler.post {
             callback(result)

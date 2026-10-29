@@ -1,10 +1,19 @@
 # Project Notes For Agents
 
 ## Scope
+
 - This repo contains two Android apps: `Everyday_glasses` and `Everyday_phone`.
 - Treat `Everyday_glasses` as the primary AR-glasses runtime target.
 
+- 
+
+## Widgets
+
+- Each widget type of `Everyday_glasses` is one package under `app/src/main/java/com/everyday/everyday_glasses/widgets/` and one line in `widgets/WidgetPlugins.kt`, whose KDoc says how to add one. `widgets/clock` is the smallest example.
+- The container, the activity and the engine (`runtime/`, `persistence/`) name no widget type. Keep it that way: a widget reaches the app through `WidgetContext`, the app's data through `AppData` channels, and the activity through `WidgetHost`.
+
 ## Build And Run (Human Workflow)
+
 - Primary workflow is Android Studio.
 - Usual build/deploy path is: press the Run button (green triangle) in Android Studio.
 - Prefer validating changes by running from Android Studio run configurations instead of assuming CLI Gradle wrappers are available.
@@ -14,6 +23,7 @@
 - Allow at least 5 minutes for a cold `Everyday_glasses` build. In the 0.9.1 release session, the first test/release build exceeded a 124-second shell timeout; the cached rerun completed in about 13 seconds. Do not treat the two-minute timeout alone as a Gradle failure.
 
 ## Target Device (RayNeo X3 Pro)
+
 - Chip platform: Qualcomm Snapdragon AR1 Gen1
 - Memory/storage: 4 GB RAM + 32 GB ROM
 - Display: 0.36cc full-color MicroLED optical engine + diffractive waveguide
@@ -37,6 +47,7 @@
 - Operating system: RayNeo AI OS 2.0
 
 ## Absolute North / Compass Conventions
+
 - For a north-aligned top-down map, prefer Android `TYPE_GEOMAGNETIC_ROTATION_VECTOR`. On this device it preserves absolute magnetic orientation across display off/on sessions; the standard rotation vector was observed re-anchoring yaw between sessions. `TYPE_GAME_ROTATION_VECTOR` is smoother for relative head motion but cannot determine north.
 - In the verified RayNeo sensor frame, local `+Y` is vertical and optical forward is local `-Z`. After converting the quaternion to Android's row-major rotation matrix, optical-forward east/north are `-matrix[2]` and `-matrix[5]`; compute magnetic heading with `atan2(east, north)`, convert to degrees, and normalize to `[0, 360)`.
 - Add location-based `GeomagneticField.declination` only when true/geographic north is required. Do not use a fixed heading bias.

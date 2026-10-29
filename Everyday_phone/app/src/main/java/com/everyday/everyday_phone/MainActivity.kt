@@ -2,20 +2,21 @@ package com.everyday.everyday_phone
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.app.AlertDialog
 import android.content.ClipboardManager
-import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
@@ -39,17 +40,24 @@ import androidx.core.content.ContextCompat
 import com.everyday.shared.sync.SubtitleControl
 import com.everyday.shared.sync.SubtitleControlAction
 import com.everyday.shared.sync.SubtitleOptions
+import com.everyday.shared.transport.AssistantControl
+import com.everyday.shared.transport.AssistantControlAction
+import com.everyday.shared.transport.AssistantSessionState
+import com.everyday.shared.transport.AssistantStatus
 import java.io.ByteArrayOutputStream
+import java.util.UUID
+import androidx.core.net.toUri
+import androidx.core.graphics.scale
+import androidx.core.content.edit
 
 /**
  * Phone app with trackpad for cursor control on glasses.
  * Shows a soft keyboard when a text field is focused on the glasses.
- * Can mirror phone screen to glasses over WiFi.
+ * Can mirror phone screen to glasses over Wi-Fi.
  */
 class MainActivity : AppCompatActivity() {
     
     companion object {
-        private const val TAG = "Everyday_phone"
         private const val REQUEST_PERMISSIONS = 1
         private const val REQUEST_BACKGROUND_LOCATION = 2
         private const val ACTION_START_MIRROR = "com.everyday.everyday_phone.START_MIRROR"
@@ -57,13 +65,15 @@ class MainActivity : AppCompatActivity() {
         private const val ACTION_DEBUG_STOP_SUBTITLE = "com.everyday.everyday_phone.DEBUG_STOP_SUBTITLE"
         private const val REQUEST_CHANNEL_ID = "mirror_request_channel"
         private const val REQUEST_NOTIFICATION_ID = 2002
+        private const val REMOTE_CONTROL_NOTIFICATION_ID = 2003
+        private const val MIRROR_RECONNECT_GRACE_MS = 60_000L
 
         private const val REQUEST_WIFI_DIRECT_PERMISSIONS = 2001
-        private const val REQUEST_IMAGE_PICKER = 2002
         private const val REQUEST_IMAGE_PERMISSION = 2003
         private const val REQUEST_SUBTITLE_AUDIO_PERMISSION = 2004
         private const val PREFS_NAME = "everyday_phone"
         private const val KEY_NOTIFICATION_ACCESS_PROMPT_DISMISSED = "notification_access_prompt_dismissed"
+        private const val ASSISTANT_RELEASE_TIMEOUT_MS = 4_000L
     }
 
     private enum class ProjectionPurpose {
@@ -88,8 +98,35 @@ class MainActivity : AppCompatActivity() {
     private lateinit var openOnGlassesButton: ImageButton
     private var mirrorButton: Button? = null
     private var imagePickerButton: Button? = null
+    private lateinit var assistantPushToTalkButton: Button
+    private val assistantHandler = Handler(Looper.getMainLooper())
+
+    /** Ends a mirror whose glasses went away and didn't come back within MIRROR_RECONNECT_GRACE_MS. */
+    private val stopMirrorWithoutGlasses = Runnable {
+        if (isMirroringEnabled && !isGlassesConnected) {
+            fileLog("Glasses didn't reconnect; stopping mirroring")
+            stopMirroring()
+        }
+    }
+private var assistantStatus: AssistantStatus? = null
+    private var assistantSessionId: String? = null
+    private var assistantStopPendingSessionId: String? = null
+    private var assistantStopTimeout: Runnable? = null
+    private val assistantKeepalive = object : Runnable {
+        override fun run() {
+            val id = assistantSessionId ?: return
+            if (sendAssistantControl(id, AssistantControlAction.KEEPALIVE)) {
+                assistantHandler.postDelayed(this, 2_000L)
+            } else {
+                fileLog("Assistant keepalive could not be sent; resetting local push-to-talk state")
+                cancelAssistantPushToTalk()
+            }
+        }
+    }
     private lateinit var phoneGoogleAuthManager: PhoneGoogleAuthManager
     private lateinit var dataSyncCoordinator: PhoneDataSyncCoordinator
+    private lateinit var phoneRouteCoordinator: PhoneRouteCalculationCoordinator
+    private lateinit var phoneDestinationSearchCoordinator: PhoneDestinationSearchCoordinator
     
     private var rfcommServer: RfcommServer? = null
     private lateinit var transportManager: TransportManager
@@ -142,13 +179,13 @@ class MainActivity : AppCompatActivity() {
             // Try to show in UI (may not work if UI thread crashed)
             try {
                 runOnUiThread {
-                    android.widget.Toast.makeText(
+                    Toast.makeText(
                         this,
                         "Crash: ${throwable.message}",
-                        android.widget.Toast.LENGTH_LONG
+                        Toast.LENGTH_LONG
                     ).show()
                 }
-            } catch (e: Exception) {}
+            } catch (_: Exception) {}
             previousCrashHandler?.uncaughtException(thread, throwable)
                 ?: run {
                     android.os.Process.killProcess(android.os.Process.myPid())
@@ -172,6 +209,7 @@ class MainActivity : AppCompatActivity() {
         closeButton = findViewById(R.id.closeButton)
         linkInput = findViewById(R.id.linkInput)
         openOnGlassesButton = findViewById(R.id.openOnGlassesButton)
+        assistantPushToTalkButton = findViewById(R.id.assistantPushToTalkButton)
 
         transportManager = TransportManager(
             rfcommServerProvider = { rfcommServer },
@@ -182,10 +220,18 @@ class MainActivity : AppCompatActivity() {
 
         dataSyncCoordinator = PhoneDataSyncCoordinator(
             context = this,
-            syncMessengerProvider = { transportManager },
-            googleAuthStateSender = { state -> transportManager.sendGoogleAuthState(state) },
+            syncMessengerProvider = { rfcommServer },
+            googleAuthStateSender = { state ->
+                rfcommServer?.sendGoogleAuthState(state.status, state.account, state.detail)
+            },
             googleAuthManager = phoneGoogleAuthManager,
             hasLocationPermission = { hasLocationPermission() }
+        )
+        phoneRouteCoordinator = PhoneRouteCalculationCoordinator(
+            transportProvider = { rfcommServer }
+        )
+        phoneDestinationSearchCoordinator = PhoneDestinationSearchCoordinator(
+            transportProvider = { rfcommServer }
         )
 
         setupRefreshButton()
@@ -197,47 +243,59 @@ class MainActivity : AppCompatActivity() {
         }
         
         rfcommServer = RfcommServer(this).apply {
-            onStatusChanged = { status ->
-                runOnUiThread { 
+            deviceListener = object : RfcommServer.DeviceListener {
+                override fun onServerStatusChanged(status: String) {
+                    this@MainActivity.runOnUiThread {
                     // Minimalist design: don't show verbose status
                     // statusText.text = status 
-                }
-            }
-            onConnectionChanged = { connected ->
-                // Connection and location/sync startup must not wait for a
-                // potentially busy UI thread.  The foreground service is what
-                // keeps live phone location available behind the lock screen.
-                Thread {
-                    dataSyncCoordinator.onConnectionChanged(connected)
-                }.start()
-                runOnUiThread { 
-                    isGlassesConnected = connected
-                    if (!connected) {
-                        glassesBatteryPercent = null
-                        lastSentClipboard = null  // Reset on disconnect
-                    } else {
-                        // Also send current clipboard so glasses have it
-                        sendCurrentClipboardToGlasses()
-                        sendPendingSharedAddress()
                     }
-                    updateStatusDisplay()
-                    trackpad.alpha = if (connected) 1.0f else 0.5f
-                    updateMirrorButton()
-                    updateImagePickerButton()
-                    updateOpenOnGlassesButton()
+                }
 
-                    if (!connected) {
-                        hideKeyboard()
-                        // Stop mirroring when glasses disconnect
-                        if (isMirroringEnabled) {
-                            stopMirroring()
+                override fun onConnectionChanged(connected: Boolean) {
+                    phoneRouteCoordinator.onConnectionChanged(connected)
+                    phoneDestinationSearchCoordinator.onConnectionChanged(connected)
+                    // Connection and location/sync startup must not wait for a
+                    // potentially busy UI thread.  The foreground service is what
+                    // keeps live phone location available behind the lock screen.
+                    Thread {
+                        dataSyncCoordinator.onConnectionChanged(connected)
+                    }.start()
+                    this@MainActivity.runOnUiThread {
+                        isGlassesConnected = connected
+                        if (!connected) {
+                            glassesBatteryPercent = null
+                            lastSentClipboard = null  // Reset on disconnect
+                            assistantStatus = null
+                        } else {
+                            // Also send current clipboard so glasses have it
+                            sendCurrentClipboardToGlasses()
+                            sendPendingSharedAddress()
+                            assistantHandler.removeCallbacks(stopMirrorWithoutGlasses)
+                            transportManager.resendMirrorState()
                         }
-                        phoneSubtitleCoordinator?.stop()
+                        updateStatusDisplay()
+                        trackpad.alpha = if (connected) 1.0f else 0.5f
+                        updateMirrorButton()
+                        updateImagePickerButton()
+                        updateOpenOnGlassesButton()
+                        if (!connected) cancelAssistantPushToTalk()
+                        updateAssistantPushToTalk()
+
+                        if (!connected) {
+                            hideKeyboard()
+                            // Keep mirroring through a short disconnection (the glasses app restarting,
+                            // a Bluetooth dropout): the screen capture can't restart without the user.
+                            if (isMirroringEnabled) {
+                                assistantHandler.removeCallbacks(stopMirrorWithoutGlasses)
+                                assistantHandler.postDelayed(stopMirrorWithoutGlasses, MIRROR_RECONNECT_GRACE_MS)
+                            }
+                            phoneSubtitleCoordinator?.stop()
+                        }
                     }
                 }
-            }
-            onTextFieldFocusChanged = { focused ->
-                runOnUiThread {
+
+                override fun onTextFieldFocusChanged(focused: Boolean) {
+                    this@MainActivity.runOnUiThread {
                     if (focused) {
                         showKeyboard()
                         // Send clipboard when text field is focused (so paste is available)
@@ -245,73 +303,127 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         hideKeyboard()
                     }
+                    }
                 }
-            }
-            onBatteryChanged = { batteryPercent ->
-                runOnUiThread {
+
+                override fun onGlassesBatteryChanged(batteryPercent: Int) {
+                    this@MainActivity.runOnUiThread {
                     glassesBatteryPercent = batteryPercent
                     updateStatusDisplay()
+                    }
                 }
             }
-            onMirrorActionRequested = { start ->
-                runOnUiThread {
+
+            phoneActionListener = object : RfcommServer.PhoneActionListener {
+                override fun onMirrorActionRequested(start: Boolean) {
+                    this@MainActivity.runOnUiThread {
                     if (start) {
                         startMirroringFromBackground()
                     } else {
                         stopMirroring()
                     }
+                    }
                 }
-            }
-            
-            onClipboardRequested = {
-                runOnUiThread {
-                    sendCurrentClipboardToGlasses()
+
+                override fun onClipboardRequested() {
+                    this@MainActivity.runOnUiThread {
+                        sendCurrentClipboardToGlasses()
+                    }
+                }
+
+                override fun onGoogleAuthRequested() {
+                    this@MainActivity.runOnUiThread {
+                        beginPhoneGoogleAuthorization()
+                    }
+                }
+
+                override fun onGoogleDisconnectRequested() {
+                    this@MainActivity.runOnUiThread {
+                        disconnectPhoneGoogleAuthorization()
+                    }
                 }
             }
 
-            onGoogleAuthRequested = {
-                runOnUiThread {
-                    beginPhoneGoogleAuthorization()
-                }
-            }
-
-            onGoogleDisconnectRequested = {
-                runOnUiThread {
-                    disconnectPhoneGoogleAuthorization()
-                }
-            }
-
-            onSyncRequested = { request ->
-                Thread {
+            dataRequestListener = object : RfcommServer.DataRequestListener {
+                override fun onSyncRequested(request: com.everyday.shared.sync.SyncRequest) {
                     dataSyncCoordinator.onSyncRequest(request)
-                }.start()
+                }
+
+                override fun onRouteRequestReceived(request: com.everyday.shared.transport.RouteTransportRequest) {
+                    phoneRouteCoordinator.onRouteRequest(request)
+                }
+
+                override fun onRouteCancellationReceived(cancellation: com.everyday.shared.transport.RouteTransportCancellation) {
+                    phoneRouteCoordinator.onRouteCancellation(cancellation)
+                }
+
+                override fun onDestinationSearchRequestReceived(request: com.everyday.shared.transport.DestinationSearchRequest) {
+                    phoneDestinationSearchCoordinator.onSearchRequest(request)
+                }
+
+                override fun onDestinationSearchCancellationReceived(cancellation: com.everyday.shared.transport.DestinationSearchCancellation) {
+                    phoneDestinationSearchCoordinator.onSearchCancellation(cancellation)
+                }
+
+                override fun onHttpRelayRequested(request: com.everyday.shared.transport.TransportMessage.HttpRelayRequest) {
+                    dataSyncCoordinator.onHttpRelayRequest(request)
+                }
+
+                override fun onMediaChunkReceived(chunk: com.everyday.shared.transport.TransportMessage.MediaChunk) {
+                    dataSyncCoordinator.onMediaChunk(chunk)
+                }
             }
 
-            onSubtitleControlRequested = { control ->
-                runOnUiThread {
-                    phoneSubtitleCoordinator?.onControl(control)
+            experienceControlListener = object : RfcommServer.ExperienceControlListener {
+                override fun onSubtitleControlRequested(control: SubtitleControl) {
+                    this@MainActivity.runOnUiThread {
+                        phoneSubtitleCoordinator?.onControl(control)
+                    }
+                }
+
+                override fun onAssistantStatusReceived(status: AssistantStatus) {
+                    this@MainActivity.runOnUiThread {
+                    showAssistantErrorToast(status)
+                    assistantStatus = status
+                    if (status.sessionId == assistantSessionId && status.state != AssistantSessionState.LISTENING) {
+                        assistantHandler.removeCallbacks(assistantKeepalive)
+                        assistantSessionId = null
+                    }
+                    val pendingStop = assistantStopPendingSessionId
+                    if (
+                        pendingStop != null &&
+                        status.state != AssistantSessionState.LISTENING &&
+                        (status.sessionId == pendingStop || status.state == AssistantSessionState.IDLE)
+                    ) {
+                        clearAssistantStopPending(pendingStop)
+                    }
+                    updateAssistantPushToTalk()
+                    }
                 }
             }
         }
         
         // Initialize screen stream server
         screenStreamServer = ScreenStreamServer(this).apply {
-            onStreamingStateChanged = { streaming ->
-                runOnUiThread {
+            streamingListener = object : ScreenStreamServer.StreamingListener {
+                override fun onStreamingStateChanged(streaming: Boolean) {
+                    this@MainActivity.runOnUiThread {
                     fileLog("Streaming state changed: $streaming")
                     // Don't overwrite detailed status updates
                 }
-            }
-            onError = { error ->
-                runOnUiThread {
+                }
+
+                override fun onStreamError(error: String) {
+                    this@MainActivity.runOnUiThread {
                     fileLog("Stream error: $error")
                     // DEBUG: coordsText commented out for minimalist design
                     // coordsText.text = "❌ $error"
                     // coordsText.setTextColor(0xFFFF6666.toInt())
                 }
-            }
-            onStatusUpdate = { status ->
-                runOnUiThread {
+                }
+
+                override fun onStreamStatusChanged(status: String) {
+                    this@MainActivity.runOnUiThread {
                     fileLog("Stream status: $status")
                     // DEBUG: coordsText commented out for minimalist design
                     // coordsText.text = status
@@ -320,9 +432,15 @@ class MainActivity : AppCompatActivity() {
                     //     coordsText.setTextColor(0xFF00FF00.toInt())
                     // }
                 }
-            }
-            onOrientationChanged = { isLandscape ->
-                // Orientation button removed - no action needed
+                }
+
+                override fun onCaptureOrientationChanged(isLandscape: Boolean) {
+                    // Orientation button removed - no action needed
+                }
+
+                override fun onRemoteControlUnavailable() {
+                    this@MainActivity.runOnUiThread { showRemoteControlSetupNotification() }
+                }
             }
         }
 
@@ -344,6 +462,7 @@ class MainActivity : AppCompatActivity() {
         setupKeyboard()
         setupImagePickerButton()
         setupMirrorButton()
+        setupAssistantPushToTalk()
         setupClipboardMonitoring()
         
         if (hasPermissions()) {
@@ -361,16 +480,16 @@ class MainActivity : AppCompatActivity() {
         checkWifiDirectPermissions()
         
         // Check for overlay permission to allow background starts
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            android.widget.Toast.makeText(
+        if (!Settings.canDrawOverlays(this)) {
+            Toast.makeText(
                 this,
                 "Please grant 'Display over other apps' to allow background mirroring",
-                android.widget.Toast.LENGTH_LONG
+                Toast.LENGTH_LONG
             ).show()
             
             val intent = Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")
+                "package:$packageName".toUri()
             )
             startActivity(intent)
         }
@@ -382,37 +501,23 @@ class MainActivity : AppCompatActivity() {
 
     private fun initializeWifiDirect() {
         wifiDirectManager = WifiDirectManager(this).apply {
-            onGroupFormed = { ownerIp ->
-                fileLog("WiFi Direct group formed, IP: $ownerIp")
-                runOnUiThread {
-                    Toast.makeText(this@MainActivity, "WiFi Direct ready: $ownerIp", Toast.LENGTH_SHORT).show()
+            connectionListener = object : WifiDirectManager.ConnectionListener {
+                override fun onGroupFormed(ownerIp: String) {
+                    fileLog("WiFi Direct group formed, IP: $ownerIp")
                 }
 
-                when (transportManager.onWifiDirectGroupFormed(ownerIp, isMirroringEnabled)) {
-                    TransportManager.MirrorStartAction.REQUEST_PROJECTION -> {
-                        runOnUiThread {
-                            pendingProjectionPurpose = ProjectionPurpose.MIRROR
-                            screenStreamServer?.requestPermission(this@MainActivity)
-                        }
-                    }
-                    else -> Unit
+                override fun onGroupRemoved() {
+                    fileLog("WiFi Direct group removed")
                 }
-            }
 
-            onGroupRemoved = {
-                fileLog("WiFi Direct group removed")
-            }
-
-            onError = { error ->
-                fileLog("WiFi Direct error: $error")
-                runOnUiThread {
-                    Toast.makeText(this@MainActivity, "WiFi Direct: $error", Toast.LENGTH_SHORT).show()
-                    transportManager.onWifiDirectError()
+                override fun onError(error: String) {
+                    fileLog("WiFi Direct error: $error")
                 }
-            }
 
-            onStateChanged = { enabled ->
-                fileLog("WiFi Direct enabled: $enabled")
+                override fun onStateChanged(enabled: Boolean) {
+                    fileLog("WiFi Direct enabled: $enabled")
+                    if (::transportManager.isInitialized) transportManager.onWifiDirectStateChanged(enabled)
+                }
             }
 
             initialize()
@@ -445,6 +550,25 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Android lets the app read the clipboard only while it's in front: send it to the glasses then,
+     * so text copied in another app (an API key, say) can be pasted there.
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && clipboardManager != null) onClipboardChanged()
+    }
+
+    /** A voice assistant error shows as a toast with its short reason ("HTTP 404: ..."), once per error. */
+    private fun showAssistantErrorToast(status: AssistantStatus) {
+        if (status.state != AssistantSessionState.ERROR) return
+        val detail = status.detail ?: "Unknown error"
+        val previous = assistantStatus
+        if (previous?.state == AssistantSessionState.ERROR && previous.detail == detail && previous.sessionId == status.sessionId) return
+        fileLog("Voice assistant error: $detail")
+        Toast.makeText(this, "Voice assistant: $detail", Toast.LENGTH_LONG).show()
+    }
+
     private fun handleIntent(intent: Intent?) {
         if (handleSharedTextIntent(intent)) {
             return
@@ -475,7 +599,7 @@ class MainActivity : AppCompatActivity() {
         if (intent?.action == ACTION_START_MIRROR) {
             fileLog("Received start mirror intent")
             // Cancel notification
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            val notificationManager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
             notificationManager.cancel(REQUEST_NOTIFICATION_ID)
             
             // Start mirroring
@@ -576,12 +700,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun hasInternetConnection(): Boolean {
-        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        return connectivityManager.allNetworks.any { network ->
-            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return@any false
-            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+        val connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+        val capabilities = connectivityManager.getNetworkCapabilities(connectivityManager.activeNetwork) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
                 capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-        }
     }
 
     private fun showRefreshErrorDialog(message: String) {
@@ -614,6 +736,7 @@ class MainActivity : AppCompatActivity() {
     }
     
     override fun onDestroy() {
+        cancelAssistantPushToTalk()
         super.onDestroy()
         fileLog("MainActivity onDestroy isFinishing=$isFinishing isChangingConfigurations=$isChangingConfigurations")
 
@@ -621,6 +744,12 @@ class MainActivity : AppCompatActivity() {
         clipboardManager?.removePrimaryClipChangedListener(clipboardListener)
 
         rfcommServer?.stop()
+        if (::phoneRouteCoordinator.isInitialized) {
+            phoneRouteCoordinator.release()
+        }
+        if (::phoneDestinationSearchCoordinator.isInitialized) {
+            phoneDestinationSearchCoordinator.release()
+        }
         phoneSubtitleCoordinator?.release()
         screenStreamServer?.release()
         wifiDirectManager?.release()
@@ -643,7 +772,7 @@ class MainActivity : AppCompatActivity() {
                 val purpose = pendingProjectionPurpose
                 pendingProjectionPurpose = ProjectionPurpose.NONE
 
-                if (resultCode == Activity.RESULT_OK && data != null) {
+                if (resultCode == RESULT_OK && data != null) {
                     fileLog("Starting foreground service...")
                     val needsAudioCapture = purpose == ProjectionPurpose.SUBTITLE
                     if (!ScreenCaptureService.start(this, includeAudioCapture = needsAudioCapture)) {
@@ -660,7 +789,7 @@ class MainActivity : AppCompatActivity() {
                     // Android requires the typed foreground service to exist before
                     // getMediaProjection(), and stale/null service restarts are ignored
                     // inside ScreenCaptureService.
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    Handler(Looper.getMainLooper()).postDelayed({
                         try {
                             fileLog("Getting MediaProjection...")
                             if (screenStreamServer?.onPermissionResult(resultCode, data) == true) {
@@ -708,10 +837,6 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 fileLog("Error in onActivityResult: ${e.message}\n${e.stackTraceToString()}")
                 // DEBUG: coordsText.text = "Error: ${e.message}"
-            }
-        } else if (requestCode == REQUEST_IMAGE_PICKER) {
-            if (resultCode == Activity.RESULT_OK && data?.data != null) {
-                handleSelectedImage(data.data!!)
             }
         }
     }
@@ -876,7 +1001,7 @@ class MainActivity : AppCompatActivity() {
     private fun clearLinkInputFocus() {
         if (!::linkInput.isInitialized) return
         linkInput.clearFocus()
-        val inputMethodManager = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        val inputMethodManager = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         inputMethodManager.hideSoftInputFromWindow(linkInput.windowToken, 0)
     }
 
@@ -905,6 +1030,10 @@ class MainActivity : AppCompatActivity() {
      * Open the system image picker to select an image to send to glasses.
      * Requests permission first if not already granted.
      */
+    private val imagePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK) result.data?.data?.let(::handleSelectedImage)
+    }
+
     private fun openImagePicker() {
         if (!hasImagePermission()) {
             requestImagePermission()
@@ -914,7 +1043,7 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(Intent.ACTION_PICK).apply {
             type = "image/*"
         }
-        startActivityForResult(intent, REQUEST_IMAGE_PICKER)
+        imagePicker.launch(intent)
     }
 
     /**
@@ -973,7 +1102,7 @@ class MainActivity : AppCompatActivity() {
                     val scale = maxDimension.toFloat() / maxOf(originalBitmap.width, originalBitmap.height)
                     val newWidth = (originalBitmap.width * scale).toInt()
                     val newHeight = (originalBitmap.height * scale).toInt()
-                    Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true).also {
+                    originalBitmap.scale(newWidth, newHeight).also {
                         if (it != originalBitmap) originalBitmap.recycle()
                     }
                 } else {
@@ -1043,7 +1172,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Location is needed for WiFi Direct on older Android versions
+        // Location is needed for Wi-Fi Direct on older Android versions
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             != PackageManager.PERMISSION_GRANTED) {
             permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -1078,6 +1207,161 @@ class MainActivity : AppCompatActivity() {
             alpha = if (isGlassesConnected) 1.0f else 0.5f
         }
     }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupAssistantPushToTalk() {
+        assistantPushToTalkButton.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (!assistantPushToTalkButton.isEnabled) return@setOnTouchListener false
+                    if (assistantSessionId == null) {
+                        val id = UUID.randomUUID().toString()
+                        assistantSessionId = id
+                        val sent = sendAssistantControl(id, AssistantControlAction.START)
+                        if (sent) {
+                            assistantHandler.postDelayed(assistantKeepalive, 2_000L)
+                        } else {
+                            fileLog("Assistant start was not delivered; clearing local session=$id")
+                            assistantSessionId = null
+                        }
+                        updateAssistantPushToTalk()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    finishAssistantPushToTalk(AssistantControlAction.STOP)
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    finishAssistantPushToTalk(AssistantControlAction.CANCEL)
+                    true
+                }
+                else -> true
+                }
+            }
+        updateAssistantPushToTalk()
+    }
+
+    private fun sendAssistantControl(sessionId: String, action: AssistantControlAction): Boolean {
+        val sent = rfcommServer?.sendAssistantControl(
+            AssistantControl(sessionId, action, System.currentTimeMillis())
+        ) == true
+        if (action != AssistantControlAction.KEEPALIVE) {
+            fileLog(
+                "Assistant control TX action=${action.wireName} session=$sessionId " +
+                    "sent=$sent connected=$isGlassesConnected"
+            )
+        }
+        return sent
+    }
+
+    /**
+     * Ends the local gesture immediately, then waits briefly for the glasses to acknowledge the
+     * stop/cancel.  The old implementation kept assistantSessionId until that acknowledgement,
+     * so a lost control or status packet left the button permanently rendered as LISTEN.
+     */
+    private fun finishAssistantPushToTalk(action: AssistantControlAction) {
+        assistantHandler.removeCallbacks(assistantKeepalive)
+        val id = assistantSessionId ?: run {
+            updateAssistantPushToTalk()
+            return
+        }
+
+        assistantSessionId = null
+        assistantStopPendingSessionId = id
+        assistantStopTimeout?.let(assistantHandler::removeCallbacks)
+
+        val sent = sendAssistantControl(id, action)
+        if (!sent) {
+            fileLog("Assistant release was not delivered; clearing pending session=$id")
+            clearAssistantStopPending(id)
+            if (assistantStatus?.sessionId == id && assistantStatus?.state == AssistantSessionState.LISTENING) {
+                assistantStatus = assistantStatus?.copy(
+                    state = AssistantSessionState.IDLE,
+                    sessionId = null,
+                    origin = null,
+                    detail = "Voice control disconnected"
+                )
+            }
+            updateAssistantPushToTalk()
+            return
+        }
+
+        val timeout = Runnable {
+            if (assistantStopPendingSessionId != id) return@Runnable
+            fileLog("Assistant release acknowledgement timed out for session=$id")
+            clearAssistantStopPending(id)
+            if (assistantStatus?.sessionId == id && assistantStatus?.state == AssistantSessionState.LISTENING) {
+                assistantStatus = assistantStatus?.copy(
+                    state = AssistantSessionState.IDLE,
+                    sessionId = null,
+                    origin = null,
+                    detail = "Voice session reset"
+                )
+            }
+            updateAssistantPushToTalk()
+        }
+        assistantStopTimeout = timeout
+        assistantHandler.postDelayed(timeout, ASSISTANT_RELEASE_TIMEOUT_MS)
+        updateAssistantPushToTalk()
+    }
+
+    private fun clearAssistantStopPending(sessionId: String) {
+        if (assistantStopPendingSessionId != sessionId) return
+        assistantStopPendingSessionId = null
+        assistantStopTimeout?.let(assistantHandler::removeCallbacks)
+        assistantStopTimeout = null
+    }
+
+    private fun cancelAssistantPushToTalk() {
+        assistantHandler.removeCallbacks(assistantKeepalive)
+        assistantStopTimeout?.let(assistantHandler::removeCallbacks)
+        val id = assistantSessionId
+        if (id != null && isGlassesConnected) {
+            sendAssistantControl(id, AssistantControlAction.CANCEL)
+        }
+        assistantSessionId = null
+        assistantStopPendingSessionId = null
+        assistantStopTimeout = null
+        updateAssistantPushToTalk()
+    }
+
+    private fun updateAssistantPushToTalk() {
+        if (!::assistantPushToTalkButton.isInitialized) return
+        val remote = assistantStatus
+        // Keep the view enabled for the lifetime of our own gesture. Disabling a pressed Android
+        // view when LISTENING arrives prevents it from receiving ACTION_UP, which would strand the
+        // glasses recorder in listening mode while keepalives continue indefinitely.
+        val waitingForRelease = assistantStopPendingSessionId != null
+        val enabled = assistantSessionId != null ||
+            (!waitingForRelease && isGlassesConnected && remote?.ready == true && remote.state == AssistantSessionState.IDLE)
+        assistantPushToTalkButton.isEnabled = enabled
+        assistantPushToTalkButton.alpha = if (enabled) 1f else .5f
+        val state = when {
+            assistantSessionId != null -> AssistantSessionState.LISTENING
+            waitingForRelease -> AssistantSessionState.PROCESSING
+            !isGlassesConnected -> null
+            remote?.state == AssistantSessionState.LISTENING -> AssistantSessionState.LISTENING
+            remote?.state == AssistantSessionState.PROCESSING -> AssistantSessionState.PROCESSING
+            else -> remote?.state
+        }
+        val color = when (state) {
+            AssistantSessionState.LISTENING -> Color.rgb(210, 45, 45)
+            AssistantSessionState.PROCESSING -> Color.rgb(224, 148, 20)
+            AssistantSessionState.SUCCESS -> Color.rgb(45, 170, 90)
+            AssistantSessionState.ERROR -> Color.rgb(190, 65, 65)
+            else -> Color.rgb(90, 90, 90)
+        }
+        assistantPushToTalkButton.backgroundTintList = android.content.res.ColorStateList.valueOf(color)
+        val presentation = assistantPushToTalkPresentation(state)
+        assistantPushToTalkButton.text = presentation.label
+        assistantPushToTalkButton.setCompoundDrawablesWithIntrinsicBounds(
+            0,
+            if (presentation.showVoiceIcon) R.drawable.ic_voice_speaking else 0,
+            0,
+            0
+        )
+    }
     
     private fun toggleMirroring() {
         if (isMirroringEnabled) {
@@ -1087,25 +1371,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Asks for screen capture; the link to the glasses is made once it's granted. */
     private fun startMirroring() {
         fileLog("Starting mirroring...")
-
-        when (transportManager.prepareMirrorStart()) {
-            TransportManager.MirrorStartAction.REQUEST_PROJECTION -> {
-                pendingProjectionPurpose = ProjectionPurpose.MIRROR
-                screenStreamServer?.requestPermission(this)
-            }
-
-            TransportManager.MirrorStartAction.WAIT_FOR_WIFI_DIRECT -> {
-                Toast.makeText(this, "Creating WiFi Direct connection...", Toast.LENGTH_SHORT).show()
-            }
-
-            TransportManager.MirrorStartAction.NO_NETWORK -> {
-                Toast.makeText(this, "Please enable WiFi for screen mirroring", Toast.LENGTH_LONG).show()
-            }
-        }
+        pendingProjectionPurpose = ProjectionPurpose.MIRROR
+        screenStreamServer?.requestPermission(this)
     }
 
+    @SuppressLint("FullScreenIntentPolicy")
     private fun startMirroringFromBackground() {
         fileLog("Starting mirroring from background...")
         
@@ -1131,7 +1404,7 @@ class MainActivity : AppCompatActivity() {
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             }
             
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            val notificationManager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
             notificationManager.createNotificationChannel(channel)
         }
         
@@ -1147,7 +1420,7 @@ class MainActivity : AppCompatActivity() {
             .setContentIntent(pendingIntent)
             
         // Show notification
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
         notificationManager.notify(REQUEST_NOTIFICATION_ID, builder.build())
         
         // Also try direct start (best effort)
@@ -1159,14 +1432,40 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startMirroringAfterPermission() {
-        val metrics = resources.displayMetrics
-        if (!transportManager.startMirrorAfterPermission(metrics)) {
-            ScreenCaptureService.stop(this)
-            return
-        }
-
         isMirroringEnabled = true
         updateMirrorButton()
+        transportManager.startMirror(resources.displayMetrics) {
+            Toast.makeText(this, "Can't reach the glasses: turn on Wi-Fi", Toast.LENGTH_LONG).show()
+            stopMirroring()
+        }
+    }
+
+    /** Remote control from the glasses needs the accessibility service: a notification opens its settings. */
+    private fun showRemoteControlSetupNotification() {
+        val manager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                android.app.NotificationChannel(
+                    REQUEST_CHANNEL_ID,
+                    "Mirror Requests",
+                    android.app.NotificationManager.IMPORTANCE_HIGH
+                )
+            )
+        }
+        val settings = android.app.PendingIntent.getActivity(
+            this, 1,
+            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = androidx.core.app.NotificationCompat.Builder(this, REQUEST_CHANNEL_ID)
+            .setSmallIcon(R.drawable.glasses_connected)
+            .setContentTitle("Control your phone from the glasses")
+            .setContentText("Turn on \"${getString(R.string.mirror_control_label)}\" in Accessibility settings")
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(settings)
+            .build()
+        manager.notify(REMOTE_CONTROL_NOTIFICATION_ID, notification)
     }
     
     private fun stopMirroring() {
@@ -1237,7 +1536,7 @@ class MainActivity : AppCompatActivity() {
     // ==================== Clipboard Monitoring ====================
     
     private fun setupClipboardMonitoring() {
-        clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboardManager = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
         clipboardManager?.addPrimaryClipChangedListener(clipboardListener)
         fileLog("Clipboard monitoring started")
     }
@@ -1251,7 +1550,7 @@ class MainActivity : AppCompatActivity() {
         
         val clipboardText = getClipboardText()
         if (clipboardText != null && clipboardText != lastSentClipboard) {
-            fileLog("Clipboard changed, sending to glasses: ${clipboardText.take(50)}...")
+            fileLog("Clipboard changed, sending to glasses: characters=${clipboardText.length}")
             lastSentClipboard = clipboardText
             rfcommServer?.sendClipboardUpdate(clipboardText)
             
@@ -1272,7 +1571,7 @@ class MainActivity : AppCompatActivity() {
         val clipboardText = getClipboardText()
         if (clipboardText != null) {
             // Always send when requested, even if same as last sent
-            fileLog("Sending current clipboard on request: ${clipboardText.take(50)}...")
+            fileLog("Sending current clipboard on request: characters=${clipboardText.length}")
             lastSentClipboard = clipboardText
             rfcommServer?.sendClipboardUpdate(clipboardText)
         }
@@ -1324,7 +1623,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun maybePromptNotificationAccess() {
         if (PhoneNotificationRepository.isListenerEnabled(this)) return
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         if (prefs.getBoolean(KEY_NOTIFICATION_ACCESS_PROMPT_DISMISSED, false)) return
 
         AlertDialog.Builder(this)
@@ -1334,7 +1633,7 @@ class MainActivity : AppCompatActivity() {
                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
             .setNegativeButton("Not now") { _, _ ->
-                prefs.edit().putBoolean(KEY_NOTIFICATION_ACCESS_PROMPT_DISMISSED, true).apply()
+                prefs.edit { putBoolean(KEY_NOTIFICATION_ACCESS_PROMPT_DISMISSED, true) }
             }
             .show()
     }
@@ -1367,7 +1666,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             REQUEST_WIFI_DIRECT_PERMISSIONS -> {
-                // WiFi Direct permissions - initialize even if denied (will just not work as fallback)
+                // Wi-Fi Direct permissions - initialize even if denied (will just not work as fallback)
                 initializeWifiDirect()
             }
 

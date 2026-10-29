@@ -1,5 +1,8 @@
 package com.everyday.everyday_glasses
 
+import com.everyday.everyday_glasses.auth_permissions.GoogleAccountSummary
+import com.everyday.everyday_glasses.auth_permissions.GoogleAuthState
+import com.everyday.everyday_glasses.auth_permissions.PersistedGoogleAuthState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -40,7 +43,10 @@ class GoogleAuthStatePersistenceTest {
     @Test
     fun `phone fallback state survives persistence round trip`() {
         val original = GoogleAuthState.phoneFallbackRequired(
-            account = GoogleAccountSummary(email = "user@example.com", displayName = "Everyday User"),
+            account = GoogleAccountSummary(
+                email = "user@example.com",
+                displayName = "Everyday User"
+            ),
             detail = "Phone sign-in required"
         )
 

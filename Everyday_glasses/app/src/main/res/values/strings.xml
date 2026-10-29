@@ -3,4 +3,33 @@
     <string name="app_name">Everyday</string>
     <!-- For the device-code glasses flow, this must be a Google limited-input/device client ID. -->
     <string name="google_device_client_id">919130726928-o3dhv0un4pijs2hehaiq7qmm0ik36dbe.apps.googleusercontent.com</string>
+    <string name="back">Back</string>
+    <string name="play">Play</string>
+    <string name="stop">Stop</string>
+    <string name="player_options_subtitle">Advanced playback controls</string>
+    <string name="seek_back">-10s</string>
+    <string name="seek_forward">+10s</string>
+    <string name="previous">Prev</string>
+    <string name="next">Next</string>
+    <string name="restart">Restart</string>
+    <string name="captions">Captions</string>
+    <string name="options">Options</string>
+    <string name="subtitles_title">Subtitles</string>
+    <string name="subtitles_subtitle">Choose an embedded or uploaded subtitle track.</string>
+    <string name="subtitles_none">None</string>
+    <string name="subtitles_hint">Double tap to close this menu.</string>
+    <string name="subtitles_current_suffix"> (Current)</string>
+    <string name="upload">Upload</string>
+    <string name="subtitle_upload_failed">Subtitle upload failed.</string>
+    <string name="subtitle_upload_unsupported">Use SRT, SUB, VTT/VVT, SSA, ASS, TTML, or a timed subtitle TXT file.</string>
+    <string name="subtitle_import_title">Upload Subtitle</string>
+    <string name="subtitle_import_subtitle">Pick a local subtitle file from Documents, Download, or Movies.</string>
+    <string name="subtitle_import_hint">Tap to import. Double tap to go back.</string>
+    <string name="subtitle_import_empty">No subtitle files were found in Documents, Download, or Movies.</string>
+    <string name="subtitle_track_embedded">Embedded</string>
+    <string name="subtitle_track_external">Uploaded</string>
+    <string name="subtitle_track_unsupported">Unsupported</string>
+    <string name="audio_track_unsupported">Audio unavailable: %1$s is not supported on this device.</string>
+    <string name="audio_track_unsupported_without_ffmpeg">Audio unavailable: %1$s. Install the FFmpeg decoder build to add support.</string>
+    <string name="video_playback_position">%1$s / %2$s</string>
 </resources>

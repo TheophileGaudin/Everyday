@@ -5,6 +5,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.util.Calendar
+import java.util.Locale
 import java.util.TimeZone
 
 object FinanceDataProvider {
@@ -60,6 +61,28 @@ object FinanceDataProvider {
                 allCrypto +
                 allFx
 
+    /**
+     * One deterministic catalogue for assistant/user-facing finance names.
+     *
+     * Symbols and display names are registered automatically, while spoken aliases that are
+     * not present in the display name (for example "FTSE") are kept here rather than guessed by
+     * the assistant prompt.
+     */
+    private val instrumentCatalogue: Map<String, FinanceInstrument> = buildMap {
+        allInstruments.forEach { instrument ->
+            put(normalizeInstrumentQuery(instrument.symbol), instrument)
+            put(normalizeInstrumentQuery(instrument.displayName), instrument)
+        }
+        val ftse100 = allInstruments.first { it.symbol == "^FTSE" }
+        put(normalizeInstrumentQuery("FTSE100"), ftse100)
+        put(normalizeInstrumentQuery("FTSE 100"), ftse100)
+        put(normalizeInstrumentQuery("FTSE"), ftse100)
+
+        val dowJones = allInstruments.first { it.symbol == "^DJI" }
+        put(normalizeInstrumentQuery("Dow"), dowJones)
+        put(normalizeInstrumentQuery("Dow Jones"), dowJones)
+    }
+
     private val countryToDefaultSymbol = mapOf(
         "US" to "^GSPC", "GB" to "^FTSE", "DE" to "^GDAXI",
         "FR" to "^FCHI", "JP" to "^N225", "HK" to "^HSI",
@@ -92,17 +115,27 @@ object FinanceDataProvider {
         return list.firstOrNull { it.symbol == symbol } ?: list.first()
     }
 
+    /** Resolve a spoken/display name or symbol without falling back to another instrument. */
+    fun resolveInstrument(value: String?): FinanceInstrument? {
+        val normalized = value?.trim()?.takeIf { it.isNotEmpty() }?.let(::normalizeInstrumentQuery)
+            ?: return null
+        return instrumentCatalogue[normalized]
+    }
+
+    private fun normalizeInstrumentQuery(value: String): String =
+        value.trim().uppercase(Locale.US).filter(Char::isLetterOrDigit)
+
     fun fetchTile(config: FinanceDashboardTileConfig): Result<FinanceTileSnapshot> {
         return when (config.assetType) {
             FinanceAssetType.INDEX -> fetchChart(config.symbol, FinanceTimeRange.fromRange(config.range)).map {
-                it.toTileSnapshot(config)
+                it.copy(id = config.id, chartType = config.chartType)
             }
             FinanceAssetType.CRYPTO -> fetchCryptoChart(config)
             FinanceAssetType.FX -> fetchFxChart(config)
         }
     }
 
-    fun fetchChart(symbol: String, range: FinanceTimeRange): Result<FinanceSnapshot> {
+    fun fetchChart(symbol: String, range: FinanceTimeRange): Result<FinanceTileSnapshot> {
         return runCatching {
             val index = indexForSymbol(symbol)
             val urlStr = buildChartUrl(index.symbol, range)
@@ -182,7 +215,9 @@ object FinanceDataProvider {
                     }
                 )
 
-                FinanceSnapshot(
+                FinanceTileSnapshot(
+                    id = "",
+                    assetType = FinanceAssetType.INDEX,
                     symbol = index.symbol,
                     displayName = index.displayName,
                     country = index.country,
@@ -190,33 +225,15 @@ object FinanceDataProvider {
                     rangeLabel = range.label,
                     points = chart.points,
                     candles = chart.candles,
+                    chartType = FinanceChartType.LINE,
                     percentChange = chart.percentChange,
-                    assetType = FinanceAssetType.INDEX,
-                    chartType = FinanceChartType.LINE
+                    source = "YAHOO"
                 )
             } finally {
                 connection.disconnect()
             }
         }
     }
-
-    private fun FinanceSnapshot.toTileSnapshot(config: FinanceDashboardTileConfig): FinanceTileSnapshot =
-        FinanceTileSnapshot(
-            id = config.id,
-            assetType = FinanceAssetType.INDEX,
-            symbol = symbol,
-            displayName = displayName,
-            country = country,
-            range = range,
-            rangeLabel = rangeLabel,
-            chartType = config.chartType,
-            points = points,
-            candles = candles,
-            percentChange = percentChange,
-            source = "YAHOO",
-            fetchedAtMs = fetchedAtMs,
-            staleAfterMs = staleAfterMs
-        )
 
     private fun fetchCryptoChart(config: FinanceDashboardTileConfig): Result<FinanceTileSnapshot> = runCatching {
         val range = FinanceTimeRange.fromRange(config.range)

@@ -4,4 +4,12 @@
     <color name="white">#FFFFFFFF</color>
     <color name="green">#FF00FF00</color>
     <color name="dark_gray">#FF111111</color>
+    <color name="surface_black">#FF020308</color>
+    <color name="panel_blue">#FF122033</color>
+    <color name="panel_blue_light">#FF1C3352</color>
+    <color name="accent_cyan">#FF5BE9FF</color>
+    <color name="accent_green">#FF7CE38B</color>
+    <color name="text_primary">#FFF5FBFF</color>
+    <color name="text_secondary">#FFB5C7D8</color>
+    <color name="error_red">#FF8B2F3D</color>
 </resources>

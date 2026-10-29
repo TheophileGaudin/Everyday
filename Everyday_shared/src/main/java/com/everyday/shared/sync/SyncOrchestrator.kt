@@ -29,7 +29,8 @@ class SyncOrchestrator(
         financeAssetType: FinanceAssetType? = null,
         financeChartType: FinanceChartType? = null,
         financeTileId: String? = null,
-        financeLiveEnabled: Boolean? = null
+        financeLiveEnabled: Boolean? = null,
+        newsSource: NewsSourceSpec? = null
     ): SyncRequest {
         return dispatch(
             SyncRequest(
@@ -44,7 +45,8 @@ class SyncOrchestrator(
                 financeAssetType = financeAssetType,
                 financeChartType = financeChartType,
                 financeTileId = financeTileId,
-                financeLiveEnabled = financeLiveEnabled
+                financeLiveEnabled = financeLiveEnabled,
+                newsSource = newsSource
             )
         )
     }

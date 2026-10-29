@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<com.everyday.everyday_glasses.binocular.BinocularView
+<com.everyday.everyday_glasses._binocular.BinocularView
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/binocularView"
     android:layout_width="match_parent"
@@ -12,9 +12,9 @@
         android:layout_height="match_parent"/>
 
     <!-- Cursor overlay (on top of everything) -->
-    <com.everyday.everyday_glasses.CursorView
+    <com.everyday.everyday_glasses.ui.components.CursorView
         android:id="@+id/cursorView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"/>
 
-</com.everyday.everyday_glasses.binocular.BinocularView>
+</com.everyday.everyday_glasses._binocular.BinocularView>

@@ -1,0 +1,653 @@
+package com.everyday.everyday_glasses.widgets.speech_to_text
+
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Shader
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
+import androidx.core.graphics.toColorInt
+import androidx.core.graphics.withClip
+import androidx.core.graphics.withTranslation
+import com.everyday.everyday_glasses.interaction.commands.AppCommandDefinition
+import com.everyday.everyday_glasses.persistence.DashboardPersistence
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.parseSizedWidgetObject
+import com.everyday.everyday_glasses.persistence.DashboardPersistence.putCommonFields
+import com.everyday.everyday_glasses.persistence.WidgetDocument
+import com.everyday.everyday_glasses.runtime.WidgetContext
+import com.everyday.everyday_glasses.runtime.WidgetPlugin
+import com.everyday.everyday_glasses.runtime.AppChannels
+import com.everyday.everyday_glasses.runtime.WidgetCommand
+import com.everyday.everyday_glasses.runtime.WidgetDescriptor
+import com.everyday.everyday_glasses.runtime.WidgetInstancePolicy
+import com.everyday.everyday_glasses.runtime.WidgetLifecycleRegistration
+import com.everyday.everyday_glasses.runtime.WidgetMenu
+import com.everyday.everyday_glasses.runtime.WidgetType
+import com.everyday.everyday_glasses.runtime.WidgetTypeId
+import com.everyday.everyday_glasses.widgets._common.BaseWidget
+import com.everyday.shared.sync.SubtitleControl
+import com.everyday.shared.sync.SubtitleControlAction
+import com.everyday.shared.sync.SubtitleOptions
+import com.everyday.shared.sync.SubtitleSource
+import com.everyday.shared.sync.SubtitleStatus
+import com.everyday.shared.sync.SubtitleStatusState
+import com.everyday.shared.sync.SubtitleTranscript
+import org.json.JSONObject
+
+class SubtitleWidget(
+    x: Float,
+    y: Float,
+    width: Float,
+    height: Float
+) : BaseWidget(SubtitlePlugin.TYPE, x, y, width, height) {
+
+    companion object {
+        const val DEFAULT_WIDTH = 520f
+        const val DEFAULT_HEIGHT = 120f
+
+        private const val CORNER_RADIUS = 8f
+        private const val CONTENT_PADDING = 16f
+        private const val TOGGLE_WIDTH = 74f
+        private const val TOGGLE_HEIGHT = 34f
+        private const val OPTION_ROW_HEIGHT = 34f
+        private const val TEXT_TTL_MS = 8_000L
+        private const val PHONE_DISCONNECTED_MESSAGE = "Phone disconnected"
+    }
+
+    override val minimizeLabel: String = "S"
+    override val minWidth: Float = MIN_WIDGET_SIZE
+    override val minHeight: Float = MIN_WIDGET_SIZE
+
+    private val toggleBounds = RectF()
+    private val optionsPanelBounds = RectF()
+    private val optionRows = Array(3) { RectF() }
+
+    private var optionsPanelVisible = false
+    private var latestText = ""
+    private var latestTextIsFinal = false
+    private var latestTextAtMs = 0L
+    private var statusMessage = "Stopped"
+    private var statusState = SubtitleStatusState.STOPPED
+    private var disconnectedNoticePersistent = false
+
+    var captureEnabled: Boolean = false
+        private set
+
+    var options: SubtitleOptions = SubtitleOptions()
+        private set
+
+    var listener: SubtitleWidgetListener? = null
+    private val onSubtitleControlRequested: ((SubtitleControl) -> Unit)?
+        get() = listener?.let { value -> { control -> value.onSubtitleControlRequested(control) } }
+
+    private val panelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = "#D0000000".toColorInt()
+        style = Paint.Style.FILL
+    }
+
+    private val statusPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = "#B0BEC5".toColorInt()
+        textSize = 17f
+    }
+
+    private val subtitlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 30f
+        isSubpixelText = true
+    }
+
+    private val partialPaint = TextPaint(subtitlePaint).apply {
+        color = "#CCDCE9".toColorInt()
+        isSubpixelText = true
+    }
+
+    private val fadePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var fadeShaderTop = Float.NaN
+    private var fadeShaderBottom = Float.NaN
+
+    private val optionTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 20f
+    }
+
+    private val disabledOptionTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = "#777777".toColorInt()
+        textSize = 20f
+    }
+
+    private val checkboxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = "#DDE7F2".toColorInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+    }
+
+    private val checkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = "#6EE7A8".toColorInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+        strokeCap = Paint.Cap.ROUND
+    }
+
+    private val toggleOffPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = "#3A3A44".toColorInt()
+        style = Paint.Style.FILL
+    }
+
+    private val toggleOnPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = "#2D9CDB".toColorInt()
+        style = Paint.Style.FILL
+    }
+
+    private val toggleKnobPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.FILL
+    }
+
+    init {
+        updateSubtitleBounds()
+    }
+
+    override fun updateBaseBounds() {
+        super.updateBaseBounds()
+        updateSubtitleBounds()
+    }
+
+    override fun containsPoint(px: Float, py: Float): Boolean {
+        return super.containsPoint(px, py) ||
+            toggleBounds.contains(px, py) ||
+            (optionsPanelVisible && optionsPanelBounds.contains(px, py))
+    }
+
+    override fun updateHover(px: Float, py: Float) {
+        updateHoverState(px, py)
+    }
+
+    fun setCaptureEnabled(enabled: Boolean, notifyPhone: Boolean = true) {
+        if (captureEnabled == enabled) return
+        disconnectedNoticePersistent = false
+        captureEnabled = enabled
+        if (!enabled) {
+            latestText = ""
+            latestTextAtMs = 0L
+            statusState = SubtitleStatusState.STOPPED
+            statusMessage = "Stopped"
+        } else if (statusState == SubtitleStatusState.STOPPED) {
+            statusMessage = "Starting..."
+        }
+
+        if (notifyPhone) {
+            sendControl(if (enabled) SubtitleControlAction.START else SubtitleControlAction.STOP)
+        }
+        notifyTransientChange()
+    }
+
+    fun restoreOptions(
+        phonePlaybackEnabled: Boolean,
+        microphoneEnabled: Boolean,
+        translationEnabled: Boolean
+    ) {
+        options = options.copy(
+            source = SubtitleSource.PHONE_PLAYBACK,
+            phonePlaybackEnabled = phonePlaybackEnabled,
+            microphoneEnabled = microphoneEnabled,
+            translationEnabled = translationEnabled
+        )
+        notifyTransientChange()
+    }
+
+    fun applyStatus(status: SubtitleStatus) {
+        disconnectedNoticePersistent = false
+        statusState = status.state
+        statusMessage = status.message ?: status.state.wireName.replace('_', ' ')
+        if (status.state == SubtitleStatusState.STOPPED || status.state == SubtitleStatusState.ERROR) {
+            captureEnabled = false
+            latestText = ""
+            latestTextAtMs = 0L
+        }
+        notifyTransientChange()
+    }
+
+    fun applyTranscript(transcript: SubtitleTranscript) {
+        if (!captureEnabled) return
+        latestText = transcript.text
+        latestTextIsFinal = transcript.isFinal
+        latestTextAtMs = System.currentTimeMillis()
+        if (transcript.text.isNotBlank()) {
+            statusState = SubtitleStatusState.LISTENING
+            statusMessage = "Listening"
+        }
+        notifyTransientChange()
+    }
+
+    fun onPhoneDisconnected() {
+        val wasCapturing = captureEnabled
+        captureEnabled = false
+        latestText = ""
+        latestTextAtMs = 0L
+        disconnectedNoticePersistent = wasCapturing
+        statusState = if (wasCapturing) SubtitleStatusState.ERROR else SubtitleStatusState.STOPPED
+        statusMessage = PHONE_DISCONNECTED_MESSAGE
+        notifyTransientChange()
+    }
+
+    override fun onPause() {
+        setCaptureEnabled(false, notifyPhone = true)
+    }
+
+    override fun onDestroy() {
+        setCaptureEnabled(false, notifyPhone = true)
+    }
+
+    override fun contentSignature(): List<Any?> = listOf(options)
+    override fun onContentTap(px: Float, py: Float): Boolean {
+        if (toggleBounds.contains(px, py)) {
+            setCaptureEnabled(!captureEnabled)
+            return true
+        }
+
+        if (optionsPanelVisible) {
+            for (index in optionRows.indices) {
+                if (optionRows[index].contains(px, py)) {
+                    when (index) {
+                        0 -> {
+                            options = options.copy(
+                                source = SubtitleSource.PHONE_PLAYBACK,
+                                phonePlaybackEnabled = true
+                            )
+                            sendControl(SubtitleControlAction.SET_OPTIONS)
+                        }
+                        else -> {
+                            // Microphone and translation are visible but disabled in v1.
+                        }
+                    }
+                    notifyTransientChange()
+                    return true
+                }
+            }
+
+            if (!widgetBounds.contains(px, py)) {
+                optionsPanelVisible = false
+                notifyTransientChange()
+                return true
+            }
+        }
+
+        return false
+    }
+
+    override fun onDoubleTap(px: Float, py: Float): Boolean {
+        if (isMinimized || !containsPoint(px, py)) return false
+        optionsPanelVisible = !optionsPanelVisible
+        notifyTransientChange()
+        return true
+    }
+
+    override fun draw(canvas: Canvas) {
+        if (isMinimized) {
+            drawMinimized(canvas)
+            return
+        }
+
+        val hasRecentText = captureEnabled &&
+            latestText.isNotBlank() &&
+            System.currentTimeMillis() - latestTextAtMs <= TEXT_TTL_MS
+        val isDisconnectedHint = statusMessage == PHONE_DISCONNECTED_MESSAGE && !disconnectedNoticePersistent
+        val showDisconnectedHint = isDisconnectedHint && (isHovering() || optionsPanelVisible)
+        val showPersistentError = statusState == SubtitleStatusState.ERROR && !isDisconnectedHint
+        val shouldDrawPanel = hasRecentText ||
+            captureEnabled ||
+            optionsPanelVisible ||
+            shouldShowBorder() ||
+            showPersistentError ||
+            showDisconnectedHint
+
+        if (shouldDrawPanel) {
+            canvas.drawRoundRect(widgetBounds, CORNER_RADIUS, CORNER_RADIUS, panelPaint)
+        }
+
+        if (shouldShowBorder()) {
+            canvas.drawRoundRect(widgetBounds, CORNER_RADIUS, CORNER_RADIUS, hoverBorderPaint)
+        }
+
+        if (shouldShowBorderButtons()) {
+            drawBorderButtons(canvas)
+            drawResizeHandle(canvas)
+        }
+
+        if (isHovering() || optionsPanelVisible) {
+            drawToggle(canvas)
+        }
+
+        if (hasRecentText) {
+            drawSubtitleText(canvas)
+        } else if (captureEnabled || showPersistentError || optionsPanelVisible || showDisconnectedHint) {
+            drawStatus(canvas)
+        }
+
+        if (optionsPanelVisible) {
+            drawOptionsPanel(canvas)
+        }
+    }
+
+    private fun updateSubtitleBounds() {
+        val top = y + CONTENT_PADDING
+        toggleBounds.set(
+            x + widgetWidth - CONTENT_PADDING - TOGGLE_WIDTH,
+            top,
+            x + widgetWidth - CONTENT_PADDING,
+            top + TOGGLE_HEIGHT
+        )
+
+        val panelWidth = (widgetWidth * 0.66f).coerceAtLeast(250f)
+        val panelHeight = OPTION_ROW_HEIGHT * 3 + CONTENT_PADDING * 1.5f
+        optionsPanelBounds.set(
+            x + CONTENT_PADDING,
+            y + widgetHeight - panelHeight - CONTENT_PADDING,
+            x + CONTENT_PADDING + panelWidth,
+            y + widgetHeight - CONTENT_PADDING
+        )
+
+        var rowTop = optionsPanelBounds.top + CONTENT_PADDING * 0.75f
+        for (row in optionRows) {
+            row.set(
+                optionsPanelBounds.left + CONTENT_PADDING,
+                rowTop,
+                optionsPanelBounds.right - CONTENT_PADDING,
+                rowTop + OPTION_ROW_HEIGHT
+            )
+            rowTop += OPTION_ROW_HEIGHT
+        }
+    }
+
+    private fun drawToggle(canvas: Canvas) {
+        canvas.drawRoundRect(
+            toggleBounds,
+            TOGGLE_HEIGHT / 2f,
+            TOGGLE_HEIGHT / 2f,
+            if (captureEnabled) toggleOnPaint else toggleOffPaint
+        )
+        val knobRadius = TOGGLE_HEIGHT * 0.38f
+        val knobX = if (captureEnabled) {
+            toggleBounds.right - TOGGLE_HEIGHT / 2f
+        } else {
+            toggleBounds.left + TOGGLE_HEIGHT / 2f
+        }
+        canvas.drawCircle(knobX, toggleBounds.centerY(), knobRadius, toggleKnobPaint)
+    }
+
+    private fun drawSubtitleText(canvas: Canvas) {
+        val displayText = latestText.lowercase()
+        if (displayText.isEmpty()) return
+
+        val padX = CONTENT_PADDING
+        val padY = CONTENT_PADDING * 0.75f
+        val interiorLeft = x + padX
+        val interiorRight = x + widgetWidth - padX
+        val interiorTop = y + padY
+        val interiorBottom = y + widgetHeight - padY
+        val interiorWidth = (interiorRight - interiorLeft).toInt().coerceAtLeast(1)
+        val interiorHeight = (interiorBottom - interiorTop).coerceAtLeast(1f)
+
+        val textPaint = if (latestTextIsFinal) subtitlePaint else partialPaint
+        val sizedFont = (widgetHeight * 0.24f)
+            .coerceAtMost(interiorWidth * 0.18f)
+            .coerceIn(13f, 34f)
+        textPaint.textSize = sizedFont
+
+        val layout = StaticLayout.Builder
+            .obtain(displayText, 0, displayText.length, textPaint, interiorWidth)
+            .setAlignment(Layout.Alignment.ALIGN_CENTER)
+            .setLineSpacing(2f, 1.05f)
+            .setIncludePad(false)
+            .build()
+
+        val totalH = layout.height.toFloat()
+        // Anchor to bottom when overflowing so the most recent line stays in view.
+        val translateY = if (totalH <= interiorHeight) {
+            interiorTop + (interiorHeight - totalH) / 2f
+        } else {
+            interiorBottom - totalH
+        }
+
+        canvas.withClip(interiorLeft, interiorTop, interiorRight, interiorBottom) {
+            translate(interiorLeft, translateY)
+            layout.draw(this)
+        }
+
+        if (totalH > interiorHeight) {
+            drawTopFade(canvas, interiorLeft, interiorTop, interiorRight, sizedFont)
+        }
+    }
+
+    private fun drawTopFade(canvas: Canvas, left: Float, top: Float, right: Float, fontSize: Float) {
+        val fadeBottom = top + (fontSize * 1.4f).coerceAtMost((widgetHeight * 0.4f))
+        if (fadeShaderTop != top || fadeShaderBottom != fadeBottom) {
+            fadePaint.shader = LinearGradient(
+                0f, top, 0f, fadeBottom,
+                0xD0000000.toInt(),
+                0x00000000,
+                Shader.TileMode.CLAMP
+            )
+            fadeShaderTop = top
+            fadeShaderBottom = fadeBottom
+        }
+        canvas.drawRect(left, top, right, fadeBottom, fadePaint)
+    }
+
+    private fun drawStatus(canvas: Canvas) {
+        val text = when {
+            captureEnabled && statusState == SubtitleStatusState.LISTENING -> "Listening"
+            else -> statusMessage
+        }
+        val reservedToggleWidth = if (isHovering() || optionsPanelVisible) TOGGLE_WIDTH + CONTENT_PADDING else 0f
+        val textWidth = (widgetWidth - CONTENT_PADDING * 2f - reservedToggleWidth).toInt().coerceAtLeast(1)
+        val layout = StaticLayout.Builder
+            .obtain(text, 0, text.length, statusPaint, textWidth)
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+            .setLineSpacing(0f, 1f)
+            .setMaxLines(2)
+            .build()
+        canvas.withTranslation(x + CONTENT_PADDING, y + CONTENT_PADDING) {
+            layout.draw(this)
+        }
+    }
+
+    private fun drawOptionsPanel(canvas: Canvas) {
+        canvas.drawRoundRect(optionsPanelBounds, CORNER_RADIUS, CORNER_RADIUS, panelPaint)
+        drawOptionRow(canvas, 0, "Phone playback", options.phonePlaybackEnabled, enabled = true)
+        drawOptionRow(canvas, 1, "Microphone", false, enabled = false)
+        drawOptionRow(canvas, 2, "Translation", false, enabled = false)
+    }
+
+    private fun drawOptionRow(canvas: Canvas, index: Int, label: String, checked: Boolean, enabled: Boolean) {
+        val row = optionRows[index]
+        val boxSize = 20f
+        val box = RectF(
+            row.left,
+            row.centerY() - boxSize / 2f,
+            row.left + boxSize,
+            row.centerY() + boxSize / 2f
+        )
+        checkboxPaint.color = if (enabled) "#DDE7F2".toColorInt() else "#777777".toColorInt()
+        canvas.drawRect(box, checkboxPaint)
+        if (checked) {
+            canvas.drawLine(box.left + 4f, box.centerY(), box.left + 9f, box.bottom - 4f, checkPaint)
+            canvas.drawLine(box.left + 9f, box.bottom - 4f, box.right - 4f, box.top + 4f, checkPaint)
+        }
+
+        val paint = if (enabled) optionTextPaint else disabledOptionTextPaint
+        canvas.drawText(
+            label,
+            box.right + 12f,
+            row.centerY() - (paint.descent() + paint.ascent()) / 2f,
+            paint
+        )
+    }
+
+    private fun sendControl(action: SubtitleControlAction) {
+        onSubtitleControlRequested?.invoke(
+            SubtitleControl(
+                action = action,
+                options = options.copy(
+                    source = SubtitleSource.PHONE_PLAYBACK,
+                    languageTag = "en-US",
+                    phonePlaybackEnabled = true,
+                    microphoneEnabled = false,
+                    translationEnabled = false
+                )
+            )
+        )
+    }
+}
+/** Puts live subtitles on the dashboard and feeds them the phone's transcripts. */
+class SubtitlePlugin(
+    private val services: WidgetContext,
+) : WidgetPlugin {
+    private val current: () -> SubtitleWidget? = { services.singleton(TYPE) as? SubtitleWidget }
+    override val lifecycle = WidgetLifecycleRegistration.singleton(
+        SubtitleWidget::class, SubtitleWidgetState.Codec,
+        current = current,
+        create = ::create,
+        restore = ::restore,
+        capture = ::capture,
+        // Reopening a closed subtitle widget resumes capture; loading a dashboard does not.
+        reopen = { state -> restore(state).also { it.setCaptureEnabled(true) } },
+    )
+
+    init {
+        services.appData.subscribe(AppChannels.subtitleStatus) { status -> update { it.applyStatus(status) } }
+        services.appData.subscribe(AppChannels.subtitleTranscript) { transcript -> update { it.applyTranscript(transcript) } }
+        services.appData.subscribe(AppChannels.phoneConnected) { connected -> if (!connected) update { it.onPhoneDisconnected() } }
+    }
+
+    private fun update(action: (SubtitleWidget) -> Unit) {
+        services.withTransientChanges {
+            current()?.let(action)
+            services.notifyTransientChange()
+        }
+    }
+
+    /** A new subtitle widget starts capturing right away. */
+    private fun create(): SubtitleWidget {
+        val width = SubtitleWidget.DEFAULT_WIDTH.coerceAtMost(services.viewportWidth * 0.82f)
+        val height = SubtitleWidget.DEFAULT_HEIGHT
+        val x = ((services.viewportWidth - width) / 2f).coerceAtLeast(20f)
+        val y = (services.viewportHeight - height - 72f).coerceAtLeast(20f)
+        return build(x, y, width, height).apply { setCaptureEnabled(true) }
+    }
+
+    /** A restored subtitle widget starts with capture off. */
+    private fun restore(state: SubtitleWidgetState): SubtitleWidget {
+        val widget = build(state.x, state.y, state.width, state.height)
+        widget.restoreOptions(
+            phonePlaybackEnabled = state.phonePlaybackEnabled,
+            microphoneEnabled = state.microphoneEnabled,
+            translationEnabled = state.translationEnabled
+        )
+        widget.setCaptureEnabled(false, notifyPhone = false)
+        services.captureRestore.restoreCommonFields(widget, state, services.viewportWidth, services.viewportHeight)
+        return widget
+    }
+
+    /** Whether it was capturing is deliberately not saved. */
+    private fun capture(widget: SubtitleWidget): SubtitleWidgetState {
+        val c = services.captureRestore.extractCommonFields(widget)
+        return SubtitleWidgetState(
+            x = c.x, y = c.y, width = c.width, height = c.height,
+            phonePlaybackEnabled = widget.options.phonePlaybackEnabled,
+            microphoneEnabled = widget.options.microphoneEnabled,
+            translationEnabled = widget.options.translationEnabled,
+            isMinimized = c.isMinimized,
+            isFullscreen = c.isFullscreen,
+            savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+            savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+            isPinned = c.isPinned
+        )
+    }
+
+    private fun build(x: Float, y: Float, width: Float, height: Float) =
+        SubtitleWidget(x, y, width, height).apply {
+            listener = object : SubtitleWidgetListener {
+                override fun onSubtitleControlRequested(control: SubtitleControl) {
+                    // The phone didn't take the request: it's no longer connected.
+                    if (this@SubtitlePlugin.services.host?.requestSubtitleControl(control) == false) {
+                        this@SubtitlePlugin.update { it.onPhoneDisconnected() }
+                    }
+                }
+            }
+        }
+    /** Live subtitles as a widget type: its id, its descriptor, how it is saved, and its plugin. */
+    companion object : WidgetType {
+        val TYPE = WidgetTypeId("subtitle")
+        override val descriptor = WidgetDescriptor(
+            TYPE,
+            "Subtitles",
+            WidgetInstancePolicy.SINGLETON,
+            order = 8,
+            storesClosedTemplate = true
+        )
+        override val codec get() = SubtitleWidgetState.Codec
+        override fun create(context: WidgetContext) = SubtitlePlugin(context)
+        override val commands = listOf(
+            WidgetCommand(
+                AppCommandDefinition(
+                    "toggle:subtitle",
+                    "Toggle: Subtitles",
+                    "Subs",
+                    "Show or hide live subtitles",
+                    shortcutEligible = true
+                ), WidgetMenu.TOGGLE
+            ),
+        )
+    }
+}
+
+/** What a saved dashboard keeps of the subtitle widget: its options. Whether it was capturing is not kept. */
+data class SubtitleWidgetState(
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    val phonePlaybackEnabled: Boolean = true,
+    val microphoneEnabled: Boolean = false,
+    val translationEnabled: Boolean = false,
+    override val isMinimized: Boolean = false,
+    override val isFullscreen: Boolean = false,
+    override val savedMinX: Float = 0f,
+    override val savedMinY: Float = 0f,
+    override val savedMinWidth: Float = 0f,
+    override val savedMinHeight: Float = 0f,
+    override val isPinned: Boolean = false
+) : DashboardPersistence.SizedWidgetFields {
+    /** Its entry in the saved dashboard file. */
+    companion object Codec : WidgetDocument.StateCodec<SubtitleWidgetState>(SubtitlePlugin.TYPE, SubtitleWidgetState::class) {
+        override fun toJson(state: SubtitleWidgetState): JSONObject = JSONObject().apply {
+            putCommonFields(state)
+            put("phonePlaybackEnabled", state.phonePlaybackEnabled)
+            put("microphoneEnabled", state.microphoneEnabled)
+            put("translationEnabled", state.translationEnabled)
+        }
+
+        override fun fromJson(payload: JSONObject): SubtitleWidgetState? =
+            parseSizedWidgetObject(payload) { obj, c, w, h ->
+                SubtitleWidgetState(
+                    x = c.x, y = c.y, width = w, height = h,
+                    phonePlaybackEnabled = obj.optBoolean("phonePlaybackEnabled", true),
+                    microphoneEnabled = obj.optBoolean("microphoneEnabled", false),
+                    translationEnabled = obj.optBoolean("translationEnabled", false),
+                    isMinimized = c.isMinimized,
+                    isFullscreen = c.isFullscreen,
+                    savedMinX = c.savedMinX, savedMinY = c.savedMinY,
+                    savedMinWidth = c.savedMinWidth, savedMinHeight = c.savedMinHeight,
+                    isPinned = c.isPinned
+                )
+            }
+    }
+}
+
+interface SubtitleWidgetListener {
+    fun onSubtitleControlRequested(control: SubtitleControl) = Unit
+}

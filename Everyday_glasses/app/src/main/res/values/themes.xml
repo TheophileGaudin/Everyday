@@ -7,4 +7,13 @@
         <item name="android:windowSoftInputMode">stateAlwaysHidden|adjustNothing</item>
         <item name="android:imeOptions">flagNoExtractUi|flagNoFullscreen</item>
     </style>
+
+    <style name="Theme.EverydayVideoPlayer" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:windowBackground">@color/surface_black</item>
+        <item name="colorPrimary">@color/accent_cyan</item>
+        <item name="colorSecondary">@color/accent_green</item>
+        <item name="android:navigationBarColor">@color/surface_black</item>
+        <item name="android:statusBarColor">@color/surface_black</item>
+        <item name="android:windowSoftInputMode">stateAlwaysHidden|adjustNothing</item>
+    </style>
 </resources>

@@ -1,6 +1,9 @@
 package com.everyday.everyday_phone
 
+import android.annotation.SuppressLint
 import android.app.Activity
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothServerSocket
 import android.content.Context
 import android.content.Intent
 import android.hardware.display.DisplayManager
@@ -17,11 +20,12 @@ import android.util.DisplayMetrics
 import android.view.Surface
 import android.view.WindowManager
 import android.widget.Toast
+import com.everyday.shared.transport.TransportMessage
+import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetAddress
 import java.net.NetworkInterface
 import java.net.ServerSocket
-import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -41,6 +45,16 @@ import java.util.concurrent.atomic.AtomicReference
  */
 class ScreenStreamServer(private val context: Context) {
 
+    /** Receives streaming lifecycle and capture-configuration changes. */
+    interface StreamingListener {
+        fun onStreamingStateChanged(streaming: Boolean) = Unit
+        fun onStreamError(error: String) = Unit
+        fun onStreamStatusChanged(status: String) = Unit
+        fun onCaptureOrientationChanged(isLandscape: Boolean) = Unit
+        /** The glasses tried to control the phone, but the remote-control accessibility service is off. */
+        fun onRemoteControlUnavailable() = Unit
+    }
+
     companion object {
         private const val TAG = "ScreenStreamServer"
         const val STREAM_PORT = 5050
@@ -48,11 +62,16 @@ class ScreenStreamServer(private val context: Context) {
         // Capture dimensions (must be multiples of 16 for encoder compatibility)
         // Using square capture for orientation-agnostic streaming
         private const val CAPTURE_SIZE = 640  // 640 = 40 * 16, square capture
-        private const val CAPTURE_SHORT_SIDE = 480   // Legacy, used when manual orientation is set
-        private const val CAPTURE_LONG_SIDE = 848    // Legacy, used when manual orientation is set
+        private const val ORIENTED_CAPTURE_SHORT_SIDE = 480
+        private const val ORIENTED_CAPTURE_LONG_SIDE = 848
         private const val FRAME_RATE = 30
         private const val BIT_RATE = 1_000_000  // 1 Mbps
-        
+        /** Over Bluetooth (a Wi-Fi radio is off): what its ~1-2 Mbit/s can carry beside the app's messages. */
+        private const val BLUETOOTH_FRAME_RATE = 15
+        private const val BLUETOOTH_BIT_RATE = 400_000
+        /** Fewer full frames over Bluetooth, so its small budget can sharpen a still screen between them. */
+        private const val BLUETOOTH_I_FRAME_INTERVAL_S = 4
+
         // Request code for MediaProjection permission
         const val REQUEST_MEDIA_PROJECTION = 1001
     }
@@ -78,9 +97,21 @@ class ScreenStreamServer(private val context: Context) {
     
     // Network
     private var serverSocket: ServerSocket? = null
-    private var clientSocket: Socket? = null
+    private var bluetoothServerSocket: BluetoothServerSocket? = null
+    private var currentClient: Client? = null
     private var outputStream: OutputStream? = null
-    
+    /** One glasses connection is served at a time; a newer one closes the older first. */
+    private val serveLock = Any()
+
+    /** The glasses, connected over TCP (Wi-Fi Direct or a shared Wi-Fi) or the Bluetooth mirror channel. */
+    private class Client(
+        val label: String,
+        val input: InputStream,
+        val output: OutputStream,
+        val overBluetooth: Boolean,
+        val close: () -> Unit,
+    )
+
     // Screen metrics
     private var screenDensity = 1
     
@@ -100,11 +131,7 @@ class ScreenStreamServer(private val context: Context) {
     private val framesSent = AtomicLong(0)
     private val bytesSent = AtomicLong(0)
     
-    // Callbacks
-    var onStreamingStateChanged: ((Boolean) -> Unit)? = null
-    var onError: ((String) -> Unit)? = null
-    var onStatusUpdate: ((String) -> Unit)? = null
-    var onOrientationChanged: ((Boolean) -> Unit)? = null  // Called when orientation changes, param is isLandscape
+    var streamingListener: StreamingListener? = null
     
     // MediaProjection callback (required on Android 14+)
     private val projectionCallback = object : MediaProjection.Callback() {
@@ -114,14 +141,13 @@ class ScreenStreamServer(private val context: Context) {
             handler.post {
                 isRunning.set(false)
                 isStreaming.set(false)
-                onStreamingStateChanged?.invoke(false)
+                streamingListener?.onStreamingStateChanged(false)
             }
         }
     }
 
     var connectionMode = ConnectionMode.NONE
         private set
-    var onConnectionModeChanged: ((ConnectionMode) -> Unit)? = null
     
     init {
         fileLog("ScreenStreamServer initialized")
@@ -138,8 +164,8 @@ class ScreenStreamServer(private val context: Context) {
         lastError.set(message)
         fileLog("Error: $message")
         handler.post { 
-            onError?.invoke(message)
-            onStatusUpdate?.invoke("Error: $message")
+            streamingListener?.onStreamError(message)
+            streamingListener?.onStreamStatusChanged("Error: $message")
         }
     }
     
@@ -199,11 +225,9 @@ class ScreenStreamServer(private val context: Context) {
         }
     }
 
-    // Keep the old method for backwards compatibility, but have it use the new one
-    fun getWifiIpAddress(): String? {
-        return getBestStreamingIp()?.first
-    }
-    
+    /** The phone's address on a regular Wi-Fi network (not its Wi-Fi Direct group), if it has one. */
+    fun getLanIp(): String? = getBestStreamingIp()?.takeIf { it.second == ConnectionMode.REGULAR_WIFI }?.first
+
     /**
      * Request screen capture permission from the user.
      */
@@ -259,6 +283,8 @@ class ScreenStreamServer(private val context: Context) {
     fun getMediaProjection(): MediaProjection? = mediaProjection
 
     fun releaseProjection() {
+        try { virtualDisplay?.release() } catch (_: Exception) {}
+        virtualDisplay = null
         try {
             mediaProjection?.stop()
         } catch (e: Exception) {
@@ -300,11 +326,11 @@ class ScreenStreamServer(private val context: Context) {
      */
     private fun getCaptureWidth(landscape: Boolean): Int = 
         if (useSquareCapture) CAPTURE_SIZE
-        else if (landscape) CAPTURE_LONG_SIDE else CAPTURE_SHORT_SIDE
+        else if (landscape) ORIENTED_CAPTURE_LONG_SIDE else ORIENTED_CAPTURE_SHORT_SIDE
     
     private fun getCaptureHeight(landscape: Boolean): Int = 
         if (useSquareCapture) CAPTURE_SIZE
-        else if (landscape) CAPTURE_SHORT_SIDE else CAPTURE_LONG_SIDE
+        else if (landscape) ORIENTED_CAPTURE_SHORT_SIDE else ORIENTED_CAPTURE_LONG_SIDE
     
     /**
      * Start the stream server.
@@ -321,7 +347,30 @@ class ScreenStreamServer(private val context: Context) {
         }
         
         screenDensity = displayMetrics.densityDpi
-        
+
+        // Since Android 14 a capture permission expires unless its virtual display is created
+        // soon after it's granted, and the glasses may connect minutes later: create it now,
+        // drawing nowhere, and hand it each glasses connection's encoder (startCapture).
+        if (virtualDisplay == null) {
+            try {
+                virtualDisplay = mediaProjection?.createVirtualDisplay(
+                    "ScreenMirror",
+                    getCaptureWidth(currentIsLandscape),
+                    getCaptureHeight(currentIsLandscape),
+                    screenDensity,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    null,
+                    null,
+                    null
+                )
+                fileLog("Virtual display created, waiting for the glasses")
+            } catch (e: Exception) {
+                fileLog("Failed to create virtual display: ${e.message}")
+                setError("Capture: ${e.message}")
+                return
+            }
+        }
+
         isRunning.set(true)
         framesSent.set(0)
         bytesSent.set(0)
@@ -339,9 +388,14 @@ class ScreenStreamServer(private val context: Context) {
             name = "ScreenStreamServer"
             start()
         }
-        
+        Thread { runBluetoothServer() }.apply {
+            name = "ScreenStreamBluetooth"
+            isDaemon = true
+            start()
+        }
+
         fileLog("Stream server started")
-        handler.post { onStatusUpdate?.invoke("Server started on port $STREAM_PORT") }
+        handler.post { streamingListener?.onStreamStatusChanged("Server started on port $STREAM_PORT") }
     }
     
     /**
@@ -371,7 +425,7 @@ class ScreenStreamServer(private val context: Context) {
                     fileLog("*** DISPLAY ROTATION CHANGED: rotation=$newRotation, landscape=$newIsLandscape (was $currentIsLandscape) ***")
                     handler.post {
                         Toast.makeText(context, "Display rotated! Reconnecting...", Toast.LENGTH_SHORT).show()
-                        onStatusUpdate?.invoke("Display rotated, reconnecting...")
+                        streamingListener?.onStreamStatusChanged("Display rotated, reconnecting...")
                     }
                     
                     // Gracefully close the client socket to trigger reconnection
@@ -441,7 +495,7 @@ class ScreenStreamServer(private val context: Context) {
                     fileLog("*** ROTATION CHECKER: detected change! rotation=$newRotation, landscape=$newIsLandscape (was $currentIsLandscape) ***")
                     handler.post {
                         Toast.makeText(context, "Rotation detected! Reconnecting...", Toast.LENGTH_SHORT).show()
-                        onStatusUpdate?.invoke("Rotation detected, reconnecting...")
+                        streamingListener?.onStreamStatusChanged("Rotation detected, reconnecting...")
                     }
                     disconnectClientForOrientationChange()
                     return  // Stop checking, will restart on next connection
@@ -467,7 +521,7 @@ class ScreenStreamServer(private val context: Context) {
         
         // Close the client socket - this will cause the streaming loop to exit cleanly
         try {
-            clientSocket?.close()
+            currentClient?.close?.invoke()
             fileLog("Client socket closed successfully")
         } catch (e: Exception) {
             fileLog("Error closing client socket: ${e.message}")
@@ -484,19 +538,21 @@ class ScreenStreamServer(private val context: Context) {
         fileLog("Stopping stream server")
         isRunning.set(false)
         isStreaming.set(false)
-        
-        stopCapture()
-        
-        try { clientSocket?.close() } catch (e: Exception) {}
+
+        stopCapture(releaseDisplay = true)
+
+        try { currentClient?.close?.invoke() } catch (e: Exception) {}
         try { serverSocket?.close() } catch (e: Exception) {}
-        
-        clientSocket = null
+        try { bluetoothServerSocket?.close() } catch (e: Exception) {}
+
+        currentClient = null
         serverSocket = null
+        bluetoothServerSocket = null
         outputStream = null
         
         handler.post { 
-            onStreamingStateChanged?.invoke(false)
-            onStatusUpdate?.invoke("Server stopped")
+            streamingListener?.onStreamingStateChanged(false)
+            streamingListener?.onStreamStatusChanged("Server stopped")
         }
     }
     
@@ -531,7 +587,7 @@ class ScreenStreamServer(private val context: Context) {
         handler.post {
             val modeStr = if (useSquareCapture) "SQUARE (seamless)" else "ORIENTATION-SPECIFIC"
             Toast.makeText(context, "Capture mode: $modeStr", Toast.LENGTH_SHORT).show()
-            onOrientationChanged?.invoke(currentIsLandscape)
+            streamingListener?.onCaptureOrientationChanged(currentIsLandscape)
         }
         
         // Need restart to apply
@@ -567,7 +623,7 @@ class ScreenStreamServer(private val context: Context) {
                 else -> "PORTRAIT"
             }
             Toast.makeText(context, "Mode: $modeStr", Toast.LENGTH_SHORT).show()
-            onOrientationChanged?.invoke(currentIsLandscape)
+            streamingListener?.onCaptureOrientationChanged(currentIsLandscape)
         }
         
         // On Android 14+, MediaProjection can't be reused after VirtualDisplay is released
@@ -587,15 +643,58 @@ class ScreenStreamServer(private val context: Context) {
         try {
             serverSocket = ServerSocket(STREAM_PORT)
             fileLog("Server listening on port $STREAM_PORT")
-            handler.post { onStatusUpdate?.invoke("Waiting for glasses on port $STREAM_PORT") }
+            handler.post { streamingListener?.onStreamStatusChanged("Waiting for glasses on port $STREAM_PORT") }
             
             while (isRunning.get()) {
-                try {
-                    // Wait for client connection
-                    val socket = serverSocket?.accept() ?: break
-                    fileLog("Client connected from ${socket.inetAddress}")
-                    handler.post { onStatusUpdate?.invoke("Glasses connected: ${socket.inetAddress}") }
-                    
+                val socket = serverSocket?.accept() ?: break
+                // Configure socket for low latency
+                socket.tcpNoDelay = true
+                socket.sendBufferSize = 65536
+                serve(Client("${socket.inetAddress}", socket.getInputStream(), socket.getOutputStream(), overBluetooth = false) {
+                    runCatching { socket.close() }
+                })
+            }
+
+        } catch (e: Exception) {
+            if (isRunning.get()) {
+                fileLog("Server error: ${e.message}")
+                setError("Server: ${e.message}")
+            }
+        }
+
+        fileLog("Server stopped")
+    }
+
+    /**
+     * The same stream on the phone's Bluetooth mirror channel, for glasses that can't use Wi-Fi
+     * (theirs or the phone's is off). Slower: [startCapture] sets the encoder lower for it.
+     */
+    @SuppressLint("MissingPermission")
+    private fun runBluetoothServer() {
+        try {
+            val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter ?: return
+            bluetoothServerSocket = adapter.listenUsingRfcommWithServiceRecord("Everyday mirror", TransportMessage.MirrorState.BLUETOOTH_UUID)
+            fileLog("Mirror also listening on Bluetooth")
+            while (isRunning.get()) {
+                val socket = bluetoothServerSocket?.accept() ?: break
+                serve(Client("Bluetooth", socket.inputStream, socket.outputStream, overBluetooth = true) {
+                    runCatching { socket.close() }
+                })
+            }
+        } catch (e: Exception) {
+            if (isRunning.get()) fileLog("Bluetooth mirror server ended: ${e.message}")
+        }
+    }
+
+    /** Streams to [client] until it disconnects. A newer connection closes this one and waits its turn. */
+    private fun serve(client: Client) {
+        currentClient?.close?.invoke()
+        synchronized(serveLock) {
+            if (!isRunning.get()) { client.close(); return }
+            try {
+                    fileLog("Client connected: ${client.label}")
+                    handler.post { streamingListener?.onStreamStatusChanged("Glasses connected: ${client.label}") }
+
                     // Use the manually set orientation (currentIsLandscape)
                     val captureWidth = getCaptureWidth(currentIsLandscape)
                     val captureHeight = getCaptureHeight(currentIsLandscape)
@@ -607,78 +706,66 @@ class ScreenStreamServer(private val context: Context) {
                         Toast.makeText(context, "Client connected: $orientationStr ${captureWidth}x${captureHeight}", Toast.LENGTH_SHORT).show()
                     }
                     
-                    // Configure socket for low latency
-                    socket.tcpNoDelay = true
-                    socket.sendBufferSize = 65536
-                    
-                    // Close previous client if any
-                    try { clientSocket?.close() } catch (e: Exception) {}
-                    
-                    clientSocket = socket
-                    outputStream = socket.getOutputStream()
-                    
+                    currentClient = client
+                    outputStream = client.output
+
                     isStreaming.set(true)
-                    handler.post { onStreamingStateChanged?.invoke(true) }
-                    
+                    handler.post { streamingListener?.onStreamingStateChanged(true) }
+                    startInputReader(client.input, captureWidth, captureHeight)
+
                     // Start capture and encoding with current orientation
-                    if (!startCapture(captureWidth, captureHeight)) {
+                    if (!startCapture(captureWidth, captureHeight, client.overBluetooth)) {
                         fileLog("startCapture failed, closing connection")
                         handler.post {
                             Toast.makeText(context, "Failed to start capture with ${captureWidth}x${captureHeight}", Toast.LENGTH_LONG).show()
                         }
                         isStreaming.set(false)
-                        continue  // Go back to waiting for next connection
+                        client.close()
+                        return
                     }
-                    
+
                     // Stream until disconnected
                     streamToClient()
-                    
-                } catch (e: Exception) {
-                    if (isRunning.get()) {
-                        fileLog("Client error: ${e.message}")
-                        // Don't report as error if it was just a socket close for orientation change
-                        if (e.message?.contains("closed") != true) {
-                            setError("Client: ${e.message}")
-                        }
+
+            } catch (e: Exception) {
+                if (isRunning.get()) {
+                    fileLog("Client error: ${e.message}")
+                    // Don't report as error if it was just a socket close for orientation change
+                    if (e.message?.contains("closed") != true) {
+                        setError("Client: ${e.message}")
                     }
                 }
-                
-                // Clean up after client disconnect
-                isStreaming.set(false)
-                
-                handler.post { 
-                    onStreamingStateChanged?.invoke(false)
-                    onStatusUpdate?.invoke("Glasses disconnected. Frames sent: ${framesSent.get()}")
-                }
-                stopCapture()
-                
-                try { clientSocket?.close() } catch (e: Exception) {}
-                clientSocket = null
+            }
+
+            // Clean up after client disconnect
+            isStreaming.set(false)
+
+            handler.post {
+                streamingListener?.onStreamingStateChanged(false)
+                streamingListener?.onStreamStatusChanged("Glasses disconnected. Frames sent: ${framesSent.get()}")
+            }
+            stopCapture()
+
+            client.close()
+            if (currentClient === client) {
+                currentClient = null
                 outputStream = null
             }
-            
-        } catch (e: Exception) {
-            if (isRunning.get()) {
-                fileLog("Server error: ${e.message}")
-                setError("Server: ${e.message}")
-            }
         }
-        
-        fileLog("Server stopped")
     }
-    
-    private fun startCapture(captureWidth: Int, captureHeight: Int): Boolean {
-        fileLog("Starting capture: ${captureWidth}x${captureHeight}")
-        handler.post { onStatusUpdate?.invoke("Starting capture ${captureWidth}x${captureHeight}") }
+
+    private fun startCapture(captureWidth: Int, captureHeight: Int, overBluetooth: Boolean): Boolean {
+        fileLog("Starting capture: ${captureWidth}x${captureHeight}${if (overBluetooth) " for Bluetooth" else ""}")
+        handler.post { streamingListener?.onStreamStatusChanged("Starting capture ${captureWidth}x${captureHeight}") }
         
         try {
             // Create encoder with low-latency settings
             fileLog("Creating encoder format...")
             val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, captureWidth, captureHeight).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-                setInteger(MediaFormat.KEY_BIT_RATE, BIT_RATE)
-                setInteger(MediaFormat.KEY_FRAME_RATE, FRAME_RATE)
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                setInteger(MediaFormat.KEY_BIT_RATE, if (overBluetooth) BLUETOOTH_BIT_RATE else BIT_RATE)
+                setInteger(MediaFormat.KEY_FRAME_RATE, if (overBluetooth) BLUETOOTH_FRAME_RATE else FRAME_RATE)
+                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, if (overBluetooth) BLUETOOTH_I_FRAME_INTERVAL_S else 1)
                 
                 // Low latency settings
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -712,21 +799,30 @@ class ScreenStreamServer(private val context: Context) {
             }
             
             fileLog("Encoder started successfully")
-            handler.post { onStatusUpdate?.invoke("Encoder started") }
+            handler.post { streamingListener?.onStreamStatusChanged("Encoder started") }
             
-            // Create virtual display that renders to encoder surface
-            fileLog("Creating virtual display...")
-            virtualDisplay = mediaProjection?.createVirtualDisplay(
-                "ScreenMirror",
-                captureWidth,
-                captureHeight,
-                screenDensity,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                encoderSurface,
-                null,
-                null
-            )
-            
+            // The virtual display is made once per screen-capture session and handed each new
+            // encoder: since Android 14 a MediaProjection may create only one, so a glasses
+            // reconnection must reuse it.
+            val existing = virtualDisplay
+            if (existing != null) {
+                fileLog("Reusing virtual display")
+                existing.resize(captureWidth, captureHeight, screenDensity)
+                existing.surface = encoderSurface
+            } else {
+                fileLog("Creating virtual display...")
+                virtualDisplay = mediaProjection?.createVirtualDisplay(
+                    "ScreenMirror",
+                    captureWidth,
+                    captureHeight,
+                    screenDensity,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    encoderSurface,
+                    null,
+                    null
+                )
+            }
+
             if (virtualDisplay == null) {
                 fileLog("Failed to create virtual display - returned null")
                 setError("Failed to create virtual display")
@@ -734,7 +830,7 @@ class ScreenStreamServer(private val context: Context) {
             }
             
             fileLog("Virtual display created successfully")
-            handler.post { onStatusUpdate?.invoke("Streaming...") }
+            handler.post { streamingListener?.onStreamStatusChanged("Streaming...") }
             return true
             
         } catch (e: Exception) {
@@ -747,16 +843,22 @@ class ScreenStreamServer(private val context: Context) {
         }
     }
     
-    private fun stopCapture() {
+    /** Stops the encoder. The virtual display is kept for the next connection unless [releaseDisplay]. */
+    private fun stopCapture(releaseDisplay: Boolean = false) {
         fileLog("Stopping capture")
-        
+
         try {
-            virtualDisplay?.release()
+            if (releaseDisplay) {
+                virtualDisplay?.release()
+                virtualDisplay = null
+            } else {
+                virtualDisplay?.surface = null
+            }
         } catch (e: Exception) {
             fileLog("Error releasing virtual display: ${e.message}")
+            virtualDisplay = null
         }
-        virtualDisplay = null
-        
+
         try {
             encoder?.stop()
             encoder?.release()
@@ -838,6 +940,83 @@ class ScreenStreamServer(private val context: Context) {
         fileLog("Stream ended. Total frames: ${framesSent.get()}, bytes: ${bytesSent.get()}")
     }
     
+    // ==================== Remote control from the glasses ====================
+
+    /** Whether the user was told, this session, that remote control needs the accessibility service. */
+    private val remoteControlPrompted = AtomicBoolean(false)
+
+    /**
+     * Reads the glasses' touches on the mirror, sent back on the stream socket as one JSON object per
+     * line: {"a":"down|move|up|scroll","x":0..1,"y":0..1,"dy":0..1}, in fractions of the video
+     * frame ([captureWidth] x [captureHeight]). Each is mapped to the phone screen and played by
+     * [MirrorControlService].
+     */
+    private fun startInputReader(input: InputStream, captureWidth: Int, captureHeight: Int) {
+        Thread {
+            try {
+                input.bufferedReader().forEachLine { line ->
+                    val input = runCatching { org.json.JSONObject(line) }.getOrNull() ?: return@forEachLine
+                    handler.post { playInput(input, captureWidth, captureHeight) }
+                }
+            } catch (e: Exception) {
+                fileLog("Mirror input reader ended: ${e.message}")
+            }
+        }.apply {
+            name = "MirrorInputReader"
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun playInput(input: org.json.JSONObject, captureWidth: Int, captureHeight: Int) {
+        val injector = MirrorControlService.instance?.injector
+        if (injector == null) {
+            if (remoteControlPrompted.compareAndSet(false, true)) {
+                fileLog("Mirror input received, but the remote control service is off")
+                streamingListener?.onRemoteControlUnavailable()
+            }
+            return
+        }
+        val (x, y) = frameToScreen(input.optDouble("x", 0.5).toFloat(), input.optDouble("y", 0.5).toFloat(), captureWidth, captureHeight)
+        val action = input.optString("a")
+        if (action != "move") fileLog("Mirror input $action at (${x.toInt()}, ${y.toInt()})")
+        when (action) {
+            "down" -> injector.down(x, y)
+            "move" -> injector.move(x, y)
+            "up" -> injector.up(x, y)
+            "scroll" -> {
+                val screenHeight = screenSize().second.toFloat()
+                val dy = input.optDouble("dy", 0.0).toFloat() * captureHeight / frameToScreenScale(captureWidth, captureHeight)
+                injector.scroll(x, y, dy.coerceIn(-screenHeight, screenHeight))
+            }
+        }
+    }
+
+    /** The phone screen's current size in pixels, in its current rotation. */
+    private fun screenSize(): Pair<Int, Int> {
+        val display = displayManager?.getDisplay(android.view.Display.DEFAULT_DISPLAY)
+        val metrics = DisplayMetrics()
+        display?.getRealMetrics(metrics)
+        return metrics.widthPixels.coerceAtLeast(1) to metrics.heightPixels.coerceAtLeast(1)
+    }
+
+    /** How much the screen is scaled down in the frame, which letterboxes it, centred. */
+    private fun frameToScreenScale(captureWidth: Int, captureHeight: Int): Float {
+        val (w, h) = screenSize()
+        return minOf(captureWidth.toFloat() / w, captureHeight.toFloat() / h)
+    }
+
+    /** A point of the video frame, in fractions of it, as a point of the phone screen, in pixels. */
+    private fun frameToScreen(fx: Float, fy: Float, captureWidth: Int, captureHeight: Int): Pair<Float, Float> {
+        val (w, h) = screenSize()
+        val scale = frameToScreenScale(captureWidth, captureHeight)
+        val offsetX = (captureWidth - w * scale) / 2f
+        val offsetY = (captureHeight - h * scale) / 2f
+        val x = ((fx * captureWidth - offsetX) / scale).coerceIn(0f, w - 1f)
+        val y = ((fy * captureHeight - offsetY) / scale).coerceIn(0f, h - 1f)
+        return x to y
+    }
+
     /**
      * Release all resources.
      */

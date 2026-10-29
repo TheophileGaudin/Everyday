@@ -12,17 +12,40 @@ import android.os.Looper
 import android.util.Log
 import java.net.Inet4Address
 import java.net.NetworkInterface
+import java.security.SecureRandom
 
 /**
- * Manages WiFi Direct (P2P) connections as fallback when devices
- * aren't on the same WiFi network.
+ * Manages the phone's Wi-Fi Direct (P2P) group, the direct link screen mirroring uses: the phone
+ * owns the group, and the glasses join it with its name and passphrase, sent over Bluetooth. No
+ * router is involved, and no peer discovery or connection prompt is needed.
  */
 class WifiDirectManager(private val context: Context) {
+
+    /** The phone's group, as the glasses need it: where to connect, and how to join. */
+    data class MirrorGroup(val ownerIp: String, val networkName: String, val passphrase: String)
+
+    /** Receives Wi-Fi Direct availability, peer discovery, and group lifecycle events. */
+    interface ConnectionListener {
+        fun onGroupFormed(ownerIp: String) = Unit
+        fun onGroupRemoved() = Unit
+        fun onError(error: String) = Unit
+        fun onStateChanged(enabled: Boolean) = Unit
+        fun onPeersChanged(peers: List<WifiP2pDevice>) = Unit
+    }
 
     companion object {
         private const val TAG = "WifiDirectManager"
         const val GROUP_OWNER_PORT = 5050  // Same port as regular streaming
+        private const val PREFS = "mirror_wifi_direct"
+        private const val KEY_NAME = "network_name"
+        private const val KEY_PASSPHRASE = "passphrase"
+        private const val GROUP_POLL_MS = 400L
+        private const val GROUP_POLL_ATTEMPTS = 25
+        private const val ALPHANUMERIC = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
     }
+
+    /** True while the current group is one this manager created for mirroring, so it removes it again. */
+    private var ownsMirrorGroup = false
 
     private var wifiP2pManager: WifiP2pManager? = null
     private var channel: WifiP2pManager.Channel? = null
@@ -40,18 +63,13 @@ class WifiDirectManager(private val context: Context) {
     var isGroupFormed = false
         private set
     
-    // Callbacks
-    var onGroupFormed: ((ownerIp: String) -> Unit)? = null
-    var onGroupRemoved: (() -> Unit)? = null
-    var onError: ((String) -> Unit)? = null
-    var onStateChanged: ((enabled: Boolean) -> Unit)? = null
-    var onPeersChanged: ((List<WifiP2pDevice>) -> Unit)? = null
+    var connectionListener: ConnectionListener? = null
 
     fun initialize() {
         wifiP2pManager = context.getSystemService(Context.WIFI_P2P_SERVICE) as? WifiP2pManager
         if (wifiP2pManager == null) {
             Log.e(TAG, "WiFi Direct not supported on this device")
-            onError?.invoke("WiFi Direct not supported")
+            connectionListener?.onError("WiFi Direct not supported")
             return
         }
         
@@ -71,7 +89,7 @@ class WifiDirectManager(private val context: Context) {
                         val state = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1)
                         isWifiDirectEnabled = (state == WifiP2pManager.WIFI_P2P_STATE_ENABLED)
                         Log.d(TAG, "WiFi P2P state: $isWifiDirectEnabled")
-                        handler.post { onStateChanged?.invoke(isWifiDirectEnabled) }
+                        handler.post { connectionListener?.onStateChanged(isWifiDirectEnabled) }
                     }
                     
                     WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> {
@@ -89,7 +107,7 @@ class WifiDirectManager(private val context: Context) {
                             isGroupFormed = false
                             isGroupOwner = false
                             groupOwnerAddress = null
-                            handler.post { onGroupRemoved?.invoke() }
+                            handler.post { connectionListener?.onGroupRemoved() }
                         }
                     }
                     
@@ -135,7 +153,7 @@ class WifiDirectManager(private val context: Context) {
                     val p2pIp = getWifiDirectIp()
                     Log.d(TAG, "Group formed, our P2P IP: $p2pIp")
                     p2pIp?.let { 
-                        handler.post { onGroupFormed?.invoke(it) }
+                        handler.post { connectionListener?.onGroupFormed(it) }
                     }
                 }
             }
@@ -150,7 +168,7 @@ class WifiDirectManager(private val context: Context) {
             deviceList.forEach { device ->
                 Log.d(TAG, "  - ${device.deviceName} (${device.deviceAddress})")
             }
-            handler.post { onPeersChanged?.invoke(deviceList) }
+            handler.post { connectionListener?.onPeersChanged(deviceList) }
         }
     }
 
@@ -177,9 +195,110 @@ class WifiDirectManager(private val context: Context) {
                 }
                 Log.e(TAG, "Group creation failed: $reasonStr")
                 fileLog("WiFi Direct group creation failed: $reasonStr")
-                handler.post { onError?.invoke("Group creation failed: $reasonStr") }
+                handler.post { connectionListener?.onError("Group creation failed: $reasonStr") }
             }
         })
+    }
+
+    /**
+     * Makes sure the phone owns a Wi-Fi Direct group the glasses can join, then reports it; null when
+     * it can't (Wi-Fi Direct off, permission missing, Android older than 10, or the phone is already
+     * a member of another device's group). Reuses a group the phone already owns. Main thread.
+     */
+    @SuppressLint("MissingPermission")
+    fun ensureMirrorGroup(onReady: (MirrorGroup?) -> Unit) {
+        val manager = wifiP2pManager
+        val ch = channel
+        if (manager == null || ch == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            fileLog("Mirror group: Wi-Fi Direct unavailable")
+            onReady(null)
+            return
+        }
+        try {
+            manager.requestGroupInfo(ch) { group ->
+                when {
+                    group != null && group.isGroupOwner -> {
+                        fileLog("Mirror group: reusing ${group.networkName}")
+                        // Ours from an earlier run of the app: remove it with the mirror, as if just created.
+                        if (group.networkName == mirrorCredentials().first) ownsMirrorGroup = true
+                        awaitMirrorGroup(onReady)
+                    }
+                    group != null -> {
+                        fileLog("Mirror group: the phone is a client of ${group.networkName}; can't host")
+                        onReady(null)
+                    }
+                    else -> createMirrorGroup(onReady)
+                }
+            }
+        } catch (e: SecurityException) {
+            fileLog("Mirror group: permission missing: ${e.message}")
+            onReady(null)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
+    private fun createMirrorGroup(onReady: (MirrorGroup?) -> Unit) {
+        val (name, passphrase) = mirrorCredentials()
+        val config = WifiP2pConfig.Builder()
+            .setNetworkName(name)
+            .setPassphrase(passphrase)
+            .setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_AUTO)
+            .build()
+        val ch = channel ?: return onReady(null)
+        wifiP2pManager?.createGroup(ch, config, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                fileLog("Mirror group: creating $name")
+                ownsMirrorGroup = true
+                awaitMirrorGroup(onReady)
+            }
+
+            override fun onFailure(reason: Int) {
+                fileLog("Mirror group: creation failed ($reason)")
+                onReady(null)
+            }
+        })
+    }
+
+    /** Polls until the group is up and the phone has its address on it. */
+    @SuppressLint("MissingPermission")
+    private fun awaitMirrorGroup(onReady: (MirrorGroup?) -> Unit, attempt: Int = 0) {
+        wifiP2pManager?.requestGroupInfo(channel) { group ->
+            val ip = getWifiDirectIp()
+            val name = group?.networkName
+            val passphrase = group?.passphrase
+            if (group != null && group.isGroupOwner && ip != null && name != null && passphrase != null) {
+                fileLog("Mirror group ready: $name at $ip")
+                onReady(MirrorGroup(ip, name, passphrase))
+            } else if (attempt >= GROUP_POLL_ATTEMPTS) {
+                fileLog("Mirror group: not ready in time (group=${group != null}, ip=$ip)")
+                onReady(null)
+            } else {
+                handler.postDelayed({ awaitMirrorGroup(onReady, attempt + 1) }, GROUP_POLL_MS)
+            }
+        } ?: onReady(null)
+    }
+
+    /** Removes the group if this manager created it for mirroring. */
+    fun removeMirrorGroup() {
+        if (!ownsMirrorGroup) return
+        ownsMirrorGroup = false
+        removeGroup()
+    }
+
+    /** The group's name and passphrase, made once and kept, so the glasses always join the same group. */
+    private fun mirrorCredentials(): Pair<String, String> {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val savedName = prefs.getString(KEY_NAME, null)
+        val savedPassphrase = prefs.getString(KEY_PASSPHRASE, null)
+        if (savedName != null && savedPassphrase != null) return savedName to savedPassphrase
+        val random = SecureRandom()
+        fun randomText(length: Int) = (1..length).map { ALPHANUMERIC[random.nextInt(ALPHANUMERIC.length)] }.joinToString("")
+        // Wi-Fi Direct group names must start with "DIRECT-" and two characters.
+        val name = "DIRECT-${randomText(2)}-Everyday"
+        val passphrase = randomText(16)
+        prefs.edit().putString(KEY_NAME, name).putString(KEY_PASSPHRASE, passphrase).apply()
+        return name to passphrase
     }
 
     /**

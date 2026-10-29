@@ -13,7 +13,20 @@ def hasExternalSigning = keystoreProperties['storeFile'] &&
         keystoreProperties['keyAlias'] &&
         keystoreProperties['keyPassword']
 
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localProperties.load(new FileInputStream(localPropertiesFile))
+}
+def mapboxAccessToken = (localProperties['MAPBOX_ACCESS_TOKEN'] ?: '').toString().trim()
+if (gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') } && !mapboxAccessToken.startsWith('pk.')) {
+    throw new GradleException('Release builds require MAPBOX_ACCESS_TOKEN=pk... in Everyday_phone/local.properties')
+}
+
 android {
+    buildFeatures {
+        buildConfig true
+    }
     signingConfigs {
         if (hasExternalSigning) {
             externalOverride {
@@ -33,6 +46,7 @@ android {
         targetSdk 34
         versionCode 10
         versionName "0.9.1"
+        buildConfigField "String", "MAPBOX_ACCESS_TOKEN", "\"${mapboxAccessToken.replace('\\', '\\\\').replace('\"', '\\\"')}\""
     }
 
     buildTypes {
@@ -72,4 +86,5 @@ dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
 }

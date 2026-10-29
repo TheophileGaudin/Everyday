@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Everyday</string>
+    <string name="mirror_control_label">Everyday remote control</string>
+    <string name="mirror_control_description">Lets your Everyday glasses tap and swipe on this phone while its screen is mirrored to them. Nothing is read from the screen.</string>
 </resources>

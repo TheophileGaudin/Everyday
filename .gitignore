@@ -28,6 +28,7 @@ github_repo_personal_access_token.txt
 
 # Debug logs
 **/app_debug.log
+**/last_device_app_debug.log
 get_phone_filelog.txt
 
 # ============================================================
@@ -44,6 +45,20 @@ get_phone_filelog.txt
 # Claude Code
 # ============================================================
 **/.claude/
+
+# ============================================================
+# Local planning docs — kept on disk, not part of the repo
+# ============================================================
+refactor/
+voice_control_update_plan/
+x3player_port_plan.md
+
+# ============================================================
+# Scratch captures and debug dumps
+# ============================================================
+page-agent-terminal*.png
+phone-current*.png
+widgets-after-page-agent.json
 
 # ============================================================
 # Misc

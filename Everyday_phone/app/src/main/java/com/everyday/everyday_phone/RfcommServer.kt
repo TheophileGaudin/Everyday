@@ -14,22 +14,26 @@ import android.os.Handler
 import android.os.Looper
 import androidx.core.app.ActivityCompat
 import com.everyday.shared.sync.SyncError
-import com.everyday.shared.sync.SyncProtocol
 import com.everyday.shared.sync.SyncRequest
 import com.everyday.shared.sync.SyncSnapshot
-import com.everyday.shared.sync.SpeedSnapshot
 import com.everyday.shared.sync.SubtitleControl
-import com.everyday.shared.sync.SubtitleProtocol
 import com.everyday.shared.sync.SubtitleStatus
 import com.everyday.shared.sync.SubtitleTranscript
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStream
-import java.text.SimpleDateFormat
 import android.content.ClipboardManager
 import android.util.Base64
-import org.json.JSONObject
+import com.everyday.shared.transport.PointerAction
+import com.everyday.shared.transport.AssistantControl
+import com.everyday.shared.transport.AssistantStatus
+import com.everyday.shared.transport.SyncMessenger
+import com.everyday.shared.transport.TransportDecodeResult
+import com.everyday.shared.transport.TransportGoogleAccount
+import com.everyday.shared.transport.TransportGoogleAuthStatus
+import com.everyday.shared.transport.TransportMessage
+import com.everyday.shared.transport.TransportProtocol
 import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.sqrt
@@ -40,7 +44,42 @@ import kotlin.math.sqrt
  * Sends delta movements for cursor control, detects tap/double-tap gestures,
  * and handles keyboard input when text fields are focused.
  */
-class RfcommServer(private val context: Context) {
+class RfcommServer(private val context: Context) : SyncMessenger, PhoneRouteTransport, PhoneDestinationSearchTransport {
+
+    /** Receives RFCOMM connection lifecycle and glasses device-state events. */
+    interface DeviceListener {
+        fun onServerStatusChanged(status: String) = Unit
+        fun onConnectionChanged(connected: Boolean) = Unit
+        fun onTextFieldFocusChanged(focused: Boolean) = Unit
+        fun onGlassesBatteryChanged(batteryPercent: Int) = Unit
+    }
+
+    /** Receives user actions requested by the glasses. */
+    interface PhoneActionListener {
+        fun onMirrorActionRequested(start: Boolean) = Unit
+        fun onClipboardRequested() = Unit
+        fun onGoogleAuthRequested() = Unit
+        fun onGoogleDisconnectRequested() = Unit
+    }
+
+    /** Receives sync and navigation requests decoded from the glasses transport. */
+    interface DataRequestListener {
+        fun onSyncRequested(request: SyncRequest) = Unit
+        fun onRouteRequestReceived(request: com.everyday.shared.transport.RouteTransportRequest) = Unit
+        fun onRouteCancellationReceived(cancellation: com.everyday.shared.transport.RouteTransportCancellation) = Unit
+        fun onDestinationSearchRequestReceived(request: com.everyday.shared.transport.DestinationSearchRequest) = Unit
+        fun onDestinationSearchCancellationReceived(cancellation: com.everyday.shared.transport.DestinationSearchCancellation) = Unit
+        /** The glasses have no internet: they ask the phone to make this request (their voice assistant's). */
+        fun onHttpRelayRequested(request: TransportMessage.HttpRelayRequest) = Unit
+        /** A piece of a photo or video taken on the glasses, to keep in the phone's gallery too. */
+        fun onMediaChunkReceived(chunk: TransportMessage.MediaChunk) = Unit
+    }
+
+    /** Receives controls for interactive glasses experiences. */
+    interface ExperienceControlListener {
+        fun onSubtitleControlRequested(control: SubtitleControl) = Unit
+        fun onAssistantStatusReceived(status: AssistantStatus) = Unit
+    }
     
     companion object {
         private const val TAG = "RfcommServer"
@@ -62,16 +101,10 @@ class RfcommServer(private val context: Context) {
             private set
     }
     
-    var onStatusChanged: ((String) -> Unit)? = null
-    var onConnectionChanged: ((Boolean) -> Unit)? = null
-    var onTextFieldFocusChanged: ((Boolean) -> Unit)? = null
-    var onBatteryChanged: ((Int) -> Unit)? = null
-    var onMirrorActionRequested: ((Boolean) -> Unit)? = null
-    var onClipboardRequested: (() -> Unit)? = null
-    var onGoogleAuthRequested: (() -> Unit)? = null
-    var onGoogleDisconnectRequested: (() -> Unit)? = null
-    var onSyncRequested: ((SyncRequest) -> Unit)? = null
-    var onSubtitleControlRequested: ((SubtitleControl) -> Unit)? = null
+    var deviceListener: DeviceListener? = null
+    var phoneActionListener: PhoneActionListener? = null
+    var dataRequestListener: DataRequestListener? = null
+    var experienceControlListener: ExperienceControlListener? = null
     
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var serverSocket: BluetoothServerSocket? = null
@@ -123,24 +156,42 @@ class RfcommServer(private val context: Context) {
         bluetoothAdapter = bluetoothManager.adapter
 
         if (bluetoothAdapter == null) {
-            onStatusChanged?.invoke("Bluetooth not supported")
+            deviceListener?.onServerStatusChanged("Bluetooth not supported")
             return false
         }
 
         if (!hasPermissions()) {
-            onStatusChanged?.invoke("Missing permissions")
+            deviceListener?.onServerStatusChanged("Missing permissions")
             return false
         }
 
         if (bluetoothAdapter?.isEnabled != true) {
-            onStatusChanged?.invoke("Bluetooth disabled")
+            deviceListener?.onServerStatusChanged("Bluetooth disabled")
             return false
         }
 
         return startServer()
     }
 
-    fun isConnected(): Boolean = isConnected.get()
+    override fun isConnected(): Boolean = isConnected.get()
+
+    override fun sendSyncRequest(request: SyncRequest): Boolean = false
+
+    override fun sendRouteResult(
+        result: com.everyday.shared.transport.RouteTransportResult
+    ): Boolean = sendMessage(TransportMessage.RouteResultMessage(result))
+
+    override fun sendRouteError(
+        error: com.everyday.shared.transport.RouteTransportError
+    ): Boolean = sendMessage(TransportMessage.RouteErrorMessage(error))
+
+    override fun sendDestinationSearchResult(
+        result: com.everyday.shared.transport.DestinationSearchResult
+    ): Boolean = sendMessage(TransportMessage.DestinationSearchResultMessage(result))
+
+    override fun sendDestinationSearchError(
+        error: com.everyday.shared.transport.DestinationSearchError
+    ): Boolean = sendMessage(TransportMessage.DestinationSearchErrorMessage(error))
     
     fun stop() {
         isRunning.set(false)
@@ -159,8 +210,8 @@ class RfcommServer(private val context: Context) {
         pendingTapRunnable = null
         resetSentPayloadCache()
         
-        onStatusChanged?.invoke("Stopped")
-        onConnectionChanged?.invoke(false)
+        deviceListener?.onServerStatusChanged("Stopped")
+        deviceListener?.onConnectionChanged(false)
     }
 
     private fun resetSentPayloadCache() {
@@ -196,7 +247,7 @@ class RfcommServer(private val context: Context) {
         
         // Send "down" event so glasses can initiate drag if cursor is over draggable element
         // Include pointerCount so glasses know if this is a two-finger gesture from the start
-        sendEventWithPointerCount("down", 0f, 0f, pointerCount)
+        sendEventWithPointerCount(PointerAction.DOWN, 0f, 0f, pointerCount)
     }
     
     fun onPointerCountChanged(pointerCount: Int, x: Float = lastX, y: Float = lastY) {
@@ -216,22 +267,7 @@ class RfcommServer(private val context: Context) {
      * This allows the glasses to enter/exit scroll mode without waiting for a move event.
      */
     private fun sendPointerCountEvent(pointerCount: Int) {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-        
-        try {
-            val data = """{"event":"pointercount","pointerCount":$pointerCount}""" + "\n"
-            
-            fileLog("Sending pointer count event: $pointerCount")
-            
-            synchronized(output) {
-                output.write(data.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            fileLog("Failed to send pointer count event: ${e.message}")
-            isConnected.set(false)
-        }
+        sendMessage(TransportMessage.Pointer(PointerAction.POINTER_COUNT, pointerCount = pointerCount))
     }
     
     fun onTouchMove(x: Float, y: Float, pointerCount: Int = 1) {
@@ -264,7 +300,7 @@ class RfcommServer(private val context: Context) {
         pendingMoveDy -= sendDy.toFloat()
 
         // Send coalesced delta movement with pointer count
-        sendEvent("move", sendDx.toFloat(), sendDy.toFloat())
+        sendEvent(PointerAction.MOVE, sendDx.toFloat(), sendDy.toFloat())
     }
     
     fun onTouchEnd() {
@@ -276,7 +312,7 @@ class RfcommServer(private val context: Context) {
         
         // Send "up" event so glasses can end any drag operation
         // Include current pointer count so glasses know the gesture state
-        sendEventWithPointerCount("up", 0f, 0f, currentPointerCount)
+        sendEventWithPointerCount(PointerAction.UP, 0f, 0f, currentPointerCount)
         
         // Only detect tap if long-press wasn't fired
         if (!longPressFired && totalDistance < TAP_THRESHOLD) {
@@ -297,7 +333,7 @@ class RfcommServer(private val context: Context) {
         
         // Get clipboard content
         val clipboardText = getClipboardText()
-        fileLog("Clipboard content: ${clipboardText?.take(50) ?: "(empty)"}")
+        fileLog("Clipboard available=${clipboardText != null}")
         
         // Send long-press event with clipboard content
         sendLongPressEvent(clipboardText)
@@ -325,31 +361,7 @@ class RfcommServer(private val context: Context) {
      * Send a long-press event to the glasses with clipboard content.
      */
     private fun sendLongPressEvent(clipboardText: String?) {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-        
-        try {
-            val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-            val battery = getBatteryLevel()
-            
-            // Escape special characters in clipboard text
-            val escapedClipboard = clipboardText?.let {
-                it.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r")
-            }
-            
-            val clipboardPart = if (escapedClipboard != null) ""","clipboard":"$escapedClipboard"""" else ""
-            val data = """{"time":"$time","battery":$battery,"event":"longpress"$clipboardPart}""" + "\n"
-            
-            fileLog("Sending long-press event")
-            
-            synchronized(output) {
-                output.write(data.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            fileLog("Failed to send long-press event: ${e.message}")
-            isConnected.set(false)
-        }
+        sendMessage(TransportMessage.LongPress(clipboardText))
     }
     
     /**
@@ -367,13 +379,13 @@ class RfcommServer(private val context: Context) {
             // Double tap detected
             fileLog("Double tap detected")
             lastTapTime = 0L  // Reset to prevent triple-tap being detected as double
-            sendEvent("doubletap", 0f, 0f)
+            sendEvent(PointerAction.DOUBLE_TAP, 0f, 0f)
         } else {
             // Potential single tap - wait to see if another tap comes
             lastTapTime = currentTime
             pendingTapRunnable = Runnable {
                 fileLog("Single tap confirmed")
-                sendEvent("tap", 0f, 0f)
+                sendEvent(PointerAction.TAP, 0f, 0f)
                 pendingTapRunnable = null
             }
             handler.postDelayed(pendingTapRunnable!!, DOUBLE_TAP_TIMEOUT_MS)
@@ -385,55 +397,16 @@ class RfcommServer(private val context: Context) {
      * Called when user types on the keyboard.
      */
     fun sendKeyPress(key: String) {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-        
-        try {
-            val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-            val battery = getBatteryLevel()
-            
-            // Escape special characters in JSON
-            val escapedKey = key.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
-            val data = """{"time":"$time","battery":$battery,"event":"key","key":"$escapedKey"}""" + "\n"
-            
-            fileLog("Sending key: $key")
-            
-            synchronized(output) {
-                output.write(data.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            fileLog("Failed to send key: ${e.message}")
-            isConnected.set(false)
-        }
+        sendMessage(TransportMessage.KeyInput(key))
     }
     
-    /**
-     * Send mirror control message to glasses.
-     * @param enabled Whether mirroring should be enabled
-     * @param ip The phone's IP address for WiFi streaming (required when enabled)
-     */
-    fun sendMirrorControl(enabled: Boolean, ip: String? = null, isWifiDirect: Boolean = false) {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-
-        try {
-            val data = if (enabled && ip != null) {
-                // Explicitly tell glasses if this is WiFi Direct
-                """{"mirror":"on","ip":"$ip","port":${ScreenStreamServer.STREAM_PORT},"wifiDirect":$isWifiDirect}""" + "\n"
-            } else {
-                """{"mirror":"off"}""" + "\n"
-            }
-
-            fileLog("Sending mirror control: $data")
-
-            synchronized(output) {
-                output.write(data.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            fileLog("Failed to send mirror control: ${e.message}")
+    /** Tells the glasses where to stream the mirrored screen from, or that mirroring stopped. */
+    fun sendMirrorState(state: TransportMessage.MirrorState) {
+        if (state.enabled && state.ip.isNullOrBlank()) {
+            fileLog("Mirror state not sent: enabled state requires an IP address")
+            return
         }
+        sendMessage(state)
     }
     
     /**
@@ -441,177 +414,58 @@ class RfcommServer(private val context: Context) {
      * Called when phone clipboard changes.
      */
     fun sendClipboardUpdate(clipboardText: String) {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-        
-        try {
-            // Escape special characters in clipboard text
-            val escapedClipboard = clipboardText
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-            
-            val data = """{"event":"clipboard","content":"$escapedClipboard"}""" + "\n"
-            
-            fileLog("Sending clipboard update (${clipboardText.length} chars)")
-            
-            synchronized(output) {
-                output.write(data.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            fileLog("Failed to send clipboard update: ${e.message}")
-            isConnected.set(false)
-        }
+        sendMessage(TransportMessage.ClipboardUpdate(clipboardText))
     }
 
     fun sendOpenBrowser(address: String): Boolean {
-        if (!isConnected.get()) return false
-        val output = outputStream ?: return false
-
-        return try {
-            val data = JSONObject()
-                .put("event", "open_browser")
-                .put("address", address)
-                .toString() + "\n"
-
-            fileLog("Sending browser open request: ${address.take(80)}")
-
-            synchronized(output) {
-                output.write(data.toByteArray())
-                output.flush()
-            }
-            true
-        } catch (e: IOException) {
-            fileLog("Failed to send browser open request: ${e.message}")
-            isConnected.set(false)
-            false
-        }
+        return sendMessage(TransportMessage.OpenBrowser(address))
     }
 
-    fun sendSyncSnapshot(snapshot: SyncSnapshot) {
-        if (snapshot.isEmpty) return
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-
-        try {
-            val data = SyncProtocol.encodeSnapshot(snapshot) + "\n"
-            if (data == lastSentSyncSnapshot) {
-                return
-            }
-
-            synchronized(output) {
-                output.write(data.toByteArray())
-                output.flush()
-            }
-            lastSentSyncSnapshot = data
-        } catch (e: IOException) {
-            fileLog("Failed to send sync snapshot: ${e.message}")
-            isConnected.set(false)
-        }
+    override fun sendSyncSnapshot(snapshot: SyncSnapshot): Boolean {
+        if (snapshot.isEmpty) return false
+        val data = TransportProtocol.encode(TransportMessage.SyncSnapshotMessage(snapshot)) + "\n"
+        if (data == lastSentSyncSnapshot) return true
+        val sent = writeEncoded(TransportMessage.SyncSnapshotMessage(snapshot).kind, data)
+        if (sent) lastSentSyncSnapshot = data
+        return sent
     }
 
-    fun sendSyncError(error: SyncError) {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
+    override fun sendSyncError(error: SyncError): Boolean =
+        sendMessage(TransportMessage.SyncErrorMessage(error))
 
-        try {
-            val data = SyncProtocol.encodeError(error) + "\n"
-            synchronized(output) {
-                output.write(data.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            fileLog("Failed to send sync error: ${e.message}")
-            isConnected.set(false)
-        }
-    }
+    override fun sendHttpRelayResponse(response: TransportMessage.HttpRelayResponse): Boolean = sendMessage(response)
 
-    fun sendSpeedSnapshot(snapshot: SpeedSnapshot) {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-
-        try {
-            val data = SyncProtocol.encodeSpeedSnapshot(snapshot) + "\n"
-            synchronized(output) {
-                output.write(data.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            fileLog("Failed to send speed snapshot: ${e.message}")
-            isConnected.set(false)
-        }
-    }
 
     fun sendSubtitleStatus(status: SubtitleStatus) {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-
-        try {
-            val data = SubtitleProtocol.encodeStatus(status) + "\n"
-            synchronized(output) {
-                output.write(data.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            fileLog("Failed to send subtitle status: ${e.message}")
-            isConnected.set(false)
-        }
+        sendMessage(TransportMessage.SubtitleStatusMessage(status))
     }
 
     fun sendSubtitleTranscript(transcript: SubtitleTranscript) {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-
-        try {
-            val data = SubtitleProtocol.encodeTranscript(transcript) + "\n"
-            synchronized(output) {
-                output.write(data.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            fileLog("Failed to send subtitle transcript: ${e.message}")
-            isConnected.set(false)
-        }
+        sendMessage(TransportMessage.SubtitleTranscriptMessage(transcript))
     }
+
+    fun sendAssistantControl(control: AssistantControl): Boolean =
+        sendMessage(TransportMessage.AssistantControlMessage(control))
 
     fun sendGoogleAuthState(
         status: PhoneGoogleAuthState.Status,
         account: PhoneGoogleAccountSummary? = null,
         detail: String? = null
     ) {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-
-        try {
-            val statusValue = when (status) {
-                PhoneGoogleAuthState.Status.SIGNED_OUT -> "signed_out"
-                PhoneGoogleAuthState.Status.AUTHORIZING -> "authorizing"
-                PhoneGoogleAuthState.Status.AUTHORIZED -> "authorized"
-                PhoneGoogleAuthState.Status.ERROR -> "error"
-            }
-            val accountPart = account?.let {
-                ""","account":{"email":"${escapeJson(it.email)}","displayName":"${escapeJson(it.displayName ?: "")}"}"""
-            } ?: ""
-            val detailPart = detail?.takeIf { it.isNotBlank() }?.let {
-                ""","detail":"${escapeJson(it)}""""
-            } ?: ""
-            val data = """{"event":"google_auth_state","status":"$statusValue"$accountPart$detailPart}""" + "\n"
-
-            if (data == lastSentGoogleAuthState) {
-                return
-            }
-
-            synchronized(output) {
-                output.write(data.toByteArray())
-                output.flush()
-            }
-            lastSentGoogleAuthState = data
-        } catch (e: IOException) {
-            fileLog("Failed to send Google auth state: ${e.message}")
-            isConnected.set(false)
+        val transportStatus = when (status) {
+            PhoneGoogleAuthState.Status.SIGNED_OUT -> TransportGoogleAuthStatus.SIGNED_OUT
+            PhoneGoogleAuthState.Status.AUTHORIZING -> TransportGoogleAuthStatus.AUTHORIZING
+            PhoneGoogleAuthState.Status.AUTHORIZED -> TransportGoogleAuthStatus.AUTHORIZED
+            PhoneGoogleAuthState.Status.ERROR -> TransportGoogleAuthStatus.ERROR
         }
+        val message = TransportMessage.GoogleAuthState(
+            status = transportStatus,
+            account = account?.let { TransportGoogleAccount(it.email, it.displayName) },
+            detail = detail
+        )
+        val data = TransportProtocol.encode(message) + "\n"
+        if (data == lastSentGoogleAuthState) return
+        if (writeEncoded(message.kind, data)) lastSentGoogleAuthState = data
     }
 
     /**
@@ -622,7 +476,7 @@ class RfcommServer(private val context: Context) {
      */
     fun sendImage(imageData: ByteArray, fileName: String) {
         if (!isConnected.get()) return
-        val output = outputStream ?: return
+        if (outputStream == null) return
 
         try {
             // Encode image as base64
@@ -631,52 +485,23 @@ class RfcommServer(private val context: Context) {
             // Send image as a single message with base64 data
             // For very large images, we could chunk this, but most phone images after
             // compression should fit in a reasonable message
-            val safeFileName = fileName.replace("\"", "\\\"")
-            val data = """{"event":"image","fileName":"$safeFileName","data":"$base64Data"}""" + "\n"
-
-            fileLog("Sending image: $fileName (${imageData.size} bytes, ${base64Data.length} base64 chars)")
-
-            synchronized(output) {
-                output.write(data.toByteArray())
-                output.flush()
-            }
-
-            fileLog("Image sent successfully")
-        } catch (e: IOException) {
-            fileLog("Failed to send image: ${e.message}")
-            isConnected.set(false)
+            sendMessage(TransportMessage.Image(fileName, base64Data))
+        } catch (e: Exception) {
+            fileLog("Failed to encode image: ${e.message}")
         }
     }
 
-    private fun sendEvent(type: String, dx: Float, dy: Float) {
-        sendEventWithPointerCount(type, dx, dy, if (type == "move") currentPointerCount else 1)
+    private fun sendEvent(action: PointerAction, dx: Float, dy: Float) {
+        sendEventWithPointerCount(
+            action,
+            dx,
+            dy,
+            if (action == PointerAction.MOVE) currentPointerCount else 1
+        )
     }
     
-    private fun sendEventWithPointerCount(type: String, dx: Float, dy: Float, pointerCount: Int) {
-        if (!isConnected.get()) return
-        val output = outputStream ?: return
-        
-        try {
-            // Always include pointerCount so glasses know the full gesture state
-            val pointerCountPart = if (pointerCount > 1) {
-                ""","pointerCount":$pointerCount"""
-            } else ""
-
-            val statusPart = if (type == "update") {
-                val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                val battery = getBatteryLevel()
-                """"time":"$time","battery":$battery,"""
-            } else ""
-
-            val data = """{$statusPart"event":"$type","dx":${dx.toInt()},"dy":${dy.toInt()}$pointerCountPart}""" + "\n"
-            
-            synchronized(output) {
-                output.write(data.toByteArray())
-                output.flush()
-            }
-        } catch (e: IOException) {
-            isConnected.set(false)
-        }
+    private fun sendEventWithPointerCount(action: PointerAction, dx: Float, dy: Float, pointerCount: Int) {
+        sendMessage(TransportMessage.Pointer(action, dx.toInt(), dy.toInt(), pointerCount))
     }
     
     private fun hasPermissions(): Boolean {
@@ -692,7 +517,7 @@ class RfcommServer(private val context: Context) {
         try {
             serverSocket = bluetoothAdapter?.listenUsingRfcommWithServiceRecord(SERVICE_NAME, SPP_UUID)
             if (serverSocket == null) {
-                onStatusChanged?.invoke("Failed to create server")
+                deviceListener?.onServerStatusChanged("Failed to create server")
                 return false
             }
             
@@ -705,11 +530,11 @@ class RfcommServer(private val context: Context) {
                 start()
             }
             
-            onStatusChanged?.invoke("Waiting for glasses...")
+            deviceListener?.onServerStatusChanged("Waiting for glasses...")
             return true
             
         } catch (e: Exception) {
-            onStatusChanged?.invoke("Failed to start server")
+            deviceListener?.onServerStatusChanged("Failed to start server")
             return false
         }
     }
@@ -726,27 +551,32 @@ class RfcommServer(private val context: Context) {
                 resetSentPayloadCache()
 
                 handler.post {
-                    onStatusChanged?.invoke("Glasses connected")
-                    onConnectionChanged?.invoke(true)
+                    deviceListener?.onServerStatusChanged("Glasses connected")
+                    deviceListener?.onConnectionChanged(true)
                 }
 
-                startPeriodicUpdates()
+                startPeriodicUpdates(socket)
                 receiveMessages(socket)
                 
             } catch (e: IOException) {
                 if (isRunning.get()) {
-                    handler.post { onStatusChanged?.invoke("Connection error") }
+                    handler.post { deviceListener?.onServerStatusChanged("Connection error") }
                 }
                 break
             }
         }
     }
 
-    private fun startPeriodicUpdates() {
-        // Heartbeat thread - sends time/battery update every second
+    private fun startPeriodicUpdates(socket: BluetoothSocket) {
+        // Device telemetry has its own cadence and is not interpreted as pointer input.
         Thread {
-            while (isConnected.get() && isRunning.get()) {
-                sendEvent("update", 0f, 0f)
+            while (isConnected.get() && isRunning.get() && clientSocket === socket) {
+                sendMessage(
+                    TransportMessage.DeviceStatus(
+                        time = java.text.SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date()),
+                        phoneBatteryPercent = getBatteryLevel().takeIf { it in 0..100 }
+                    )
+                )
                 Thread.sleep(1000)
             }
         }.start()
@@ -763,110 +593,96 @@ class RfcommServer(private val context: Context) {
                 
                 while (isConnected.get() && isRunning.get()) {
                     val line = reader.readLine() ?: break
-                    
-                    fileLog("Received from glasses: $line")
-                    
-                    // Parse messages from glasses
-                    parseGlassesMessage(line)
+
+                    if (line.length > TransportProtocol.MAX_MESSAGE_CHARS) {
+                        fileLog("RX rejected oversized message bytes=${line.length}")
+                        continue
+                    }
+
+                    when (val decoded = TransportProtocol.decode(line)) {
+                        is TransportDecodeResult.Success -> {
+                            fileLog("RX kind=${decoded.message.kind} bytes=${line.length}")
+                            routeMessage(decoded.message)
+                        }
+                        is TransportDecodeResult.Failure -> fileLog(
+                            "RX rejected kind=${decoded.kind ?: "unknown"} bytes=${line.length}: ${decoded.reason}"
+                        )
+                    }
                 }
             } catch (e: IOException) {
                 fileLog("Connection read error: ${e.message}")
             }
             
+            // A replacement connection may already be installed while this reader is unwinding.
+            // The old reader must not tear down the new socket or trigger a false route fallback.
+            if (clientSocket !== socket) return@Thread
             isConnected.set(false)
             outputStream = null
             resetSentPayloadCache()
             
             // Reset text field state on disconnect
             if (isTextFieldFocused.getAndSet(false)) {
-                handler.post { onTextFieldFocusChanged?.invoke(false) }
+                handler.post { deviceListener?.onTextFieldFocusChanged(false) }
             }
             
             handler.post {
-                onStatusChanged?.invoke("Disconnected")
-                onConnectionChanged?.invoke(false)
-                if (isRunning.get()) onStatusChanged?.invoke("Waiting for glasses...")
+                deviceListener?.onServerStatusChanged("Disconnected")
+                deviceListener?.onConnectionChanged(false)
+                if (isRunning.get()) deviceListener?.onServerStatusChanged("Waiting for glasses...")
             }
         }.start()
     }
     
-    /**
-     * Parse messages received from the glasses.
-     * Format: {"textFieldFocused": true/false, "fieldId": "optional_id", "battery": 75}
-     */
-    private fun parseGlassesMessage(json: String) {
-        try {
-            // Check for text field focus message
-            val focusMatch = Regex(""""textFieldFocused"\s*:\s*(true|false)""").find(json)
-            if (focusMatch != null) {
-                val focused = focusMatch.groupValues[1] == "true"
-                val wasChanged = isTextFieldFocused.getAndSet(focused) != focused
-                
-                if (wasChanged) {
-                    fileLog("Text field focus changed to: $focused")
-                    handler.post { onTextFieldFocusChanged?.invoke(focused) }
-                }
+    private fun routeMessage(message: TransportMessage) {
+        when (message) {
+            is TransportMessage.TextFieldFocus -> {
+                val changed = isTextFieldFocused.getAndSet(message.focused) != message.focused
+                if (changed) handler.post { deviceListener?.onTextFieldFocusChanged(message.focused) }
             }
-            
-            // Check for battery level
-            val batteryMatch = Regex(""""battery"\s*:\s*(\d+)""").find(json)
-            if (batteryMatch != null) {
-                val batteryPercent = batteryMatch.groupValues[1].toIntOrNull()
-                if (batteryPercent != null && batteryPercent in 0..100) {
-                    handler.post { onBatteryChanged?.invoke(batteryPercent) }
-                }
+            is TransportMessage.DeviceStatus -> message.glassesBatteryPercent?.let { battery ->
+                handler.post { deviceListener?.onGlassesBatteryChanged(battery) }
             }
-
-            // Check for mirror request
-            // Format: {"action":"mirrorRequest","start":true/false}
-            if (json.contains(""""action":"mirrorRequest"""") || json.contains(""""action" : "mirrorRequest"""")) {
-                val startMatch = Regex(""""start"\s*:\s*(true|false)""").find(json)
-                if (startMatch != null) {
-                    val start = startMatch.groupValues[1] == "true"
-                    fileLog("Mirror request received: start=$start")
-                    handler.post { onMirrorActionRequested?.invoke(start) }
-                }
+            is TransportMessage.MirrorRequest -> handler.post { phoneActionListener?.onMirrorActionRequested(message.start) }
+            TransportMessage.ClipboardRequest -> handler.post { phoneActionListener?.onClipboardRequested() }
+            TransportMessage.GoogleAuthRequest -> handler.post { phoneActionListener?.onGoogleAuthRequested() }
+            TransportMessage.GoogleAuthDisconnect -> handler.post { phoneActionListener?.onGoogleDisconnectRequested() }
+            // Sync dispatch stays on the RFCOMM reader thread; refresh work is then
+            // handed to the coordinator's bounded executors.
+            is TransportMessage.SyncRequestMessage -> dataRequestListener?.onSyncRequested(message.request)
+            is TransportMessage.RouteRequestMessage -> dataRequestListener?.onRouteRequestReceived(message.request)
+            is TransportMessage.RouteCancellationMessage -> dataRequestListener?.onRouteCancellationReceived(message.cancellation)
+            is TransportMessage.DestinationSearchRequestMessage -> dataRequestListener?.onDestinationSearchRequestReceived(message.request)
+            is TransportMessage.DestinationSearchCancellationMessage -> dataRequestListener?.onDestinationSearchCancellationReceived(message.cancellation)
+            is TransportMessage.SubtitleControlMessage -> handler.post {
+                experienceControlListener?.onSubtitleControlRequested(message.control)
             }
-            
-            // Check for clipboard request
-            // Format: {"action":"requestClipboard"}
-            if (json.contains(""""action":"requestClipboard"""") || json.contains(""""action" : "requestClipboard"""")) {
-                fileLog("Clipboard request received from glasses")
-                handler.post { onClipboardRequested?.invoke() }
+            is TransportMessage.AssistantStatusMessage -> handler.post {
+                experienceControlListener?.onAssistantStatusReceived(message.status)
             }
-
-            SyncProtocol.decodeRequest(json)?.let { request ->
-                fileLog("Sync request received from glasses: channels=${request.channels} reason=${request.reason}")
-                handler.post { onSyncRequested?.invoke(request) }
-                return
-            }
-
-            SubtitleProtocol.decodeControl(json)?.let { control ->
-                fileLog("Subtitle control received from glasses: action=${control.action.wireName}")
-                handler.post { onSubtitleControlRequested?.invoke(control) }
-                return
-            }
-
-            if (json.contains(""""action":"requestGoogleAuth"""") || json.contains(""""action" : "requestGoogleAuth"""")) {
-                fileLog("Google auth request received from glasses")
-                handler.post { onGoogleAuthRequested?.invoke() }
-            }
-
-            if (json.contains(""""action":"disconnectGoogleAuth"""") || json.contains(""""action" : "disconnectGoogleAuth"""")) {
-                fileLog("Google disconnect request received from glasses")
-                handler.post { onGoogleDisconnectRequested?.invoke() }
-            }
-        } catch (e: Exception) {
-            fileLog("Failed to parse glasses message: $json - ${e.message}")
+            is TransportMessage.HttpRelayRequest -> dataRequestListener?.onHttpRelayRequested(message)
+            is TransportMessage.MediaChunk -> dataRequestListener?.onMediaChunkReceived(message)
+else -> fileLog("RX unexpected kind=${message.kind} for phone endpoint")
         }
     }
 
-    private fun escapeJson(value: String): String {
-        return value
-            .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
+private fun sendMessage(message: TransportMessage): Boolean =
+        writeEncoded(message.kind, TransportProtocol.encode(message) + "\n")
+
+    private fun writeEncoded(kind: String, encoded: String): Boolean {
+        if (!isConnected.get()) return false
+        val output = outputStream ?: return false
+        return try {
+            fileLog("TX kind=$kind bytes=${encoded.length}")
+            synchronized(output) {
+                output.write(encoded.toByteArray())
+                output.flush()
+            }
+            true
+        } catch (error: IOException) {
+            fileLog("TX failed kind=$kind: ${error.message}")
+            isConnected.set(false)
+            false
+        }
     }
     
     private fun getBatteryLevel(): Int {

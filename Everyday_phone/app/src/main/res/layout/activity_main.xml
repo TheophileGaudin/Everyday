@@ -162,19 +162,36 @@
         <!-- Image picker button (replaces orientation button) -->
         <Button
             android:id="@+id/imagePickerButton"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:text="🖼️ Send Image"
             android:textSize="14sp"
             android:enabled="false"
             android:alpha="0.5"
             android:layout_marginEnd="8dp"/>
 
+        <Button
+            android:id="@+id/assistantPushToTalkButton"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/assistant_ptt_background"
+            android:drawableTop="@drawable/ic_voice_speaking"
+            android:gravity="center"
+            android:text=""
+            android:textColor="#FFFFFF"
+            android:textStyle="bold"
+            android:enabled="false"
+            android:alpha="0.5"
+            android:contentDescription="Hold to talk to Gemini" />
+
         <!-- Mirror button -->
         <Button
             android:id="@+id/mirrorButton"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:text="📺 Start Mirror"
             android:textSize="14sp"
             android:enabled="false"

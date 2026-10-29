@@ -130,20 +130,7 @@ class BinanceFinanceStreamManager(
     }
 
     private fun FinanceTileSnapshot.toSnapshot(): FinanceSnapshot =
-        FinanceSnapshot(
-            symbol = symbol,
-            displayName = displayName,
-            country = country,
-            range = range,
-            rangeLabel = rangeLabel,
-            points = points,
-            percentChange = percentChange,
-            assetType = assetType,
-            chartType = chartType,
-            tiles = listOf(this),
-            fetchedAtMs = fetchedAtMs,
-            staleAfterMs = staleAfterMs
-        )
+        requireNotNull(FinanceSnapshot.fromTiles(listOf(this)))
 
     private fun key(config: FinanceDashboardTileConfig): String =
         "${config.id}:${config.symbol}:${config.range}"
