@@ -16,7 +16,7 @@ Everyday also includes a configurable hover shortcut control, "the lemon", for q
 | Time / Date / Battery | Time, date, and phone / glasses battery. Double-tap to configure what's shown.                                                                                                                                                                                                                               |
 | Minimap               | Minimap that follows compass orientation and shows your current position as well as surrounding Points of Interest.                                                                                                                                                                                                                                           |
 | Location / Weather    | Current city and weather with an icon. Double-tap to configure.                                                                                                                                                                                                                                              |
-| Screen mirror         | Mirrors your phone screen over Wi-Fi.                                                                                                                                                                                                                                                                        |
+| Screen mirror         | Mirrors your phone screen over Wi-Fi. Control your phone from your glasses.                                                                                                                                                                                                                                                                       |
 | Web browser           | Supports tabs, full-screen video, Google services, cookies / multi-window authentication flows, and direct link or search launch from the phone companion app.                                                                                                                                               |
 | Text editor           | Text can be formatted and arranged in columns. Paste directly from your phone clipboard.                                                                                                                                                                                                                     |
 | File browser          | Open an image from phone or glasses storage. On the glasses, also open pdfs and videos.                                                                                                                                                                                                                                                                |
@@ -26,6 +26,28 @@ Everyday also includes a configurable hover shortcut control, "the lemon", for q
 | Google Calendar       | See what's next on your agenda. Tap to browse upcoming events, double-tap to go back. Requires Google sign-in.                                                                                                                                                                                               |
 | Subtitles             | Subtitle the audio content from your phone. Useful for hearing disabilities or when ambient noise is high.                                                                                                                                                                                                   |
 | Notifications         | Access notifications stored from your phone. The widget displays the latest ones, and tapping on it lets you browse them.                                                                                                                                                                                    |
+## Voice control agent
+
+**How it works:** Come with your API key (see Wiki for [easy set-up instructions](https://github.com/TheophileGaudin/Everyday/wiki/Set-up-voice-control-agent)). Then, it is push-to-talk (the phone's button). Alternatively on the glasses a hover control bottom right should be tapped once to switch on and once to switch off. Gemini acts and shows short text answers but doesn't speak back. It works on the glasses' Wi-Fi or through the phone's internet connection.
+
+| Area | What you can ask | Example | Notes |
+|---|---|---|---|
+| **Questions & answers** | Ask a factual or current question and get a short text answer on the glasses | "Who won the match last night?" | Answers are checked against a web search first, shown in a framed text box for a set time |
+| **Your view** | Ask what you're looking at: read, identify, describe or explain it | "What am I looking at?", "Read this sign" | One photo is taken and shown to Gemini, not kept |
+| **Photos** | Take a photo | "Take a picture" | Saved to the glasses' gallery (DCIM/Everyday) and copied to the phone's gallery when connected. "Photo taken" notice |
+| **Videos** | Record a video with sound (10 s by default, up to 60 s) | "Record a 20-second video" | Saved to Movies/Everyday on the glasses and the phone. Can be described on request ("film this and tell me what happens") |
+| **Video analysis** | Ask about the video open in the video player | "What happens in this video?" | Available while a video is open |
+| **Navigation** | Get walking directions to a place or address, shown on the map. Stops the map too. | "Directions to the train station", "Stop navigation" | Walking routes only |
+| **Map** | Choose which places the map shows (categories, nearest, distance) | "Show cafés and pharmacies on the map" | |
+| **News** | Change the news source or country | "Show me BBC news" | |
+| **Finance** | Change what a finance tile tracks | "Track the S&P 500 in the first tile" | |
+| **Widgets** | Show or hide widgets: clock, calendar, map, news, finance, notifications, speedometer, status, location/weather, subtitles, phone mirror, create a text box or open a browser | "Hide the calendar", "Open a text box" | |
+| **Layouts** | Switch to a saved layout, save the current one, lock or unlock widget positions | "Switch to my walking layout", "Save the layout" | |
+| **Web browsing** | Open a web page, or have the assistant carry out a task in the browser | "Open wikipedia.org", "Find the opening hours on this site" | Sensitive steps ask for your confirmation on the glasses first |
+| **Files** | Open the file picker | "Open a file" | |
+| **Text** | Type into the focused text field or box | "Type my groceries list: milk, egg, sugar, chocolate" | Only when you explicitly ask to type or write |
+| **Display & dashboard** | Set brightness, scroll, open settings, close the app, look at what's on screen | "Brightness to 50%", "Scroll down" | |
+
 
 
 ## Other features
@@ -38,6 +60,7 @@ Everyday also includes a configurable hover shortcut control, "the lemon", for q
 | Adaptive brightness | Optionally adapts display brightness to ambient light rather than keeping it fixed.                                                                                                                                       |
 | 3dof mode           | Pins the dashboard relative to head rotation.                                                                                                                                                                             |
 | Google OAuth        | Authenticate with your Google account via your phone. Opt-in via settings. Required for the Calendar widget.                                                                                                              |
+| Gemini API Key        | Create your free API key on [AI Studio](https://aistudio.google.com/api-keys). Paste it in the settings to activate the voice control agent.                                                                                                              |
 | Alignment guides    | Helps to align widgets relative to each other and to the screen.                                                                                                                                                          |
 | System of units     | Auto-detects the default system of units based on your location. Temperature and speed can be configured individually, or the app can be forced to Metric or Imperial.                                              |
 
