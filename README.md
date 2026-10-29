@@ -9,8 +9,6 @@ Everyday is structured around draggable, resizable, minimizable widgets. You cho
 
 A voice-control agent (come with  [your API key](https://github.com/TheophileGaudin/Everyday/wiki/Set-up-voice-control-agent)) can help you make the most out of your glasses, even though it is not required to run the app.
 
-Everyday also includes a configurable hover shortcut control, "the lemon", for quickly switching between app features such as layouts, subtitling, mirroring, and other shortcuts.
-
 ## Widgets
 
 | Widget                | Description                                                                                                                                                                                                                                                                                                  |
