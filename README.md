@@ -7,6 +7,8 @@ The most important thing we expect from AR glasses is **not to obstruct**. What 
 
 Everyday is structured around draggable, resizable, minimizable widgets. You choose what appears in your FOV. A phone companion app handles interaction with the phone, but the glasses app can work standalone too. The phone companion app can also receive shared links from Android and search queries and send them directly to the glasses browser.
 
+A voice-control agent (come with  [your API key](https://github.com/TheophileGaudin/Everyday/wiki/Set-up-voice-control-agent)) can help you make the most out of your glasses, even though it is not required to run the app.
+
 Everyday also includes a configurable hover shortcut control, "the lemon", for quickly switching between app features such as layouts, subtitling, mirroring, and other shortcuts.
 
 ## Widgets
