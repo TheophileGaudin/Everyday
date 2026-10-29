@@ -100,6 +100,8 @@ class AssistantToolLoop(
             // A successful Page Agent task is already the user-visible result. Do not spend
             // another main-assistant turn asking it to summarize a page action that completed.
             if (browserTaskCompleted || !shouldContinue() || results.isEmpty() || round + 1 >= maxRounds || executed >= maxCalls) break
+            // An action that was the whole request (a photo taken) needs no model turn to confirm it.
+            if (results.all { (_, result) -> result.success && result.completesRequest }) break
             catalog = refreshCatalog()
             turn = provider.continueInteraction(
                 apiKey,

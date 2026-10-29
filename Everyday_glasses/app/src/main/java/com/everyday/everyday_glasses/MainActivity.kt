@@ -336,6 +336,7 @@ class MainActivity : AppCompatActivity() {
             requestPermission = { runOnUiThread { if (::permissionCoordinator.isInitialized) permissionCoordinator.requestCameraPermission() } },
             sendToPhone = { file, name, mimeType -> phoneConnectionOrNull()?.sendMediaToPhone(file, name, mimeType) == true },
             wakeScreen = { runOnUiThread { if (::displayPowerController.isInitialized) displayPowerController.wakeScreen("assistant_camera") } },
+            showNotice = { message, durationMs -> widgetContainer.assistant.notice.show(message, durationMs) },
         )
 browserRoutingCoordinator = BrowserRoutingCoordinator(
             pageAgent = PageAgentCoordinator.usingPreferences(

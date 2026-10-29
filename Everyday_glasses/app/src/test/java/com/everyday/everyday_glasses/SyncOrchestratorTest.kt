@@ -41,7 +41,10 @@ class SyncOrchestratorTest {
             as TransportMessage.SyncSnapshotMessage
 
         assertTrue(encoded.contains("\"weather\""))
-        assertEquals(location, decoded.snapshot.location)
+        // The fix's timestamp is re-expressed on the reader's clock: equal up to the encoding time.
+        val readFix = decoded.snapshot.location!!
+        assertTrue(kotlin.math.abs(readFix.timestampMs - location.timestampMs) < 1_000L)
+        assertEquals(location, readFix.copy(timestampMs = location.timestampMs))
         assertEquals(weather, decoded.snapshot.weather)
     }
 

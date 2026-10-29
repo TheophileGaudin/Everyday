@@ -49,6 +49,8 @@ class AssistantCamera(
     private val sendToPhone: (file: File, fileName: String, mimeType: String) -> Boolean,
     /** Switches the glasses' screen on, as a touch would: Android lends the camera only to an app on screen. */
     private val wakeScreen: () -> Unit,
+    /** Shows a short message on the glasses ("Taking photo…", "Photo taken") for so many milliseconds. */
+    private val showNotice: (message: String, durationMs: Long) -> Unit,
 ) {
     private val appContext = context.applicationContext
     private val cameraManager = appContext.getSystemService(CameraManager::class.java)
@@ -63,18 +65,37 @@ class AssistantCamera(
     // ==================== Captures ====================
 
     /** One photo of what the wearer faces, reduced for Gemini to look at; nothing is kept. */
-    fun look(): AssistantScreenshot = synchronized(captureLock) { reducedForGemini(captureJpeg()) }
+    fun look(): AssistantScreenshot = synchronized(captureLock) {
+        showNotice("Looking…", NOTICE_WHILE_CAPTURING_MS)
+        try {
+            reducedForGemini(captureJpeg())
+        } finally {
+            showNotice("Photo seen", NOTICE_DONE_MS)
+        }
+    }
 
     /** A full-resolution photo, kept in DCIM/Everyday, plus a reduced copy if Gemini should see it. */
     fun takePhoto(): Pair<KeptMedia, ByteArray> = synchronized(captureLock) {
-        val jpeg = captureJpeg()
-        val name = "IMG_${timestamp()}.jpg"
-        val file = workingFile(name).apply { writeBytes(jpeg) }
-        keep(file, name, "image/jpeg", "DCIM/Everyday", MediaStore.Images.Media.EXTERNAL_CONTENT_URI) to jpeg
+        showNotice("Taking photo…", NOTICE_WHILE_CAPTURING_MS)
+        val result = runCatching {
+            val jpeg = captureJpeg()
+            val name = "IMG_${timestamp()}.jpg"
+            val file = workingFile(name).apply { writeBytes(jpeg) }
+            keep(file, name, "image/jpeg", "DCIM/Everyday", MediaStore.Images.Media.EXTERNAL_CONTENT_URI) to jpeg
+        }
+        showNotice(if (result.isSuccess) "Photo taken" else "Photo failed", NOTICE_DONE_MS)
+        result.getOrThrow()
     }
 
     /** A video of [seconds] with sound, 720p at a size Gemini can also receive through the phone. */
     fun recordVideo(seconds: Int): KeptMedia = synchronized(captureLock) {
+        showNotice("Recording ${seconds} s…", seconds * 1_000L + NOTICE_WHILE_CAPTURING_MS)
+        val result = runCatching { recordVideoNow(seconds) }
+        showNotice(if (result.isSuccess) "Video saved" else "Video failed", NOTICE_DONE_MS)
+        result.getOrThrow()
+    }
+
+    private fun recordVideoNow(seconds: Int): KeptMedia {
         val name = "VID_${timestamp()}.mp4"
         val file = workingFile(name)
         withCamera { device, handler, characteristics ->
@@ -112,7 +133,7 @@ class AssistantCamera(
                 recorder.release()
             }
         }
-        keep(file, name, "video/mp4", "Movies/Everyday", MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
+        return keep(file, name, "video/mp4", "Movies/Everyday", MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
     }
 
     // ==================== Camera2 ====================
@@ -351,7 +372,8 @@ class AssistantCamera(
                 true, AssistantToolExecutionCodes.SUCCESS,
                 "Photo ${kept.fileName} kept on the glasses" + if (kept.copiedToPhone) " and being copied to the phone" else "",
                 screenshots = if (describe) listOf(reducedForGemini(jpeg)) else emptyList(),
-                groundingEvidence = true
+                groundingEvidence = true,
+                completesRequest = !describe
             ))
         }
     }
@@ -382,7 +404,8 @@ class AssistantCamera(
                 true, AssistantToolExecutionCodes.SUCCESS,
                 "Video ${kept.fileName} kept on the glasses" + if (kept.copiedToPhone) " and being copied to the phone" else "",
                 videos = if (describe) listOf(AssistantVideo(kept.file)) else emptyList(),
-                groundingEvidence = true
+                groundingEvidence = true,
+                completesRequest = !describe
             ))
         }
     }
@@ -391,11 +414,14 @@ class AssistantCamera(
         private const val TAG = "AssistantCamera"
         private const val PREVIEW_WIDTH = 640
         private const val PREVIEW_HEIGHT = 480
-        private const val MIN_WARM_UP_MS = 600L
+        private const val MIN_WARM_UP_MS = 300L
         private const val MAX_WARM_UP_MS = 1_500L
         private const val CAPTURE_TIMEOUT_MS = 6_000L
         private const val SCREEN_ON_TIMEOUT_MS = 3_000L
         private const val SCREEN_ON_SETTLE_MS = 800L
+        /** Shown until the capture replaces it, in case it never does. */
+        private const val NOTICE_WHILE_CAPTURING_MS = 10_000L
+        private const val NOTICE_DONE_MS = 2_000L
         /** The longest side of a photo Gemini looks at: detailed enough to read signs, small to send. */
         private const val GEMINI_IMAGE_SIDE = 1024
         /** About 3 MB for 10 s: small enough for Gemini to receive through the phone. */

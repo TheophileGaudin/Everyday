@@ -29,6 +29,63 @@ interface AssistantContribution {
     fun assistantFacts(widget: BaseWidget, stableId: String): List<AssistantSemanticFact> = emptyList()
 }
 
+/**
+ * A short message from the assistant ("Photo taken"), head-locked at the bottom of the view, above
+ * everything; it hides itself after a while and never takes input. Kept small and dim: the scene
+ * behind it is what the camera is taking. Shown from any thread.
+ */
+class AssistantNotice(private val repaint: () -> Unit) {
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private var text: String? = null
+    private val hide = Runnable {
+        text = null
+        repaint()
+    }
+
+    val isVisible: Boolean get() = text != null
+
+    fun show(message: String, durationMs: Long) = main.post {
+        text = message
+        main.removeCallbacks(hide)
+        main.postDelayed(hide, durationMs)
+        repaint()
+    }
+
+    fun dismiss() = main.post { hide.run() }
+
+    fun draw(canvas: android.graphics.Canvas) {
+        val message = text ?: return
+        val width = textPaint.measureText(message) + PADDING_X * 2
+        val height = textPaint.textSize + PADDING_Y * 2
+        val left = (canvas.width - width) / 2f
+        val top = canvas.height - height - MARGIN_BOTTOM
+        val rect = android.graphics.RectF(left, top, left + width, top + height)
+        canvas.drawRoundRect(rect, 8f, 8f, backgroundPaint)
+        canvas.drawRoundRect(rect, 8f, 8f, borderPaint)
+        canvas.drawText(message, rect.centerX(), rect.centerY() - (textPaint.descent() + textPaint.ascent()) / 2, textPaint)
+    }
+
+    private val backgroundPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.BLACK
+    }
+    private val borderPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        style = android.graphics.Paint.Style.STROKE
+        strokeWidth = 1f
+        color = android.graphics.Color.rgb(110, 110, 120)
+    }
+    private val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.rgb(200, 200, 205)
+        textSize = 16f
+        textAlign = android.graphics.Paint.Align.CENTER
+    }
+
+    private companion object {
+        const val PADDING_X = 10f
+        const val PADDING_Y = 5f
+        const val MARGIN_BOTTOM = 12f
+    }
+}
+
 /** The plugin that shows the assistant's text answers (the text box's). */
 interface AssistantTextPresenter {
     fun presentAssistantText(request: AssistantTextPresentationRequest): CompletableFuture<AssistantToolExecution>
@@ -63,6 +120,9 @@ internal class AssistantDashboardAccess(
     var internet: okhttp3.Interceptor? = null
     /** The glasses' camera, for looks, photos and videos; the activity sets it. */
     var camera: AssistantCamera? = null
+
+    /** Short messages from the assistant's actions ("Photo taken"), drawn by the dashboard. */
+    val notice = AssistantNotice { services.notifyTransientChange() }
     private val webSearch by lazy { WebSearchSemanticToolHandler(DuckDuckGoWebSearchProvider(internet)) }
     private val contributions: Map<WidgetTypeId, AssistantContribution> = plugins
         .filterIsInstance<AssistantContribution>()

@@ -543,7 +543,7 @@ class WidgetContainer @JvmOverloads constructor(
         Log.d(TAG, "Container sized: ${w}x${h}")
     }
     private fun drawOverlayMenus(canvas: Canvas) {
-        if (isAnyPopupVisible() || registry.allWidgets().any { it.requestsDrawingAboveNativeViews }) ensureDrawnAboveNativeOverlays()
+        if (isAnyPopupVisible() || assistant.notice.isVisible || registry.allWidgets().any { it.requestsDrawingAboveNativeViews }) ensureDrawnAboveNativeOverlays()
         registry.getAllSortedByZOrder().forEach { it.drawScreenOverlay(canvas) }
         contextMenu?.draw(canvas)
         settingsController.drawHoverControlsLayoutEditor(canvas)  // Draw the hover-controls editor before the close-app confirmation so the popup appears on top of it when the user invokes Close from the editor's context menu.
@@ -554,6 +554,7 @@ class WidgetContainer @JvmOverloads constructor(
         layoutManager.drawNamePrompt(canvas)
         textEditing.drawMenus(canvas)
         assistant.approvalOverlay.draw(canvas)
+        assistant.notice.draw(canvas)
     }
     private fun ensureDrawnAboveNativeOverlays() {
         val rootView = parent as? ViewGroup ?: return

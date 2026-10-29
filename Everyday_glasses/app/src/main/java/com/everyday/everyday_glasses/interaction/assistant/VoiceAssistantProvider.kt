@@ -29,6 +29,8 @@ data class AssistantToolExecution(
     val sources: List<AssistantSource> = emptyList(),
     val groundingEvidence: Boolean = false,
     val videos: List<AssistantVideo> = emptyList(),
+    /** The action was the whole request (a photo just taken): once it succeeds, no further model turn. */
+    val completesRequest: Boolean = false,
 ) {
     val screenshot: AssistantScreenshot? get() = screenshots.firstOrNull()
 

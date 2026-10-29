@@ -61,6 +61,31 @@ class AssistantSemanticToolTest {
     }
 
     @Test
+    fun `an action that is the whole request ends it without another model turn`() {
+        val photo = object : AssistantSemanticToolHandler {
+            override val definition = AssistantToolDefinition("take_photo", "Take a photo", JSONObject().put("type", "object"))
+            override fun validate(arguments: JSONObject): Result<Unit> = Result.success(Unit)
+            override fun execute(arguments: JSONObject, context: AssistantToolExecutionContext) =
+                assistantCompletedFuture(AssistantToolExecution(
+                    true, AssistantToolExecutionCodes.SUCCESS, "Photo taken", completesRequest = true
+                ))
+        }
+        val catalog = AssistantToolCatalog(listOf(photo))
+        val provider = FakeProvider()
+
+        val outcome = AssistantToolLoop(
+            provider = provider,
+            apiKey = "test-key",
+            modelId = "test-model",
+            refreshCatalog = { catalog },
+            context = executionContext()
+        ).run(catalog, AssistantProviderTurn("interaction-1", listOf(AssistantToolCall("call-1", "take_photo", JSONObject()))))
+
+        assertTrue(outcome.anySuccess)
+        assertTrue(provider.receivedResults.isEmpty())
+    }
+
+    @Test
     fun `unknown tool fails without executing a handler`() {
         val handler = RecordingHandler("known_action")
         val catalog = AssistantToolCatalog(listOf(handler))
